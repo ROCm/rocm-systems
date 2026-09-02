@@ -7,49 +7,9 @@
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
-#include <algorithm>
 #include <limits>
 
 namespace rocjitsu {
-
-std::vector<uint64_t> sc_relay_reservoir_slot_offsets(uint64_t anchor_offset,
-                                                      uint32_t original_size) {
-  const uint64_t payload_begin = anchor_offset + kScRelayEntryWords * sizeof(uint32_t);
-  const uint64_t payload_end =
-      anchor_offset + original_size - kScRelayTailRestoreWords * sizeof(uint32_t);
-  std::vector<uint64_t> slots;
-  if (payload_end <= payload_begin)
-    return slots;
-  for (uint64_t offset = payload_begin; offset < payload_end;
-       offset += kScRelayReservoirSlotStrideWords * sizeof(uint32_t))
-    slots.push_back(offset);
-  const uint64_t dense_edge_bytes = kScRelayReservoirDenseEdgeWords * sizeof(uint32_t);
-  for (uint64_t offset = payload_begin;
-       offset < std::min(payload_end, payload_begin + dense_edge_bytes); offset += sizeof(uint32_t))
-    slots.push_back(offset);
-  const uint64_t dense_tail_begin = payload_end > dense_edge_bytes
-                                        ? std::max(payload_begin, payload_end - dense_edge_bytes)
-                                        : payload_begin;
-  for (uint64_t offset = dense_tail_begin; offset < payload_end; offset += sizeof(uint32_t))
-    slots.push_back(offset);
-  std::ranges::sort(slots);
-  slots.erase(std::ranges::unique(slots).begin(), slots.end());
-  return slots;
-}
-
-std::vector<uint64_t> sc_relay_reservoir_all_slot_offsets(uint64_t anchor_offset,
-                                                          uint32_t original_size) {
-  const uint64_t payload_begin = anchor_offset + kScRelayEntryWords * sizeof(uint32_t);
-  const uint64_t payload_end =
-      anchor_offset + original_size - kScRelayTailRestoreWords * sizeof(uint32_t);
-  std::vector<uint64_t> slots;
-  if (payload_end <= payload_begin)
-    return slots;
-  slots.reserve(static_cast<size_t>((payload_end - payload_begin) / sizeof(uint32_t)));
-  for (uint64_t offset = payload_begin; offset < payload_end; offset += sizeof(uint32_t))
-    slots.push_back(offset);
-  return slots;
-}
 
 bool append_lds_check_trap_indirect_jump(std::vector<uint32_t> &words, uint64_t words_text_offset,
                                          uint64_t target_text_offset, uint16_t pc_sgpr,

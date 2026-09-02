@@ -14,17 +14,6 @@ namespace rocjitsu {
 struct ConSanTargetProfile;
 
 inline constexpr uint64_t kLdsCheckTrapIndirectJumpWords = 7u;
-inline constexpr uint32_t kScRelayEntryWords = 8u;
-inline constexpr uint32_t kScRelayTailRestoreWords = 1u;
-inline constexpr uint32_t kScRelayAppendedOverheadWords = 9u;
-inline constexpr uint32_t kScRelayReservoirSlotStrideWords = 16u;
-inline constexpr uint32_t kScRelayReservoirDenseEdgeWords = 16u;
-[[nodiscard]] std::vector<uint64_t> sc_relay_reservoir_slot_offsets(uint64_t anchor_offset,
-                                                                    uint32_t original_size);
-
-[[nodiscard]] std::vector<uint64_t> sc_relay_reservoir_all_slot_offsets(uint64_t anchor_offset,
-                                                                        uint32_t original_size);
-
 [[nodiscard]] bool append_lds_check_trap_indirect_jump(std::vector<uint32_t> &words,
                                                        uint64_t words_text_offset,
                                                        uint64_t target_text_offset,

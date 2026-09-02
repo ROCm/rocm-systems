@@ -78,7 +78,6 @@ namespace {
       consan_enum(E::TrampolineScIndirectBranchIsland, "trampoline-sc-indirect-branch-island"),
       consan_enum(E::TrampolineScDenseCallDispatcher, "trampoline-sc-dense-call-dispatcher"),
       consan_enum(E::TrampolineScDenseEntryHost, "trampoline-sc-dense-entry-host"),
-      consan_enum(E::TrampolineScBranchRelayDonor, "trampoline-sc-branch-relay-donor"),
       consan_enum(E::TrampolineBranchRelayReservoir, "trampoline-branch-relay-reservoir"),
       consan_enum(E::TrampolineNopBranchRelay, "trampoline-nop-branch-relay"),
       consan_enum(E::InlineScalarClauseNopRewrite, "inline-scalar-clause-nop-rewrite"),

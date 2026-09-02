@@ -333,6 +333,8 @@ struct BranchOnlyDirectRelayReservoirSet {
   std::vector<BranchOnlyDirectRelayReservoir> reservoirs;
   std::unordered_map<uint64_t, size_t> reservoir_by_relay;
 
+  [[nodiscard]] bool mark_relays_used(std::span<const uint64_t> relays,
+                                      std::string *error_out = nullptr);
   [[nodiscard]] bool mark_claims_used(std::span<const BranchOnlyRelayClaim> claims,
                                       std::string *error_out = nullptr);
 };
@@ -346,6 +348,11 @@ struct BranchOnlyDirectReservoirWorkLimits {
   /// The margin also guards future algorithmic growth; programmatic callers
   /// may override it through ConSanOptions.
   PlanningWorkLimit discovery = kDefaultDirectReservoirPlanningWorkLimit;
+  /// Bounds each relocated straight-line donor. The defaults preserve the
+  /// compact access-engine policy; callers with a denser relay demand may
+  /// admit a wider donor without changing reservoir mechanics.
+  size_t minimum_words = 16u;
+  size_t maximum_words = 64u;
 };
 
 /// Owns capacity-one branch relay hosts from discovery through emission.

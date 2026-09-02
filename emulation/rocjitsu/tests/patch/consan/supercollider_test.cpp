@@ -54,7 +54,7 @@ TEST(ConSan, SuperColliderScalarVccSpillOwnsReservoirStrategy) {
   EXPECT_FALSE(spill.is_well_formed());
 }
 
-TEST(ConSan, SuperColliderIndirectRoutesOwnMutuallyExclusiveScalarStrategies) {
+TEST(ConSan, SuperColliderIndirectBodyRouteOwnsScalarState) {
   ConSanSuperColliderIndirectBodyRoute body{
       .jump = {8u, 10u},
       .vcc_save_sgpr = 12u,
@@ -64,34 +64,6 @@ TEST(ConSan, SuperColliderIndirectRoutesOwnMutuallyExclusiveScalarStrategies) {
   EXPECT_EQ(body.minimum_required_sgpr_count(/*vcc_save_width=*/2u), 14u);
   body.vcc_save_sgpr = 9u;
   EXPECT_FALSE(body.is_well_formed(/*vcc_save_width=*/2u));
-
-  ConSanSuperColliderRelayReservoirRoute wave32{
-      .scratch =
-          ConSanSuperColliderWave32RelayScratch{
-              .entry_vcc_save_sgpr = 8u,
-              .return_vcc_save_sgpr = 10u,
-          },
-  };
-  EXPECT_TRUE(wave32.uses_wave32_vcc());
-  EXPECT_TRUE(wave32.is_well_formed());
-  EXPECT_EQ(wave32.minimum_required_sgpr_count(), 11u);
-  std::get<ConSanSuperColliderWave32RelayScratch>(wave32.scratch).entry_vcc_save_sgpr =
-      std::numeric_limits<uint16_t>::max();
-  EXPECT_FALSE(wave32.is_well_formed());
-
-  ConSanSuperColliderRelayReservoirRoute ordinary{
-      .scratch =
-          ConSanSuperColliderOrdinaryRelayScratch{
-              .entry_jump = {8u, 10u},
-              .return_jump = {12u, 14u},
-          },
-  };
-  EXPECT_FALSE(ordinary.uses_wave32_vcc());
-  EXPECT_TRUE(ordinary.is_well_formed());
-  EXPECT_EQ(ordinary.minimum_required_sgpr_count(), 15u);
-  std::get<ConSanSuperColliderOrdinaryRelayScratch>(ordinary.scratch).return_jump.scc_save_sgpr =
-      13u;
-  EXPECT_FALSE(ordinary.is_well_formed());
 }
 
 [[nodiscard]] std::vector<uint8_t>
@@ -296,13 +268,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
                patch.original_size != 0u;
       });
   ASSERT_NE(malformed_reservoir, malformed.patches.end());
-  malformed_reservoir->sc_relay_reservoir_route = ConSanSuperColliderRelayReservoirRoute{
-      .scratch =
-          ConSanSuperColliderWave32RelayScratch{
-              .entry_vcc_save_sgpr = std::numeric_limits<uint16_t>::max(),
-              .return_vcc_save_sgpr = 0u,
-          },
-  };
+  malformed_reservoir->trampoline_size += sizeof(uint32_t);
   const std::vector<std::string> malformed_errors = validate_consan_modified_elf(bytes, malformed);
   EXPECT_TRUE(std::ranges::any_of(malformed_errors, [](const std::string &error) {
     return error.find("invalid geometry or phase") != std::string::npos;
@@ -7541,11 +7507,11 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("branch-only continuation could not route all spill-backed sites") !=
                std::string::npos &&
-           warning.find("1 relay-contended pair") != std::string::npos;
+           warning.find("1 unreachable appended entry route pair") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 
-TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
+TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughCommonDirectReservoir) {
   constexpr uint64_t kMaximumForwardHop = 4u + 32767u * sizeof(uint32_t);
   constexpr uint64_t kSecondAnchorOffset = kMaximumForwardHop - sizeof(uint32_t);
   constexpr size_t kTextWords = (2u * kMaximumForwardHop) / sizeof(uint32_t) - 64u;
@@ -7580,25 +7546,18 @@ TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
   ASSERT_NE(island, result.patches.end());
   EXPECT_EQ(island->anchor_offset, 0u);
 
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  ASSERT_EQ(patched.text_sections().size(), 1u);
-  uint32_t relay_word = 0;
-  const uint64_t relay_offset = kSecondAnchorOffset + sizeof(uint32_t);
-  std::memcpy(&relay_word, patched.text_sections().front()->data() + relay_offset,
-              sizeof(relay_word));
-  const auto relay_branch = compute_sopp_branch_simm16(relay_offset, island->trampoline_offset);
-  ASSERT_TRUE(relay_branch);
-  EXPECT_EQ(relay_word, build_s_branch(*relay_branch, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto reservoir = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(reservoir, result.patches.end());
+  EXPECT_EQ(reservoir->trampoline_size, reservoir->original_size + sizeof(uint32_t));
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality) {
   constexpr size_t kTextWords = 33010u;
   constexpr uint64_t kReservoirOffset = 65536u;
   constexpr size_t kReservoirWords = 16u;
-  constexpr size_t kReservoirEntryWords = 8u;
-  constexpr size_t kReservoirTailWords = 1u;
-  constexpr size_t kReservoirAppendedOverheadWords = 9u;
   const uint32_t inadmissible_filler = 0xBF870001u; // s_delay_alu instid0(VALU_DEP_1)
   std::vector<uint32_t> text_words(kTextWords, inadmissible_filler);
   for (size_t site = 0; site < 3u; ++site) {
@@ -7648,25 +7607,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
             1u);
   EXPECT_EQ(reservoir->anchor_offset, kReservoirOffset);
   EXPECT_EQ(reservoir->original_size, kReservoirWords * sizeof(uint32_t));
-  EXPECT_EQ(reservoir->trampoline_size,
-            (kReservoirWords + kReservoirAppendedOverheadWords) * sizeof(uint32_t));
-  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
-  ASSERT_TRUE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
-  EXPECT_TRUE(reservoir->sc_relay_reservoir_route->is_well_formed());
-
-  ConSanTransformArtifacts corrupted_route = result;
-  auto corrupted_reservoir =
-      std::ranges::find(corrupted_route.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
-                        &ConSanPatchInfo::kind);
-  ASSERT_NE(corrupted_reservoir, corrupted_route.patches.end());
-  ASSERT_TRUE(corrupted_reservoir->sc_relay_reservoir_route);
-  std::get<ConSanSuperColliderWave32RelayScratch>(
-      corrupted_reservoir->sc_relay_reservoir_route->scratch)
-      .entry_vcc_save_sgpr = std::numeric_limits<uint16_t>::max();
-  const auto corrupted_route_errors = validate_consan_modified_elf(bytes, corrupted_route);
-  EXPECT_TRUE(std::ranges::any_of(corrupted_route_errors, [](const std::string &error) {
-    return error.find("relay reservoir proof found invalid geometry or phase") != std::string::npos;
-  })) << testing::PrintToString(corrupted_route_errors);
+  EXPECT_EQ(reservoir->trampoline_size, (kReservoirWords + 1u) * sizeof(uint32_t));
 
   const ConSanTransformArtifacts repeated = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(repeated));
@@ -7677,13 +7618,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(repeated.replacement, result.replacement);
 
   ConSanOptions exhausted_options = options;
-  exhausted_options.lds_relay_layout_planning_work_limit = {1u, 0u};
+  exhausted_options.direct_reservoir_planning_work_limit = {1u, 0u};
   const ConSanTransformArtifacts exhausted = test_lower_consan(bytes, exhausted_options);
   EXPECT_FALSE(consan_patch_succeeded(exhausted));
   EXPECT_FALSE(exhausted.modified());
   EXPECT_TRUE(exhausted.patches.empty());
   EXPECT_TRUE(std::ranges::any_of(exhausted.errors, [](const std::string &error) {
-    return error.find("LDS relay-layout replay exhausted its work allowance") != std::string::npos;
+    return error.find("direct-reservoir discovery exhausted its work allowance") !=
+           std::string::npos;
   })) << testing::PrintToString(exhausted.errors);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -7693,14 +7635,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
       reinterpret_cast<const uint8_t *>(patched.text_sections().front()->data()),
       patched.text_sections().front()->size());
   EXPECT_EQ(std::memcmp(reservoir_original.data(),
-                        patched_text.data() + reservoir->trampoline_offset + sizeof(uint32_t),
+                        patched_text.data() + reservoir->trampoline_offset,
                         reservoir->original_size),
             0);
   size_t used_payload_words = 0;
-  for (uint64_t offset = reservoir->anchor_offset + kReservoirEntryWords * sizeof(uint32_t);
-       offset <
-       reservoir->anchor_offset + reservoir->original_size - kReservoirTailWords * sizeof(uint32_t);
-       offset += sizeof(uint32_t)) {
+  for (uint64_t offset = reservoir->anchor_offset + sizeof(uint32_t);
+       offset < reservoir->anchor_offset + reservoir->original_size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, patched_text.data() + offset, sizeof(word));
     used_payload_words += word != build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
@@ -7713,15 +7653,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
       .replacement[text_file_offset + reservoir->trampoline_offset + 2u * sizeof(uint32_t)] ^= 1u;
   const auto body_errors = validate_consan_modified_elf(bytes, corrupted_body);
   EXPECT_TRUE(std::ranges::any_of(body_errors, [](const std::string &error) {
-    return error.find("relay reservoir proof found a corrupted displaced sequence") !=
+    return error.find("relay reservoir proof found a corrupted direct execution path") !=
            std::string::npos;
   }));
 
   ConSanTransformArtifacts unused = result;
-  for (uint64_t offset = reservoir->anchor_offset + kReservoirEntryWords * sizeof(uint32_t);
-       offset <
-       reservoir->anchor_offset + reservoir->original_size - kReservoirTailWords * sizeof(uint32_t);
-       offset += sizeof(uint32_t)) {
+  for (uint64_t offset = reservoir->anchor_offset + sizeof(uint32_t);
+       offset < reservoir->anchor_offset + reservoir->original_size; offset += sizeof(uint32_t)) {
     const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
     std::memcpy(unused.replacement.data() + text_file_offset + offset, &nop, sizeof(nop));
   }
@@ -7731,7 +7669,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   }));
 }
 
-TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64) {
+TEST(ConSan, ProbeLdsCheckTrapModeUsesCommonDirectRelayReservoirForCdna4Wave64) {
   constexpr size_t kTextWords = 33010u;
   constexpr uint64_t kReservoirOffset = 65536u;
   constexpr size_t kReservoirWords = 16u;
@@ -7775,18 +7713,13 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
   EXPECT_EQ(reservoir->anchor_offset, kReservoirOffset);
-  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
-  EXPECT_FALSE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
-  EXPECT_TRUE(reservoir->sc_relay_reservoir_route->is_well_formed());
+  EXPECT_EQ(reservoir->trampoline_size, reservoir->original_size + sizeof(uint32_t));
 
   ConSanTransformArtifacts corrupted = result;
   auto corrupted_reservoir = std::ranges::find(
       corrupted.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(corrupted_reservoir, corrupted.patches.end());
-  ASSERT_TRUE(corrupted_reservoir->sc_relay_reservoir_route);
-  auto &scratch = std::get<ConSanSuperColliderOrdinaryRelayScratch>(
-      corrupted_reservoir->sc_relay_reservoir_route->scratch);
-  scratch.return_jump.scc_save_sgpr = scratch.return_jump.pc_sgpr;
+  corrupted_reservoir->trampoline_size += sizeof(uint32_t);
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
     return error.find("relay reservoir proof found invalid geometry or phase") != std::string::npos;
@@ -7831,9 +7764,12 @@ TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
   const auto reservoir = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
-  EXPECT_EQ(reservoir->anchor_offset, candidate_kernel.size() * sizeof(uint32_t));
-  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
-  EXPECT_FALSE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
+  const uint64_t skipped_kernel_begin = candidate_kernel.size() * sizeof(uint32_t);
+  const uint64_t skipped_kernel_end =
+      skipped_kernel_begin + skipped_kernel.size() * sizeof(uint32_t);
+  EXPECT_GE(reservoir->anchor_offset, skipped_kernel_begin);
+  EXPECT_LE(reservoir->anchor_offset + reservoir->original_size, skipped_kernel_end);
+  EXPECT_EQ(reservoir->trampoline_size, reservoir->original_size + sizeof(uint32_t));
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOfRange) {

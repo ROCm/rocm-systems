@@ -34,7 +34,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     for (const auto &[file_offset, site] : admitted_sites) {
       (void)file_offset;
       (void)publish_sc_access_rejection(
-          result.coverage_ledger, result.errors, site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site->physical_id,
+          ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider LDS lowerer found no complete execution owner");
     }
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
@@ -221,42 +222,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   constexpr uint16_t kDenseExplicitKeyMaximumSites = 64u;
   std::vector<ScDenseCallGroup> dense_call_groups;
 
-  // A wide relay donor combines a relocatable two-dword instruction with a
-  // pristine six-dword sequence. The sequence's appended body preserves its
-  // ordinary execution path; its skipped payload preserves the two-dword
-  // instruction and contributes three capacity-one relay words.
-  struct ScRelayAnchorCandidate {
-    uint64_t anchor_offset = 0;
-    std::array<uint32_t, 2> anchor_original_words{};
-  };
-  struct ScWideRelayHostCandidate {
-    uint64_t host_offset = 0;
-    std::vector<uint32_t> host_original_words;
-    std::vector<uint32_t> prefix_word_counts;
-  };
-  struct ScWideCompositeBranchRelayDonor {
-    uint64_t anchor_offset = 0;
-    std::array<uint32_t, 2> anchor_original_words{};
-    uint64_t host_offset = 0;
-    std::vector<uint32_t> host_original_words;
-    DbiPatchPlacement host_placement;
-  };
-  struct ScRelayReservoirCandidate {
-    uint64_t anchor_offset = 0;
-    uint32_t original_size = 0;
-    const BasicBlock *block = nullptr;
-    ConSanSuperColliderRelayReservoirRoute route;
-    std::vector<uint64_t> owner_descriptor_file_offsets;
-  };
-  struct ScRelayReservoir {
-    uint64_t anchor_offset = 0;
-    uint32_t original_size = 0;
-    ConSanSuperColliderRelayReservoirRoute route;
-    std::vector<uint64_t> owner_descriptor_file_offsets;
-    DbiPatchPlacement placement;
-    bool used = false;
-  };
-
   // Candidate discovery visits every decoded instruction, which can number in
   // the hundreds of thousands in generated library code objects. Index the
   // immutable container and probe ranges once instead of rescanning every
@@ -382,89 +347,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     preceding_end = inst->src_loc() + static_cast<uint64_t>(inst->size());
   }
 
-  std::vector<ScRelayAnchorCandidate> relay_anchor_candidates;
-  for (BasicBlock *block : block_ptrs) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      const uint64_t offset = inst.src_loc();
-      if (inst.size() != 2 * static_cast<int>(sizeof(uint32_t)) ||
-          std::string_view(inst.mnemonic()).starts_with("ds_") || inst.raw_encoding() == nullptr ||
-          !is_relocatable_anchor(inst, offset, pristine_text, arch) ||
-          offset % sizeof(uint32_t) != 0 || !range_is_in_selected_container(offset, inst.size()) ||
-          s_clause_blocked_offsets.contains(offset) ||
-          overlaps_future_flat_probe(offset, inst.size()) ||
-          overlaps_preapplied_reserved_range(
-              result.program_inventory, {offset, offset + static_cast<uint64_t>(inst.size())})) {
-        continue;
-      }
-      ScRelayAnchorCandidate candidate;
-      candidate.anchor_offset = offset;
-      std::memcpy(candidate.anchor_original_words.data(), pristine_text.data() + offset,
-                  inst.size());
-      relay_anchor_candidates.push_back(candidate);
-    }
-  }
-  std::ranges::sort(relay_anchor_candidates, {}, &ScRelayAnchorCandidate::anchor_offset);
-
-  std::vector<ScWideRelayHostCandidate> relay_wide_host_candidates;
-  for (BasicBlock *block : block_ptrs) {
-    if (block == nullptr)
-      continue;
-    auto &instructions = block->instructions();
-    for (auto host_it = instructions.begin(); host_it != instructions.end(); ++host_it) {
-      const Instruction &host = *host_it;
-      const uint64_t host_offset = host.src_loc();
-      if (host.size() != 3 * static_cast<int>(sizeof(uint32_t)) ||
-          (!std::string_view(host.mnemonic()).starts_with("flat_load") &&
-           !std::string_view(host.mnemonic()).starts_with("flat_store")) ||
-          host.raw_encoding() == nullptr || s_clause_blocked_offsets.contains(host_offset))
-        continue;
-      constexpr uint32_t kMaxWideRelayHostWords = 512u;
-      uint32_t accumulated_size = 0;
-      std::vector<uint32_t> prefix_word_counts;
-      auto sequence_it = host_it;
-      while (sequence_it != instructions.end() &&
-             accumulated_size < kMaxWideRelayHostWords * sizeof(uint32_t)) {
-        const Instruction &inst = *sequence_it;
-        if (inst.src_loc() != host_offset + accumulated_size || inst.size() <= 0 ||
-            !is_consan_branch_relay_reservoir_instruction(inst, inst.src_loc(), pristine_text,
-                                                          arch) ||
-            s_clause_blocked_offsets.contains(inst.src_loc()) ||
-            overlaps_supported_lds_probe(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
-            overlaps_future_flat_probe(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
-            overlaps_preapplied_reserved_range(
-                result.program_inventory,
-                {inst.src_loc(), inst.src_loc() + static_cast<uint64_t>(inst.size())}) ||
-            !range_is_in_selected_container(inst.src_loc(), static_cast<uint64_t>(inst.size())) ||
-            static_cast<uint32_t>(inst.size()) >
-                kMaxWideRelayHostWords * sizeof(uint32_t) - accumulated_size) {
-          break;
-        }
-        accumulated_size += static_cast<uint32_t>(inst.size());
-        if (accumulated_size >= 6u * sizeof(uint32_t))
-          prefix_word_counts.push_back(accumulated_size / sizeof(uint32_t));
-        ++sequence_it;
-      }
-      if (prefix_word_counts.empty())
-        continue;
-      ScWideRelayHostCandidate candidate;
-      candidate.host_offset = host_offset;
-      candidate.host_original_words.resize(accumulated_size / sizeof(uint32_t));
-      candidate.prefix_word_counts = std::move(prefix_word_counts);
-      std::memcpy(candidate.host_original_words.data(), pristine_text.data() + host_offset,
-                  accumulated_size);
-      relay_wide_host_candidates.push_back(candidate);
-    }
-  }
-  std::ranges::sort(relay_wide_host_candidates, {}, &ScWideRelayHostCandidate::host_offset);
-
-  // A reservoir relocates one pristine straight-line sequence and turns every
-  // skipped word after its entry branch into an independent relay vertex. Keep
-  // candidate windows bounded to avoid pathological code growth, while still
-  // admitting the hundreds of vertices required by dense generated kernels.
-  constexpr uint32_t kMaxScRelayReservoirWords = 512u;
-  std::vector<ScRelayReservoirCandidate> relay_reservoir_candidates;
+  // LDS supplies only its protected-range policy. Discovery, relocation,
+  // ownership, and emission belong to the common direct-reservoir transaction.
   const auto reservoir_instruction_is_admissible = [&](const Instruction &inst) {
     const uint64_t offset = inst.src_loc();
     const int size = inst.size();
@@ -482,150 +366,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     return is_consan_branch_relay_reservoir_instruction(inst, offset, pristine_text, arch);
   };
-  for (BasicBlock *block : block_ptrs) {
-    if (block == nullptr)
-      continue;
-    std::vector<std::pair<uint64_t, uint32_t>> run;
-    const auto flush_run = [&]() {
-      for (size_t begin = 0; begin < run.size(); ++begin) {
-        uint32_t bytes = 0;
-        size_t end = begin;
-        while (end < run.size() &&
-               run[end].second <= kMaxScRelayReservoirWords * sizeof(uint32_t) - bytes) {
-          bytes += run[end].second;
-          ++end;
-        }
-        if (bytes >= 2u * sizeof(uint32_t))
-          relay_reservoir_candidates.push_back({.anchor_offset = run[begin].first,
-                                                .original_size = bytes,
-                                                .block = block,
-                                                .route = {},
-                                                .owner_descriptor_file_offsets = {}});
-      }
-      run.clear();
-    };
-    std::optional<uint64_t> expected_offset;
-    for (const Instruction &inst : block->instructions()) {
-      if (!reservoir_instruction_is_admissible(inst) ||
-          (expected_offset && inst.src_loc() != *expected_offset)) {
-        flush_run();
-      }
-      if (!reservoir_instruction_is_admissible(inst)) {
-        expected_offset.reset();
-        continue;
-      }
-      run.emplace_back(inst.src_loc(), static_cast<uint32_t>(inst.size()));
-      expected_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
-    }
-    flush_run();
-  }
-  std::unordered_map<uint64_t, const Instruction *> reservoir_instruction_by_offset;
-  for (BasicBlock *block : block_ptrs) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &instruction : block->instructions())
-      reservoir_instruction_by_offset.emplace(instruction.src_loc(), &instruction);
-  }
-  std::unordered_map<const BasicBlock *, std::vector<const ScReservoirOwnerContext *>>
-      reservoir_owners_by_block;
-  for (const ScReservoirOwnerContext &context : reservoir_owner_contexts) {
-    for (const BasicBlock *block : context.scope.blocks)
-      reservoir_owners_by_block[block].push_back(&context);
-  }
-  std::erase_if(relay_reservoir_candidates, [&](ScRelayReservoirCandidate &candidate) {
-    if (candidate.original_size <
-            (kScRelayEntryWords + kScRelayTailRestoreWords + 1u) * sizeof(uint32_t) ||
-        reservoir_owner_contexts.empty())
-      return true;
-    const auto entry_it = reservoir_instruction_by_offset.find(candidate.anchor_offset);
-    const Instruction *entry_instruction =
-        entry_it == reservoir_instruction_by_offset.end() ? nullptr : entry_it->second;
-    if (entry_instruction == nullptr)
-      return true;
-    const auto boundary_it =
-        reservoir_instruction_by_offset.find(candidate.anchor_offset + candidate.original_size);
-    const Instruction *boundary =
-        boundary_it == reservoir_instruction_by_offset.end() ? nullptr : boundary_it->second;
-    const BasicBlock *candidate_block = candidate.block;
-    if (candidate_block == nullptr)
-      return true;
-    const auto owners_it = reservoir_owners_by_block.find(candidate_block);
-    if (owners_it == reservoir_owners_by_block.end() || owners_it->second.empty())
-      return true;
-    const std::vector<const ScReservoirOwnerContext *> &owners = owners_it->second;
-    const auto register_is_dead_at_endpoint = [&](const ScReservoirOwnerContext &owner,
-                                                  RegisterRef reg, bool entry) {
-      if (entry)
-        return !owner.liveness->any_live_before(*entry_instruction, reg);
-      if (boundary != nullptr)
-        return !owner.liveness->any_live_before(*boundary, reg);
-      return !owner.liveness->any_live_out(*candidate_block, reg);
-    };
-    const auto find_dead_sgpr = [&](bool entry, uint16_t excluded_base,
-                                    uint16_t excluded_width) -> std::optional<uint16_t> {
-      for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
-        if (sc_sgpr_ranges_overlap(sgpr, 1u, excluded_base, excluded_width))
-          continue;
-        const RegisterRef ref{RegClass::SGPR, sgpr, 1};
-        if (std::ranges::all_of(owners, [&](const auto *owner) {
-              return register_is_dead_at_endpoint(*owner, ref, entry);
-            }))
-          return sgpr;
-      }
-      return std::nullopt;
-    };
-    const bool every_owner_is_wave32 =
-        std::ranges::all_of(owners, [](const auto *owner) { return owner->wavefront_size == 32u; });
-    if (every_owner_is_wave32) {
-      const auto entry_saved_vcc = find_dead_sgpr(true, kAmdGpuVccLo, 2u);
-      const auto return_saved_vcc = find_dead_sgpr(false, kAmdGpuVccLo, 2u);
-      if (!entry_saved_vcc || !return_saved_vcc)
-        return true;
-      candidate.route.scratch = ConSanSuperColliderWave32RelayScratch{
-          .entry_vcc_save_sgpr = *entry_saved_vcc,
-          .return_vcc_save_sgpr = *return_saved_vcc,
-      };
-    } else {
-      const auto find_dead_scalar_tuple =
-          [&](bool entry) -> std::optional<std::pair<uint16_t, uint16_t>> {
-        for (uint16_t pair = 0u; pair + 1u < REGISTER_SET_ALLOCATABLE_SGPRS; pair += 2u) {
-          const RegisterRef pair_ref{RegClass::SGPR, pair, 2u};
-          if (!std::ranges::all_of(owners, [&](const auto *owner) {
-                return register_is_dead_at_endpoint(*owner, pair_ref, entry);
-              }))
-            continue;
-          if (const auto saved_scc = find_dead_sgpr(entry, pair, 2u))
-            return std::pair(pair, *saved_scc);
-        }
-        return std::nullopt;
-      };
-      const auto entry_scratch = find_dead_scalar_tuple(true);
-      const auto return_scratch = find_dead_scalar_tuple(false);
-      if (!entry_scratch || !return_scratch)
-        return true;
-      candidate.route.scratch = ConSanSuperColliderOrdinaryRelayScratch{
-          .entry_jump = {entry_scratch->first, entry_scratch->second},
-          .return_jump = {return_scratch->first, return_scratch->second},
-      };
-    }
-    for (const ScReservoirOwnerContext *owner : owners)
-      candidate.owner_descriptor_file_offsets.push_back(owner->descriptor_file_offset);
-    std::ranges::sort(candidate.owner_descriptor_file_offsets);
-    return false;
-  });
-  std::ranges::sort(relay_reservoir_candidates, [](const auto &lhs, const auto &rhs) {
-    if (lhs.anchor_offset != rhs.anchor_offset)
-      return lhs.anchor_offset < rhs.anchor_offset;
-    return lhs.original_size < rhs.original_size;
-  });
-  relay_reservoir_candidates.erase(std::ranges::unique(relay_reservoir_candidates, {},
-                                                       [](const auto &candidate) {
-                                                         return std::pair(candidate.anchor_offset,
-                                                                          candidate.original_size);
-                                                       })
-                                       .begin(),
-                                   relay_reservoir_candidates.end());
-
   struct LdsSitePlanningContext {
     std::string_view container_name;
     uint64_t container_entry_text_offset = 0;
@@ -731,7 +471,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (!complete) {
       (void)publish_sc_access_rejection(
-          result.coverage_ledger, result.errors, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site.physical_id,
+          ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider LDS lowerer found no complete planning context");
       return;
     }
@@ -1979,8 +1720,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   std::vector<LocalNopCave> generated_entry_islands;
   std::vector<LdsCheckTrapCandidate> generated_island_candidates;
-  std::vector<ScWideCompositeBranchRelayDonor> selected_wide_composite_relay_donors;
-  std::vector<ScRelayReservoir> selected_relay_reservoirs;
+  BranchOnlyRelayRouter direct_reservoir_router;
+  BranchOnlyDirectRelayReservoirSet direct_relay_reservoirs;
   generated_entry_islands.reserve(generated_island_seed_candidates.size());
   generated_island_candidates.reserve(generated_island_seed_candidates.size());
   uint64_t generated_island_bank_offset = appended_cave_offset;
@@ -2008,97 +1749,37 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         relay_routed_sites.insert(candidate.site);
     }
 
-    // Place wide-host bodies at the pristine append cursor, before the much
-    // larger direct SC bodies consume their SOPP reach. Each host keeps an
-    // intermediate eight-byte instruction's original bytes and local return
-    // in its otherwise skipped payload, creating three relay vertices while
-    // preserving both normal execution paths.
     DbiPatchPlacementPlanner relay_prefix_planner = placement_planner;
-    std::unordered_set<uint64_t> prefixed_anchor_offsets;
-    std::unordered_set<uint64_t> prefixed_host_offsets;
-    const size_t wide_prefix_limit = relay_owner_seeds.size();
-    for (auto host_it = relay_wide_host_candidates.rbegin();
-         host_it != relay_wide_host_candidates.rend(); ++host_it) {
-      if (selected_wide_composite_relay_donors.size() >= wide_prefix_limit)
-        break;
-      const ScWideRelayHostCandidate &host = *host_it;
-      if (prefixed_host_offsets.contains(host.host_offset))
+    std::vector<std::pair<uint64_t, uint64_t>> reservoir_protected_ranges;
+    for (BasicBlock *block : block_ptrs) {
+      if (block == nullptr)
         continue;
-      DbiPatchPlacementPlanner host_planner = relay_prefix_planner;
-      std::optional<DbiPatchPlacement> host_placement;
-      uint32_t selected_host_words = 0;
-      for (auto prefix_it = host.prefix_word_counts.rbegin();
-           prefix_it != host.prefix_word_counts.rend(); ++prefix_it) {
-        DbiPatchPlacementPlanner tentative_host_planner = relay_prefix_planner;
-        DbiPatchPlacementRequest host_request;
-        host_request.anchor_offset = host.host_offset;
-        host_request.original_size = *prefix_it * sizeof(uint32_t);
-        host_request.body_size = *prefix_it * sizeof(uint32_t);
-        host_request.allow_appended_cave = true;
-        auto placement = tentative_host_planner.plan(host_request);
-        if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave)
-          continue;
-        host_planner = std::move(tentative_host_planner);
-        host_placement = *placement;
-        selected_host_words = *prefix_it;
-        break;
-      }
-      if (!host_placement)
-        continue;
-      const uint64_t target_distance =
-          selected_wide_composite_relay_donors.empty() ? 110000u : 65536u;
-      const uint64_t target_anchor =
-          host.host_offset > target_distance ? host.host_offset - target_distance : 0u;
-      auto anchor_it = std::ranges::lower_bound(relay_anchor_candidates, target_anchor, {},
-                                                &ScRelayAnchorCandidate::anchor_offset);
-      for (; anchor_it != relay_anchor_candidates.end() &&
-             anchor_it->anchor_offset < host.host_offset;
-           ++anchor_it) {
-        const ScRelayAnchorCandidate &anchor = *anchor_it;
-        if (prefixed_anchor_offsets.contains(anchor.anchor_offset) ||
-            !compute_sopp_branch_simm16(anchor.anchor_offset,
-                                        host.host_offset + sizeof(uint32_t)) ||
-            !compute_sopp_branch_simm16(host.host_offset + 3u * sizeof(uint32_t),
-                                        anchor.anchor_offset + 2u * sizeof(uint32_t)))
-          continue;
-        DbiPatchPlacementPlanner tentative_planner = host_planner;
-        if (!tentative_planner.reserve_existing_range(anchor.anchor_offset, 2u * sizeof(uint32_t)))
-          continue;
-        ScWideCompositeBranchRelayDonor wide;
-        wide.anchor_offset = anchor.anchor_offset;
-        wide.anchor_original_words = anchor.anchor_original_words;
-        wide.host_offset = host.host_offset;
-        wide.host_original_words.assign(host.host_original_words.begin(),
-                                        host.host_original_words.begin() + selected_host_words);
-        wide.host_placement = *host_placement;
-        selected_wide_composite_relay_donors.push_back(wide);
-        prefixed_anchor_offsets.insert(anchor.anchor_offset);
-        prefixed_host_offsets.insert(host.host_offset);
-        relay_prefix_planner = std::move(tentative_planner);
-        break;
+      for (const Instruction &instruction : block->instructions()) {
+        if (!reservoir_instruction_is_admissible(instruction)) {
+          reservoir_protected_ranges.emplace_back(
+              instruction.src_loc(),
+              instruction.src_loc() + static_cast<uint64_t>(std::max(instruction.size(), 0)));
+        }
       }
     }
-
-    const auto replay_support_prefix =
-        [&](std::vector<ScWideCompositeBranchRelayDonor> &wide_donors,
-            std::string *error_out) -> std::optional<DbiPatchPlacementPlanner> {
-      DbiPatchPlacementPlanner planner = placement_planner;
-      for (ScWideCompositeBranchRelayDonor &donor : wide_donors) {
-        const uint32_t host_size =
-            static_cast<uint32_t>(donor.host_original_words.size() * sizeof(uint32_t));
-        DbiPatchPlacementRequest request;
-        request.anchor_offset = donor.host_offset;
-        request.original_size = host_size;
-        request.body_size = host_size;
-        request.allow_appended_cave = true;
-        auto placement = planner.plan(request, error_out);
-        if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave ||
-            !planner.reserve_existing_range(donor.anchor_offset, 2u * sizeof(uint32_t), error_out))
-          return std::nullopt;
-        donor.host_placement = *placement;
-      }
-      return planner;
-    };
+    uint64_t relay_frontier = std::numeric_limits<uint64_t>::max();
+    for (const LdsCheckTrapCandidate &candidate : relay_owner_seeds) {
+      relay_frontier = std::min(relay_frontier, candidate.site->physical_id.original_text_offset);
+    }
+    const size_t reservoir_relay_target =
+        saturated_add(saturated_multiply(relay_owner_seeds.size(), 2u), 8u);
+    std::string reservoir_error;
+    if (relay_frontier != std::numeric_limits<uint64_t>::max() &&
+        !direct_reservoir_router.plan_direct_reservoirs(
+            block_ptrs, pristine_text, reservoir_protected_ranges, arch, relay_frontier,
+            reservoir_relay_target, relay_prefix_planner, direct_relay_reservoirs, &reservoir_error,
+            {.discovery = options.direct_reservoir_planning_work_limit,
+             .minimum_words = 2u,
+             .maximum_words = 512u})) {
+      result.errors.emplace_back("ConSan LDS check/trap direct-reservoir planning failed: " +
+                                 reservoir_error);
+      return;
+    }
 
     // Every support prefix changes the later direct bodies and island bank.
     // Rebuild that complete layout for every trial and let exact max flow,
@@ -2116,8 +1797,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     };
     const std::unordered_set<const ConSanAccessInventorySite *> required_relay_routed_sites =
         relay_routed_sites;
-    const size_t relay_layout_inputs =
-        saturated_add(required_relay_routed_sites.size(), relay_reservoir_candidates.size());
+    const size_t relay_layout_inputs = saturated_add(required_relay_routed_sites.size(),
+                                                     direct_relay_reservoirs.reservoirs.size());
     MeteredPlanningWork relay_layout_work(
         options.lds_relay_layout_planning_work_limit.for_inputs(relay_layout_inputs));
     bool relay_layout_exhausted = false;
@@ -2188,12 +1869,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
       std::vector<uint64_t> relay_offsets;
       size_t reservoir_slot_count = 0;
-      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs)
-        reservoir_slot_count +=
-            sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size)
-                .size();
+      std::unordered_set<uint64_t> reservoir_route_claims;
+      for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs)
+        if (reservoir.route) {
+          for (const BranchOnlyRelayClaim &claim : reservoir.route->claims)
+            reservoir_route_claims.insert(claim.offset);
+        }
+      for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs)
+        for (size_t word = 1u; word < reservoir.original_words.size(); ++word)
+          reservoir_slot_count +=
+              !reservoir_route_claims.contains(reservoir.anchor_offset + word * sizeof(uint32_t));
       relay_offsets.reserve(relay_owner_seeds.size() + body_relay_slots.size() +
-                            3u * selected_wide_composite_relay_donors.size() +
                             reservoir_slot_count);
       for (const LdsCheckTrapCandidate &candidate : relay_owner_seeds)
         relay_offsets.push_back(candidate.site->physical_id.original_text_offset +
@@ -2203,15 +1889,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         relay_offsets.insert(relay_offsets.end(), relay_site_offsets.begin(),
                              relay_site_offsets.end());
       }
-      for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-        relay_offsets.push_back(donor.anchor_offset + sizeof(uint32_t));
-        for (size_t word = 4u; word < donor.host_original_words.size(); ++word)
-          relay_offsets.push_back(donor.host_offset + word * sizeof(uint32_t));
-      }
-      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-        const std::vector<uint64_t> slots =
-            sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size);
-        relay_offsets.insert(relay_offsets.end(), slots.begin(), slots.end());
+      for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs) {
+        for (size_t word = 1u; word < reservoir.original_words.size(); ++word) {
+          const uint64_t relay = reservoir.anchor_offset + word * sizeof(uint32_t);
+          if (!reservoir_route_claims.contains(relay))
+            relay_offsets.push_back(relay);
+        }
       }
       const uint64_t relay_bank_offset = direct_layout.appended_end();
       if (!direct_layout.reserve_appended_prefix(relay_bank_word_count * sizeof(uint32_t),
@@ -2230,16 +1913,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       const uint64_t island_bank_bytes = cursor - island_bank_offset;
       if (!direct_layout.reserve_appended_prefix(island_bank_bytes, error_out))
         return std::nullopt;
-      for (ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-        auto placement = direct_layout.plan_indirect_appended(
-            reservoir.anchor_offset, reservoir.original_size,
-            reservoir.original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t), error_out);
-        if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave)
-          return std::nullopt;
-        placement->return_target = reservoir.anchor_offset + reservoir.original_size -
-                                   kScRelayTailRestoreWords * sizeof(uint32_t);
-        reservoir.placement = *placement;
-      }
       auto plan = plan_forward_sopp_branch_relays(
           source_offsets, relay_offsets, island_offsets, error_out, nullptr,
           {.total = options.sopp_relay_planning_work_limit});
@@ -2258,265 +1931,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (!relay_attempt) {
       result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " + relay_error);
       return;
-    }
-
-    // A cut in pristine text needs more pristine vertices. Relocate a
-    // straight-line range with an indirect entry/return pair. Wave32 uses VCC
-    // as the PC pair and inactive EXEC_HI to preserve SCC. Wave64 instead uses
-    // an endpoint-dead ordinary SGPR pair and SCC-save SGPR. Expose only the
-    // skipped interior words as relay capacity. Exact replay and max flow
-    // remain the acceptance test for every trial.
-    size_t last_ranked_reservoir_count = 0;
-    size_t last_exact_reservoir_trial_count = 0;
-    while (!relay_attempt->relay_plan.rejected_source_indices.empty()) {
-      struct RankedReservoir {
-        const ScRelayReservoirCandidate *candidate = nullptr;
-        size_t cut_words = 0;
-      };
-      std::vector<RankedReservoir> ranked;
-      constexpr uint64_t kMaximumForwardSoppBranchBytes = 131072u;
-      uint64_t cut_neighborhood_begin = 0u;
-      uint64_t cut_neighborhood_end = 0u;
-      if (!relay_attempt->relay_plan.min_cut_relay_offsets.empty()) {
-        const auto [minimum_cut_relay, maximum_cut_relay] =
-            std::ranges::minmax(relay_attempt->relay_plan.min_cut_relay_offsets);
-        cut_neighborhood_begin = minimum_cut_relay > kMaximumForwardSoppBranchBytes
-                                     ? minimum_cut_relay - kMaximumForwardSoppBranchBytes
-                                     : 0u;
-        cut_neighborhood_end = maximum_cut_relay > std::numeric_limits<uint64_t>::max() -
-                                                       kMaximumForwardSoppBranchBytes
-                                   ? std::numeric_limits<uint64_t>::max()
-                                   : maximum_cut_relay + kMaximumForwardSoppBranchBytes;
-      } else {
-        // A graph with no existing relay on its source-to-island frontier has
-        // no saturated relay vertex to report. Seed that empty frontier from
-        // the rejected sources through the reserved island bank; exact replay
-        // below still decides whether any ranked reservoir adds real flow.
-        cut_neighborhood_begin = std::numeric_limits<uint64_t>::max();
-        for (size_t rejected : relay_attempt->relay_plan.rejected_source_indices) {
-          if (rejected >= relay_attempt->source_offsets.size())
-            continue;
-          cut_neighborhood_begin =
-              std::min(cut_neighborhood_begin, relay_attempt->source_offsets[rejected]);
-        }
-        if (cut_neighborhood_begin == std::numeric_limits<uint64_t>::max())
-          break;
-        cut_neighborhood_end =
-            relay_attempt->island_bank_offset +
-            relay_attempt->relay_seeds.size() * kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
-      }
-      for (const ScRelayReservoirCandidate &candidate : relay_reservoir_candidates) {
-        const bool already_selected =
-            std::ranges::any_of(selected_relay_reservoirs, [&](const auto &selected) {
-              return candidate.anchor_offset < selected.anchor_offset + selected.original_size &&
-                     selected.anchor_offset < candidate.anchor_offset + candidate.original_size;
-            });
-        if (already_selected)
-          continue;
-        const uint64_t payload_begin =
-            candidate.anchor_offset + kScRelayEntryWords * sizeof(uint32_t);
-        const uint64_t payload_end = candidate.anchor_offset + candidate.original_size -
-                                     kScRelayTailRestoreWords * sizeof(uint32_t);
-        const uint64_t overlap_begin = std::max(payload_begin, cut_neighborhood_begin);
-        const uint64_t overlap_end = std::min(payload_end, cut_neighborhood_end);
-        const size_t cut_words =
-            overlap_end > overlap_begin
-                ? static_cast<size_t>((overlap_end - overlap_begin) / sizeof(uint32_t))
-                : 0u;
-        if (cut_words != 0)
-          ranked.push_back({&candidate, cut_words});
-      }
-      std::ranges::sort(ranked, [](const auto &lhs, const auto &rhs) {
-        if (lhs.cut_words != rhs.cut_words)
-          return lhs.cut_words > rhs.cut_words;
-        if (lhs.candidate->original_size != rhs.candidate->original_size)
-          return lhs.candidate->original_size > rhs.candidate->original_size;
-        return lhs.candidate->anchor_offset < rhs.candidate->anchor_offset;
-      });
-      last_ranked_reservoir_count = ranked.size();
-      const size_t old_rejected = relay_attempt->relay_plan.rejected_source_indices.size();
-      std::optional<RelayLayoutAttempt> best_attempt;
-      std::optional<ScRelayReservoir> best_reservoir;
-      DbiPatchPlacementPlanner best_prefix = relay_prefix_planner;
-      const auto append_candidate_reservoir = [&](const ScRelayReservoirCandidate &candidate) {
-        selected_relay_reservoirs.push_back(
-            {.anchor_offset = candidate.anchor_offset,
-             .original_size = candidate.original_size,
-             .route = candidate.route,
-             .owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets,
-             .placement = {}});
-      };
-      constexpr size_t kMaxExactReservoirTrialsPerIteration = 8u;
-      size_t exact_reservoir_trials = 0;
-      for (const RankedReservoir &ranked_candidate : ranked) {
-        const ScRelayReservoirCandidate &candidate = *ranked_candidate.candidate;
-        append_candidate_reservoir(candidate);
-        std::string trial_error;
-        auto trial_prefix =
-            replay_support_prefix(selected_wide_composite_relay_donors, &trial_error);
-        if (!trial_prefix) {
-          selected_relay_reservoirs.pop_back();
-          continue;
-        }
-        ++exact_reservoir_trials;
-        last_exact_reservoir_trial_count = exact_reservoir_trials;
-        auto trial = evaluate_relay_layout(*trial_prefix, 0u, &trial_error);
-        ScRelayReservoir trial_reservoir = selected_relay_reservoirs.back();
-        selected_relay_reservoirs.pop_back();
-        if (relay_layout_exhausted) {
-          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " + trial_error);
-          return;
-        }
-        if (!trial || trial->relay_plan.rejected_source_indices.size() >= old_rejected) {
-          if (exact_reservoir_trials >= kMaxExactReservoirTrialsPerIteration)
-            break;
-          else
-            continue;
-        }
-        if (!best_attempt || trial->relay_plan.rejected_source_indices.size() <
-                                 best_attempt->relay_plan.rejected_source_indices.size()) {
-          best_attempt = std::move(trial);
-          best_reservoir = std::move(trial_reservoir);
-          best_prefix = std::move(*trial_prefix);
-          if (best_attempt->relay_plan.rejected_source_indices.empty())
-            break;
-        }
-        if (exact_reservoir_trials >= kMaxExactReservoirTrialsPerIteration)
-          break;
-      }
-      bool accepted_batch = false;
-      if (!best_attempt) {
-        const size_t old_reservoir_count = selected_relay_reservoirs.size();
-        size_t batch_size = 0;
-        size_t last_trial_batch_size = 0;
-        size_t next_trial_size = 2u;
-        // A long generated object can require a complete chain across many
-        // empty SOPP bands before maximum flow increases at all. Keep the
-        // exponential trials, but allow one trial to span that full chain.
-        constexpr size_t kMaxBatchReservoirs = 4096u;
-        for (const RankedReservoir &ranked_candidate : ranked) {
-          const ScRelayReservoirCandidate &candidate = *ranked_candidate.candidate;
-          const bool overlaps_batch =
-              std::ranges::any_of(selected_relay_reservoirs, [&](const auto &selected) {
-                return candidate.anchor_offset < selected.anchor_offset + selected.original_size &&
-                       selected.anchor_offset < candidate.anchor_offset + candidate.original_size;
-              });
-          if (overlaps_batch)
-            continue;
-          append_candidate_reservoir(candidate);
-          ++batch_size;
-          if (batch_size < next_trial_size && batch_size < kMaxBatchReservoirs)
-            continue;
-          std::string trial_error;
-          last_trial_batch_size = batch_size;
-          auto trial_prefix =
-              replay_support_prefix(selected_wide_composite_relay_donors, &trial_error);
-          ++exact_reservoir_trials;
-          last_exact_reservoir_trial_count = exact_reservoir_trials;
-          auto trial =
-              trial_prefix ? evaluate_relay_layout(*trial_prefix, 0u, &trial_error) : std::nullopt;
-          if (relay_layout_exhausted) {
-            result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
-                                       trial_error);
-            return;
-          }
-          if (trial && trial->relay_plan.rejected_source_indices.size() < old_rejected) {
-            relay_prefix_planner = std::move(*trial_prefix);
-            relay_attempt = std::move(trial);
-            accepted_batch = true;
-            break;
-          }
-          if (batch_size >= kMaxBatchReservoirs)
-            break;
-          next_trial_size = std::min(kMaxBatchReservoirs, next_trial_size * 2u);
-        }
-        if (!accepted_batch && batch_size != last_trial_batch_size) {
-          std::string trial_error;
-          auto trial_prefix =
-              replay_support_prefix(selected_wide_composite_relay_donors, &trial_error);
-          ++exact_reservoir_trials;
-          last_exact_reservoir_trial_count = exact_reservoir_trials;
-          auto trial =
-              trial_prefix ? evaluate_relay_layout(*trial_prefix, 0u, &trial_error) : std::nullopt;
-          if (relay_layout_exhausted) {
-            result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " +
-                                       trial_error);
-            return;
-          }
-          if (trial && trial->relay_plan.rejected_source_indices.size() < old_rejected) {
-            relay_prefix_planner = std::move(*trial_prefix);
-            relay_attempt = std::move(trial);
-            accepted_batch = true;
-          }
-        }
-        if (!accepted_batch)
-          selected_relay_reservoirs.resize(old_reservoir_count);
-      }
-      if (accepted_batch)
-        continue;
-      if (!best_attempt || !best_reservoir)
-        break;
-      selected_relay_reservoirs.push_back(*best_reservoir);
-      relay_prefix_planner = std::move(best_prefix);
-      relay_attempt = std::move(best_attempt);
-    }
-
-    if (relay_attempt->relay_plan.rejected_source_indices.empty()) {
-      std::unordered_set<uint64_t> used_support_slots;
-      for (const SoppBranchRelayRoute &route : relay_attempt->relay_plan.routes) {
-        for (uint64_t offset : route.relay_offsets)
-          used_support_slots.insert(offset);
-      }
-      const auto wide_is_used = [&](const ScWideCompositeBranchRelayDonor &donor) {
-        if (used_support_slots.contains(donor.anchor_offset + sizeof(uint32_t)))
-          return true;
-        for (size_t word = 4u; word < donor.host_original_words.size(); ++word) {
-          if (used_support_slots.contains(donor.host_offset + word * sizeof(uint32_t)))
-            return true;
-        }
-        return false;
-      };
-      const auto reservoir_is_used = [&](const ScRelayReservoir &reservoir) {
-        for (uint64_t offset :
-             sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size)) {
-          if (used_support_slots.contains(offset))
-            return true;
-        }
-        return false;
-      };
-      std::vector<ScWideCompositeBranchRelayDonor> pruned_wide;
-      std::ranges::copy_if(selected_wide_composite_relay_donors, std::back_inserter(pruned_wide),
-                           wide_is_used);
-      std::vector<ScRelayReservoir> pruned_reservoirs;
-      std::ranges::copy_if(selected_relay_reservoirs, std::back_inserter(pruned_reservoirs),
-                           reservoir_is_used);
-      if (pruned_wide.size() != selected_wide_composite_relay_donors.size() ||
-          pruned_reservoirs.size() != selected_relay_reservoirs.size()) {
-        auto original_wide = selected_wide_composite_relay_donors;
-        auto original_reservoirs = selected_relay_reservoirs;
-        selected_wide_composite_relay_donors = std::move(pruned_wide);
-        selected_relay_reservoirs = std::move(pruned_reservoirs);
-        std::string prune_error;
-        auto pruned_prefix =
-            replay_support_prefix(selected_wide_composite_relay_donors, &prune_error);
-        auto pruned_attempt =
-            pruned_prefix
-                ? evaluate_relay_layout(*pruned_prefix, relay_bank_word_count, &prune_error)
-                : std::nullopt;
-        if (relay_layout_exhausted) {
-          selected_wide_composite_relay_donors = std::move(original_wide);
-          selected_relay_reservoirs = std::move(original_reservoirs);
-          result.errors.emplace_back("ConSan LDS check/trap relay planning failed: " + prune_error);
-          return;
-        }
-        if (pruned_attempt && pruned_attempt->relay_plan.rejected_source_indices.empty()) {
-          relay_prefix_planner = std::move(*pruned_prefix);
-          relay_attempt = std::move(pruned_attempt);
-        } else {
-          selected_wide_composite_relay_donors = std::move(original_wide);
-          selected_relay_reservoirs = std::move(original_reservoirs);
-        }
-      }
     }
 
     relay_routed_sites = relay_attempt->routed_sites;
@@ -2539,20 +1953,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       uint64_t max_cut_relay = 0;
       size_t min_cut_direct_relay_count = 0;
       size_t min_cut_owner_relay_count = 0;
-      size_t min_cut_wide_relay_count = 0;
-      size_t selected_wide_relay_slot_count = 0;
       size_t selected_reservoir_relay_slot_count = 0;
-      size_t max_selected_wide_host_words = 0;
-      for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-        selected_wide_relay_slot_count += donor.host_original_words.size() - 3u;
-        max_selected_wide_host_words =
-            std::max(max_selected_wide_host_words, donor.host_original_words.size());
-      }
-      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-        selected_reservoir_relay_slot_count +=
-            sc_relay_reservoir_slot_offsets(reservoir.anchor_offset, reservoir.original_size)
-                .size();
-      }
+      for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs)
+        selected_reservoir_relay_slot_count += reservoir.original_words.size() - 1u;
       for (size_t rejected_index : relay_plan.rejected_source_indices) {
         min_rejected_source = std::min(min_rejected_source, source_offsets[rejected_index]);
         max_rejected_source = std::max(max_rejected_source, source_offsets[rejected_index]);
@@ -2574,31 +1977,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             std::ranges::any_of(relay_owner_seeds, [&](const LdsCheckTrapCandidate &candidate) {
               return candidate.site->physical_id.original_text_offset + sizeof(uint32_t) == relay;
             });
-        min_cut_wide_relay_count +=
-            std::ranges::any_of(selected_wide_composite_relay_donors,
-                                [&](const ScWideCompositeBranchRelayDonor &donor) {
-                                  return donor.anchor_offset + sizeof(uint32_t) == relay ||
-                                         donor.host_offset + 4u * sizeof(uint32_t) == relay ||
-                                         donor.host_offset + 5u * sizeof(uint32_t) == relay;
-                                });
       }
       result.warnings.emplace_back(
           "ConSan LDS check/trap relay bank could not close " +
           std::to_string(relay_plan.rejected_source_indices.size()) +
           " source route(s); retaining ordinary placement; "
-          "relay_anchor_candidates=" +
-          std::to_string(relay_anchor_candidates.size()) + " wide_host_candidates=" +
-          std::to_string(relay_wide_host_candidates.size()) + " selected_wide_composite_donors=" +
-          std::to_string(selected_wide_composite_relay_donors.size()) + " rejected_source_range=" +
+          "rejected_source_range=" +
           std::to_string(min_rejected_source) + "-" + std::to_string(max_rejected_source) +
-          " relay_reservoir_candidates=" + std::to_string(relay_reservoir_candidates.size()) +
-          " selected_relay_reservoirs=" + std::to_string(selected_relay_reservoirs.size()) +
-          " ranked_relay_reservoirs=" + std::to_string(last_ranked_reservoir_count) +
-          " exact_relay_reservoir_trials=" + std::to_string(last_exact_reservoir_trial_count) +
+          " direct_relay_reservoirs=" + std::to_string(direct_relay_reservoirs.reservoirs.size()) +
           " generated_relay_bank_words=" + std::to_string(generated_relay_bank_word_count) +
-          " selected_wide_relay_slots=" + std::to_string(selected_wide_relay_slot_count) +
           " selected_reservoir_relay_slots=" + std::to_string(selected_reservoir_relay_slot_count) +
-          " max_selected_wide_host_words=" + std::to_string(max_selected_wide_host_words) +
           " min_cut_hops=" + std::to_string(relay_plan.min_cut_hops.size()) +
           " min_cut_from_range=" + std::to_string(min_cut_from) + "-" +
           std::to_string(max_cut_from) + " min_cut_to_range=" + std::to_string(min_cut_to) + "-" +
@@ -2606,18 +1994,30 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           " min_cut_relays=" + std::to_string(relay_plan.min_cut_relay_offsets.size()) +
           " min_cut_direct_relays=" + std::to_string(min_cut_direct_relay_count) +
           " min_cut_owner_relays=" + std::to_string(min_cut_owner_relay_count) +
-          " min_cut_wide_relays=" + std::to_string(min_cut_wide_relay_count) +
           " min_cut_relay_range=" + std::to_string(min_cut_relay) + "-" +
           std::to_string(max_cut_relay));
       generated_entry_islands.clear();
-      selected_wide_composite_relay_donors.clear();
-      selected_relay_reservoirs.clear();
+      direct_relay_reservoirs = {};
+      direct_reservoir_router = {};
       generated_island_bank_offset = appended_cave_offset;
       generated_island_cursor = generated_island_bank_offset;
       generated_relay_bank_offset = appended_cave_offset;
       generated_relay_bank_word_count = 0;
       use_relay_island_bank = false;
     } else {
+      std::vector<uint64_t> used_direct_relays;
+      for (const SoppBranchRelayRoute &route : relay_plan.routes) {
+        for (uint64_t relay : route.relay_offsets) {
+          if (direct_relay_reservoirs.reservoir_by_relay.contains(relay)) {
+            used_direct_relays.push_back(relay);
+            direct_reservoir_router.retire_range(relay, sizeof(uint32_t));
+          }
+        }
+      }
+      if (!direct_relay_reservoirs.mark_relays_used(used_direct_relays, &relay_error)) {
+        result.errors.emplace_back("ConSan LDS check/trap lost a direct reservoir: " + relay_error);
+        return;
+      }
       generated_island_cursor = generated_island_bank_offset;
       for (const LdsCheckTrapCandidate &candidate : relay_seeds) {
         generated_entry_islands.push_back(LocalNopCave{
@@ -2642,6 +2042,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         candidate.entry_relay_offsets = route.relay_offsets;
         generated_island_candidates.push_back(std::move(candidate));
       }
+      placement_planner = relay_prefix_planner;
       indirect_island_unreachable_site_count = 0;
     }
   }
@@ -2688,25 +2089,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   for (const LdsCheckTrapCandidate &candidate : local_cave_candidates)
     try_select_candidate(candidate, true);
   if (use_relay_island_bank) {
-    for (ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-      const uint32_t host_size =
-          static_cast<uint32_t>(donor.host_original_words.size() * sizeof(uint32_t));
-      DbiPatchPlacementRequest request;
-      request.anchor_offset = donor.host_offset;
-      request.original_size = host_size;
-      request.body_size = host_size;
-      request.allow_appended_cave = true;
-      auto placement = placement_planner.plan(request);
-      if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave ||
-          placement->body_offset != donor.host_placement.body_offset ||
-          placement->return_target != donor.host_placement.return_target ||
-          !placement_planner.reserve_existing_range(donor.anchor_offset, 2u * sizeof(uint32_t))) {
-        result.errors.emplace_back(
-            "ConSan LDS check/trap direct sequence diverged from its wide composite relay plan");
-        return;
-      }
-      donor.host_placement = *placement;
-    }
     for (const LdsCheckTrapCandidate &candidate : appended_cave_candidates) {
       if (candidate.entry_island == nullptr && !relay_routed_sites.contains(candidate.site))
         try_select_candidate(candidate, true);
@@ -2719,24 +2101,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       result.errors.emplace_back(
           "ConSan LDS check/trap direct sequence diverged from its relay-bank plan");
       return;
-    }
-    for (ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-      auto placement = placement_planner.plan_indirect_appended(
-          reservoir.anchor_offset, reservoir.original_size,
-          reservoir.original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t));
-      if (placement)
-        placement->return_target = reservoir.anchor_offset + reservoir.original_size -
-                                   kScRelayTailRestoreWords * sizeof(uint32_t);
-      if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave ||
-          placement->body_offset != reservoir.placement.body_offset ||
-          placement->body_size != reservoir.placement.body_size ||
-          placement->return_branch_offset != reservoir.placement.return_branch_offset ||
-          placement->return_target != reservoir.placement.return_target) {
-        result.errors.emplace_back(
-            "ConSan LDS check/trap direct sequence diverged from its relay-reservoir plan");
-        return;
-      }
-      reservoir.placement = *placement;
     }
     for (const LdsCheckTrapCandidate &candidate : generated_island_candidates)
       try_select_candidate(candidate, true);
@@ -2758,268 +2122,102 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   // and never make a live guest scalar carry a continuation.
   if (target.supports_sc_branch_only_route && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
-    std::string branch_only_route_error;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->physical_id.original_text_offset <
              rhs.site->physical_id.original_text_offset;
     });
 
-    // Reservoir discovery emits overlapping suffixes of each admissible run.
-    // Keep one maximum-size, non-overlapping candidate at each frontier so an
-    // optimistic route cannot borrow two payload words whose ordinary
-    // sequences could not both be relocated.
-    std::vector<const ScRelayReservoirCandidate *> branch_reservoir_candidates;
-    branch_reservoir_candidates.reserve(relay_reservoir_candidates.size());
-    for (const ScRelayReservoirCandidate &candidate : relay_reservoir_candidates)
-      branch_reservoir_candidates.push_back(&candidate);
-    std::ranges::sort(branch_reservoir_candidates, [](const auto *lhs, const auto *rhs) {
-      if (lhs->anchor_offset != rhs->anchor_offset)
-        return lhs->anchor_offset < rhs->anchor_offset;
-      return lhs->original_size > rhs->original_size;
-    });
-    uint64_t reservoir_frontier = 0;
-    std::erase_if(branch_reservoir_candidates, [&](const auto *candidate) {
-      const bool overlaps_selected =
-          std::ranges::any_of(selected_relay_reservoirs, [&](const auto &selected) {
-            return candidate->anchor_offset < selected.anchor_offset + selected.original_size &&
-                   selected.anchor_offset < candidate->anchor_offset + candidate->original_size;
-          });
-      if (overlaps_selected || candidate->anchor_offset < reservoir_frontier)
-        return true;
-      reservoir_frontier = candidate->anchor_offset + candidate->original_size;
-      return false;
-    });
-    // A dense object can offer tens of thousands of tiny relocatable runs.
-    // Routing against all of them makes independently greedy paths choose a
-    // different run at nearly every hop. Bound the candidate pool to the
-    // capacity needed for two disjoint relay lanes per site in each half-range
-    // window.
-    constexpr uint64_t kBranchReservoirBinBytes = 65536u;
-    const size_t required_slots_per_bin = 2u * branch_only_candidates.size() + 8u;
-    std::unordered_map<uint64_t, size_t> reservoir_slots_by_bin;
-    std::erase_if(branch_reservoir_candidates, [&](const auto *candidate) {
-      const uint64_t bin = candidate->anchor_offset / kBranchReservoirBinBytes;
-      size_t &slots = reservoir_slots_by_bin[bin];
-      if (slots >= required_slots_per_bin)
-        return true;
-      slots +=
-          sc_relay_reservoir_all_slot_offsets(candidate->anchor_offset, candidate->original_size)
-              .size();
-      return false;
-    });
-
-    DbiPatchPlacementPlanner branch_prefix_planner = placement_planner;
-    std::vector<ScRelayReservoir> branch_selected_reservoirs;
-    std::unordered_set<const ScRelayReservoirCandidate *> selected_branch_reservoir_candidates;
-    std::unordered_set<const ScRelayReservoirCandidate *> unavailable_branch_reservoir_candidates;
-    std::vector<LdsCheckTrapCandidate> accepted_candidates;
-    DbiPatchPlacementPlanner accepted_planner = placement_planner;
-    bool routes_complete = false;
-
-    // Route optimistically through every non-overlapping proven reservoir,
-    // then materialize exactly the reservoirs used by that route and replay.
-    // Replay proves the route against the owners that could actually reserve
-    // appended storage; failed reservations make their capacity unavailable.
-    // Every noninitial replay either commits, stops, or permanently classifies
-    // at least one previously optimistic candidate as selected or unavailable.
-    // The defensive attempt cap admits the initial pass, one promotion per
-    // finite candidate, and one final materialized-only replay; correct
-    // progress never reaches it.
-    MeteredPlanningWork convergence_work(
-        options.lds_convergence_planning_work_limit.for_inputs(branch_reservoir_candidates.size()));
-    const auto charge_convergence = [&]() { return convergence_work.consume(); };
-    bool convergence_terminated = false;
-    for (size_t iteration = 0u; charge_convergence(); ++iteration) {
-      const bool initial_iteration = iteration == 0u;
-      std::vector<LdsCheckTrapCandidate> tentative_candidates;
-      DbiPatchPlacementPlanner tentative_planner = branch_prefix_planner;
-      for (LdsCheckTrapCandidate candidate : branch_only_candidates) {
-        if (selected_sites.contains(candidate.site) ||
-            selected_candidates.size() + tentative_candidates.size() >= max_patches)
-          continue;
-        if (!candidate.placement)
-          continue;
-        tentative_candidates.push_back(std::move(candidate));
-      }
-      if (tentative_candidates.empty()) {
-        convergence_terminated = true;
-        break;
-      }
-
-      std::vector<uint64_t> available_relays;
-      std::unordered_set<uint64_t> owned_anchor_relays;
-      const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
-        if ((candidate.use_local_cave || candidate.use_appended_cave) &&
-            !candidate.dense_call_group_index &&
-            candidate.site->instruction_size == 2u * sizeof(uint32_t)) {
-          const uint64_t relay =
-              candidate.site->physical_id.original_text_offset + sizeof(uint32_t);
-          available_relays.push_back(relay);
-          owned_anchor_relays.insert(relay);
-        }
-      };
-      for (const LdsCheckTrapCandidate &candidate : selected_candidates)
-        offer_anchor_relay(candidate);
-      for (const LdsCheckTrapCandidate &candidate : tentative_candidates)
-        offer_anchor_relay(candidate);
-      for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-        available_relays.push_back(donor.anchor_offset + sizeof(uint32_t));
-        for (size_t word = 4u; word < donor.host_original_words.size(); ++word)
-          available_relays.push_back(donor.host_offset + word * sizeof(uint32_t));
-      }
-      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-        const auto slots =
-            sc_relay_reservoir_all_slot_offsets(reservoir.anchor_offset, reservoir.original_size);
-        available_relays.insert(available_relays.end(), slots.begin(), slots.end());
-      }
-      for (const ScRelayReservoir &reservoir : branch_selected_reservoirs) {
-        const auto slots =
-            sc_relay_reservoir_all_slot_offsets(reservoir.anchor_offset, reservoir.original_size);
-        available_relays.insert(available_relays.end(), slots.begin(), slots.end());
-      }
-      // The ordinary appended-body layout deliberately leaves one relay word
-      // after each direct body. These words bridge the otherwise empty span
-      // between pristine text and late branch-only bodies just as they do for
-      // the generated entry-island bank.
-      for (const auto &[site, slots] : direct_body_relay_slots) {
-        (void)site;
-        available_relays.insert(available_relays.end(), slots.begin(), slots.end());
-      }
-      for (size_t index = 0; index < generated_relay_bank_word_count; ++index) {
-        const uint64_t relay = generated_relay_bank_offset + index * sizeof(uint32_t);
-        available_relays.push_back(relay);
-      }
-
-      std::unordered_map<uint64_t, const ScRelayReservoirCandidate *> optimistic_relay_owner;
-      for (const ScRelayReservoirCandidate *candidate : branch_reservoir_candidates) {
-        if (initial_iteration || selected_branch_reservoir_candidates.contains(candidate) ||
-            unavailable_branch_reservoir_candidates.contains(candidate))
-          continue;
-        const auto slots =
-            sc_relay_reservoir_all_slot_offsets(candidate->anchor_offset, candidate->original_size);
-        for (uint64_t slot : slots) {
-          available_relays.push_back(slot);
-          optimistic_relay_owner.emplace(slot, candidate);
-        }
-      }
-      std::ranges::sort(available_relays);
-      available_relays.erase(std::ranges::unique(available_relays).begin(), available_relays.end());
-      for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
-        for (uint64_t used : candidate.entry_relay_offsets)
-          std::erase(available_relays, used);
-        if (candidate.branch_only_route) {
-          for (const BranchOnlyRelayClaim &claim : candidate.branch_only_route->claims)
-            std::erase(available_relays, claim.offset);
-        }
-      }
-
-      std::unordered_set<const ScRelayReservoirCandidate *> used_optimistic_reservoirs;
-      BranchOnlyRelayRouter branch_router;
-      for (uint64_t relay : available_relays) {
-        const BranchOnlyRelayProvenance provenance =
-            owned_anchor_relays.contains(relay) ? BranchOnlyRelayProvenance::OwnedAnchor
-                                                : BranchOnlyRelayProvenance::OwnedReservoir;
-        const auto optimistic_owner = optimistic_relay_owner.find(relay);
-        if (optimistic_owner == optimistic_relay_owner.end()) {
-          (void)branch_router.offer(relay, provenance);
-        } else {
-          (void)branch_router.offer(
-              relay, provenance,
-              BranchOnlyRelayOwnerIdentity::lds_reservoir(optimistic_owner->second->anchor_offset));
-        }
-      }
-      std::vector<BranchOnlyRelayPairRequest> route_requests;
-      route_requests.reserve(tentative_candidates.size());
-      for (const LdsCheckTrapCandidate &candidate : tentative_candidates) {
-        route_requests.push_back({
-            .entry_source = candidate.site->physical_id.original_text_offset,
-            .entry_target = candidate.placement->body_offset,
-            .return_source =
-                candidate.placement->body_offset + candidate.requested_words * sizeof(uint32_t),
-            .return_target =
-                candidate.site->physical_id.original_text_offset + candidate.site->instruction_size,
-        });
-      }
-      std::string route_error;
-      // Only retain the current convergence iteration's routing cause. A
-      // later successful route must not relabel a spill-selection failure.
-      branch_only_route_error.clear();
-      BranchOnlyRelayBatchPlan route_plan =
-          branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
-      if (!route_plan.complete())
-        branch_only_route_error = route_error;
-      for (const BranchOnlyRelayRoute &route : route_plan.routes) {
-        for (const BranchOnlyRelayClaim &claim : route.claims) {
-          if (const auto owner = optimistic_relay_owner.find(claim.offset);
-              owner != optimistic_relay_owner.end())
-            used_optimistic_reservoirs.insert(owner->second);
-        }
-      }
-      const bool complete =
-          route_plan.complete() && route_plan.routes.size() == tentative_candidates.size();
-      bool committed = false;
-      if (complete && used_optimistic_reservoirs.empty()) {
-        committed = branch_router.commit(route_plan.routes, &route_error);
-      }
-      if (committed) {
-        for (size_t index = 0; index < tentative_candidates.size(); ++index) {
-          tentative_candidates[index].branch_only_route = std::move(route_plan.routes[index]);
-        }
-        accepted_candidates = std::move(tentative_candidates);
-        accepted_planner = std::move(tentative_planner);
-        routes_complete = true;
-        convergence_terminated = true;
-        break;
-      }
-      if (used_optimistic_reservoirs.empty() && initial_iteration &&
-          !branch_reservoir_candidates.empty())
+    BranchOnlyRelayRouter branch_router = direct_reservoir_router;
+    BranchOnlyDirectRelayReservoirSet branch_reservoirs = direct_relay_reservoirs;
+    DbiPatchPlacementPlanner branch_planner = placement_planner;
+    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
+    for (BasicBlock *block : block_ptrs) {
+      if (block == nullptr)
         continue;
-      if (used_optimistic_reservoirs.empty()) {
-        convergence_terminated = true;
-        break;
-      }
-
-      // Promote every optimistic owner referenced by the current complete or
-      // partial plan together. Owner minimization reduces the promoted set for
-      // complete plans. A bounded or fallback partial plan is not a capacity
-      // verdict: paying for an earlier pair's owners can change later choices
-      // and recover a complete route. Replay also excludes any candidate whose
-      // appended reservation could not be materialized.
-      std::vector<const ScRelayReservoirCandidate *> newly_used(used_optimistic_reservoirs.begin(),
-                                                                used_optimistic_reservoirs.end());
-      std::ranges::sort(newly_used, {}, &ScRelayReservoirCandidate::anchor_offset);
-      bool selected_any = false;
-      for (const ScRelayReservoirCandidate *candidate : newly_used) {
-        auto placement = branch_prefix_planner.plan_indirect_appended(
-            candidate->anchor_offset, candidate->original_size,
-            candidate->original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t));
-        if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave) {
-          unavailable_branch_reservoir_candidates.insert(candidate);
-          continue;
+      for (const Instruction &instruction : block->instructions()) {
+        if (!reservoir_instruction_is_admissible(instruction)) {
+          protected_ranges.emplace_back(instruction.src_loc(),
+                                        instruction.src_loc() +
+                                            static_cast<uint64_t>(std::max(instruction.size(), 0)));
         }
-        placement->return_target = candidate->anchor_offset + candidate->original_size -
-                                   kScRelayTailRestoreWords * sizeof(uint32_t);
-        branch_selected_reservoirs.push_back(
-            {.anchor_offset = candidate->anchor_offset,
-             .original_size = candidate->original_size,
-             .route = candidate->route,
-             .owner_descriptor_file_offsets = candidate->owner_descriptor_file_offsets,
-             .placement = *placement});
-        selected_branch_reservoir_candidates.insert(candidate);
-        selected_any = true;
-      }
-      if (!selected_any) {
-        convergence_terminated = true;
-        break;
       }
     }
-    if (!convergence_terminated && !convergence_work.exhausted()) {
+    const size_t relay_target =
+        saturated_add(saturated_multiply(branch_only_candidates.size(), 2u), 8u);
+    std::string branch_only_route_error;
+    if (!branch_router.plan_direct_reservoirs(
+            block_ptrs, pristine_text, protected_ranges, arch,
+            branch_only_candidates.front().site->physical_id.original_text_offset, relay_target,
+            branch_planner, branch_reservoirs, &branch_only_route_error,
+            {.discovery = options.direct_reservoir_planning_work_limit,
+             .minimum_words = 2u,
+             .maximum_words = 512u})) {
       result.errors.emplace_back(
-          "ConSan LDS check/trap branch-only reservoir replay lost its termination state");
+          "ConSan LDS check/trap branch-only direct-reservoir planning failed: " +
+          branch_only_route_error);
       return;
     }
-    assert(!convergence_work.exhausted() && convergence_terminated &&
-           "branch-only reservoir replay must converge before its defensive limit");
+
+    std::vector<LdsCheckTrapCandidate> accepted_candidates;
+    for (LdsCheckTrapCandidate candidate : branch_only_candidates) {
+      if (!selected_sites.contains(candidate.site) &&
+          selected_candidates.size() + accepted_candidates.size() < max_patches &&
+          candidate.placement) {
+        accepted_candidates.push_back(std::move(candidate));
+      }
+    }
+    const auto offer_anchor_relay = [&](const LdsCheckTrapCandidate &candidate) {
+      if ((candidate.use_local_cave || candidate.use_appended_cave) &&
+          !candidate.dense_call_group_index &&
+          candidate.site->instruction_size == 2u * sizeof(uint32_t)) {
+        (void)branch_router.offer(candidate.site->physical_id.original_text_offset +
+                                      sizeof(uint32_t),
+                                  BranchOnlyRelayProvenance::OwnedAnchor);
+      }
+    };
+    for (const LdsCheckTrapCandidate &candidate : selected_candidates)
+      offer_anchor_relay(candidate);
+    for (const LdsCheckTrapCandidate &candidate : accepted_candidates)
+      offer_anchor_relay(candidate);
+    for (const auto &[site, slots] : direct_body_relay_slots) {
+      (void)site;
+      for (uint64_t relay : slots)
+        (void)branch_router.offer(relay, BranchOnlyRelayProvenance::OwnedReservoir);
+    }
+    for (size_t index = 0; index < generated_relay_bank_word_count; ++index) {
+      (void)branch_router.offer(generated_relay_bank_offset + index * sizeof(uint32_t),
+                                BranchOnlyRelayProvenance::OwnedReservoir);
+    }
+    for (const LdsCheckTrapCandidate &candidate : selected_candidates) {
+      for (uint64_t used : candidate.entry_relay_offsets)
+        branch_router.retire_range(used, sizeof(uint32_t));
+      if (candidate.branch_only_route) {
+        for (const BranchOnlyRelayClaim &claim : candidate.branch_only_route->claims)
+          branch_router.retire_range(claim.offset, sizeof(uint32_t));
+      }
+    }
+
+    std::vector<BranchOnlyRelayPairRequest> route_requests;
+    route_requests.reserve(accepted_candidates.size());
+    for (const LdsCheckTrapCandidate &candidate : accepted_candidates) {
+      route_requests.push_back({
+          .entry_source = candidate.site->physical_id.original_text_offset,
+          .entry_target = candidate.placement->body_offset,
+          .return_source =
+              candidate.placement->body_offset + candidate.requested_words * sizeof(uint32_t),
+          .return_target =
+              candidate.site->physical_id.original_text_offset + candidate.site->instruction_size,
+      });
+    }
+    BranchOnlyRelayBatchPlan route_plan =
+        branch_router.plan_pairs(branch_planner, route_requests, &branch_only_route_error);
+    bool routes_complete = route_plan.complete() &&
+                           route_plan.routes.size() == accepted_candidates.size() &&
+                           branch_router.commit(route_plan.routes, &branch_only_route_error);
+    if (routes_complete) {
+      for (size_t index = 0; index < accepted_candidates.size(); ++index)
+        accepted_candidates[index].branch_only_route = std::move(route_plan.routes[index]);
+    }
     std::optional<ScSelectedSpillState> accepted_spills;
     if (routes_complete &&
         std::ranges::any_of(accepted_candidates, [&](const LdsCheckTrapCandidate &candidate) {
@@ -3035,17 +2233,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
     if (routes_complete) {
-      placement_planner = std::move(accepted_planner);
+      for (const LdsCheckTrapCandidate &candidate : accepted_candidates) {
+        if (!branch_reservoirs.mark_claims_used(candidate.branch_only_route->claims,
+                                                &branch_only_route_error)) {
+          result.errors.emplace_back("ConSan LDS check/trap lost a direct reservoir: " +
+                                     branch_only_route_error);
+          return;
+        }
+      }
+      placement_planner = std::move(branch_planner);
+      direct_reservoir_router = std::move(branch_router);
+      direct_relay_reservoirs = std::move(branch_reservoirs);
       if (accepted_spills)
         selected_spills = std::move(*accepted_spills);
-      selected_relay_reservoirs.insert(selected_relay_reservoirs.end(),
-                                       branch_selected_reservoirs.begin(),
-                                       branch_selected_reservoirs.end());
       for (LdsCheckTrapCandidate &candidate : accepted_candidates) {
         selected_sites.insert(candidate.site);
         selected_candidates.push_back(std::move(candidate));
       }
-    } else {
+    } else if (!accepted_candidates.empty()) {
       result.warnings.emplace_back(
           "ConSan LDS check/trap branch-only continuation could not route all spill-backed sites" +
           (branch_only_route_error.empty() ? std::string{} : ": " + branch_only_route_error));
@@ -3267,9 +2472,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedLdsCheckTrapPatch planned;
     planned.site = &site;
-    planned.intent_ids =
-        result.coverage_ledger.pending_intent_ids(
-            ConSanProbeIntentKind::RedundantAccessObservation, site.physical_id);
+    planned.intent_ids = result.coverage_ledger.pending_intent_ids(
+        ConSanProbeIntentKind::RedundantAccessObservation, site.physical_id);
     if (planned.intent_ids.empty()) {
       result.errors.emplace_back(
           "ConSan LDS check/trap proof selected a site without a pending semantic intent");
@@ -3537,15 +2741,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     selected_relay_slots.insert(planned.trailing_relay_offsets.begin(),
                                 planned.trailing_relay_offsets.end());
   }
-  for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-    selected_relay_slots.insert(donor.anchor_offset + sizeof(uint32_t));
-    for (size_t word = 4u; word < donor.host_original_words.size(); ++word)
-      selected_relay_slots.insert(donor.host_offset + word * sizeof(uint32_t));
-  }
-  for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-    for (uint64_t offset :
-         sc_relay_reservoir_all_slot_offsets(reservoir.anchor_offset, reservoir.original_size))
-      selected_relay_slots.insert(offset);
+  for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs) {
+    for (size_t word = 1u; word < reservoir.original_words.size(); ++word)
+      selected_relay_slots.insert(reservoir.anchor_offset + word * sizeof(uint32_t));
   }
   for (size_t index = 0; index < generated_relay_bank_word_count; ++index)
     selected_relay_slots.insert(generated_relay_bank_offset + index * sizeof(uint32_t));
@@ -3594,14 +2792,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  for (ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-    reservoir.used = std::ranges::any_of(
-        sc_relay_reservoir_all_slot_offsets(reservoir.anchor_offset, reservoir.original_size),
-        [&](uint64_t offset) {
-          return entry_relay_words.contains(offset) ||
-                 branch_only_claimed_relay_slots.contains(offset);
-        });
-  }
   const bool generated_relay_bank_used =
       std::ranges::any_of(selected_relay_slots, [&](uint64_t offset) {
         const bool used =
@@ -3614,7 +2804,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                       [](const PlannedLdsCheckTrapPatch &patch) {
                                                         return patch.use_appended_cave;
                                                       }) ||
-                                  !selected_relay_reservoirs.empty();
+                                  !direct_relay_reservoirs.reservoirs.empty();
   ConSanDescriptorRegisterRequirements descriptor_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.required_vgpr_allocation_count) {
@@ -3629,15 +2819,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (required != 0)
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
         note_maximum_descriptor_extent(descriptor_sgpr_growths, owner, required);
-  }
-  for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-    if (!reservoir.used)
-      continue;
-    for (uint64_t descriptor_file_offset : reservoir.owner_descriptor_file_offsets) {
-      note_maximum_descriptor_extent(
-          descriptor_sgpr_growths, descriptor_file_offset,
-          static_cast<uint16_t>(reservoir.route.minimum_required_sgpr_count()));
-    }
   }
   std::unordered_map<uint64_t, uint32_t> descriptor_private_requirements;
   const ConSanDescriptorMemoryRequirements no_group_segment_requirements;
@@ -3715,148 +2896,21 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         patch_infos.push_back(std::move(info));
       generated_relay_bank_emitted = true;
     };
-    bool wide_composite_relay_donors_emitted = false;
-    const auto append_wide_composite_relay_donors_if_due = [&]() -> bool {
-      if (wide_composite_relay_donors_emitted || selected_wide_composite_relay_donors.empty())
+    bool direct_relay_reservoirs_emitted = false;
+    const auto append_direct_relay_reservoirs_if_due = [&]() -> bool {
+      if (direct_relay_reservoirs_emitted || direct_relay_reservoirs.reservoirs.empty())
         return true;
-      if (new_text.size() !=
-          selected_wide_composite_relay_donors.front().host_placement.body_offset)
+      if (new_text.size() != direct_relay_reservoirs.reservoirs.front().placement.body_offset)
         return true;
-      for (const ScWideCompositeBranchRelayDonor &donor : selected_wide_composite_relay_donors) {
-        if (new_text.size() != donor.host_placement.body_offset)
-          return false;
-        const auto anchor_to_host =
-            compute_sopp_branch_simm16(donor.anchor_offset, donor.host_offset + sizeof(uint32_t));
-        const auto anchor_return = compute_sopp_branch_simm16(
-            donor.host_offset + 3u * sizeof(uint32_t), donor.anchor_offset + 2u * sizeof(uint32_t));
-        const auto host_to_body =
-            compute_sopp_branch_simm16(donor.host_offset, donor.host_placement.body_offset);
-        const auto host_return = compute_sopp_branch_simm16(
-            donor.host_placement.return_branch_offset, donor.host_placement.return_target);
-        if (!anchor_to_host || !anchor_return || !host_to_body || !host_return ||
-            donor.host_original_words.size() < 6u ||
-            donor.host_placement.return_target !=
-                donor.host_offset + donor.host_original_words.size() * sizeof(uint32_t)) {
-          result.errors.emplace_back(
-              "ConSan LDS check/trap wide composite relay exceeds branch reach");
+      for (const BranchOnlyDirectRelayReservoir &reservoir : direct_relay_reservoirs.reservoirs) {
+        std::string reservoir_error;
+        if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, patch_infos,
+                                                          &reservoir_error)) {
+          result.errors.emplace_back("ConSan LDS check/trap " + reservoir_error);
           return false;
         }
-        const std::array<uint32_t, 2> anchor_words = {build_s_branch(*anchor_to_host, arch),
-                                                      padding_nop};
-        std::vector<uint32_t> host_words(donor.host_original_words.size(), padding_nop);
-        host_words[0] = build_s_branch(*host_to_body, arch);
-        host_words[1] = donor.anchor_original_words[0];
-        host_words[2] = donor.anchor_original_words[1];
-        host_words[3] = build_s_branch(*anchor_return, arch);
-        std::memcpy(new_text.data() + donor.anchor_offset, anchor_words.data(),
-                    anchor_words.size() * sizeof(uint32_t));
-        std::memcpy(new_text.data() + donor.host_offset, host_words.data(),
-                    host_words.size() * sizeof(uint32_t));
-        append_consan_patch_words(new_text, donor.host_original_words);
-        const uint32_t host_return_word = build_s_branch(*host_return, arch);
-        append_consan_patch_words(new_text, std::span<const uint32_t>(&host_return_word, 1));
-
-        ConSanPatchInfo anchor_info;
-        anchor_info.kind = ConSanPatchKind::TrampolineScBranchRelayDonor;
-        anchor_info.anchor_offset = donor.anchor_offset;
-        anchor_info.trampoline_offset = donor.host_offset + sizeof(uint32_t);
-        anchor_info.original_size = 2u * sizeof(uint32_t);
-        anchor_info.trampoline_size = 3u * sizeof(uint32_t);
-        patch_infos.push_back(std::move(anchor_info));
-        ConSanPatchInfo host_info;
-        host_info.kind = ConSanPatchKind::TrampolineScBranchRelayDonor;
-        host_info.anchor_offset = donor.host_offset;
-        host_info.trampoline_offset = donor.host_placement.body_offset;
-        host_info.original_size =
-            static_cast<uint32_t>(donor.host_original_words.size() * sizeof(uint32_t));
-        host_info.trampoline_size = host_info.original_size + sizeof(uint32_t);
-        patch_infos.push_back(std::move(host_info));
       }
-      wide_composite_relay_donors_emitted = true;
-      return true;
-    };
-    bool relay_reservoirs_emitted = false;
-    const auto append_relay_reservoirs_if_due = [&]() -> bool {
-      if (relay_reservoirs_emitted || selected_relay_reservoirs.empty())
-        return true;
-      if (new_text.size() != selected_relay_reservoirs.front().placement.body_offset)
-        return true;
-      for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-        if (new_text.size() != reservoir.placement.body_offset ||
-            reservoir.anchor_offset > pristine_text.size() ||
-            reservoir.original_size > pristine_text.size() - reservoir.anchor_offset)
-          return false;
-        if (!reservoir.used) {
-          new_text.resize(new_text.size() + reservoir.placement.body_size);
-          for (uint64_t offset = reservoir.placement.body_offset; offset < new_text.size();
-               offset += sizeof(uint32_t))
-            std::memcpy(new_text.data() + offset, &padding_nop, sizeof(padding_nop));
-          continue;
-        }
-        std::vector<uint32_t> entry_words;
-        const ConSanSuperColliderRelayEncodingScratch scratch =
-            reservoir.route.encoding_scratch({kAmdGpuVccLo, kAmdGpuExecHi});
-        const bool wave32_vcc = scratch.entry_vcc_save_sgpr.has_value();
-        entry_words.push_back(
-            wave32_vcc ? build_s_mov_b32(*scratch.entry_vcc_save_sgpr, kAmdGpuVccLo, arch)
-                       : build_s_nop(0, arch));
-        if (!append_lds_check_trap_indirect_jump(
-                entry_words, reservoir.anchor_offset, reservoir.placement.body_offset,
-                scratch.entry_jump.pc_sgpr, scratch.entry_jump.scc_save_sgpr, target) ||
-            entry_words.size() != kScRelayEntryWords ||
-            reservoir.original_size < entry_words.size() * sizeof(uint32_t) ||
-            reservoir.placement.return_target != reservoir.anchor_offset + reservoir.original_size -
-                                                     kScRelayTailRestoreWords * sizeof(uint32_t)) {
-          result.errors.emplace_back(
-              "ConSan LDS check/trap could not encode its relay-reservoir entry");
-          return false;
-        }
-        std::memcpy(new_text.data() + reservoir.anchor_offset, entry_words.data(),
-                    entry_words.size() * sizeof(uint32_t));
-        for (uint64_t offset = reservoir.anchor_offset + entry_words.size() * sizeof(uint32_t);
-             offset < reservoir.placement.return_target; offset += sizeof(uint32_t))
-          std::memcpy(new_text.data() + offset, &padding_nop, sizeof(padding_nop));
-        const uint32_t tail_word =
-            wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.return_vcc_save_sgpr, arch)
-                       : build_s_nop(0, arch);
-        std::memcpy(new_text.data() + reservoir.placement.return_target, &tail_word,
-                    sizeof(uint32_t));
-        const uint32_t body_prefix =
-            wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.entry_vcc_save_sgpr, arch)
-                       : build_s_nop(0, arch);
-        append_consan_patch_words(new_text, std::span<const uint32_t>(&body_prefix, 1u));
-        new_text.insert(new_text.end(), pristine_text.begin() + reservoir.anchor_offset,
-                        pristine_text.begin() + reservoir.anchor_offset + reservoir.original_size);
-        std::vector<uint32_t> return_words;
-        return_words.push_back(
-            wave32_vcc ? build_s_mov_b32(*scratch.return_vcc_save_sgpr, kAmdGpuVccLo, arch)
-                       : build_s_nop(0, arch));
-        if (!append_lds_check_trap_indirect_jump(
-                return_words,
-                reservoir.placement.body_offset + sizeof(uint32_t) + reservoir.original_size,
-                reservoir.placement.return_target, scratch.return_jump.pc_sgpr,
-                scratch.return_jump.scc_save_sgpr, target) ||
-            return_words.size() + 1u != kScRelayAppendedOverheadWords) {
-          result.errors.emplace_back(
-              "ConSan LDS check/trap could not encode its relay-reservoir return");
-          return false;
-        }
-        append_consan_patch_words(new_text, return_words);
-
-        ConSanPatchInfo info;
-        info.kind = ConSanPatchKind::TrampolineBranchRelayReservoir;
-        info.anchor_offset = reservoir.anchor_offset;
-        info.trampoline_offset = reservoir.placement.body_offset;
-        info.original_size = reservoir.original_size;
-        info.trampoline_size =
-            reservoir.original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t);
-        info.sc_relay_reservoir_route = reservoir.route;
-        info.required_sgpr_count =
-            static_cast<uint16_t>(reservoir.route.minimum_required_sgpr_count());
-        info.owner_descriptor_file_offsets = reservoir.owner_descriptor_file_offsets;
-        patch_infos.push_back(std::move(info));
-      }
-      relay_reservoirs_emitted = true;
+      direct_relay_reservoirs_emitted = true;
       return true;
     };
     size_t next_dense_group = 0;
@@ -4012,14 +3066,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         if (!append_dense_call_groups_if_due()) {
           return;
         }
-        if (!append_wide_composite_relay_donors_if_due()) {
-          return;
-        }
         append_generated_relay_bank_if_due();
         append_island_bank_if_due();
-        if (!append_relay_reservoirs_if_due()) {
+        if (!append_direct_relay_reservoirs_if_due()) {
           return;
         }
+        while (planned.placement && new_text.size() < planned.placement->body_offset)
+          append_consan_patch_words(new_text, std::span<const uint32_t>(&padding_nop, 1));
         if (!planned.placement || new_text.size() != planned.placement->body_offset) {
           const uint64_t expected_offset = planned.placement ? planned.placement->body_offset : 0u;
           result.errors.emplace_back(
@@ -4072,12 +3125,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     if (!append_dense_call_groups_if_due()) {
       return;
     }
-    if (!append_wide_composite_relay_donors_if_due()) {
-      return;
-    }
     append_generated_relay_bank_if_due();
     append_island_bank_if_due();
-    if (!append_relay_reservoirs_if_due()) {
+    if (!append_direct_relay_reservoirs_if_due()) {
       return;
     }
     for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {

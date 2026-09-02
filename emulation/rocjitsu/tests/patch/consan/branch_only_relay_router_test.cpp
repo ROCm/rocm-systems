@@ -2923,6 +2923,48 @@ TEST(ConSanBranchOnlyRelayRouter, PlansOnlyMinimumWidthRunsAndChunksLongRuns) {
             last.anchor_offset);
 }
 
+TEST(ConSanBranchOnlyRelayRouter, DirectReservoirWordBoundsAreExplicitAndValidated) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> words(12u, kRelayTestDonor);
+  words.push_back(kRelayTestEnd);
+  RelayTestCodeObject object(std::move(words));
+  RelayTestDecoder decoder;
+  auto blocks = BasicBlock::build(object, decoder, kArch);
+  const std::vector<BasicBlock *> block_ptrs = relay_block_ptrs(blocks);
+
+  DbiPatchPlacementPlanner planner(kArch, relay_test_text(object).size());
+  BranchOnlyRelayRouter router;
+  BranchOnlyDirectRelayReservoirSet reservoirs;
+  BranchOnlyDirectReservoirWorkLimits limits;
+  limits.minimum_words = 2u;
+  limits.maximum_words = 8u;
+  std::string error;
+  ASSERT_TRUE(router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {}, kArch, 0u, 20u,
+                                            planner, reservoirs, &error, limits))
+      << error;
+  ASSERT_FALSE(reservoirs.reservoirs.empty());
+  EXPECT_TRUE(std::ranges::all_of(reservoirs.reservoirs, [](const auto &reservoir) {
+    return reservoir.original_words.size() >= 2u && reservoir.original_words.size() <= 8u;
+  }));
+
+  for (const auto [minimum, maximum] :
+       std::array<std::pair<size_t, size_t>, 2>{{{1u, 8u}, {9u, 8u}}}) {
+    DbiPatchPlacementPlanner invalid_planner(kArch, relay_test_text(object).size());
+    BranchOnlyRelayRouter invalid_router;
+    BranchOnlyDirectRelayReservoirSet invalid_reservoirs;
+    BranchOnlyDirectReservoirWorkLimits invalid_limits;
+    invalid_limits.minimum_words = minimum;
+    invalid_limits.maximum_words = maximum;
+    error.clear();
+    EXPECT_FALSE(invalid_router.plan_direct_reservoirs(block_ptrs, relay_test_text(object), {},
+                                                       kArch, 0u, 1u, invalid_planner,
+                                                       invalid_reservoirs, &error, invalid_limits));
+    EXPECT_NE(error.find("invalid direct-reservoir word bounds"), std::string::npos);
+    EXPECT_TRUE(invalid_reservoirs.reservoirs.empty());
+    EXPECT_TRUE(invalid_planner.occupied_ranges().empty());
+  }
+}
+
 TEST(ConSanBranchOnlyRelayRouter, DirectReservoirPlanningScalesWithLargeRelayInventory) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr size_t kDonorWordCount = 4096u;

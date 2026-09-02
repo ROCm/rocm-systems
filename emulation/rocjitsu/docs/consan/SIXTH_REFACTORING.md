@@ -764,3 +764,55 @@ assertions may move from the removed borrowed-scratch route to the common
 direct execution contract, but corruption detection and admitted-site
 coverage may not weaken. The cutover gate is the complete nonphysical
 RocJitsu matrix.
+
+The cutover converged on that thesis without teaching the common router any
+SuperCollider or LDS vocabulary. LDS now contributes only its protected-range
+policy and its larger two-to-512-word donor bounds. The common direct-
+reservoir transaction owns discovery, recursive placement, relay ownership,
+transitive used-reservoir marking, emission, patch metadata, and validation.
+The generated-island max-flow planner consumes those same reservoir words and
+retires its raw relay claims before the later branch-only batch reuses the
+remaining common inventory.
+
+The displaced subsystem was deleted in the same slice. This removes LDS's
+endpoint liveness and scratch-SGPR search, wave32-VCC and wave64 ordinary-SGPR
+route variants, overlapping candidate windows, min-cut ranking and replay,
+wide composite donor, optimistic promotion loop, indirect reservoir emitter,
+special patch kind and vocabulary, descriptor-growth side effect, target slot
+helpers, and independent special validation branch. There is no compatibility
+adapter or second reservoir authority left. SuperCollider LDS, SuperCollider
+FLAT, and all three MOI access modes now use the same direct relocation
+mechanism; LDS-specific probe, dense-island, and max-flow policy remains local
+to its mode owner.
+
+The production accounting from the Macro-slice 4 post-abort result is:
+
+| Signal | Macro-slice 4 | Macro-slice 5 result | Change |
+| --- | ---: | ---: | ---: |
+| ConSan production files | 312 | 312 | 0 |
+| Physical ConSan production lines | 99,978 | 98,645 | **-1,333** |
+| Nonblank ConSan production lines | 93,526 | 92,222 | **-1,304** |
+| ConSan implementation lines | 85,780 | 84,536 | **-1,244** |
+
+The production implementation diff contains 1,480 deleted and 236 added
+lines, for the 1,244-line net reduction. This exceeds the 950-line thesis and
+500-line abort floor. From the 88,015-line sixth-refactoring baseline, the
+campaign has now removed **3,479 net production implementation lines** and
+crossed the 3,000-line review floor. It has not reached the 5,000-line stretch
+milestone, and crossing the review floor is not a completion condition.
+
+The focused cutover gate passed 135 SuperCollider, LDS, relay-reservoir, and
+common direct-reservoir tests. The complete ConSan host suite passed 1,666
+tests with two optional benchmark-object skips. The full `-j16 -LE physical`
+RocJitsu gate then ran 9,575 tests with zero failures; its one disabled test and
+normal environment-dependent skips were unchanged. That gate exercises all
+four modes on gfx942, gfx950, gfx1100, gfx1201, and gfx1250 emulation. No
+physical gfx1201 test was run at this intermediate milestone.
+
+Existing corruption tests now attack the common displaced sequence, direct
+entry/return path, geometry, and unused-reservoir proof rather than deleted
+scratch-route metadata. A new owner-level test pins caller-selectable donor
+word bounds and their transactional rejection. No pre-existing behavior bug
+was found during this replacement. Macro-slice 5 therefore closes as a
+successful subsystem replacement, but the campaign remains active pending the
+required whole-codebase reassessment and further high-leverage work.

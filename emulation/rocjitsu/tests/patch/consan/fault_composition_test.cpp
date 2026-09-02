@@ -1185,7 +1185,7 @@ TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {
   EXPECT_EQ(bytes, original);
 }
 
-TEST(ConSan, ProbeLdsCheckTrapModeUsesWideCompositeRelayDonor) {
+TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
   constexpr size_t kTextWords = 33010u;
   constexpr uint64_t kOriginalTextSize = kTextWords * sizeof(uint32_t);
   constexpr uint64_t kAnchorOffset = 22012u;
@@ -1216,72 +1216,41 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesWideCompositeRelayDonor) {
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.modified());
-  std::vector<const ConSanPatchInfo *> donors;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor)
-      donors.push_back(&patch);
-  }
-  ASSERT_EQ(donors.size(), 2u);
-  const ConSanPatchInfo *anchor_patch =
-      donors[0]->original_size == anchor_original.size() * sizeof(uint32_t) ? donors[0] : donors[1];
-  const ConSanPatchInfo *host_patch = anchor_patch == donors[0] ? donors[1] : donors[0];
-  EXPECT_EQ(anchor_patch->anchor_offset, kAnchorOffset);
-  EXPECT_EQ(anchor_patch->trampoline_offset, kHostOffset + sizeof(uint32_t));
-  EXPECT_EQ(anchor_patch->original_size, 2u * sizeof(uint32_t));
-  EXPECT_EQ(anchor_patch->trampoline_size, 3u * sizeof(uint32_t));
-  EXPECT_EQ(host_patch->anchor_offset, kHostOffset);
-  EXPECT_EQ(host_patch->trampoline_offset, kOriginalTextSize);
-  EXPECT_EQ(host_patch->original_size, 6u * sizeof(uint32_t));
-  EXPECT_EQ(host_patch->trampoline_size, 7u * sizeof(uint32_t));
-
+  const auto reservoir = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+           patch.original_size != 0u;
+  });
+  ASSERT_NE(reservoir, result.patches.end());
+  EXPECT_GE(reservoir->original_size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(reservoir->trampoline_size, reservoir->original_size + sizeof(uint32_t));
   const auto island = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland, &ConSanPatchInfo::kind);
   ASSERT_NE(island, result.patches.end());
-  EXPECT_EQ(island->anchor_offset, 0u);
-  EXPECT_EQ(island->trampoline_offset, kOriginalTextSize + 7u * sizeof(uint32_t));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const Section *text = patched.text_sections().front();
-  ASSERT_GE(text->size(), kOriginalTextSize + 7u * sizeof(uint32_t));
+  ASSERT_GE(text->size(), reservoir->trampoline_offset + reservoir->trampoline_size);
   const auto text_bytes =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-  std::array<uint32_t, 2> patched_anchor{};
-  std::array<uint32_t, 6> patched_host{};
-  std::array<uint32_t, 7> appended_host{};
-  std::memcpy(patched_anchor.data(), text_bytes.data() + kAnchorOffset, sizeof(patched_anchor));
-  std::memcpy(patched_host.data(), text_bytes.data() + kHostOffset, sizeof(patched_host));
-  std::memcpy(appended_host.data(), text_bytes.data() + kOriginalTextSize, sizeof(appended_host));
-
-  const auto anchor_to_host =
-      compute_sopp_branch_simm16(kAnchorOffset, kHostOffset + sizeof(uint32_t));
-  const auto host_to_body = compute_sopp_branch_simm16(kHostOffset, kOriginalTextSize);
-  const auto anchor_return = compute_sopp_branch_simm16(kHostOffset + 3u * sizeof(uint32_t),
-                                                        kAnchorOffset + 2u * sizeof(uint32_t));
-  const auto host_return = compute_sopp_branch_simm16(kOriginalTextSize + 6u * sizeof(uint32_t),
-                                                      kHostOffset + 6u * sizeof(uint32_t));
-  ASSERT_TRUE(anchor_to_host && host_to_body && anchor_return && host_return);
-  EXPECT_EQ(patched_anchor[0], build_s_branch(*anchor_to_host, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(patched_host[0], build_s_branch(*host_to_body, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_TRUE(std::ranges::equal(std::span<const uint32_t>(patched_host).subspan(1u, 2u),
-                                 std::span<const uint32_t>(anchor_original)));
-  EXPECT_EQ(patched_host[3], build_s_branch(*anchor_return, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_TRUE(std::ranges::equal(std::span<const uint32_t>(appended_host).first(6u),
-                                 std::span<const uint32_t>(host_original)));
-  EXPECT_EQ(appended_host[6], build_s_branch(*host_return, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto pristine_text = std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(text_words.data()), text_words.size() * sizeof(uint32_t));
+  ASSERT_LE(reservoir->anchor_offset + reservoir->original_size, pristine_text.size());
+  EXPECT_EQ(std::memcmp(text_bytes.data() + reservoir->trampoline_offset,
+                        pristine_text.data() + reservoir->anchor_offset, reservoir->original_size),
+            0);
 
   ConSanTransformArtifacts corrupted = result;
   const uint64_t text_file_offset = text->sectionOffset();
-  corrupted.replacement[text_file_offset + kOriginalTextSize + sizeof(uint32_t)] ^= 1u;
+  corrupted.replacement[text_file_offset + reservoir->trampoline_offset + sizeof(uint32_t)] ^= 1u;
   const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
-  ASSERT_FALSE(validation_errors.empty());
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
-    return error.find("corrupted displaced") != std::string::npos;
-  }));
+    return error.find("corrupted direct execution path") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
 }
 
 } // namespace

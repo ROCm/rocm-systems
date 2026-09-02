@@ -128,7 +128,6 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineScIndirectBranchIsland,
   TrampolineScDenseCallDispatcher,
   TrampolineScDenseEntryHost,
-  TrampolineScBranchRelayDonor,
   TrampolineBranchRelayReservoir,
   TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
@@ -594,7 +593,6 @@ struct ConSanPatchAbiEffects {
   std::optional<ConSanSuperColliderIndirectBodyRoute> sc_indirect_body_route;
   /// Mutually exclusive wave32-VCC or ordinary-scalar route used by an
   /// indirect SuperCollider relay reservoir.
-  std::optional<ConSanSuperColliderRelayReservoirRoute> sc_relay_reservoir_route;
   /// Entry island paired with this MOI dense dispatcher. This explicit
   /// relation lets later synchronization composition reuse an access router
   /// without depending on incidental result.patches ordering.

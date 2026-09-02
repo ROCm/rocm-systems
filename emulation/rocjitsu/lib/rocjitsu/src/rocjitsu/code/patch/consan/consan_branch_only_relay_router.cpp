@@ -2014,23 +2014,19 @@ bool BranchOnlyRelayRouter::commit(std::span<const BranchOnlyRelayRoute> routes,
   return true;
 }
 
-bool BranchOnlyDirectRelayReservoirSet::mark_claims_used(
-    std::span<const BranchOnlyRelayClaim> claims, std::string *error_out) {
+bool BranchOnlyDirectRelayReservoirSet::mark_relays_used(std::span<const uint64_t> relays,
+                                                         std::string *error_out) {
   std::vector<size_t> pending;
-  const auto append_claimed_reservoirs = [&](std::span<const BranchOnlyRelayClaim> source_claims) {
-    for (const BranchOnlyRelayClaim &claim : source_claims) {
-      if (claim.provenance != BranchOnlyRelayProvenance::OwnedReservoir || !claim.owner_affinity ||
-          claim.owner_affinity->kind() != BranchOnlyRelayOwnerKind::DirectReservoir) {
-        continue;
-      }
-      const auto reservoir = reservoir_by_relay.find(claim.offset);
+  const auto append_relays = [&](std::span<const uint64_t> source_relays) {
+    for (uint64_t relay : source_relays) {
+      const auto reservoir = reservoir_by_relay.find(relay);
       if (reservoir == reservoir_by_relay.end() || reservoir->second >= reservoirs.size())
         return false;
       pending.push_back(reservoir->second);
     }
     return true;
   };
-  if (!append_claimed_reservoirs(claims)) {
+  if (!append_relays(relays)) {
     report(error_out, "branch-only router lost a claimed direct reservoir");
     return false;
   }
@@ -2047,14 +2043,35 @@ bool BranchOnlyDirectRelayReservoirSet::mark_claims_used(
       continue;
     selected[index] = true;
     const BranchOnlyDirectRelayReservoir &reservoir = reservoirs[index];
-    if (reservoir.route && !append_claimed_reservoirs(reservoir.route->claims)) {
-      report(error_out, "branch-only router lost a routed-reservoir dependency");
-      return false;
+    if (reservoir.route) {
+      std::vector<uint64_t> dependencies;
+      for (const BranchOnlyRelayClaim &claim : reservoir.route->claims) {
+        if (claim.provenance == BranchOnlyRelayProvenance::OwnedReservoir && claim.owner_affinity &&
+            claim.owner_affinity->kind() == BranchOnlyRelayOwnerKind::DirectReservoir) {
+          dependencies.push_back(claim.offset);
+        }
+      }
+      if (!append_relays(dependencies)) {
+        report(error_out, "branch-only router lost a routed-reservoir dependency");
+        return false;
+      }
     }
   }
   for (size_t index = 0u; index < selected.size(); ++index)
     reservoirs[index].used = reservoirs[index].used || selected[index];
   return true;
+}
+
+bool BranchOnlyDirectRelayReservoirSet::mark_claims_used(
+    std::span<const BranchOnlyRelayClaim> claims, std::string *error_out) {
+  std::vector<uint64_t> relays;
+  for (const BranchOnlyRelayClaim &claim : claims) {
+    if (claim.provenance == BranchOnlyRelayProvenance::OwnedReservoir && claim.owner_affinity &&
+        claim.owner_affinity->kind() == BranchOnlyRelayOwnerKind::DirectReservoir) {
+      relays.push_back(claim.offset);
+    }
+  }
+  return mark_relays_used(relays, error_out);
 }
 
 bool BranchOnlyRelayRouter::plan_direct_reservoirs(
@@ -2068,6 +2085,10 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
     return true;
   if (pristine_text.empty()) {
     report(error_out, "branch-only router cannot discover reservoirs without pristine text");
+    return false;
+  }
+  if (work_limits.minimum_words < 2u || work_limits.minimum_words > work_limits.maximum_words) {
+    report(error_out, "branch-only router received invalid direct-reservoir word bounds");
     return false;
   }
 
@@ -2134,8 +2155,6 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
     std::vector<uint32_t> words;
   };
   std::vector<Candidate> candidates;
-  constexpr size_t kMinimumReservoirWords = 16u;
-  constexpr size_t kMaximumReservoirWords = 64u;
   bool discovery_exhausted = false;
   for (BasicBlock *block : blocks) {
     if (!charge_discovery()) {
@@ -2155,12 +2174,12 @@ bool BranchOnlyRelayRouter::plan_direct_reservoirs(
             return false;
           const size_t instruction_words =
               static_cast<size_t>(run[run_begin - 1u]->size()) / sizeof(uint32_t);
-          if (word_count + instruction_words > kMaximumReservoirWords)
+          if (word_count + instruction_words > work_limits.maximum_words)
             break;
           word_count += instruction_words;
           --run_begin;
         }
-        if (word_count >= kMinimumReservoirWords) {
+        if (word_count >= work_limits.minimum_words) {
           if (!charge_discovery(word_count))
             return false;
           Candidate candidate;

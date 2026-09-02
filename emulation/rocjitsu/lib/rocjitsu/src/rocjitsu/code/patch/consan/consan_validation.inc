@@ -43,7 +43,6 @@ struct ValidationByteRange {
 enum class BranchRelayReservoirShape : uint8_t {
   GeneratedBank,
   DirectInstruction,
-  IndirectInstruction,
   Invalid,
 };
 
@@ -51,13 +50,8 @@ enum class BranchRelayReservoirShape : uint8_t {
   if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
     return BranchRelayReservoirShape::Invalid;
   if (patch.original_size == 0u)
-    return !patch.sc_relay_reservoir_route ? BranchRelayReservoirShape::GeneratedBank
-                                           : BranchRelayReservoirShape::Invalid;
-  if (!patch.sc_relay_reservoir_route)
-    return BranchRelayReservoirShape::DirectInstruction;
-  if (patch.sc_relay_reservoir_route->is_well_formed())
-    return BranchRelayReservoirShape::IndirectInstruction;
-  return BranchRelayReservoirShape::Invalid;
+    return BranchRelayReservoirShape::GeneratedBank;
+  return BranchRelayReservoirShape::DirectInstruction;
 }
 
 /// Independently derived relay-graph facets shared by the three relay proofs.
@@ -65,12 +59,10 @@ enum class BranchRelayReservoirShape : uint8_t {
 /// not necessarily a legal donor or reservoir payload target.
 struct BranchRelayValidationInventory {
   std::unordered_set<uint64_t> continuation_slots;
-  std::unordered_set<uint64_t> donor_target_vertices;
   std::unordered_set<uint64_t> reservoir_target_vertices;
   std::unordered_set<uint64_t> indirect_islands;
   std::unordered_map<uint64_t, uint64_t> branch_only_targets;
   std::vector<const ConSanPatchInfo *> nop_relays;
-  std::vector<const ConSanPatchInfo *> donors;
   std::vector<const ConSanPatchInfo *> reservoirs;
 };
 
@@ -83,7 +75,6 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
   };
   const auto insert_shared_slot = [&](uint64_t offset) {
     inventory.continuation_slots.insert(offset);
-    inventory.donor_target_vertices.insert(offset);
     inventory.reservoir_target_vertices.insert(offset);
   };
   const auto insert_shared_words = [&](uint64_t begin, uint64_t end) {
@@ -112,14 +103,6 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
     }
     if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
       inventory.indirect_islands.insert(patch.trampoline_offset);
-    if (patch.kind == ConSanPatchKind::TrampolineScBranchRelayDonor) {
-      inventory.donors.push_back(&patch);
-      if (patch.original_size == 2u * sizeof(uint32_t))
-        insert_shared_slot(patch.anchor_offset + sizeof(uint32_t));
-      if (patch.original_size >= 6u * sizeof(uint32_t))
-        insert_shared_words(patch.anchor_offset + 4u * sizeof(uint32_t),
-                            patch.anchor_offset + patch.original_size);
-    }
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
       inventory.reservoirs.push_back(&patch);
       switch (branch_relay_reservoir_shape(patch)) {
@@ -131,16 +114,6 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
         insert_shared_words(patch.anchor_offset + sizeof(uint32_t),
                             patch.anchor_offset + patch.original_size);
         break;
-      case BranchRelayReservoirShape::IndirectInstruction: {
-        const std::vector<uint64_t> continuation =
-            sc_relay_reservoir_all_slot_offsets(patch.anchor_offset, patch.original_size);
-        inventory.continuation_slots.insert(continuation.begin(), continuation.end());
-        inventory.reservoir_target_vertices.insert(continuation.begin(), continuation.end());
-        const std::vector<uint64_t> donor_targets =
-            sc_relay_reservoir_slot_offsets(patch.anchor_offset, patch.original_size);
-        inventory.donor_target_vertices.insert(donor_targets.begin(), donor_targets.end());
-        break;
-      }
       case BranchRelayReservoirShape::Invalid:
         break;
       }
@@ -364,18 +337,6 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
           existing->phase != next.phase &&
           ((existing->bytes.begin <= next.bytes.begin && next.bytes.end <= existing->bytes.end) ||
            (next.bytes.begin <= existing->bytes.begin && existing->bytes.end <= next.bytes.end));
-      const bool nested_sc_relay_donor =
-          existing->kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          next.kind == ConSanPatchKind::TrampolineScBranchRelayDonor &&
-          ((existing->is_trampoline &&
-            existing->bytes.end - existing->bytes.begin == 3u * sizeof(uint32_t) &&
-            !next.is_trampoline && size >= 6u * sizeof(uint32_t) &&
-            existing->bytes.begin == next.bytes.begin + sizeof(uint32_t) &&
-            existing->bytes.end == next.bytes.begin + 4u * sizeof(uint32_t)) ||
-           (next.is_trampoline && size == 3u * sizeof(uint32_t) && !existing->is_trampoline &&
-            existing->bytes.end - existing->bytes.begin >= 6u * sizeof(uint32_t) &&
-            next.bytes.begin == existing->bytes.begin + sizeof(uint32_t) &&
-            next.bytes.end == existing->bytes.begin + 4u * sizeof(uint32_t)));
       const bool nested_composed_access_atomic =
           existing->phase == ConSanPatchPhase::Instrumentation &&
           next.phase == ConSanPatchPhase::Instrumentation &&
@@ -408,9 +369,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
             next_patch.entry_prologue_chained_trampoline_offset ==
                 existing_patch.trampoline_offset &&
             existing->bytes.begin < next.bytes.end));
-      if (!exact_alias && !nested_cross_phase && !nested_sc_relay_donor &&
-          !nested_composed_access_atomic && !nested_composed_sampled_access_atomic &&
-          !nested_composed_entry_prefix) {
+      if (!exact_alias && !nested_cross_phase && !nested_composed_access_atomic &&
+          !nested_composed_sampled_access_atomic && !nested_composed_entry_prefix) {
         if (failure_cause)
           *failure_cause = ConSanTransformFailureCause::OverlappingPatchRanges;
         errors.emplace_back(
@@ -588,7 +548,6 @@ void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &resu
   for (const ConSanPatchInfo &patch : result.patches) {
     const uint32_t route_count = static_cast<uint32_t>(patch.branch_only_route.has_value()) +
                                  static_cast<uint32_t>(patch.sc_indirect_body_route.has_value()) +
-                                 static_cast<uint32_t>(patch.sc_relay_reservoir_route.has_value()) +
                                  static_cast<uint32_t>(patch.sc_dense_route.has_value());
     const ConSanBranchOnlyBorrowedEntry *borrowed_entry =
         patch.branch_only_route ? patch.branch_only_route->borrowed_entry() : nullptr;
@@ -601,11 +560,7 @@ void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &resu
                                 patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
                                 patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                                 patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap);
-    const bool valid_sc_reservoir =
-        !patch.sc_relay_reservoir_route ||
-        (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
-         patch.original_size != 0u);
-    if (route_count > 1u || !valid_borrowed_entry || !valid_sc_body || !valid_sc_reservoir) {
+    if (route_count > 1u || !valid_borrowed_entry || !valid_sc_body) {
       errors.emplace_back("ConSan final validation found a misplaced indirect route effect");
       return;
     }
@@ -872,8 +827,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   const auto has_other_indirect_route = [](const ConSanPatchInfo &patch) {
-    return patch.branch_only_route || patch.sc_indirect_body_route ||
-           patch.sc_relay_reservoir_route;
+    return patch.branch_only_route || patch.sc_indirect_body_route;
   };
 
   for (const ConSanPatchInfo &dispatcher : result.patches) {
@@ -1043,193 +997,6 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
   return;
 }
 
-void validate_branch_relay_donor_semantics(const FinalValidationEnvironment &environment,
-                                           const BranchRelayValidationInventory &inventory,
-                                           std::vector<std::string> &errors) {
-  std::vector<const ConSanPatchInfo *> anchors;
-  std::vector<const ConSanPatchInfo *> hosts;
-  for (const ConSanPatchInfo *patch : inventory.donors) {
-    if (patch->phase != ConSanPatchPhase::Instrumentation) {
-      errors.emplace_back("ConSan relay donor proof found a non-instrumentation donor");
-      return;
-    }
-    if (patch->original_size == 2u * sizeof(uint32_t) &&
-        patch->trampoline_size == 3u * sizeof(uint32_t)) {
-      anchors.push_back(patch);
-    } else if (patch->original_size >= 6u * sizeof(uint32_t) &&
-               patch->original_size % sizeof(uint32_t) == 0 &&
-               patch->trampoline_size == patch->original_size + sizeof(uint32_t)) {
-      hosts.push_back(patch);
-    } else {
-      errors.emplace_back("ConSan relay donor proof found an unknown donor geometry");
-      return;
-    }
-  }
-  if (anchors.empty() && hosts.empty())
-    return;
-  if (!environment.original_text.available || !environment.replacement_text.available ||
-      anchors.size() != hosts.size()) {
-    errors.emplace_back("ConSan relay donor proof found an incomplete wide-donor pairing");
-    return;
-  }
-  const std::span<const uint8_t> original_text = environment.original_text.bytes;
-  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
-  if (!environment.require_target(errors, "ConSan relay donor proof found no target profile",
-                                  "ConSan relay donor proof could not create a pristine decoder"))
-    return;
-  const rj_code_arch_t arch = environment.arch();
-  const uint32_t nop = build_s_nop(0, arch);
-  const uint32_t branch_opcode = build_s_branch(0, arch) & 0xffff0000u;
-
-  const auto valid_relay_payload = [&](uint64_t offset) {
-    const auto word = environment.replacement_text.word(offset);
-    if (!word)
-      return false;
-    if (*word == nop)
-      return true;
-    if ((*word & 0xffff0000u) != branch_opcode)
-      return false;
-    const int64_t target =
-        static_cast<int64_t>(offset) + sizeof(uint32_t) +
-        static_cast<int64_t>(static_cast<int16_t>(*word & 0xffffu)) * sizeof(uint32_t);
-    if (target <= static_cast<int64_t>(offset) || target < 0)
-      return false;
-    const uint64_t target_offset = static_cast<uint64_t>(target);
-    return inventory.donor_target_vertices.contains(target_offset) ||
-           inventory.indirect_islands.contains(target_offset);
-  };
-
-  std::unordered_set<const ConSanPatchInfo *> paired_hosts;
-  for (const ConSanPatchInfo *anchor : anchors) {
-    const auto host_it = std::ranges::find_if(hosts, [&](const ConSanPatchInfo *host) {
-      return anchor->trampoline_offset == host->anchor_offset + sizeof(uint32_t);
-    });
-    if (host_it == hosts.end() || !paired_hosts.insert(*host_it).second) {
-      errors.emplace_back("ConSan relay donor proof found an ambiguous wide-donor pairing");
-      return;
-    }
-    const ConSanPatchInfo &host = **host_it;
-    if (anchor->anchor_offset > original_text.size() ||
-        anchor->original_size > original_text.size() - anchor->anchor_offset ||
-        host.anchor_offset > original_text.size() ||
-        host.original_size > original_text.size() - host.anchor_offset ||
-        host.trampoline_offset > replacement_text.size() ||
-        host.trampoline_size > replacement_text.size() - host.trampoline_offset) {
-      errors.emplace_back("ConSan relay donor proof found a stale donor range");
-      return;
-    }
-
-    std::array<uint32_t, 4> anchor_words{};
-    std::memcpy(anchor_words.data(), original_text.data() + anchor->anchor_offset,
-                anchor->original_size);
-    std::unique_ptr<Instruction> anchor_instruction = decode_bounded_instruction(
-        *environment.decoder,
-        std::span<const uint32_t>(anchor_words).first(anchor->original_size / sizeof(uint32_t)),
-        anchor->anchor_offset);
-    if (!anchor_instruction ||
-        anchor_instruction->size() != static_cast<int>(anchor->original_size) ||
-        std::string_view(anchor_instruction->mnemonic()).starts_with("ds_") ||
-        !is_relocatable_anchor(*anchor_instruction, anchor->anchor_offset, original_text, arch)) {
-      errors.emplace_back("ConSan relay donor proof rejected its pristine anchor semantics");
-      return;
-    }
-    uint32_t host_cursor = 0;
-    while (host_cursor < host.original_size) {
-      std::array<uint32_t, 4> words{};
-      const uint32_t remaining = host.original_size - host_cursor;
-      std::memcpy(words.data(), original_text.data() + host.anchor_offset + host_cursor,
-                  std::min<uint32_t>(remaining, words.size() * sizeof(uint32_t)));
-      std::unique_ptr<Instruction> instruction =
-          decode_bounded_instruction(*environment.decoder,
-                                     std::span<const uint32_t>(words).first(std::min<size_t>(
-                                         words.size(), remaining / sizeof(uint32_t))),
-                                     host.anchor_offset + host_cursor);
-      if (!instruction || instruction->size() <= 0 ||
-          static_cast<uint32_t>(instruction->size()) > host.original_size - host_cursor) {
-        errors.emplace_back("ConSan relay donor proof could not decode its pristine host");
-        return;
-      }
-      const std::string_view mnemonic = instruction->mnemonic();
-      const bool valid =
-          host_cursor == 0
-              ? instruction->size() == 3 * static_cast<int>(sizeof(uint32_t)) &&
-                    (mnemonic.starts_with("flat_load") || mnemonic.starts_with("flat_store"))
-              : is_consan_branch_relay_reservoir_instruction(
-                    *instruction, host.anchor_offset + host_cursor, original_text, arch);
-      if (!valid) {
-        errors.emplace_back("ConSan relay donor proof rejected its pristine host semantics");
-        return;
-      }
-      host_cursor += static_cast<uint32_t>(instruction->size());
-    }
-
-    std::vector<uint32_t> pristine_host(host.original_size / sizeof(uint32_t));
-    std::vector<uint32_t> rewritten_host(host.original_size / sizeof(uint32_t));
-    std::vector<uint32_t> relocated_host(host.trampoline_size / sizeof(uint32_t));
-    std::array<uint32_t, 2> pristine_anchor{};
-    std::array<uint32_t, 2> rewritten_anchor{};
-    std::memcpy(pristine_host.data(), original_text.data() + host.anchor_offset,
-                pristine_host.size() * sizeof(uint32_t));
-    std::memcpy(rewritten_host.data(), replacement_text.data() + host.anchor_offset,
-                rewritten_host.size() * sizeof(uint32_t));
-    std::memcpy(relocated_host.data(), replacement_text.data() + host.trampoline_offset,
-                relocated_host.size() * sizeof(uint32_t));
-    std::memcpy(pristine_anchor.data(), original_text.data() + anchor->anchor_offset,
-                sizeof(pristine_anchor));
-    std::memcpy(rewritten_anchor.data(), replacement_text.data() + anchor->anchor_offset,
-                sizeof(rewritten_anchor));
-    if (!std::ranges::equal(
-            pristine_host, std::span<const uint32_t>(relocated_host).first(pristine_host.size()))) {
-      errors.emplace_back("ConSan relay donor proof found a corrupted displaced host sequence");
-      return;
-    }
-    if (!std::ranges::equal(pristine_anchor,
-                            std::span<const uint32_t>(rewritten_host).subspan(1u, 2u))) {
-      errors.emplace_back(
-          "ConSan relay donor proof found a corrupted displaced anchor sequence at " +
-          std::to_string(anchor->anchor_offset) + " via host " +
-          std::to_string(host.anchor_offset) + "; pristine=" + std::to_string(pristine_anchor[0]) +
-          "," + std::to_string(pristine_anchor[1]) + " relocated=" +
-          std::to_string(rewritten_host[1]) + "," + std::to_string(rewritten_host[2]));
-      return;
-    }
-    const auto anchor_to_host =
-        compute_sopp_branch_simm16(anchor->anchor_offset, anchor->trampoline_offset);
-    const auto host_to_body =
-        compute_sopp_branch_simm16(host.anchor_offset, host.trampoline_offset);
-    const auto anchor_return = compute_sopp_branch_simm16(
-        host.anchor_offset + 3u * sizeof(uint32_t), anchor->anchor_offset + anchor->original_size);
-    const auto host_return = compute_sopp_branch_simm16(host.trampoline_offset + host.original_size,
-                                                        host.anchor_offset + host.original_size);
-    if (!anchor_to_host || !host_to_body || !anchor_return || !host_return ||
-        rewritten_anchor[0] != build_s_branch(*anchor_to_host, arch) ||
-        rewritten_host[0] != build_s_branch(*host_to_body, arch) ||
-        rewritten_host[3] != build_s_branch(*anchor_return, arch) ||
-        relocated_host.back() != build_s_branch(*host_return, arch)) {
-      errors.emplace_back("ConSan relay donor proof found a corrupted normal execution path");
-      return;
-    }
-    std::vector<uint64_t> payload_offsets = {anchor->anchor_offset + sizeof(uint32_t)};
-    for (uint64_t offset = host.anchor_offset + 4u * sizeof(uint32_t);
-         offset < host.anchor_offset + host.original_size; offset += sizeof(uint32_t))
-      payload_offsets.push_back(offset);
-    bool has_used_payload = false;
-    for (uint64_t payload_offset : payload_offsets) {
-      const auto payload_word = environment.replacement_text.word(payload_offset);
-      if (!payload_word || !valid_relay_payload(payload_offset)) {
-        errors.emplace_back("ConSan relay donor proof found an invalid relay payload");
-        return;
-      }
-      has_used_payload |= *payload_word != nop;
-    }
-    if (!has_used_payload) {
-      errors.emplace_back("ConSan relay donor proof found an unused wide donor");
-      return;
-    }
-  }
-  return;
-}
-
 void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment &environment,
                                                const ConSanFinalValidationInput &result,
                                                const BranchRelayValidationInventory &inventory,
@@ -1342,19 +1109,9 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
         shape == BranchRelayReservoirShape::DirectInstruction &&
         patch->original_size >= 2u * sizeof(uint32_t) &&
         patch->trampoline_size == patch->original_size + sizeof(uint32_t);
-    const bool valid_indirect_geometry =
-        shape == BranchRelayReservoirShape::IndirectInstruction &&
-        patch->original_size >=
-            (kScRelayEntryWords + kScRelayTailRestoreWords + 1u) * sizeof(uint32_t) &&
-        patch->trampoline_size ==
-            patch->original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t) &&
-        patch->sc_relay_reservoir_route &&
-        patch->required_sgpr_count >=
-            patch->sc_relay_reservoir_route->minimum_required_sgpr_count();
     if (patch->phase != ConSanPatchPhase::Instrumentation ||
         patch->original_size > 512u * sizeof(uint32_t) ||
-        patch->original_size % sizeof(uint32_t) != 0 ||
-        (!valid_direct_geometry && !valid_indirect_geometry)) {
+        patch->original_size % sizeof(uint32_t) != 0 || !valid_direct_geometry) {
       errors.emplace_back("ConSan relay reservoir proof found invalid geometry or phase");
       return;
     }
@@ -1411,7 +1168,7 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
           "ConSan relay reservoir proof rejected its pristine straight-line sequence");
       return;
     }
-    if (shape == BranchRelayReservoirShape::DirectInstruction) {
+    {
       const std::span<const uint64_t> entry_relays =
           patch->branch_only_route
               ? std::span<const uint64_t>(patch->branch_only_route->entry_relay_offsets())
@@ -1444,56 +1201,6 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
         return;
       }
       continue;
-    }
-    if (!std::ranges::equal(original_text.subspan(patch->anchor_offset, patch->original_size),
-                            replacement_text.subspan(patch->trampoline_offset + sizeof(uint32_t),
-                                                     patch->original_size))) {
-      errors.emplace_back("ConSan relay reservoir proof found a corrupted displaced sequence");
-      return;
-    }
-    std::vector<uint32_t> expected_entry;
-    std::vector<uint32_t> expected_return;
-    const ConSanSuperColliderRelayReservoirRoute &route = *patch->sc_relay_reservoir_route;
-    const ConSanSuperColliderRelayEncodingScratch scratch =
-        route.encoding_scratch({kAmdGpuVccLo, kAmdGpuExecHi});
-    const bool wave32_vcc = scratch.entry_vcc_save_sgpr.has_value();
-    expected_entry.push_back(wave32_vcc
-                                 ? build_s_mov_b32(*scratch.entry_vcc_save_sgpr, kAmdGpuVccLo, arch)
-                                 : build_s_nop(0, arch));
-    expected_return.push_back(
-        wave32_vcc ? build_s_mov_b32(*scratch.return_vcc_save_sgpr, kAmdGpuVccLo, arch)
-                   : build_s_nop(0, arch));
-    if (!append_lds_check_trap_indirect_jump(expected_entry, patch->anchor_offset,
-                                             patch->trampoline_offset, scratch.entry_jump.pc_sgpr,
-                                             scratch.entry_jump.scc_save_sgpr,
-                                             *environment.target_profile) ||
-        !append_lds_check_trap_indirect_jump(
-            expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
-            patch->anchor_offset + patch->original_size -
-                kScRelayTailRestoreWords * sizeof(uint32_t),
-            scratch.return_jump.pc_sgpr, scratch.return_jump.scc_save_sgpr,
-            *environment.target_profile) ||
-        std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
-                    expected_entry.size() * sizeof(uint32_t)) != 0 ||
-        environment.replacement_text.word(patch->trampoline_offset) !=
-            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.entry_vcc_save_sgpr, arch)
-                        : build_s_nop(0, arch)) ||
-        std::memcmp(expected_return.data(),
-                    replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
-                        patch->original_size,
-                    expected_return.size() * sizeof(uint32_t)) != 0 ||
-        environment.replacement_text.word(patch->anchor_offset + patch->original_size -
-                                          sizeof(uint32_t)) !=
-            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.return_vcc_save_sgpr, arch)
-                        : build_s_nop(0, arch))) {
-      errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
-      return;
-    }
-    if (!validate_relay_payload(patch->anchor_offset + kScRelayEntryWords * sizeof(uint32_t),
-                                patch->anchor_offset + patch->original_size -
-                                    kScRelayTailRestoreWords * sizeof(uint32_t),
-                                "displaced", patch->anchor_offset, patch->original_size)) {
-      return;
     }
   }
   return;
@@ -4169,7 +3876,6 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   validate_sc_indirect_island_semantics(environment, result, errors);
   validate_branch_only_continuation_semantics(environment, result, relay_inventory, errors);
   validate_sc_dense_call_semantics(environment, result, errors);
-  validate_branch_relay_donor_semantics(environment, relay_inventory, errors);
   validate_branch_relay_reservoir_semantics(environment, result, relay_inventory, errors);
   validate_mutation_semantics(environment, result, errors);
   validate_sc_perturbation_semantics(original_bytes, environment, result,

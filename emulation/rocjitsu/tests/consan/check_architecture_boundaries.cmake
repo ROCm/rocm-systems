@@ -2022,14 +2022,10 @@ if(NOT _shared_aggregate_contract MATCHES
        "ConSanIndirectJumpSgprs[ \t]+jump" OR
    NOT _sc_indirect_route_contract MATCHES
        "struct ConSanSuperColliderIndirectBodyRoute" OR
-   NOT _sc_indirect_route_contract MATCHES
-       "struct ConSanSuperColliderRelayReservoirRoute" OR
    NOT _patch_proof_contract MATCHES
        "std::optional<ConSanBranchOnlyContinuation>[ \t]+branch_only_route" OR
    NOT _patch_proof_contract MATCHES
        "std::optional<ConSanSuperColliderIndirectBodyRoute>[ \t]+sc_indirect_body_route" OR
-   NOT _patch_proof_contract MATCHES
-       "std::optional<ConSanSuperColliderRelayReservoirRoute>[ \t]+sc_relay_reservoir_route" OR
    NOT _consan_validation MATCHES
        "validate_indirect_route_effect_roles" OR
    NOT _consan_validation MATCHES
@@ -2037,9 +2033,7 @@ if(NOT _shared_aggregate_contract MATCHES
    NOT _consan_validation MATCHES
        "[.]prologue_entry[(]" OR
    NOT _consan_validation MATCHES
-       "sc_indirect_body_route->is_well_formed" OR
-   NOT _consan_validation MATCHES
-       "sc_relay_reservoir_route->is_well_formed")
+       "sc_indirect_body_route->is_well_formed")
     message(FATAL_ERROR
         "indirect control flow lost its shared primitive or exact mode-local effects"
     )
