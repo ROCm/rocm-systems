@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "util/bit.h"
 
 #include <algorithm>
@@ -177,9 +178,19 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
   if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
+    const IsaTargetRegistry &registry = default_isa_target_registry();
+    const IsaTargetDescriptor *architecture = registry.find(options.arch);
+    const IsaTargetDescriptor *target_architecture = registry.find(options.target);
+    const IsaGpuTargetDescription *target =
+        target_architecture != nullptr && target_architecture->architecture_id == options.arch
+            ? registry.find_gpu_target(options.target)
+            : nullptr;
+    if (target == nullptr && architecture != nullptr)
+      target = registry.find_default_gpu_target(*architecture);
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
         deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
-        options.additional_entry_blocks);
+        options.additional_entry_blocks,
+        target != nullptr && target->capabilities.setreg_vgpr_msb_fixup);
   }
   collect_global_register_usage(deferred_scope, options.text, options.arch);
 }

@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -205,9 +206,12 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<PcAddressBuilder> pc_address_builders;
+    const auto *amdgpu_object = dynamic_cast<const AmdGpuCodeObject *>(&co);
+    const rj_code_target_id_t concrete_target =
+        amdgpu_object != nullptr ? amdgpu_object->target_id() : ROCJITSU_CODE_TARGET_INVALID;
     std::vector<IndirectCallFixup> recovered_indirect_targets =
         discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy,
-                                       &pc_address_builders, extra_split_points);
+                                       &pc_address_builders, extra_split_points, concrete_target);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());

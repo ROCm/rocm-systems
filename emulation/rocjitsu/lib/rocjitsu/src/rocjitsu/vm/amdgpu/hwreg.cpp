@@ -629,7 +629,8 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   return HwregAccessResult::Success;
 }
 
-HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src) {
+HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                    HwregWriteKind kind) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
   const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
   if (!desc)
@@ -654,7 +655,19 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   if (result != HwregAccessResult::Success)
     return result;
 
-  return write_raw_hwreg(wf, desc->state, insert_hwreg_field(raw_value, src, decoded));
+  uint32_t updated = insert_hwreg_field(raw_value, src, decoded);
+  if (desc->state == HwregState::Mode && kind != HwregWriteKind::Generic &&
+      wf.cu().setreg_vgpr_msb_fixup()) {
+    // Public LLVM's SetregVGPRMSBFixup contract records that gfx1250 MODE
+    // writes take VGPR-MSB from the unshifted source bits[12:19], regardless of
+    // the requested HWREG slice. gfx1251 lacks this target capability and uses
+    // the ordinary field insertion above.
+    updated = (updated & ~VGPR_MSB_MODE_MASK) | (src & VGPR_MSB_MODE_MASK);
+    if (kind == HwregWriteKind::SetregImm32)
+      wf.arm_setreg_vgpr_msb_hazard();
+  }
+
+  return write_raw_hwreg(wf, desc->state, updated);
 }
 
 } // namespace amdgpu

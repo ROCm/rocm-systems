@@ -735,6 +735,104 @@ TEST(Gfx1250SimulationTest, SSetVgprMsbUpdatesWavefrontMode) {
   EXPECT_EQ((wf.mode_raw & amdgpu::VGPR_MSB_MODE_MASK) >> amdgpu::VGPR_MSB_MODE_SHIFT, kModeLayout);
 }
 
+TEST(Gfx1250SimulationTest, SetregModeClobbersVgprMsbFromUnshiftedSourceBits) {
+  constexpr uint8_t kInitialSetLayout = 0x41;
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr uint8_t kExpectedSetLayout = amdgpu::mode_layout_to_set_vgpr_msb(kClobberedModeLayout);
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr uint32_t kLiteral =
+      (static_cast<uint32_t>(kClobberedModeLayout) << amdgpu::VGPR_MSB_MODE_SHIFT) | 1u;
+  const uint32_t code[] = {
+      S_SET_VGPR_MSB | kInitialSetLayout,
+      setreg[0],
+      kLiteral,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
+  EXPECT_EQ((wf->mode_raw & amdgpu::VGPR_MSB_MODE_MASK) >> amdgpu::VGPR_MSB_MODE_SHIFT,
+            kClobberedModeLayout);
+}
+
+TEST(Gfx1250SimulationTest, SetVgprMsbImmediatelyAfterSetregModeIsDropped) {
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr uint8_t kExpectedSetLayout = amdgpu::mode_layout_to_set_vgpr_msb(kClobberedModeLayout);
+  constexpr uint8_t kDroppedSetLayout = 0xC3;
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr uint32_t kLiteral = static_cast<uint32_t>(kClobberedModeLayout)
+                                << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0],
+      kLiteral,
+      S_SET_VGPR_MSB | kDroppedSetLayout,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, InterveningNopEndsSetregVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto nop = cdna5::build_sopp(cdna5::kSNopSopp);
+  constexpr uint32_t kLiteral = 0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0], kLiteral, nop[0], S_SET_VGPR_MSB | kFollowingSetLayout, S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, NonModeSetregImm32DoesNotArmVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr uint16_t kWaveSchedModeHwreg = 26u | (31u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kWaveSchedModeHwreg});
+  constexpr uint32_t kLiteral = 0xA5A55A5Au;
+  const uint32_t code[] = {
+      setreg[0],
+      kLiteral,
+      S_SET_VGPR_MSB | kFollowingSetLayout,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, InterveningTrapEndsSetregVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto trap = cdna5::build_sopp(cdna5::kSTrapSopp, {.simm16 = 1});
+  constexpr uint32_t kLiteral = 0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0], kLiteral, trap[0], S_SET_VGPR_MSB | kFollowingSetLayout, S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
+}
+
 TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {
   Gfx1250Sim sim;
   // Resident wave: this test drives Operand read/write against live VGPR banks.

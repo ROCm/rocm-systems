@@ -26,6 +26,9 @@ class Decoder;
 /// describe instruction/encoding legality, rather than naming a GPU revision.
 struct IsaTargetCapabilities {
   uint64_t instruction_features = 0;
+  /// Whether S_SETREG writes to MODE have the VGPR-MSB clobber and adjacency
+  /// hazard that require the target-specific software fixup.
+  bool setreg_vgpr_msb_fixup = false;
   /// Whether the selected provider implements execution for this target.
   bool execution_implemented = false;
 };

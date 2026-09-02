@@ -6644,9 +6644,53 @@ def test_mode_status_hwreg_semantics_call_central_vm_helpers(arch_name, profile)
     assert 'amdgpu::read_hwreg_field(wf, hwreg, reg_val)' in getreg
     assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg
     assert 'amdgpu::write_hwreg_field(wf, hwreg, src)' in setreg_imm
+    assert 'HwregWriteKind' not in setreg
+    assert 'HwregWriteKind' not in setreg_imm
     assert 'wf.status_raw()' not in getreg
     assert 'wf.set_status_raw' not in setreg
     assert 'wf.set_status_raw' not in setreg_imm
+
+
+def test_cdna5_setreg_codegen_marks_target_specific_write_kinds():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    setreg_inst = Instruction(
+        'S_SETREG_B32',
+        'ENC_SOPK',
+        18,
+        [
+            Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1),
+            Operand('sdst', 32, 'OPR_SDST', True, False, False, True, 2),
+        ],
+    )
+    setreg_imm_inst = Instruction(
+        'S_SETREG_IMM32_B32',
+        'SOPK_INST_LITERAL',
+        20,
+        [Operand('simm16', 16, 'OPR_HWREG', False, True, False, True, 1)],
+        is_implied_literal_enc=True,
+    )
+
+    setreg = codegen._gen_execute_body(
+        setreg_inst, InstructionSemantics('S_SETREG_B32', 'scalar_setreg')
+    )
+    setreg_imm = codegen._gen_execute_body(
+        setreg_imm_inst,
+        InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm'),
+    )
+
+    assert (
+        'amdgpu::write_hwreg_field(wf, hwreg, src, ' 'amdgpu::HwregWriteKind::Setreg)'
+    ) in setreg
+    assert (
+        'amdgpu::write_hwreg_field(wf, hwreg, src, '
+        'amdgpu::HwregWriteKind::SetregImm32)'
+    ) in setreg_imm
 
 
 def _hwreg_predefined_values(isa_name: str) -> dict[str, int]:

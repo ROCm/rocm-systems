@@ -224,11 +224,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto &wg_coord = w->wg_coord();
           auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
-          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
-                                              w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
-                                              sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
-                                              w->kernel_wave_size(), w->wf_size());
+          auto wfs = fb::CreateWavefrontState(
+              builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
+              w->wf_size(), w->setreg_vgpr_msb_hazard());
           wf_offsets.push_back(wfs);
         }
 
@@ -354,6 +354,9 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
+          if (wf_state->setreg_vgpr_msb_hazard())
+            wf->arm_setreg_vgpr_msb_hazard();
+
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
