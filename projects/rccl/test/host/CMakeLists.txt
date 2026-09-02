@@ -417,6 +417,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_compile_options(-Wno-tautological-constant-out-of-range-compare)
 
+# Wrapper around add_executable() that also records the target in
+# HOST_TEST_BINARIES, so the coverage block at the end of this file instruments
+# every host-only test binary without a separately-maintained list. A macro
+# (not a function) so list(APPEND) mutates the caller's variable. Use this
+# instead of add_executable() for every test binary in the standalone build.
+macro(add_test_executable _name)
+  list(APPEND HOST_TEST_BINARIES ${_name})
+  add_executable(${_name} ${ARGN})
+endmacro()
+
 find_package(Threads REQUIRED)
 include(FetchContent)
 
@@ -583,7 +593,7 @@ target_link_libraries(rccl-source-wrappers PRIVATE
 )
 
 # --- Main test executable ---
-add_executable(rccl-HostUnitTests
+add_test_executable(rccl-HostUnitTests
   main.cpp
   ${RCCL_TEST_DIR}/BitOpsTests.cpp
   ${RCCL_TEST_DIR}/IommuPassthrough_test.cpp
@@ -646,7 +656,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # DEVCOMM_V22907_CC_PATH) and
 # satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
 # HIP runtime.
-add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable)
@@ -715,7 +725,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
 # with different -D (see the in-build block above for the full rationale).
 foreach(_variant "" "-uncached")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-  add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
+  add_test_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
 
   target_compile_options(${_init_tgt} PRIVATE
     -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
@@ -797,7 +807,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
 # the shipping arm would go untested by that workflow entirely.
 foreach(_enq_variant "" "-devlinker")
   set(_enq_tgt "rccl-UnitTestsMicroEnqueue${_enq_variant}")
-  add_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
+  add_test_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
 
   target_compile_options(${_enq_tgt} PRIVATE
     -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
@@ -851,13 +861,9 @@ endforeach()
 # through it and otherwise disappears from the report entirely.
 option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
 if(HOST_TEST_COVERAGE)
-  foreach(_cov_tgt
-      rccl-HostUnitTests
-      rccl-UnitTestsMicro
-      rccl-UnitTestsMicroInit
-      rccl-UnitTestsMicroInit-uncached
-      rccl-UnitTestsMicroEnqueue
-      rccl-UnitTestsMicroEnqueue-devlinker)
+  # HOST_TEST_BINARIES is populated by add_test_executable() above, so new test
+  # binaries are instrumented automatically.
+  foreach(_cov_tgt ${HOST_TEST_BINARIES})
     target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_compile_definitions(${_cov_tgt} PRIVATE RCCL_TEST_CODE_COVERAGE=1)
