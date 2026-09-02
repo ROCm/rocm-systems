@@ -138,7 +138,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,sqtt-enable,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,sqtt-enable,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1

@@ -823,10 +823,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
   endif()
-  # Build SQTT marker plugin if SQTT is enabled
-  if(SQTT_ENABLED)
-    add_subdirectory(plugins/profiler/sqttmarker)
-  endif()
   add_subdirectory(test)
 
 endif()
