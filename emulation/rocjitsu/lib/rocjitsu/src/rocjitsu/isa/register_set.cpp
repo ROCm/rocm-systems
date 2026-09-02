@@ -30,6 +30,15 @@ template <size_t N>
   return true;
 }
 
+template <size_t N>
+[[nodiscard]] bool intersects_range(const std::bitset<N> &bits, size_t base, size_t width) {
+  for (size_t i = 0; i < width; ++i) {
+    if (base + i < N && bits.test(base + i))
+      return true;
+  }
+  return false;
+}
+
 template <size_t N> void subtract(std::bitset<N> &lhs, const std::bitset<N> &rhs) { lhs &= ~rhs; }
 
 } // namespace
@@ -101,6 +110,20 @@ bool RegisterSet::contains(RegisterRef ref) const {
 bool RegisterSet::none() const { return sgprs_.none() && vgprs_.none() && acc_vgprs_.none(); }
 
 size_t RegisterSet::size() const { return sgprs_.count() + vgprs_.count() + acc_vgprs_.count(); }
+
+bool RegisterSet::intersects(RegisterRef ref) const {
+  const size_t width = std::max<size_t>(1, ref.width);
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    return intersects_range(sgprs_, ref.index, width);
+  case RegClass::VGPR:
+    return intersects_range(vgprs_, ref.index, width);
+  case RegClass::ACC_VGPR:
+    return intersects_range(acc_vgprs_, ref.index, width);
+  default:
+    return false;
+  }
+}
 
 bool RegisterSet::intersects(const RegisterSet &rhs) const {
   return (sgprs_ & rhs.sgprs_).any() || (vgprs_ & rhs.vgprs_).any() ||

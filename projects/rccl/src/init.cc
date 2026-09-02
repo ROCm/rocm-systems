@@ -103,8 +103,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"AllGather",    "AllReduce", "AlltoAllPivot", "AlltoAllGda",
-                                                   "AlltoAllvGda", "Broadcast", "Reduce",        "ReduceScatter",
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};

@@ -227,7 +227,9 @@ public:
   ///
   /// @param inst Instruction that will use the tuple. It must belong to the
   ///        analyzed scope.
-  /// @param count Number of consecutive VGPRs required.
+  /// @param count Number of consecutive VGPRs required. Runs wider than a
+  ///        RegisterRef can name (255) fail closed, since the search tests a
+  ///        candidate run as one RegisterRef.
   /// @param search_start Lowest candidate base requested by the caller.
   /// @param base_alignment Required tuple-base alignment.
   /// @param available_count Exclusive upper bound imposed by the current
@@ -245,7 +247,8 @@ public:
   /// kernel-scope live-before set. Some host operands also require the base of
   /// a register tuple to be aligned; @p base_alignment lets those lowerings ask
   /// liveness for a power-of-two-aligned dead run that is also encodable for
-  /// the target instruction.
+  /// the target instruction. Runs wider than a RegisterRef can name (255) fail
+  /// closed, since the search tests a candidate run as one RegisterRef.
   [[nodiscard]] std::optional<uint16_t> find_free_run(const Instruction *inst, uint16_t count,
                                                       uint16_t search_start = 0,
                                                       uint16_t base_alignment = 1) const;
