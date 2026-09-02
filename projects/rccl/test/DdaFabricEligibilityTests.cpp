@@ -107,6 +107,13 @@ TEST(DdaFabricMaxBlocksTest, NegativeOverrideUsesOneBlock)
     EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5"), 1);
 }
 
+TEST(DdaFabricMaxBlocksTest, LargeOverrideDoesNotOverflow)
+{
+    // Values beyond INT_MAX should not overflow and incorrectly lower maxBlocks
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "3000000000"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "9999999999"), 96);
+}
+
 // ---------------------------------------------------------------------------
 // Scratch sizing
 // ---------------------------------------------------------------------------
