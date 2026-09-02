@@ -118,11 +118,12 @@ TEST(kernel_replay_abi, dispatch_info_follows_size)
 TEST(kernel_replay_abi, members_are_in_declaration_order)
 {
     EXPECT_LT(offsetof(replay_data_t, size), offsetof(replay_data_t, dispatch_info));
-    EXPECT_LT(offsetof(replay_data_t, dispatch_info), offsetof(replay_data_t, replay_pass_count));
-    EXPECT_LT(offsetof(replay_data_t, replay_pass_count), offsetof(replay_data_t, replay_continue));
-    EXPECT_LT(offsetof(replay_data_t, replay_continue), offsetof(replay_data_t, current_pass));
+    EXPECT_LT(offsetof(replay_data_t, dispatch_info), offsetof(replay_data_t, current_pass));
     EXPECT_LT(offsetof(replay_data_t, current_pass), offsetof(replay_data_t, total_passes));
-    EXPECT_LT(offsetof(replay_data_t, total_passes), offsetof(replay_data_t, replay_start_context));
+    EXPECT_LT(offsetof(replay_data_t, total_passes), offsetof(replay_data_t, replay_pass_count));
+    EXPECT_LT(offsetof(replay_data_t, replay_pass_count), offsetof(replay_data_t, replay_continue));
+    EXPECT_LT(offsetof(replay_data_t, replay_continue),
+              offsetof(replay_data_t, replay_start_context));
     EXPECT_LT(offsetof(replay_data_t, replay_start_context),
               offsetof(replay_data_t, replay_stop_context));
     EXPECT_LT(offsetof(replay_data_t, replay_stop_context), sizeof(replay_data_t));
@@ -134,17 +135,17 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
 {
     EXPECT_GE(offsetof(replay_data_t, dispatch_info),
               offsetof(replay_data_t, size) + sizeof(replay_data_t{}.size));
-    EXPECT_GE(offsetof(replay_data_t, replay_pass_count),
+    EXPECT_GE(offsetof(replay_data_t, current_pass),
               offsetof(replay_data_t, dispatch_info) + sizeof(replay_data_t{}.dispatch_info));
+    EXPECT_GE(offsetof(replay_data_t, total_passes),
+              offsetof(replay_data_t, current_pass) + sizeof(replay_data_t{}.current_pass));
+    EXPECT_GE(offsetof(replay_data_t, replay_pass_count),
+              offsetof(replay_data_t, total_passes) + sizeof(replay_data_t{}.total_passes));
     EXPECT_GE(
         offsetof(replay_data_t, replay_continue),
         offsetof(replay_data_t, replay_pass_count) + sizeof(replay_data_t{}.replay_pass_count));
-    EXPECT_GE(offsetof(replay_data_t, current_pass),
-              offsetof(replay_data_t, replay_continue) + sizeof(replay_data_t{}.replay_continue));
-    EXPECT_GE(offsetof(replay_data_t, total_passes),
-              offsetof(replay_data_t, current_pass) + sizeof(replay_data_t{}.current_pass));
     EXPECT_GE(offsetof(replay_data_t, replay_start_context),
-              offsetof(replay_data_t, total_passes) + sizeof(replay_data_t{}.total_passes));
+              offsetof(replay_data_t, replay_continue) + sizeof(replay_data_t{}.replay_continue));
     EXPECT_GE(offsetof(replay_data_t, replay_stop_context),
               offsetof(replay_data_t, replay_start_context) +
                   sizeof(replay_data_t{}.replay_start_context));
