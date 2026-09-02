@@ -1050,18 +1050,6 @@ set(RJ_HAS_KFD_DEVICE FALSE)
 if(EXISTS "/dev/kfd")
     set(RJ_HAS_KFD_DEVICE TRUE)
 endif()
-set(RJ_HAS_KFD_ACCESS FALSE)
-if(RJ_HAS_KFD_DEVICE)
-    execute_process(
-        COMMAND sh -c "test -r /dev/kfd && test -w /dev/kfd"
-        RESULT_VARIABLE _rj_kfd_access_rc
-        OUTPUT_QUIET
-        ERROR_QUIET
-    )
-    if(_rj_kfd_access_rc EQUAL 0)
-        set(RJ_HAS_KFD_ACCESS TRUE)
-    endif()
-endif()
 set(RJ_HAS_GFX1201_GPU FALSE)
 if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
     set(RJ_HAS_GFX1201_GPU TRUE)
@@ -1812,7 +1800,7 @@ if(HSA_RUNTIME64)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
         set(HAS_CDNA2_GPU FALSE)
-        if(ROCM_AGENT_ENUM AND RJ_HAS_KFD_ACCESS)
+        if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
                 OUTPUT_VARIABLE _agents
@@ -1951,8 +1939,7 @@ if(HSA_RUNTIME64)
         else()
             message(
                 STATUS
-                "HSA translate test built but NOT registered with CTest "
-                "(no accessible RDNA4 GPU)"
+                "HSA translate test built but NOT registered with CTest (no RDNA4 GPU)"
             )
         endif()
 
