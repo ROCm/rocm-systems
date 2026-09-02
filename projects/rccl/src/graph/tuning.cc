@@ -1866,7 +1866,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                             // [1] Reduce          -- not used
     8ULL*1024*1024*1024,           // [2] AllGather       -- 8 GiB registered CE cap (R=2)
     0,                             // [3] ReduceScatter   -- not used
-    8ULL*1024*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
+    256ULL*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
     0,                             // [5] SendRecv        -- not used
     0,                             // [6] Send            -- not used
     0,                             // [7] Recv            -- not used
