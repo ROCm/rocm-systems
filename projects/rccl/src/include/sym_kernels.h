@@ -34,6 +34,18 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
 constexpr int ncclSymkWarpsPerBlock = 16;
 
+// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% below 256 KB since an LL epoch
+// carries one element per thread. Host code cannot test __gfx950__ so it selects on comm->archName.
+constexpr int ncclSymkGfx950LLThreads = 512;
+
+// The same width resolved at device compile time, where it also serves as the LL slot pitch. The
+// host sizes the shared slot buffer to match and never launches a reduce kernel wider than this.
+#if defined(__gfx950__)
+constexpr int ncclSymkReduceLLMaxThreads = ncclSymkGfx950LLThreads;
+#else
+constexpr int ncclSymkReduceLLMaxThreads = ncclSymkMaxThreads;
+#endif
+
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }
@@ -172,6 +184,10 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+bool ncclSymkIsGfx950(struct ncclComm* comm);
+#endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
 bool ncclSymkTmaAvailable(struct ncclComm* comm);
