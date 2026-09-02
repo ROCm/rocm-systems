@@ -45,6 +45,72 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
+# The guest's MODE.FP_ROUND is executed by setting the host's rounding mode --
+# fp_mode.h wraps each architectural operation in a ScopedFenv and lets the
+# hardware round. A compiler may assume the default rounding mode unless told
+# otherwise, and every compiler tried moves the arithmetic across the fesetround
+# call without this: v_fmac_f64 of 1.0 * 2^-53 + 1.0 under MODE.FP_ROUND=+inf
+# returned 1.0 where the guest should see 1.0 + 1ulp, and every directed mode
+# silently gave the round-to-nearest answer. Measured wrong without the flag and
+# right with it on GCC 13.4, clang 14, clang 15 and AMD clang 22 -- this is not
+# one compiler's quirk, and it is not avoided by building with amdclang.
+#
+# The standard spelling is `#pragma STDC FENV_ACCESS ON`; GCC does not implement
+# it, so the flag is what is portable between the two. It only forbids
+# optimisations that assume a rounding mode, so it cannot make arithmetic less
+# correct.
+#
+# It is carried as a variable rather than applied here, because the contract it
+# imposes is only needed where fp_mode.h's ScopedFenv actually inlines. Applying
+# it at this scope would reach googletest, flatbuffers, simdojo, util, the VM,
+# the DBT and every tool as well, constraining code that never touches the host
+# rounding mode. Two places consume it, and they are the closure of the header:
+#
+#   - rocjitsu_isa_<arch>_exec (isa/CMakeLists.txt), the object libraries that
+#     own the generated *_exec*.cpp sources. Those are the only translation
+#     units that include fp_mode.h or simd_glue.h; the sibling _model libraries
+#     and the RISC-V ISA do not.
+#   - tests/ (directory scope). fp_mode.h's helpers are `inline`, so a test that
+#     includes it emits its own copy and the linker keeps one of the two. A test
+#     compiled without the flag could therefore supply the copy the library
+#     calls, which is the miscompile this flag exists to prevent.
+#
+# ROCJITSU_STRICT_FP_ROUNDING travels with the flag, so the header boundary and
+# the option boundary cannot drift apart. fp_mode.h refuses to compile without
+# it; the helpers that never touch the host FP environment -- effective_omod and
+# the rest of the OMOD plumbing -- live in fp_mode_no_fenv.h and carry no such
+# requirement. That is what lets vm/amdgpu/compute_unit.cpp reach the OMOD
+# helpers through alu_exceptions.h from outside this option set: it can no
+# longer emit an unflagged inline definition of fma_f64 or finish_f64 by
+# accident, because it can no longer see one.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS
+        -frounding-math
+        -DROCJITSU_STRICT_FP_ROUNDING=1
+    )
+elseif(MSVC)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS
+        /fp:strict
+        -DROCJITSU_STRICT_FP_ROUNDING=1
+    )
+else()
+    # Unknown compiler: nothing to spell "the rounding mode is dynamic" with, so
+    # the miscompile above may well be present. Define the guard anyway rather
+    # than failing the build -- that is the behaviour such a toolchain already
+    # had -- but say so, because otherwise the only report is the f64
+    # directed-rounding tests failing.
+    message(
+        WARNING
+        "No strict floating-point rounding option known for "
+        "${CMAKE_CXX_COMPILER_ID}; the guest's MODE.FP_ROUND may not reach f64 "
+        "arithmetic. See fp_mode.h."
+    )
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS -DROCJITSU_STRICT_FP_ROUNDING=1)
+endif()
+
 find_package(Threads REQUIRED)
 
 # GCC 14+ emits false-positive -Wuninitialized on reinterpret_cast<uint32_t*>

@@ -7,6 +7,14 @@ include(rj_find_amdcxx)
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
 
+# fp_mode.h's helpers are `inline`, so a test that includes it -- directly or
+# through simd_glue.h -- emits its own copy of them and the linker keeps one of
+# the two. Without this the copy compiled here could be the one the library ends
+# up calling, reintroducing the miscompile the flag exists to prevent. Applied
+# after the HIP kernels above so it reaches only host test code. See
+# RJ_STRICT_FP_ROUNDING_OPTIONS in the top-level CMakeLists.txt.
+add_compile_options(${RJ_STRICT_FP_ROUNDING_OPTIONS})
+
 # Common object libraries linked by all test/tool executables.
 set(RJ_OBJECT_LIBS
     rocjitsu_analysis

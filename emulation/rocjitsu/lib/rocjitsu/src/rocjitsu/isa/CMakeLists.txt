@@ -50,6 +50,15 @@ function(rj_add_split_amdgpu_isa_library arch)
     rj_add_object_library(${_target}_model ${_model_sources})
     rj_add_object_library(${_target}_exec ${_execution_sources})
 
+    # The execution sources are the ones that include fp_mode.h and simd_glue.h,
+    # so they are the ones that need the compiler to stop assuming a rounding
+    # mode across the ScopedFenv. See RJ_STRICT_FP_ROUNDING_OPTIONS in the
+    # top-level CMakeLists.txt. The _model sources never see either header.
+    target_compile_options(
+        ${_target}_exec
+        PRIVATE ${RJ_STRICT_FP_ROUNDING_OPTIONS}
+    )
+
     add_library(${_target} INTERFACE)
     target_sources(
         ${_target}
