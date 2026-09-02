@@ -123,8 +123,12 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
     parser->newDispatch(dispatch_pkt);
 }
 
+}  // namespace
+
 /**
- * Callback called by HSA interceptor when the kernel has completed.
+ * Callback called by HSA interceptor when the kernel has completed. Declared in
+ * hsa_adapter.hpp and invoked from pc_sampling::signal_completion_hook (see
+ * pc_sampling/queue_hooks.cpp), so it lives outside the anonymous namespace.
  */
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
@@ -145,6 +149,8 @@ kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
     agent_session->cid_manager->cid_async_activity_completed(session.correlation_id);
 }
 
+namespace
+{
 void
 data_ready_callback(void*                                client_callback_data,
                     size_t                               data_size,
@@ -345,34 +351,11 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
         }
     }
 
-    using external_corr_id_map_t = ::rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t;
-
-    // Register callbacks for the HSA's queue interceptor.
-    // TODO: should we store callback ID in the service?
-    rocprofiler::hsa::get_queue_controller()->add_callback(
-        std::nullopt,
-        ::rocprofiler::hsa::queue_callbacks_t{
-            .batch_packets = []() { return true; },
-            .write_interceptor =
-                [](const rocprofiler::hsa::Queue&,
-                   const rocprofiler::hsa::rocprofiler_packet&,
-                   rocprofiler_kernel_id_t /*kernel_id*/,
-                   rocprofiler_dispatch_id_t /*dispatch_id*/,
-                   rocprofiler_user_data_t*,
-                   const external_corr_id_map_t&,
-                   const context::correlation_id*) {
-                    return rocprofiler::hsa::write_packet_t{nullptr, false};
-                },
-            // Completion CB
-            .signal_completion =
-                [](const rocprofiler::hsa::Queue&                           q,
-                   rocprofiler::hsa::rocprofiler_packet                     kern_pkt,
-                   std::shared_ptr<rocprofiler::hsa::queue_info_session_t>& session,
-                   rocprofiler::hsa::packet_data_t& /*packet*/,
-                   rocprofiler::hsa::inst_pkt_t&,
-                   kernel_dispatch::profiling_time) {
-                    kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, *session);
-                }});
+    // PC sampling no longer registers a per-queue callback with the HSA queue
+    // controller. Kernel completion is delivered explicitly via
+    // pc_sampling::signal_completion_hook, called from the HSA async signal
+    // handler (see hsa/queue.cpp). The marker packet is still injected directly
+    // in the write interceptor, gated by pc_sampling::is_configured_on_agent.
 }
 
 rocprofiler_status_t

@@ -34,10 +34,8 @@ namespace rocprofiler
 {
 namespace hsa
 {
-using ClientID = int64_t;
-
 using inst_pkt_t =
-    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, ClientID>, 4>;
+    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, int64_t>, 4>;
 
 union rocprofiler_packet
 {

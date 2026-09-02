@@ -23,7 +23,8 @@ set(rocprofiler_lib_sources
     queue_interposition.cpp
     timestamp.cpp
     version.cpp
-    hsa_barrier.cpp)
+    hsa_barrier.cpp
+    should_batch_packets_test.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests)
 target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}

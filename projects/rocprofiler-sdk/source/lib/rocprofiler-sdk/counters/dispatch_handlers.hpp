@@ -31,9 +31,8 @@ namespace rocprofiler
 {
 namespace counters
 {
-using ClientID   = int64_t;
 using inst_pkt_t = common::container::
-    small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
+    small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, int64_t>, 4>;
 
 hsa::write_packet_t
 queue_cb(const context::context*                                  ctx,
