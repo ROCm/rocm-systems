@@ -333,6 +333,23 @@ class TestExpandPlaceholderRanges:
         with pytest.raises(SystemExit):
             expand_placeholder_ranges(configs, _sys_info())
 
+    def test_key_prefix_with_space_survives_expansion(self):
+        """
+        Panel 18 labels its rows "Channel 0", "Channel 1", ... by carrying
+        the literal prefix on the placeholder key. Only the placeholder token
+        is substituted; the space-bearing prefix must come through intact."""
+        metrics: dict[str, Any] = {
+            "Channel ::_1": {"expr": "AVG(TCC_HIT[::_1])"},
+            "placeholder_range": {"::_1": "$total_l2_chan"},
+        }
+        configs = OrderedDict([(1800, _metric_panel(1800, 1802, metrics=metrics))])
+
+        result = expand_placeholder_ranges(configs, {"total_l2_chan": 3})
+
+        expanded = result[1800]["data source"][0]["metric_table"]["metric"]
+        assert list(expanded) == ["Channel 0", "Channel 1", "Channel 2"]
+        assert expanded["Channel 2"] == {"expr": "AVG(TCC_HIT[2])"}
+
     def test_none_sys_info_clears_metric_dict(self):
         configs = _placeholder_panel(3)
         result = expand_placeholder_ranges(configs, None)
