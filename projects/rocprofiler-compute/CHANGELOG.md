@@ -9,8 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
-* A failed profile whose output contains a duplicate-ROCm abort now also
-  prints that the profiler and the workload must use the same ROCm.
+* Added a message on failed profiles that loaded two ROCm installations,
+  stating that the profiler and the workload must use the same ROCm.
 
 ### Changed
 
