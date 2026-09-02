@@ -11869,3 +11869,48 @@ This slice completes the bidirectional separation exposed by checkpoint 175:
 mode-local Sampled fallback stays with Sampled, while shared exact-entry
 storage knows nothing about modes.  It also deletes four implementation lines
 and one repeated registry lookup rather than introducing an adapter.
+
+### 16.179 Convergence checkpoint 178: Record/Replay-owned entry assignment
+
+The same trace exposed a second redundant policy lookup on the other side of
+the boundary.  `apply_record_replay_entry_workgroup_assignment` is declared and
+implemented by Record/Replay planning, and all five of its production callers
+are Record/Replay access, first-light, or barrier paths.  Nevertheless, it
+accepted the broad request only to ask the mode registry whether the selected
+mode requires entry workgroup capture.  Record/Replay's registration always
+answers yes; admitting any other engine to this operation would itself violate
+the operation's ownership.
+
+The helper now expresses the selected-mode invariant directly: accept an
+existing unambiguous exact-entry representation, otherwise restore the
+owner-local VGPR assignment and verify it.  Its interface carries only the
+operating point, owner assignments, owner offsets, and optional private
+layout.  A structural check extracts this Record/Replay-owned implementation
+and rejects `ConSanRequest`, registry lookup, or capture-policy vocabulary.
+The shared placement diagnostic for an ambiguous exact-entry representation
+is also mode-neutral now; common placement no longer presents its invariant as
+a Record/Replay failure.
+
+| Signal | Checkpoint 178 | Cumulative change | Slice change from checkpoint 177 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,166 | **-2,810** | **-2** |
+| Nonblank production lines | 95,758 | **-3,326** | **-2** |
+| Production implementation lines | 88,022 | **-3,428** | **-2** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Record/Replay entry-assignment registry lookups | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `a86d03da737`.  Validation includes a
+successful full `-j16` build and **883/883** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+Together with checkpoints 176 and 177, this leaves the entry-workgroup seam in
+one direction: mode owners decide whether and how to obtain the state, while
+the shared exact-storage component validates and projects it.  No common
+helper reopens mode selection, and no mode-only fallback is exposed as a
+shared API.
