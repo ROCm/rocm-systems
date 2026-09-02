@@ -1,8 +1,10 @@
 schema: spec-driven
 created: 2026-08-20
-# partially-implemented: the AMD SMI identity API, CLI and seed provisioning are
-# in projects/amdsmi, but three obligations of this change are not yet met.
-# Task 2.3 (determine the answering stage) has only its driver half; the CLI's
-# seven field names are not all emitted; and the seed is reported once per GPU
-# rather than once per invocation. The last two are being corrected now.
-status: partially-implemented
+# implemented: the AMD SMI identity API, CLI and seed provisioning are in
+# projects/amdsmi, and the last outstanding obligation -- task 2.3, determining
+# which stage of the staged lookup answered -- is met by AMDCUID_QUERY_SOURCE.
+#
+# Read alongside README.md's tier note: the obligations of this change are
+# harder to meet on a tier-2 node, where the driver publishes nothing, and were
+# not in fact met there until that node was tested rather than assumed.
+status: implemented

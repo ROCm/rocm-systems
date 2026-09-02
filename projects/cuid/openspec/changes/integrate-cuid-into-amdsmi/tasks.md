@@ -22,18 +22,21 @@ struct that group 1 defines.
       the primary, the derived value, the device type and the temporary flag.
 - [x] 2.2 Return an empty primary rather than failing when the primary query
       reports a permission error.
-- [ ] 2.3 Determine the source: driver where the device's sysfs CUID attribute
-      exists, store where the record file answered, library otherwise. **Only
-      the driver half is implemented.** The store and library stages are not
-      observable from `amd-smi`: `libamdcuid` writes a value it computed back
-      into the store it consults, so an entry for a device says only that
-      something has looked it up before. The code guessed it from
-      `access("/tmp/cuid", R_OK)`, one global file for every device, and so
-      reported `STORE` for every GPU on any machine where that file existed,
-      including one whose value it had just computed. (The store has since moved
-      to `/var/lib/amdcuid/cuid`.) `cuid_source_for()` now reports `DRIVER` or
-      `UNKNOWN` and nothing else. Completing this needs a `libamdcuid` query that
-      reports the stage that answered.
+- [x] 2.3 Determine the source: driver where the device's sysfs CUID attribute
+      exists, store where the record file answered, library otherwise.
+      `AMDCUID_QUERY_SOURCE` returns the stage `CuidDevice` recorded as it
+      derived, so amd-smi reports what happened rather than guessing after the
+      fact. The guess it replaces could only ever say DRIVER or UNKNOWN, and on
+      a tier-2 node -- no CUID support in the driver, which is every node until
+      the kernel series ships -- said UNKNOWN for every device.
+      Recorded rather than recomputed on purpose: asking again would repeat the
+      sysfs read and the record search and could answer differently from the
+      call that produced the value the caller holds, reporting a device
+      provisioned in between as driver-sourced for a value the library computed.
+      The earlier attempt guessed from `access("/tmp/cuid", R_OK)`, one global
+      file for every device, and so reported STORE for every GPU on any machine
+      where that file existed, including one whose value it had just computed.
+      (The store has since moved to `/var/lib/amdcuid/cuid`.)
 - [x] 2.4 Rewrite `amdsmi_get_gpu_device_cuid()` as a wrapper over 2.1.
 - [x] 2.5 Implement `amdsmi_set_cuid_seed()` over `amdcuid_set_hash_key()`,
       propagating the store failure.
@@ -50,13 +53,51 @@ struct that group 1 defines.
       Not `cmake_dependent_option`: when its condition is false it sets a
       *normal* variable to the force value, shadowing the cache entry the user
       set, so `-DBUILD_CUID=ON` on a tree with no `libamdcuid` silently produced
-      a CUID-less build. A plain `option()` defaulted from `amdcuid_FOUND` keeps
-      the request visible and puts `BUILD_CUID` in the cache as a `BOOL`, which
-      is what lets `tests/amd_smi_test` see it for 5.8.
+      a CUID-less build.
+      **Nor a plain `option()`, which was the first answer here and was wrong
+      twice over.** `option()` writes a `BOOL` cache entry on the first
+      configure and does nothing on every later one, so a build directory
+      configured before `libamdcuid` was installed kept CUID off for its whole
+      life, silently, until someone deleted `CMakeCache.txt`; and its default
+      argument was `"${amdcuid_FOUND}"`, which is the empty string when the
+      package is absent, giving a `BOOL` cache entry whose value is `""`.
+      `BUILD_CUID` is now `AUTO`, `ON` or `OFF`: the cache holds the request,
+      and whether the package was found is a normal variable recomputed every
+      run. `ON` still requires and still fails configure. Any other value is
+      read as the boolean it used to be, so `-DBUILD_CUID=ON`, `=1` and `=TRUE`
+      are unchanged, which is also what keeps 5.8 working.
+      `AUTO` warns when it finds nothing, because a build whose feature set
+      depends on what happens to be installed on the build host ships one thing
+      from a distro image and another from a manylinux container with no
+      diagnostic either way; a packaging job passes `ON` or `OFF`.
 - [x] 3.2 Confirm the static library links with no new external dependency, and
       that the exported target does not reference the uninstalled `rocm-sha256`
       (A7).
 - [x] 3.3 Confirm a tree with no `libamdcuid` still builds and links.
+- [x] 3.4 Search `${ROCM_DIR}/core` for the `amdcuid` package. `libamdcuid`
+      takes that as its install prefix while AMD SMI takes `${ROCM_DIR}`, and
+      config mode has no search template with an arbitrary intermediate
+      directory, so a prefix of `/opt/rocm` never reaches
+      `/opt/rocm/core/lib/cmake/amdcuid`. Verified directly: a config installed
+      at `<prefix>/core/lib/cmake/amdcuid` is not found with
+      `CMAKE_INSTALL_PREFIX=<prefix>` and nothing else set. It was being found
+      only by accident, through the `/opt/rocm/lib -> /opt/rocm/core-X.Y/lib`
+      symlink a different ROCm package creates, and not at all in a manylinux
+      wheel container or a TheRock stage prefix, neither of which has
+      `/opt/rocm`. `AMDCUID_HINT_DIR` names the real prefix and is overridable.
+- [x] 3.5 Call `find_dependency(amdcuid)` from the installed
+      `amd_smi-config.cmake`, gated on the build having linked it.
+      `amd_smi_static` links `amdcuid::amdcuid` PRIVATE, and a private link
+      dependency of a *static* library is not absorbed -- an archive is not
+      linked -- so CMake records it in `INTERFACE_LINK_LIBRARIES` as
+      `$<LINK_ONLY:amdcuid::amdcuid>`. Without the call, every downstream
+      `find_package(amd_smi CONFIG)` that linked `amd_smi_static` failed at
+      generate time with "the link interface ... contains amdcuid::amdcuid but
+      the target was not found". `amd_smi_static` is built whenever
+      `BUILD_TESTS=ON`, which the nine-distro packaging job sets, and the
+      standalone example build that runs on each of those distros resolves AMD
+      SMI through exactly that `find_package`. `Threads::Threads` was in the
+      same position and is resolved there too.
 
 ## 4. CLI and Python
 

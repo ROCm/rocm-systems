@@ -13,6 +13,47 @@
 - **`changes/`**: deltas against that baseline, each with a proposal, a design
   note, tasks, and spec deltas.
 
+## Two tiers
+
+Not a product name and not for a manual; a working distinction the corpus needs
+because the requirements differ between them and nothing named the split.
+
+**Tier 1** — the `amdgpu` driver publishes `cuid_primary`, `cuid_secondary`,
+`cuid_seed` and `cuid_temporary`. The kernel is the producer, the library and
+`amd-smi` report its value verbatim, and the agreement between the two layers
+is the property worth testing.
+
+**Tier 2** — the driver publishes nothing and `libamdcuid` is the only
+producer. It reads the record store, and computes from the PCIe Device Serial
+Number where the store is empty.
+
+**Tier 2 is what ships first.** CUID reaches customers inside AMD SMI one
+release before the kernel series lands, so for that release every node is tier
+2, and a node stays tier 2 for as long as it runs a kernel without the series.
+Tier 1 is the later state, not the normal one.
+
+What that costs, and what has to hold:
+
+| | tier 1 | tier 2 |
+|---|---|---|
+| Producer | the driver | this library |
+| Unprivileged read | always: `cuid_secondary` is 0444 | only once the record store exists, because deriving reads PCIe configuration space |
+| Store required | no | yes, for an unprivileged caller |
+| Who fills the store | anyone; it is redundant | the first privileged lookup, which now records what it computed |
+| `source` reports | `DRIVER` | `STORE`, or `LIBRARY` before anything is recorded |
+| Survives a driver reload | **no** — see `CONFLICTS.md` O3 | yes; nothing per-device is held in the kernel |
+| Survives an OS reinstall | yes | yes, where a real serial exists; an auxiliary value does not, and says so through bit 117 |
+
+The tier-2 obligations were not met until measured. On a driver built without
+`cuid_sysfs_init()`, an unprivileged caller could not read a CUID at all and a
+privileged one recomputed on every call because nothing was recorded. Both are
+fixed; `tests/QA_PLAN.md` makes tier 2 the first cell of the matrix for the
+same reason.
+
+Reading them the wrong way round is the mistake to avoid: a result obtained on
+a tier-1 node says nothing about tier 2, because the driver's value stands in
+front of every code path tier 2 depends on. Two defects hid there.
+
 ## The changes
 
 | Change | Layer | State |
