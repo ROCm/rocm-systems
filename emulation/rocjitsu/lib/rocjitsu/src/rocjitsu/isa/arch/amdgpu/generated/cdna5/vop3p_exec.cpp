@@ -1992,10 +1992,8 @@ void VFmaMixloBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());
+    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16(a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp,
+                                                  amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
 }
@@ -2038,10 +2036,8 @@ RJ_NOINLINE void VFmaMixloBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());
+    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16(a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp,
+                                                  amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0u, h);
   }
   dpp_write_mask_scope_.restore();
@@ -2074,10 +2070,8 @@ void VFmaMixhiBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());
+    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16(a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp,
+                                                  amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
 }
@@ -2120,10 +2114,8 @@ RJ_NOINLINE void VFmaMixhiBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
       b = -b;
     if (inst_.neg & 4)
       c = -c;
-    float result = std::fma(a, b, c);
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());
+    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16(a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp,
+                                                  amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, 0x8u, h);
   }
   dpp_write_mask_scope_.restore();
