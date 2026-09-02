@@ -40,10 +40,14 @@ constexpr size_t kReduceScatterCount = 32 * 1024;       // 1 MiB input at 8 rank
 constexpr size_t kAllToAllCount      = 32 * 1024;       // 1 MiB input at 8 ranks
 constexpr int    kRepeatedIterations = 10;
 
-// Barrier stress test parameters: small buffers complete quickly, exposing
-// timing windows where missing/broken barriers would cause data corruption.
-// Large buffers (32MB) hide races because DMA latency masks the barrier window.
-constexpr size_t kBarrierStressCount      = 128 * 1024;  // 512 KB per rank
+// AllReduce must exceed the default 16 MiB LL two-shot threshold to reach the
+// SIMPLE barrier path without relying on process-global environment settings.
+constexpr size_t kAllReduceBarrierStressCount =
+    16 * 1024 * 1024 / sizeof(float) + 1;
+
+// ReduceScatter and AllToAll use a 32 KiB LL threshold, so a 512 KiB shard or
+// peer chunk naturally selects their SIMPLE barrier path.
+constexpr size_t kBarrierStressCount      = 128 * 1024;
 constexpr int    kBarrierStressIterations = 100;
 
 constexpr char kAllReduceNeedle[] =
@@ -360,14 +364,9 @@ TEST_F(DdaMPI_FabricSimple, AlternatingCollectivesOnSameCommunicator)
 }
 
 // ---------------------------------------------------------------------------
-// Barrier stress tests: Small buffers expose timing windows where missing
-// or broken barriers cause data corruption. These tests are designed to FAIL
-// if the barrier synchronization is removed or broken.
-//
-// Rationale: Large buffers (32MB) hide races because DMA latency masks the
-// barrier window. Small buffers (512KB) complete quickly, exposing the race.
-// See CRITICAL-2 test results: 512KB buffers showed 29M errors without
-// proper release semantics, while 32MB buffers passed incorrectly.
+// Barrier stress tests repeatedly exercise the SIMPLE synchronization path.
+// AllReduce uses the smallest naturally SIMPLE payload above its LL range;
+// ReduceScatter and AllToAll can use smaller 512 KiB shards/chunks.
 // ---------------------------------------------------------------------------
 
 class DdaMPI_FabricBarrierStress : public DdaFabricSimpleMPITest
@@ -375,10 +374,11 @@ class DdaMPI_FabricBarrierStress : public DdaFabricSimpleMPITest
 protected:
     void runBarrierStressAllReduce()
     {
+        const size_t countAlignment =
+            static_cast<size_t>(nRanks_) * (16 / sizeof(float));
         const size_t count =
-            ((kBarrierStressCount + static_cast<size_t>(nRanks_) - 1)
-             / static_cast<size_t>(nRanks_))
-            * static_cast<size_t>(nRanks_);
+            ((kAllReduceBarrierStressCount + countAlignment - 1) / countAlignment)
+            * countAlignment;
         const size_t bytes = count * sizeof(float);
 
         void* sendBuf = nullptr;
