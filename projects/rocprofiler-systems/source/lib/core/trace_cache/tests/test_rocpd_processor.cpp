@@ -108,6 +108,19 @@ TEST(make_agent_uid_test, inequality_gpu_vs_nic)
     EXPECT_FALSE(gpu == nic);
 }
 
+TEST(make_agent_uid_test, nic_agents_at_different_device_indices_are_distinct)
+{
+    // Regression: register_nic_agents() must use entry.device->get_index()
+    // as type_index, not the loop counter.  Two NIC devices at system
+    // indices 2 and 5 must produce distinct UIDs, not the same ones that
+    // devices at indices 0 and 1 would produce.
+    auto idx2 = make_agent_uid(make_test_agent(agent_type::NIC, 2));
+    auto idx5 = make_agent_uid(make_test_agent(agent_type::NIC, 5));
+    EXPECT_FALSE(idx2 == idx5);
+    EXPECT_EQ(idx2.type_index, 2U);
+    EXPECT_EQ(idx5.type_index, 5U);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // make_trace_env — validate trace_environment_t struct fields
 // ═══════════════════════════════════════════════════════════════════════════
@@ -469,6 +482,71 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
     EXPECT_TRUE(found_gpu) << "GPU agent not found in read-back";
     EXPECT_TRUE(found_cpu) << "CPU agent not found in read-back";
     EXPECT_TRUE(found_nic) << "NIC agent not found in read-back";
+}
+
+// ---------------------------------------------------------------------------
+// NIC agent device index: agents at non-sequential system indices must use
+// the real device index, not the enumeration loop counter.
+// ---------------------------------------------------------------------------
+
+TEST_F(rocpd_write_read_test, nic_agents_with_nonconsecutive_device_indices)
+{
+    // Simulate NIC devices that have been partially filtered: only the
+    // devices at system indices 2 and 5 survive.  register_nic_agents()
+    // must pass entry.device->get_index() (2, 5) as type_index rather than
+    // the loop counter (0, 1), so agent lookups by type index remain
+    // correct and UIDs do not collide with agents at indices 0 and 1.
+    register_base_metadata();
+
+    auto make_nic = [](size_t device_idx, const char* name) {
+        agent a{};
+        a.type              = agent_type::NIC;
+        a.device_type_index = device_idx;
+        a.name              = name;
+        a.model_name        = "CX7";
+        a.vendor_name       = "AI NIC";
+        a.product_name      = "AI NIC";
+        return a;
+    };
+
+    const auto nic_at_2 = make_nic(2, "rdma0");
+    const auto nic_at_5 = make_nic(5, "rdma1");
+
+    auto reg = [&](const agent& a) {
+        profiler_hub::writer_types::agent_info_t info{};
+        info.unique_id    = make_agent_uid(a);
+        info.name         = a.name;
+        info.model_name   = a.model_name;
+        info.vendor_name  = a.vendor_name;
+        info.product_name = a.product_name;
+        info.node_id      = NODE_ID;
+        info.process_id   = PID;
+        m_writer->register_agent_info(info);
+    };
+
+    reg(nic_at_2);
+    reg(nic_at_5);
+
+    flush_and_open_reader();
+
+    auto agents = m_reader->get_all_agents();
+    ASSERT_EQ(agents.size(), 2U);
+    for(const auto& agent_ptr : agents)
+        EXPECT_EQ(agent_ptr->agent_type, "NIC");
+
+    bool found_rdma0 = false, found_rdma1 = false;
+    for(const auto& agent_ptr : agents)
+    {
+        if(agent_ptr->name == "rdma0") found_rdma0 = true;
+        if(agent_ptr->name == "rdma1") found_rdma1 = true;
+    }
+    EXPECT_TRUE(found_rdma0) << "NIC agent 'rdma0' not found in read-back";
+    EXPECT_TRUE(found_rdma1) << "NIC agent 'rdma1' not found in read-back";
+
+    // The UIDs must carry the actual device indices, not the loop counters.
+    EXPECT_EQ(make_agent_uid(nic_at_2).type_index, 2U);
+    EXPECT_EQ(make_agent_uid(nic_at_5).type_index, 5U);
+    EXPECT_NE(make_agent_uid(nic_at_2), make_agent_uid(nic_at_5));
 }
 
 // ---------------------------------------------------------------------------

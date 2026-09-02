@@ -210,9 +210,10 @@ struct nic_traits
         size_t nic_index = 0;
         for(const auto& entry : entries)
         {
+            const size_t device_index = entry.device->get_index();
             agent cur_agent{ agent_type::NIC,
                              0,
-                             nic_index,
+                             device_index,
                              static_cast<std::uint32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
                              static_cast<std::int32_t>(nic_index),
