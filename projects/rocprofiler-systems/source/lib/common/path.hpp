@@ -5,7 +5,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -361,14 +361,14 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_se
         struct link_map* _link_map = nullptr;
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         // if include_self is false, start at next library
-        const struct link_map* _next = _include_self ? _link_map : _link_map->l_next;
-        while(_next)
+        const struct link_map* next = _include_self ? _link_map : _link_map->l_next;
+        while(next)
         {
-            if(_next->l_name != nullptr && !std::string_view{ _next->l_name }.empty())
+            if(next->l_name != nullptr && !std::string_view{ next->l_name }.empty())
             {
-                _chain.emplace_back(_next->l_name);
+                _chain.emplace_back(next->l_name);
             }
-            _next = _next->l_next;
+            next = next->l_next;
         }
 
         if(_noload == false) dlclose(_handle);

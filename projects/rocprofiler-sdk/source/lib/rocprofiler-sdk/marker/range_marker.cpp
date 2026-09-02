@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -674,14 +674,6 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
             auto& _push_copy_func = _info.get_push_table_func(_copy_table);
             auto& _pop_copy_func  = _info.get_pop_table_func(_copy_table);
 
-            ROCP_FATAL_IF(_push_copy_func && _tbl_instance == 0)
-                << _info.name << " has non-null function pointer " << _push_copy_func
-                << " despite this being the first instance of the library being copies";
-
-            ROCP_FATAL_IF(_pop_copy_func && _tbl_instance == 0)
-                << _info.name << " has non-null function pointer " << _pop_copy_func
-                << " despite this being the first instance of the library being copies";
-
             if(!_push_copy_func || !_pop_copy_func)
             {
                 ROCP_TRACE << "copying table entry for " << _info.name;
@@ -708,10 +700,6 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
             // 5. save the original function in the saved table
             auto& _copy_table = _info.get_table(*get_table<TableIdx>());
             auto& _copy_func  = _info.get_table_func(_copy_table);
-
-            ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
-                << _info.name << " has non-null function pointer " << _copy_func
-                << " despite this being the first instance of the library being copies";
 
             if(!_copy_func)
             {

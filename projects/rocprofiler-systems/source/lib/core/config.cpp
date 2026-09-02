@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
@@ -16,8 +17,8 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "sdk-tracing-config-deps.hpp"
-#include "sdk-tracing-config.hpp"
+#include "sdk/tracing-config-deps.hpp"
+#include "sdk/tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -40,8 +41,8 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -66,6 +67,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -468,6 +470,136 @@ json_has_project_name_root(const std::string& json_path)
         return false;
     }
 }
+
+void
+register_operation_include_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_include_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_include_env_name,
+                              "Inclusive filter for domain operations (for API "
+                              "domains, this selects the functions to trace) "
+                              "[regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_exclude_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_exclude_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_exclude_env_name,
+                              "Exclusive filter for domain operations applied "
+                              "after the inclusive filter (for API domains, "
+                              "removes function from trace) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_backtrace_setting(const std::shared_ptr<settings>& _config,
+                                     std::unordered_set<std::string>& registered,
+                                     const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_annotate_backtrace_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string,
+                              spec.env_names.operations_annotate_backtrace_env_name,
+                              "Specification of domain operations which will "
+                              "record a backtrace (for API domains, this is a "
+                              "list of function names) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_rocm_operation_settings(const std::shared_ptr<settings>& _config,
+                                 const auto&                      operation_settings)
+{
+    auto registered_operation_settings = std::unordered_set<std::string>{};
+    for(const auto& spec : operation_settings)
+    {
+        register_operation_include_setting(_config, registered_operation_settings, spec);
+        register_operation_exclude_setting(_config, registered_operation_settings, spec);
+        register_operation_backtrace_setting(_config, registered_operation_settings,
+                                             spec);
+    }
+}
+
+void
+register_rocm_group_by_queue_setting(const std::shared_ptr<settings>& _config,
+                                     const std::vector<std::string>&  rocm_domain_choices)
+{
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
+    // present in supported ROCProfiler-SDK domains.
+    if(std::ranges::find(rocm_domain_choices, std::string{ "hip_stream" }) ==
+       rocm_domain_choices.end())
+    {
+        return;
+    }
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
+                              "By default, Perfetto trace will show the HIP streams "
+                              "to which kernel and memory copy operations submitted. "
+                              "With the `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the "
+                              "trace will display HSA queues to which these kernel "
+                              "and memory operations were submitted.",
+                              false, "rocm", "perfetto");
+}
+
+void
+configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
+{
+    using tracing_config_t = rocprofiler_sdk::tracing_config<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
+        rocprofiler_sdk::default_externals>;
+
+    const auto rocm_domain_choices = tracing_config_t::get_domain_choices();
+    const auto rocm_domain_description =
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(rocm_domain_choices, ", "));
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
+        tracing_config_t::get_domain_defaults(), "rocm", "rocprofiler-sdk")
+        ->set_choices(rocm_domain_choices);
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
+                              "ROCm hardware counters. Use ':device=N' syntax to "
+                              "specify collection on device number N, e.g. ':device=0'. "
+                              "If no device specification is provided, the event is "
+                              "collected on every available device",
+                              std::string{}, "rocm", "hardware_counters");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_SPM_EVENTS,
+        "ROCm SPM hardware counters to collect. Comma-separated list of SPM-capable "
+        "counter names",
+        std::string{}, "rocm", "hardware_counters", "spm", "beta");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::uint64_t, env_vars::ROCM_SPM_SAMPLE_INTERVAL,
+        "ROCm SPM sampling interval in GPU shader-clock cycles. Required when SPM "
+        "events are set; the default of 0 means unset and is rejected. The interval "
+        "is rounded to the nearest multiple of 32. Supported intervals are "
+        "hardware-limited and can be queried with 'rocprofv3-avail info --spm-config'",
+        std::uint64_t{ 0 }, "rocm", "hardware_counters", "spm", "beta");
+
+    register_rocm_operation_settings(_config, tracing_config_t::get_operation_settings());
+
+    register_rocm_group_by_queue_setting(_config, rocm_domain_choices);
+}
 }  // namespace
 
 void
@@ -534,9 +666,6 @@ configure_settings(bool _init)
 
     auto _config = *get_config_impl();
 
-    // if using timemory, default to perfetto being off
-    auto _default_perfetto_v = !rocprofsys::get_env<bool>(env_vars::PROFILE, false);
-
     auto _system_backend = rocprofsys::get_env(env_vars::PERFETTO_BACKEND_SYSTEM, false);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::LOG_LEVEL,
@@ -586,8 +715,8 @@ configure_settings(bool _init)
         "parallelism", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
-                              "Enable perfetto backend for tracing", _default_perfetto_v,
-                              "backend", "perfetto");
+                              "Enable perfetto backend for tracing", false, "backend",
+                              "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
                               "[DEPRECATED] The new default option is to use data from "
@@ -601,20 +730,18 @@ configure_settings(bool _init)
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
                               "backend", "perfetto", "deprecated");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend", false,
                               "backend", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_TIMEMORY,
-                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE", false,
                               "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_CAUSAL,
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", false,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", true,
                               "backend", "rocpd");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -986,9 +1113,7 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::sdk_tracing_config<
-        rocprofiler_sdk::wrapper,
-        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
+    configure_rocm_tracing_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
@@ -1332,19 +1457,26 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    auto  _cap_status        = timemory::linux::capability::cap_read(process::get_id());
-    auto* _cap_data          = &_cap_status.effective;
-    bool  _has_cap_sys_admin = false;
-    for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
-        if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
+    // Capability numbers are stable kernel ABI, but CAP_* macros come from the host
+    // Name the PERFMON bit here to keep it visible even where those headers predate it
+    constexpr unsigned _cap_sys_admin_bit = CAP_SYS_ADMIN;
+    constexpr unsigned _cap_perfmon_bit   = 38;  // linux 5.8+
 
-    if(_paranoid > 2 && !_has_cap_sys_admin)
+    // CAP_PERFMON is the narrower grant; either one permits perf_event_open
+    const auto _cap_effective =
+        timemory::linux::capability::cap_read(process::get_id()).effective;
+    const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
+                               ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
+
+    if(_paranoid > 2 && !_has_perf_cap)
     {
         LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2)",
+                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                    "CAP_SYS_ADMIN)",
                     _paranoid);
         LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
+                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
         trait::runtime_enabled<comp::papi_config>::set(false);
         trait::runtime_enabled<comp::papi_common<void>>::set(false);
         trait::runtime_enabled<comp::papi_array_t>::set(false);
@@ -1580,6 +1712,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -1592,6 +1725,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
@@ -1636,6 +1770,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -2819,6 +2954,14 @@ get_gpu_perf_counters()
 {
     static auto _v = get_config()->find(std::string{ env_vars::GPU_PERF_COUNTERS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::vector<std::string>
+get_rocm_counter_events()
+{
+    static auto _val = get_config()->find(std::string{ env_vars::ROCM_EVENTS });
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_val->second).get(), " ,;\t\n");
 }
 
 bool

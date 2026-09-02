@@ -297,8 +297,8 @@ struct kernel_dispatch
     uint64_t                dispatch_id         = 0;
     uint64_t                stream_id           = 0;
     uint64_t                queue_id            = 0;
-    uint64_t                graph_exec_id       = 0;
-    uint64_t                graph_node_id       = 0;
+    std::optional<uint64_t> graph_exec_id       = std::nullopt;
+    std::optional<uint64_t> graph_node_id       = std::nullopt;
     std::string             queue               = {};
     std::string             stream              = {};
     rocprofiler_timestamp_t start               = 0;
@@ -357,8 +357,8 @@ struct memory_copies
     std::string             category             = {};
     uint64_t                stream_id            = 0;
     uint64_t                queue_id             = 0;
-    uint64_t                graph_exec_id        = 0;
-    uint64_t                graph_node_id        = 0;
+    std::optional<uint64_t> graph_exec_id        = std::nullopt;
+    std::optional<uint64_t> graph_node_id        = std::nullopt;
     std::string             stream_name          = {};
     std::string             queue_name           = {};
     uint64_t                size                 = 0;

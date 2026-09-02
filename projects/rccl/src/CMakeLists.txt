@@ -30,31 +30,31 @@ set(SRC_FILES
   dev_runtime.cc
   dev_runtime_segments.cc
   dev_runtime_internal.h
-  dda_all_reduce_ipc.cu
-  dda_reduce_scatter_ipc.cu
-  dda_all_gather_ipc.cu
-  dda_alltoall_ipc.cu
-  dda_all_reduce_fabric.cu
-  dda_all_reduce_fabric_ll.cu
-  dda_all_reduce_fabric_ll128.cu
-  dda_reduce_scatter_fabric.cu
-  dda_all_gather_fabric.cu
-  dda_all_gather_fabric_ll.cu
-  dda_all_gather_fabric_ll128.cu
-  dda_alltoall_fabric.cu
-  dda_alltoall_fabric_ll.cu
-  dda_alltoall_fabric_ll128.cu
-  dda_reduce_scatter_fabric_ll.cu
-  dda_reduce_scatter_fabric_ll128.cu
-  device_buffer.cc
+  algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
+  algorithms/dda/all_gather/dda_all_gather_ipc.cu
+  algorithms/dda/alltoall/dda_alltoall_ipc.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu
+  algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
+  algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
+  algorithms/dda/device/device_buffer.cc
   enqueue.cc
-  fabric_gpu_barrier.cu
-  fabric_init.cu
-  fabric_mem_handler.cc
+  algorithms/dda/fabric/fabric_gpu_barrier.cu
+  algorithms/dda/fabric/fabric_init.cu
+  algorithms/dda/fabric/fabric_mem_handler.cc
   group.cc
-  ipc_gpu_barrier.cu
-  ipc_init.cu
-  ipc_mem_handler.cc
+  algorithms/dda/ipc/ipc_gpu_barrier.cu
+  algorithms/dda/ipc/ipc_init.cu
+  algorithms/dda/ipc/ipc_mem_handler.cc
   init.cc
   init_nvtx.cc
   mnnvl.cc
@@ -120,25 +120,25 @@ set(SRC_FILES
   include/alloc.h
   include/mem_manager.h
   include/allocator.h
-  include/algorithms/CollCommon.h
-  include/algorithms/CollCommon_ll128.h
-  include/algorithms/all_reduce/all_reduce_dda.h
-  include/algorithms/all_reduce/all_reduce_dda_ll.h
-  include/algorithms/all_reduce/all_reduce_dda_ll_twoshot.h
-  include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda.h
-  include/algorithms/all_gather/all_gather_dda.h
-  include/algorithms/alltoall/alltoall_dda.h
-  include/algorithms/all_reduce/all_reduce_dda_fabric.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric.h
-  include/algorithms/all_gather/all_gather_dda_fabric.h
-  include/algorithms/all_gather/all_gather_dda_fabric_ll.h
-  include/algorithms/all_gather/all_gather_dda_fabric_ll128.h
-  include/algorithms/alltoall/alltoall_dda_fabric.h
-  include/algorithms/alltoall/alltoall_dda_fabric_ll.h
-  include/algorithms/alltoall/alltoall_dda_fabric_ll128.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/dda/device/CollCommon.h
+  algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda.h
+  algorithms/dda/all_gather/all_gather_dda.h
+  algorithms/dda/alltoall/alltoall_dda.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
+  algorithms/dda/all_gather/all_gather_dda_fabric.h
+  algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
+  algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h
+  algorithms/dda/alltoall/alltoall_dda_fabric.h
+  algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
+  algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -161,20 +161,20 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
-  include/dda_all_reduce.h
-  include/dda_reduce_scatter.h
-  include/dda_all_gather.h
-  include/dda_alltoall.h
-  include/dda_init_detail.h
+  algorithms/dda/all_reduce/dda_all_reduce.h
+  algorithms/dda/reduce_scatter/dda_reduce_scatter.h
+  algorithms/dda/all_gather/dda_all_gather.h
+  algorithms/dda/alltoall/dda_alltoall.h
+  algorithms/dda/dda_init_detail.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
   include/env.h
-  include/device_buffer.h
+  algorithms/dda/device/device_buffer.h
   include/enqueue.h
-  include/fabric_init.h
-  include/fabric_gpu_barrier.h
-  include/fabric_mem_handler.h
+  algorithms/dda/fabric/fabric_init.h
+  algorithms/dda/fabric/fabric_gpu_barrier.h
+  algorithms/dda/fabric/fabric_mem_handler.h
   include/gdr_peermem.h
   include/gdrwrap.h
   include/git_version.h
@@ -191,9 +191,9 @@ set(SRC_FILES
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
-  include/ipc_gpu_barrier.h
-  include/ipc_init.h
-  include/ipc_mem_handler.h
+  algorithms/dda/ipc/ipc_gpu_barrier.h
+  algorithms/dda/ipc/ipc_init.h
+  algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h
   include/mem_manager.h
   include/mnnvl.h
@@ -201,6 +201,7 @@ set(SRC_FILES
   include/nccl_device.h
   include/nccl_device/net_device.h
   include/net.h
+  include/net_telemetry.h
   include/nvmlwrap.h
   include/nvtx.h
   include/nvtx_payload_schemas.h
@@ -487,6 +488,7 @@ set(SRC_FILES
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib/gdaki/gin_host_gdaki.h
+  transport/net_telemetry.cc
   transport/net_socket.cc
   transport/nvls.cc
   transport/p2p.cc
@@ -596,13 +598,14 @@ foreach(SRC_FILE ${SRC_FILES})
   endif()
 endforeach()
 
-set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/nccl_device.h")
+set(NCCL_DEVICE_HEADER_STAMP "${PROJECT_BINARY_DIR}/include/.nccl_device_headers.stamp")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
 set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
 set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
 add_custom_command(
   OUTPUT ${HIP_COMPAT_DST}
-  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
   MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
   COMMENT "Copying hip_compat.h (no hipification)"
 )
@@ -622,9 +625,7 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
 
-# copy_directory_if_different was added in CMake 3.26.  On older toolchains
-# fall back to the unconditional copy_directory (same behaviour, just causes
-# unnecessary recompilation on no-op rebuilds).
+# copy_directory_if_different was added in CMake 3.26.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
   add_custom_command(
     OUTPUT ${NCCL_DEVICE_HEADER}
@@ -634,17 +635,23 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER})
 else()
+  # On older CMake, copy_directory is unconditional and can retrigger rebuilds.
+  # Use a touched stamp to keep OUTPUT >= DEPENDS after successful staging.
   add_custom_command(
-    OUTPUT ${NCCL_DEVICE_HEADER}
+    OUTPUT ${NCCL_DEVICE_HEADER_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    COMMAND ${CMAKE_COMMAND} -E touch "${NCCL_DEVICE_HEADER_STAMP}"
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    COMMENT "Staging nccl_device headers into include/"
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER_STAMP})
 endif()
-add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
+add_custom_target(copy_nccl_device_headers DEPENDS ${COPY_NCCL_DEVICE_HEADERS_OUTPUT})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are

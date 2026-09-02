@@ -11,8 +11,6 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
-#include "core/sdk-tracing-config-deps.hpp"
-#include "core/sdk-tracing-config.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
@@ -67,13 +65,6 @@
 
 namespace rocprofsys::rocprofiler_sdk::spm
 {
-namespace
-{
-using rocprofiler_sdk::default_sdk_externals;
-using rocprofiler_sdk::sdk_tracing_config;
-using rocprofiler_sdk::wrapper;
-}  // namespace
-
 bool
 configuration::requested() const noexcept
 {
@@ -1228,8 +1219,7 @@ configure_runtime(client_data* data)
         .counter_events  = get_events(),
         .sample_interval = get_sample_interval(),
     };
-    const auto dispatch_counter_events =
-        sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events();
+    const auto dispatch_counter_events = config::get_rocm_counter_events();
     const auto gpu_perf_counter_events = config::get_gpu_perf_counters();
 
     if(!is_config_valid(requested_config, dispatch_counter_events,

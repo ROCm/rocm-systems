@@ -1087,19 +1087,52 @@ setup()
     return configure(true);
 }
 
+void
+postfork_child_release_samplers() noexcept
+{
+    // release() rather than reset(): deliberately skips ~sampler_t() after fork().
+    auto* samplers = sampler_instances::get();
+    if(!samplers)
+    {
+        return;
+    }
+    for(auto& itr : *samplers)
+    {
+        (void) itr.release();
+    }
+}
+
 std::set<int>
 shutdown()
 {
+    // Prefer the ID captured in thread_info: the thread-local backing get_id() may
+    // already have been destroyed when shutdown() runs from a thread-local destructor.
+    const auto& info = thread_info::get();
+    const auto  tid  = (info && info->index_data) ? info->index_data->sequent_value
+                                                  : threading::get_id();
+
     if(is_child_process())
     {
-        for(auto& itr : *sampler_instances::get())
-            itr.release();
+        // Only this thread's sampler may be released here: shutdown() runs from the
+        // destructor of every exiting thread, and is_child_process() stays true for the
+        // child's whole lifetime, so releasing the whole array would destroy samplers
+        // belonging to threads still inside configure().
+        auto* samplers = sampler_instances::get();
+        if(samplers)
+        {
+            // Validate the signed thread ID before converting it and indexing sampler
+            // storage. This runs during thread teardown, so avoid throwing accessors.
+            if(tid >= 0 && static_cast<size_t>(tid) < samplers->size())
+            {
+                (void) (*samplers)[static_cast<size_t>(tid)].release();
+            }
+        }
         return std::set<int>{};
     }
 
-    auto _v = configure(false);
+    auto configured_signals = configure(false, tid);
     if(utility::get_thread_index() == 0) stop_duration_thread();
-    return _v;
+    return configured_signals;
 }
 
 void

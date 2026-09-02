@@ -260,9 +260,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     def test_simulate_lib(self, rocprof_config):
-        user_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-user.so"
-        if not user_lib.exists():
-            pytest.fail("librocprof-sys-user.so not found")
+        causal_api_lib = (
+            rocprof_config.rocprofsys_lib_dir / "librocprof-sys-causal-api.so"
+        )
+        if not causal_api_lib.exists():
+            pytest.fail("librocprof-sys-causal-api.so not found")
 
         pass_regex = [
             r"\[rocprof-sys\]\[exe\] Runtime instrumentation is not possible![\s\S]*"
@@ -272,7 +274,14 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=self.target,
-            run_args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
+            run_args=[
+                "--print-available",
+                "functions",
+                "-v",
+                "2",
+                "--",
+                str(causal_api_lib),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
@@ -287,9 +296,9 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         binary rewrite tests with "unable to reinstrument previously instrumented
         binary" errors.
         """
-        lib_basename = "librocprof-sys-user.so"
-        user_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
-        if not user_lib.exists():
+        lib_basename = "librocprof-sys-causal-api.so"
+        causal_api_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
+        if not causal_api_lib.exists():
             pytest.skip(f"{lib_basename} not built")
 
         tmp_dir = test_output_dir / "tmp"

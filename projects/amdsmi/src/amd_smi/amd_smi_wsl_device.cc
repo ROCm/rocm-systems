@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifdef ENABLE_WSL_BACKEND
 
@@ -313,7 +294,10 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
     info->device_id = a.device_id;
     info->rev_id = a.rev_id;
     std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "%016lx", a.asic_serial);
-    info->oam_id = gpu_id_;
+    // rocdxg_smi_asic_info_t has no OAM/physical-accelerator-ID fields; gpu_id_ is
+    // just an enumeration index, not real hardware data, so report N/A rather than 0.
+    info->oam_id = std::numeric_limits<uint32_t>::max();
+    info->physical_acc_id = std::numeric_limits<uint32_t>::max();
     info->num_of_compute_units = a.num_of_compute_units;
     // Convert IP version (major<<16|minor<<8|stepping) to the nibble-packed
     // hex format Python expects: hex(value)[2:] == "MMSS" (e.g. 0x1100 → "gfx1100").
@@ -336,7 +320,10 @@ amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
   info->device_id = device_id_;
   info->rev_id = std::numeric_limits<uint32_t>::max();
   copy_string(info->asic_serial, "ffffffffffffffff");
-  info->oam_id = gpu_id_;
+  // rocdxg_smi_asic_info_t has no OAM/physical-accelerator-ID fields; gpu_id_ is
+  // just an enumeration index, not real hardware data, so report N/A rather than 0.
+  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
   info->num_of_compute_units =
       num_compute_units_ ? num_compute_units_ : std::numeric_limits<uint32_t>::max();
   info->target_graphics_version = std::numeric_limits<uint64_t>::max();

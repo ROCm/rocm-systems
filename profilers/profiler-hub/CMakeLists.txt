@@ -131,6 +131,20 @@ if(PROFILER_HUB_ENABLE_COVERAGE)
 endif()
 
 # ------------------------------------------------------------ #
+# Schema from rocprofiler-sdk-rocpd
+# ------------------------------------------------------------ #
+
+set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
+set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
+
+include(rocprofiler-sdk-rocpd)
+
+target_include_directories(
+    profiler-hub-objects
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
+
+# ------------------------------------------------------------ #
 # SQLite3
 # ------------------------------------------------------------ #
 
@@ -157,40 +171,6 @@ target_link_libraries(profiler-hub-objects PRIVATE spdlog::spdlog)
 
 include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
-
-# ------------------------------------------------------------ #
-# Schema from rocprofiler-sdk-rocpd
-# ------------------------------------------------------------ #
-
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocm)
-include(rocprofiler-sdk-rocpd)
-
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub-objects
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub-objects
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
 
 # ------------------------------------------------------------ #
 # Logging

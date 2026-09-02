@@ -1,11 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
-#include "core/sdk-tracing-config-deps.hpp"
-#include "core/sdk-tracing-config.hpp"
 #include "core/timemory.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm_internal.hpp"
 
@@ -13,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -21,9 +19,6 @@ namespace
 {
 constexpr auto valid_sample_interval = std::uint64_t{ 8192 };
 
-using rocprofsys::rocprofiler_sdk::default_sdk_externals;
-using rocprofsys::rocprofiler_sdk::sdk_tracing_config;
-using rocprofsys::rocprofiler_sdk::wrapper;
 using rocprofsys::rocprofiler_sdk::spm::configuration;
 using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
@@ -33,13 +28,21 @@ void
 ensure_spm_settings_registered()
 {
     auto settings = rocprofsys::settings::shared_instance();
-    if(settings->find(std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS }) ==
-           settings->end() ||
-       settings->find(std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL }) ==
-           settings->end())
-    {
-        sdk_tracing_config<wrapper, default_sdk_externals>::config_settings(settings);
-    }
+    auto register_if_missing = [&settings](const char* env_name, auto initial_value) {
+        using value_type = decltype(initial_value);
+        auto setting_name = std::string{ env_name };
+        if(settings->find(setting_name) == settings->end())
+        {
+            (void) settings->insert<value_type, value_type>(
+                setting_name, setting_name, "SPM unit-test setting",
+                value_type{ initial_value }, std::set<std::string>{ "spm" });
+        }
+    };
+
+    register_if_missing(rocprofsys::env_vars::ROCM_EVENTS, std::string{});
+    register_if_missing(rocprofsys::env_vars::ROCM_SPM_EVENTS, std::string{});
+    register_if_missing(rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL,
+                        std::uint64_t{ 0 });
 }
 
 class spm_settings_test : public ::testing::Test
