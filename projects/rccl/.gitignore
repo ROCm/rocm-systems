@@ -25,7 +25,6 @@ tags
 *.swp
 .cache/
 *.log
-*.profraw
 
 # Visual Studio Code
 .vscode
