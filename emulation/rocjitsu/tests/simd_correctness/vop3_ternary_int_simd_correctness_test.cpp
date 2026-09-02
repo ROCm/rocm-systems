@@ -219,65 +219,6 @@ TEST(Vop3TernaryIntSimdCorrectness, PartialExec) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
-TEST(Vop3TernaryIntSimdCorrectness, Rdna4Add3ClampSaturatesNormalAndDppPaths) {
-  ForceScalarGuard gate_guard;
-  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
-  constexpr uint32_t kSrc0 = 0;
-  constexpr uint32_t kSrc1 = 1;
-  constexpr uint32_t kSrc2 = 2;
-
-  auto run_case = [&](bool force_scalar, bool dpp, bool clamp) {
-    util::set_force_scalar_for_testing(force_scalar);
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
-    EXPECT_NE(fx.cu, nullptr);
-    EXPECT_NE(fx.wf, nullptr);
-    if (fx.cu == nullptr || fx.wf == nullptr)
-      return 0u;
-    const uint32_t base = fx.wf->vgpr_alloc().base;
-    fx.wf->set_exec(1u);
-    fx.cu->write_vgpr(base + kSrc0, 0, UINT32_MAX);
-    fx.cu->write_vgpr(base + kSrc1, 0, 1u);
-    fx.cu->write_vgpr(base + kSrc2, 0, 0u);
-    fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
-
-    if (!dpp) {
-      const auto words =
-          rdna4::build_vop3(rdna4::kVAdd3U32Vop3, {.vdst = kDstVgpr,
-                                                   .clamp = static_cast<uint8_t>(clamp),
-                                                   .src0 = 256 + kSrc0,
-                                                   .src1 = 256 + kSrc1,
-                                                   .src2 = 256 + kSrc2});
-      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
-      EXPECT_NE(inst, nullptr);
-      if (inst == nullptr)
-        return 0u;
-      fx.cu->execute_instruction(inst.get(), *fx.wf);
-    } else {
-      rdna4::Vop3VopDpp16MachineInst raw{};
-      raw.vdst = kDstVgpr;
-      raw.clamp = clamp;
-      raw.src0 = amdgpu::SRC_DPP;
-      raw.src1 = 256 + kSrc1;
-      raw.src2 = 256 + kSrc2;
-      raw.vsrc0 = kSrc0;
-      raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE;
-      raw.bound_ctrl = 1;
-      raw.bank_mask = 0xF;
-      raw.row_mask = 0xF;
-      rdna4::VAdd3U32Vop3 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
-      inst.execute_impl(*fx.wf);
-    }
-
-    return fx.cu->read_vgpr(base + kDstVgpr, 0);
-  };
-
-  for (bool force_scalar : {false, true}) {
-    EXPECT_EQ(run_case(force_scalar, false, true), UINT32_MAX);
-    EXPECT_EQ(run_case(force_scalar, true, true), UINT32_MAX);
-    EXPECT_EQ(run_case(force_scalar, false, false), 0u);
-  }
-}
-
 TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
   struct GoldenCase {
     const char *name;

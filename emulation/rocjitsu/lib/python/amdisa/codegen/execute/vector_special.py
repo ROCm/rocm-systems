@@ -803,8 +803,16 @@ def gen_vector_mad_32_16(
         L.append(
             f'    int32_t s2 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane));'
         )
+        result = (
+            'amdgpu::vop3_integer_mad<int32_t, 16>('
+            'static_cast<uint32_t>(s0), static_cast<uint32_t>(s1), '
+            'static_cast<uint32_t>(s2), inst_.clamp)'
+            if is_vop3
+            else 'static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) + '
+            'static_cast<uint32_t>(s2)'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) + static_cast<uint32_t>(s2));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});'
         )
     else:
         if is_vop3:
@@ -820,8 +828,13 @@ def gen_vector_mad_32_16(
         L.append(
             f'    uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
+        result = (
+            'amdgpu::vop3_integer_mad<uint32_t, 16>(s0, s1, s2, inst_.clamp)'
+            if is_vop3
+            else 's0 * s1 + s2'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, s0 * s1 + s2);'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});'
         )
     L.append('  }')
     return '\n'.join(L)

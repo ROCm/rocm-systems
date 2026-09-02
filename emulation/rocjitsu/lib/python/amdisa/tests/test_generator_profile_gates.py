@@ -4126,7 +4126,7 @@ def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
     assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
 
 
-def test_rdna4_generator_wires_add3_clamp_from_encoded_vop3_field():
+def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
     isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
     parser = Parser(str(isa_xml), Rdna4Profile())
     spec = parser.parse()
@@ -4144,8 +4144,27 @@ def test_rdna4_generator_wires_add3_clamp_from_encoded_vop3_field():
         )
 
     add3 = generated_body('V_ADD3_U32')
-    assert 'vop3_integer_add3<uint32_t>' in add3
-    assert 'inst_.clamp' in add3
+    assert 'vop3_integer_' not in add3
+    assert 'inst_.clamp' not in add3
+
+    expected_helpers = {
+        'V_MUL_I32_I24': 'vop3_integer_mul<int32_t, 24>',
+        'V_MUL_U32_U24': 'vop3_integer_mul<uint32_t, 24>',
+        'V_MAD_I32_I24': 'vop3_integer_mad<int32_t, 24>',
+        'V_MAD_U32_U24': 'vop3_integer_mad<uint32_t, 24>',
+        'V_MAD_I16': 'vop3_integer_mad<int16_t, 16>',
+        'V_MAD_U16': 'vop3_integer_mad<uint16_t, 16>',
+        'V_MAD_I32_I16': 'vop3_integer_mad<int32_t, 16>',
+        'V_MAD_U32_U16': 'vop3_integer_mad<uint32_t, 16>',
+        'V_SAD_U8': 'vop3_integer_sad_u8',
+        'V_SAD_U16': 'vop3_integer_sad_u16',
+        'V_SAD_U32': 'vop3_integer_sad_u32',
+        'V_MSAD_U8': 'vop3_integer_msad_u8',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name)
+        assert helper in body
+        assert 'inst_.clamp' in body
 
     or3 = generated_body('V_OR3_B32')
     assert 'vop3_integer_add3' not in or3

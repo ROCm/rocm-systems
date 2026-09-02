@@ -119,13 +119,71 @@ inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
   }
 }
 
-/// @brief Execute unsigned VOP3 integer three-input addition, saturating when CLAMP is set.
-template <typename T>
-inline std::make_unsigned_t<T> vop3_integer_add3(std::make_unsigned_t<T> lhs,
-                                                 std::make_unsigned_t<T> rhs,
-                                                 std::make_unsigned_t<T> addend, bool clamp) {
-  static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>);
-  return vop3_integer_add<T>(vop3_integer_add<T>(lhs, rhs, clamp), addend, clamp);
+/// @brief Execute an integer multiply-add with an exact intermediate.
+template <typename T, unsigned SourceBits>
+inline std::make_unsigned_t<T> vop3_integer_mad(uint32_t lhs, uint32_t rhs,
+                                                std::make_unsigned_t<T> addend, bool clamp) {
+  static_assert(std::is_integral_v<T> && sizeof(T) <= 4);
+  static_assert(SourceBits == 16 || SourceBits == 24);
+  using U = std::make_unsigned_t<T>;
+  if constexpr (std::is_signed_v<T>) {
+    const auto extend = [](uint32_t value) -> int64_t {
+      constexpr uint32_t shift = 32 - SourceBits;
+      return static_cast<int64_t>(static_cast<int32_t>(value << shift) >> shift);
+    };
+    const int64_t wide = extend(lhs) * extend(rhs) + static_cast<int64_t>(std::bit_cast<T>(addend));
+    if (!clamp)
+      return static_cast<U>(wide);
+    return static_cast<U>(std::clamp(wide, static_cast<int64_t>(std::numeric_limits<T>::min()),
+                                     static_cast<int64_t>(std::numeric_limits<T>::max())));
+  } else {
+    constexpr uint32_t source_mask = (uint32_t{1} << SourceBits) - 1u;
+    const uint64_t wide = static_cast<uint64_t>(lhs & source_mask) * (rhs & source_mask) + addend;
+    if (clamp && wide > std::numeric_limits<U>::max())
+      return std::numeric_limits<U>::max();
+    return static_cast<U>(wide);
+  }
+}
+
+template <typename T, unsigned SourceBits>
+inline std::make_unsigned_t<T> vop3_integer_mul(uint32_t lhs, uint32_t rhs, bool clamp) {
+  return vop3_integer_mad<T, SourceBits>(lhs, rhs, std::make_unsigned_t<T>{0}, clamp);
+}
+
+inline uint32_t vop3_integer_sad_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+inline uint32_t vop3_integer_sad_u16(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 2; ++i) {
+    const uint32_t a = (lhs >> (i * 16)) & 0xffffu;
+    const uint32_t b = (rhs >> (i * 16)) & 0xffffu;
+    difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+inline uint32_t vop3_integer_sad_u32(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  const uint32_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
+}
+
+inline uint32_t vop3_integer_msad_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    if (b != 0)
+      difference += a > b ? a - b : b - a;
+  }
+  return vop3_integer_add<uint32_t>(difference, addend, clamp);
 }
 
 /// @brief Execute VOP3 integer subtraction, saturating when CLAMP is set.
@@ -2334,8 +2392,9 @@ template <typename T, typename Inst, typename TernOp>
 [[nodiscard]] inline bool try_execute_ternary_vop3_true16_src01_simd(Inst &inst, Wavefront &wf,
                                                                      TernOp tern_op) {
   static_assert(std::is_same_v<T, uint32_t>);
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));

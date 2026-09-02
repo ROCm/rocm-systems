@@ -740,8 +740,20 @@ def _lower_saturating_integer_binary(node: SemaNode, ctx: LoweringContext) -> st
     if dtype not in ('i16', 'u16', 'i32', 'u32', 'u64'):
         raise ValueError(f'Unsupported integer saturation type: {dtype}')
 
-    lhs = _lower_expr(node.children[0], replace(ctx, integer_saturation_dtype=None))
-    rhs = _lower_expr(node.children[1], replace(ctx, integer_saturation_dtype=None))
+    child_ctx = replace(ctx, integer_saturation_dtype=None)
+    if node.kind == SemaNodeKind.ADD and node.children[0].kind == SemaNodeKind.MUL:
+        product = node.children[0]
+        lhs = _lower_expr(product.children[0], child_ctx)
+        rhs = _lower_expr(product.children[1], child_ctx)
+        addend = _lower_expr(node.children[1], child_ctx)
+        cpp_type = f'{"int" if dtype.startswith("i") else "uint"}{dtype[1:]}_t'
+        return (
+            f'amdgpu::vop3_integer_mad<{cpp_type}, {dtype[1:]}>('
+            f'{lhs}, {rhs}, {addend}, inst_.clamp)'
+        )
+
+    lhs = _lower_expr(node.children[0], child_ctx)
+    rhs = _lower_expr(node.children[1], child_ctx)
     operation = 'add' if node.kind == SemaNodeKind.ADD else 'sub'
     cpp_type = f'{"int" if dtype.startswith("i") else "uint"}{dtype[1:]}_t'
     return (
@@ -1751,8 +1763,27 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
-    if ctx.integer_saturation_dtype == 'u32' and callee == 'add3':
-        return f'amdgpu::vop3_integer_add3<uint32_t>({args_str}, inst_.clamp)'
+    saturating_calls = {
+        'mul_i24': ('int32_t', 24, False),
+        'mul_u24': ('uint32_t', 24, False),
+        'mad_i24': ('int32_t', 24, True),
+        'mad_u24': ('uint32_t', 24, True),
+        'mad_lo_u16': ('uint16_t', 16, True),
+    }
+    if ctx.integer_saturation_dtype is not None and callee in saturating_calls:
+        cpp_type, source_bits, has_addend = saturating_calls[callee]
+        helper = 'vop3_integer_mad' if has_addend else 'vop3_integer_mul'
+        return (
+            f'amdgpu::{helper}<{cpp_type}, {source_bits}>(' f'{args_str}, inst_.clamp)'
+        )
+
+    if ctx.integer_saturation_dtype == 'u32' and callee in (
+        'sad_u8',
+        'sad_u16',
+        'sad_u32',
+        'msad_u8',
+    ):
+        return f'amdgpu::vop3_integer_{callee}({args_str}, inst_.clamp)'
 
     if ctx.integer_saturation_dtype == 'u32' and callee in (
         'add_co',

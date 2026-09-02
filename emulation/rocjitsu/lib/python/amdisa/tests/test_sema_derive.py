@@ -1606,18 +1606,27 @@ class TestDeriveVectorBinop:
         assert 'inst_.clamp' in cpp
         assert expected in cpp
 
-    def test_vop3_integer_add3_clamps_the_full_unsigned_sum(self):
-        sem = _FakeSem('V_ADD3_U32', 'vector_ternary', 'add3', 'u32')
+    @pytest.mark.parametrize(
+        'name,op,dtype,helper',
+        [
+            ('V_MUL_I32_I24', 'mul', 'i24', 'vop3_integer_mul<int32_t, 24>'),
+            ('V_MUL_U32_U24', 'mul', 'u24', 'vop3_integer_mul<uint32_t, 24>'),
+            ('V_MAD_I32_I24', 'mad', 'i24', 'vop3_integer_mad<int32_t, 24>'),
+            ('V_MAD_U32_U24', 'mad', 'u24', 'vop3_integer_mad<uint32_t, 24>'),
+        ],
+    )
+    def test_vop3_integer_mul_mad_use_exact_saturating_intermediate(
+        self, name, op, dtype, helper
+    ):
+        sem_class = 'vector_binop' if op == 'mul' else 'vector_ternary'
+        sem = _FakeSem(name, sem_class, op, dtype)
         block = derive_sema_block(sem)
         cpp = lower_sema_block(
             block,
-            LoweringContext(
-                exec_model=block.pragma,
-                integer_saturation_dtype='u32',
-            ),
+            LoweringContext(exec_model=block.pragma, integer_saturation_dtype=dtype),
         )
 
-        assert 'vop3_integer_add3<uint32_t>' in cpp
+        assert helper in cpp
         assert 'inst_.clamp' in cpp
 
     def test_lshlrev(self):
