@@ -49,9 +49,10 @@ Some of these already have RCCL analogues (e.g. IBVerbs headers) while for other
 only a small portion of the original rocSHMEM header is required.
 
 ### RCCL Analogues
-* `gda/ibv_core.hpp` (includes `ibvwrap.h`)
+* `gda/ibv_core.hpp` (includes RCCL `ibvcore.h` or `<infiniband/verbs.h>`)
 
 ### Minimized rocSHMEM header
+* `log.hpp`
 * `util.hpp`
 * `containers/free_list.hpp`
 * `rocshmem/rocshmem_common.hpp`
