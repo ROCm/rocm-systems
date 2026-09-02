@@ -4878,6 +4878,23 @@ def test_generated_dpp_legality_checks_are_coalesced(
     assert 'does not support DPP' not in _generated_decode_body(vop1, 'VNopVop1')
 
 
+def test_generated_dpp_constructor_binding_is_emitted_once(
+    amdgpu_generated_root: Path,
+):
+    marker = 'reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP'
+    cases = (
+        ('cdna5', 'vop1.cpp', 'VMovB64Vop1', True),
+        ('cdna5', 'vop2.cpp', 'VAddF64Vop2', True),
+        ('cdna5', 'vop3_ternary.cpp', 'VFmaF64Vop3', True),
+        ('rdna4', 'vop3.cpp', 'VMovB32Vop3', False),
+    )
+    for arch, filename, class_name, requires_feature in cases:
+        source = (amdgpu_generated_root / arch / filename).read_text()
+        constructor = _generated_constructor_body(source, class_name)
+        assert constructor.count(marker) == 1, class_name
+        assert ('required_isa_features_' in constructor) is requires_feature
+
+
 def test_generated_optional_includes_have_direct_uses(amdgpu_generated_root: Path):
     unused = []
     for path in sorted(amdgpu_generated_root.rglob('*.cpp')):
@@ -5053,6 +5070,63 @@ def test_split_execution_ids_name_and_match_callbacks(
             selected_ids.extend(ids)
 
         assert sorted(selected_ids) == sorted(callbacks)
+
+
+def test_cdna5_model_only_variant_instructions_have_no_execution_callbacks(
+    gfx1250_generated_root: Path,
+) -> None:
+    model_only_classes = (
+        'VPkFmaF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
+        'VPkAddNcU64Vop3p',
+        'VPkSubNcU64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
+        'VWmmaF6416x16x4F64Vop3p',
+    )
+    header = (gfx1250_generated_root / 'vop3p.h').read_text()
+    model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
+    backend_source = (gfx1250_generated_root / 'execution_backend_exec.cpp').read_text()
+    execution_source = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
+
+    for class_name in model_only_classes:
+        class_body = header.split(f'class {class_name} ', 1)[1].split('\n};', 1)[0]
+        assert 'execute_impl' not in class_body
+        constructor = model.split(f'{class_name}::{class_name}(', 1)[1].split('\n}', 1)[
+            0
+        ]
+        assert 'nullptr' in constructor
+        assert class_name not in backend_header
+        assert class_name not in backend_source
+        assert class_name not in execution_source
+
+    executable_class = 'VPkLshlAddU64Vop3p'
+    class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[0]
+    assert 'execute_impl' in class_body
+    constructor = model.split(f'{executable_class}::{executable_class}(', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)' in constructor
+    assert executable_class in backend_header
+    assert executable_class in backend_source
+    assert executable_class in execution_source
+    assert 'PkU64Pair read_pk_u64_pair' in execution_source
+    assert 'PkU32Pair read_pk_u32_pair' in execution_source
+    assert 'void write_pk_u64_pair' in execution_source
+    u64_read_helper = execution_source.split('PkU64Pair read_pk_u64_pair', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'const auto reg = operand.to_register_ref();' in u64_read_helper
+    assert 'if (!reg || reg->cls != RegClass::VGPR)' in u64_read_helper
+    u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
+    assert 'if (reg && reg->cls == RegClass::SGPR)' in u32_read_helper
+    assert 'read_lane(operand, lane)' in u32_read_helper
+    assert 'read_lane_pair32(operand, lane)' in u32_read_helper
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

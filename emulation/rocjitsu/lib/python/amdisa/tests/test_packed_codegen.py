@@ -15,6 +15,7 @@ from amdisa.codegen.execute.packed import (
     gen_pk_binop_f32,
     gen_pk_fmac_vop2,
     gen_pk_fmac_vop3,
+    gen_pk_lshl_add_u64,
     gen_pk_ternary,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
@@ -289,6 +290,40 @@ def test_cdna_pk_f32_reads_all_register_pairs():
     assert 'encoding_value_ >= 256' not in cpp
 
 
+def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
+    assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
+    assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
+    assert (
+        'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
+        in cpp
+    )
+    assert (
+        'amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi'
+        in cpp
+    )
+    assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
+    assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
+    assert 'results[lane] = {result_lo, result_hi};' in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, results[lane]);' in cpp
+    assert 'inst_.neg' not in cpp
+    assert 'inst_.clamp' not in cpp
+
+
+def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    reject = 'if (shifts.lo > 4u || shifts.hi > 4u)'
+    report = 'wf.report_instruction_execution_error('
+    write = 'write_pk_u64_pair(vdst, wf, lane, results[lane]);'
+    assert reject in cpp
+    assert report in cpp
+    assert write in cpp
+    assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
+
+
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
     probe = vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('opsel', 'opsel_hi'))
 
@@ -394,7 +429,7 @@ def test_mad_mixlo_bf16_uses_true16_low_write():
     assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
 
 
-def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
+def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     cpp_f32 = gen_mad_mix_bf16(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -411,7 +446,25 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
         use_cdna5_helpers=True,
     )
+    cpp_hi = gen_mad_mix_bf16(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        result='hi',
+        op_sel_hi_2_expr='inst_.pad_14',
+        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        use_cdna5_helpers=True,
+    )
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    assert 'util::f32_to_bf16(result)' in cpp_lo
+    mode_round = 'amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
+    assert mode_round in cpp_lo
+    assert mode_round in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_lo
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' not in cpp_f32
+    assert 'std::fma(a, b, c)' not in cpp_lo
+    assert 'std::fma(a, b, c)' not in cpp_hi
+    assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_hi
