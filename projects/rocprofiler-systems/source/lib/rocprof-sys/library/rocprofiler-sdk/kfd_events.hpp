@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#if ROCPROFILER_VERSION >= 10000
+#if ROCPROFILER_VERSION >= 10202
 
 namespace rocprofsys
 {

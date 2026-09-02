@@ -1,0 +1,437 @@
+#pragma once
+
+#include "executor.hpp"
+#include "runtime.hpp"
+
+namespace tf {
+
+// ----------------------------------------------------------------------------
+// Async Helper Methods
+// ----------------------------------------------------------------------------
+
+// Procedure: _schedule_async_task
+template <typename... ArgsT>
+void Executor::_schedule_async_task(ArgsT&&... args) {  
+  // caller is a worker of the executor
+  if(auto w = this_worker(); w) {
+    // We don't do per-worker cache as it can cause bugs in corun that are very difficult to 
+    // track. For example, when a worker invokes an async task and then immediately enter corun,
+    // it becomes very difficult to get the task out of its cache correctly.
+    _schedule(*w, animate(std::forward<ArgsT>(args)...));
+  }
+  // caller is a freelance thread
+  else{
+    _schedule(animate(std::forward<ArgsT>(args)...));
+  }
+}
+
+// Procedure: _schedule_dependent_async_task
+template <typename I, typename... ArgsT>
+AsyncTask Executor::_schedule_dependent_async_task(I first, I last, size_t num_predecessors, ArgsT&&... args) {  
+    
+  // We need to create an async-task first to acquire an ownership.
+  AsyncTask task(animate(std::forward<ArgsT>(args)...));
+
+  for(; first != last; first++) {
+    auto&& x = *first;
+
+    if constexpr (std::is_pointer_v<std::remove_reference_t<decltype(x)>>) {
+      _process_dependent_async(task._node, *x, num_predecessors);
+    } else {
+      _process_dependent_async(task._node, x, num_predecessors);
+    }
+  }
+  
+  if(num_predecessors == 0) {
+    // caller is a worker of the executor
+    if(auto w = this_worker(); w) {
+      // We don't do per-worker cache as it can cause bugs in corun that are very difficult to 
+      // track. For example, when a worker invokes an async task and then immediately enter corun,
+      // it becomes very difficult to get the task out of its cache correctly.
+      _schedule(*w, task._node);
+    }
+    // caller is a freelance thread
+    else {
+      _schedule(task._node);
+    }
+  }
+  
+  return task;
+}
+
+// Procedure: _tear_down_async
+inline void Executor::_tear_down_async(Worker& worker, Node* node, Node*& cache) {
+  
+  /*
+  -------------------------------------------------------------------------------------------------
+  node->_topology | node->_parent | secenario
+  -------------------------------------------------------------------------------------------------
+  nullptr         | nullptr       | exe.async();
+  -------------------------------------------------------------------------------------------------
+  nullptr         | 0x123         | exe.async([](Runtime rt){ rt.async(); });
+                  |               | task_group.async([](){});
+  -------------------------------------------------------------------------------------------------
+  0x123           | nullptr       | ?
+  -------------------------------------------------------------------------------------------------
+  0x123           | 0x123         | tf.emplace([](Runtime& rt){ rt.async(); });
+  -------------------------------------------------------------------------------------------------
+  */
+
+  // no parent context (e.g., from executor)
+  if(auto parent = node->_parent; parent == nullptr) {
+    _decrement_topology();
+  }
+  // has parent context (e.g., from runtime, from task group)
+  else {
+    auto state = parent->_nstate;
+    if(parent->_join_counter.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      // this async is spawned from a preempted parent, so we need to resume it
+      if(state & NSTATE::PREEMPTED) { 
+        _update_cache(worker, cache, static_cast<Node*>(parent));
+      }
+    }
+  }
+  recycle(node);
+}
+
+// ----------------------------------------------------------------------------
+// Async
+// ----------------------------------------------------------------------------
+
+// Function: async
+template <typename F>
+auto Executor::async(F&& f) {
+  return async(DefaultTaskParams{}, std::forward<F>(f));
+}
+
+// Function: async
+template <typename P, typename F>
+auto Executor::async(P&& params, F&& f) {
+  _increment_topology();
+  return _async(std::forward<P>(params), std::forward<F>(f), nullptr, nullptr);
+}
+
+// Function: _async
+template <typename P, typename F>
+auto Executor::_async(P&& params, F&& f, Topology* tpg, NodeBase* parent) {
+  
+  // async task with runtime: [] (tf::Runtime&) -> void {}
+  if constexpr (is_runtime_task_v<F>) {
+
+    std::promise<void> p;
+    auto fu{p.get_future()};
+    
+    _schedule_async_task(
+      NSTATE::NONE, ESTATE::EXPLICITLY_ANCHORED, std::forward<P>(params), tpg, parent, 0, 
+      std::in_place_type_t<Node::Async>{}, 
+      [p=MoC{std::move(p)}, f=std::forward<F>(f)](Runtime& rt, bool reentered) mutable { 
+        if(!reentered) {
+          f(rt);
+        }
+        else {
+          auto& eptr = rt._node->_exception_ptr;
+          eptr ? p.object.set_exception(eptr) : p.object.set_value();
+        }
+      }
+    );
+    return fu;
+  }
+  // async task with closure: [] () -> auto { return ... }
+  else if constexpr (std::is_invocable_v<F>){
+    using R = std::invoke_result_t<F>;
+    std::packaged_task<R()> p(std::forward<F>(f));
+    auto fu{p.get_future()};
+    _schedule_async_task(
+      NSTATE::NONE, ESTATE::NONE, std::forward<P>(params), tpg, parent, 0, 
+      std::in_place_type_t<Node::Async>{}, 
+      [p=make_moc(std::move(p))]() mutable { p.object(); }
+    );
+    return fu;
+  }
+  else {
+    static_assert(dependent_false_v<F>, 
+      "invalid async target - must be one of the following types:\n\
+      (1) [] (tf::Runtime&) -> void {}\n\
+      (2) [] () -> auto { ... return ... }\n"
+    );
+  }
+}
+
+
+// ----------------------------------------------------------------------------
+// Silent Async
+// ----------------------------------------------------------------------------
+
+// Function: silent_async
+template <typename F>
+void Executor::silent_async(F&& f) {
+  silent_async(DefaultTaskParams{}, std::forward<F>(f));
+}
+
+// Function: silent_async
+template <typename P, typename F>
+void Executor::silent_async(P&& params, F&& f) {
+  _increment_topology();
+  _silent_async(std::forward<P>(params), std::forward<F>(f), nullptr, nullptr);
+}
+
+// Function: _silent_async
+template <typename P, typename F>
+void Executor::_silent_async(P&& params, F&& f, Topology* tpg, NodeBase* parent) {
+  // silent task 
+  if constexpr (is_runtime_task_v<F> || is_static_task_v<F>) {
+    _schedule_async_task(
+      NSTATE::NONE, ESTATE::NONE, std::forward<P>(params), tpg, parent, 0,
+      std::in_place_type_t<Node::Async>{}, std::forward<F>(f)
+    );
+  }
+  // invalid silent async target
+  else {
+    static_assert(dependent_false_v<F>, 
+      "invalid silent_async target - must be one of the following types:\n\
+      (1) [] (tf::Runtime&) -> void {}\n\
+      (2) [] () -> void { ... }\n"
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Silent Dependent Async
+// ----------------------------------------------------------------------------
+
+// Function: silent_dependent_async
+template <typename F, typename... Tasks>
+requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+tf::AsyncTask Executor::silent_dependent_async(F&& func, Tasks&&... tasks) {
+  return silent_dependent_async(
+    DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...
+  );
+}
+
+// Function: silent_dependent_async
+template <TaskParamsLike P, typename F, typename... Tasks>
+requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+tf::AsyncTask Executor::silent_dependent_async(
+  P&& params, F&& func, Tasks&&... tasks 
+){
+  std::array<AsyncTask*, sizeof...(Tasks)> array{ (&tasks)... };
+  return silent_dependent_async(
+    std::forward<P>(params), std::forward<F>(func), array.begin(), array.end()
+  );
+}
+
+// Function: silent_dependent_async
+template <typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+tf::AsyncTask Executor::silent_dependent_async(F&& func, I first, I last) {
+  return silent_dependent_async(DefaultTaskParams{}, std::forward<F>(func), first, last);
+}
+
+// Function: silent_dependent_async
+template <TaskParamsLike P, typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+tf::AsyncTask Executor::silent_dependent_async(
+  P&& params, F&& func, I first, I last
+) {
+  _increment_topology();
+  return _silent_dependent_async(
+    std::forward<P>(params), std::forward<F>(func), first, last, nullptr, nullptr
+  );
+}
+
+// Function: _silent_dependent_async
+template <TaskParamsLike P, typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+auto Executor::_silent_dependent_async(
+  P&& params, F&& func, I first, I last, Topology* tpg, NodeBase* parent
+) {
+  size_t num_predecessors = std::distance(first, last);
+  return _schedule_dependent_async_task(first, last, num_predecessors,
+    NSTATE::NONE, ESTATE::REFCOUNT_ONE, std::forward<P>(params), tpg, parent, num_predecessors,
+    std::in_place_type_t<Node::DependentAsync>{}, std::forward<F>(func)
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Dependent Async
+// ----------------------------------------------------------------------------
+
+// Function: dependent_async
+template <typename F, typename... Tasks>
+requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+auto Executor::dependent_async(F&& func, Tasks&&... tasks) {
+  return dependent_async(DefaultTaskParams{}, std::forward<F>(func), std::forward<Tasks>(tasks)...);
+}
+
+// Function: dependent_async
+template <TaskParamsLike P, typename F, typename... Tasks>
+requires (std::same_as<std::decay_t<Tasks>, AsyncTask> && ...)
+auto Executor::dependent_async(P&& params, F&& func, Tasks&&... tasks) {
+  std::array<AsyncTask*, sizeof...(Tasks)> array{ (&tasks)... };
+  return dependent_async(
+    std::forward<P>(params), std::forward<F>(func), array.begin(), array.end()
+  );
+}
+
+// Function: dependent_async
+template <typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+auto Executor::dependent_async(F&& func, I first, I last) {
+  return dependent_async(DefaultTaskParams{}, std::forward<F>(func), first, last);
+}
+
+// Function: dependent_async
+template <TaskParamsLike P, typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+auto Executor::dependent_async(P&& params, F&& func, I first, I last) {
+  _increment_topology();
+  return _dependent_async(std::forward<P>(params), std::forward<F>(func), first, last, nullptr, nullptr);
+}
+
+// Function: _dependent_async
+template <TaskParamsLike P, typename F, typename I>
+requires (!std::same_as<std::decay_t<I>, AsyncTask>)
+auto Executor::_dependent_async(P&& params, F&& func, I first, I last, Topology* tpg, NodeBase* parent) {
+    
+  size_t num_predecessors = std::distance(first, last);
+  
+  // async with runtime: [] (tf::Runtime&) -> void {}
+  if constexpr (is_runtime_task_v<F>) {
+
+    std::promise<void> p;
+    auto fu{p.get_future()};
+
+    return std::make_pair(_schedule_dependent_async_task(first, last, num_predecessors,
+      NSTATE::NONE, ESTATE::EXPLICITLY_ANCHORED | ESTATE::REFCOUNT_ONE, std::forward<P>(params), tpg, parent, num_predecessors,
+      std::in_place_type_t<Node::DependentAsync>{},
+      [p=MoC{std::move(p)}, f=std::forward<F>(func)] (tf::Runtime& rt, bool reentered) mutable { 
+        if(!reentered) {
+          f(rt); 
+        }
+        else {
+          auto& eptr = rt._node->_exception_ptr;
+          eptr ? p.object.set_exception(eptr) : p.object.set_value();
+        }
+      }
+    ), std::move(fu));
+  }
+  // async without runtime: [] () -> auto { return ... }
+  else if constexpr(std::is_invocable_v<F>) {
+
+    using R = std::invoke_result_t<F>;
+    std::packaged_task<R()> p(std::forward<F>(func));
+    auto fu{p.get_future()};
+
+    return std::make_pair(_schedule_dependent_async_task(first, last, num_predecessors,
+      NSTATE::NONE, ESTATE::REFCOUNT_ONE, std::forward<P>(params), tpg, parent, num_predecessors,
+      std::in_place_type_t<Node::DependentAsync>{},
+      [p=make_moc(std::move(p))] () mutable { p.object(); }
+    ), std::move(fu));
+  }
+  else {
+    static_assert(dependent_false_v<F>, "invalid async callable");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Dependent Async Helper Functions
+// ----------------------------------------------------------------------------
+
+// Procedure: _process_dependent_async
+inline void Executor::_process_dependent_async(
+  Node* node, tf::AsyncTask& task, size_t& num_predecessors
+) {
+
+  // special case: the task is not associated with any dependent-async task
+  if(task.empty()) {
+    num_predecessors = node->_join_counter.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    return;
+  }
+
+  auto& state = task._node->_estate;
+  auto target = state.load(std::memory_order_acquire);
+
+  while (!(target & ESTATE::FINISHED)) {
+    // can only go from unlock and unfinished to locked
+    target &= ~ESTATE::LOCKED;
+    if(state.compare_exchange_weak(target, target | ESTATE::LOCKED, 
+                                   std::memory_order_acq_rel,
+                                   std::memory_order_acquire)) {
+      task._node->_edges.push_back(node);
+      state.fetch_and(~ESTATE::LOCKED, std::memory_order_release);
+      return;
+    }
+  }
+  
+  num_predecessors = node->_join_counter.fetch_sub(1, std::memory_order_acq_rel) - 1;
+}
+
+// Procedure: _tear_down_dependent_async
+inline void Executor::_tear_down_dependent_async(Worker& worker, Node* node, Node*& cache) {
+
+  auto target = node->_estate.load(std::memory_order_acquire);
+
+  while(true) {
+    // We can only go from unlocked and unfinished to finished. 
+    // Only this function can set the state to FINISHED.
+    target &= ~ESTATE::LOCKED;
+    if(node->_estate.compare_exchange_weak(target, target | ESTATE::FINISHED, 
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_acquire)) {
+      break;
+    }
+  }
+  
+  // spawn successors whenever their dependencies are resolved
+  for(size_t i=0; i<node->_edges.size(); ++i) {
+    if(auto s = node->_edges[i]; 
+      s->_join_counter.fetch_sub(1, std::memory_order_acq_rel) == 1
+    ) {
+      _update_cache(worker, cache, s);
+    }
+  }
+  
+  /*
+  -------------------------------------------------------------------------------------------------
+  node->_topology | node->_parent | secenario
+  -------------------------------------------------------------------------------------------------
+  nullptr         | nullptr       | exe.async();
+  -------------------------------------------------------------------------------------------------
+  nullptr         | 0x123         | exe.async([](Runtime rt){ rt.async(); });
+                  |               | task_group.async([](){});
+  -------------------------------------------------------------------------------------------------
+  0x123           | nullptr       | ?
+  -------------------------------------------------------------------------------------------------
+  0x123           | 0x123         | tf.emplace([](Runtime& rt){ rt.async(); });
+  -------------------------------------------------------------------------------------------------
+  */
+
+  // no parent context (e.g., from executor)
+  if(auto parent = node->_parent; parent == nullptr) {
+    _decrement_topology();
+  }
+  // has parent context (e.g., from runtime, from task group)
+  else {
+    auto state = parent->_nstate;
+    if(parent->_join_counter.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      // this async is spawned from a preempted parent, so we need to resume it
+      if(state & NSTATE::PREEMPTED) {
+        _update_cache(worker, cache, static_cast<Node*>(parent));
+      }
+    }
+  }
+  
+  // now the executor no longer needs to retain ownership —
+  // decrement the refcount packed in the lower 24 bits of _estate.
+  // if it reaches zero, no AsyncTask handle remains and we can recycle.
+  if((node->_estate.fetch_sub(ESTATE::REFCOUNT_ONE, std::memory_order_acq_rel) 
+      & ESTATE::REFCOUNT_MASK) == ESTATE::REFCOUNT_ONE) {
+    recycle(node);
+  }
+}
+
+
+
+
+
+}  // end of namespace tf -----------------------------------------------------

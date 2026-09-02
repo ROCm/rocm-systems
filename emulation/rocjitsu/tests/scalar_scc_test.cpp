@@ -5,7 +5,7 @@
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
 #include "decode_test_util.h"
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"

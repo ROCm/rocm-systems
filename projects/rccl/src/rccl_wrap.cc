@@ -32,9 +32,9 @@ THE SOFTWARE.
 #include "register.h"
 #include "info.h"
 #include "ce_coll.h"
-#include "dda_all_reduce.h"
-#include "dda_all_gather.h"
-#include "dda_reduce_scatter.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "group.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
@@ -68,6 +68,8 @@ RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(134217728));           // 128 MiB
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", (size_t)(32768));          // 32 KiB
+RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
+RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024); // 16 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", 0);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", (size_t)(33554432)); // 32 MiB
 #ifdef ENABLE_WARP_SPEED
@@ -931,8 +933,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symEligible, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       // Small-message fast lane: LL protocol (no GPU barrier).
-      if (rcclParamDdaLL() && msgBytes <= (size_t)rcclParamDdaLLThreshold() &&
-          ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (ncclAllReduceDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_LL;
         decision->protocol = NCCL_PROTO_LL;
         decision->nMaxChannels = ncclAllReduceDdaFabricLLBlocks(comm, count, datatype);
@@ -1262,8 +1263,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   }
 
   // (4) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  // That reduce runs with PreOpSrcs=0 / postOp=false, an unscaled sum, so ncclAvg and
+  // user-defined PreMulSum (op >= ncclNumOps) fall through to the ring kernel instead.
   size_t directMsgSize = totalBytes;
-  if (!symEligible && ncclGroupDepth == 0 && rcclUseReduceScatterDirect(comm, directMsgSize)) {
+  if (!symEligible && ncclGroupDepth == 0 && op < ncclAvg && rcclUseReduceScatterDirect(comm, directMsgSize)) {
     decision->algo = RCCL_DIRECT_REDUCESCATTER;
     decision->protocol = NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;

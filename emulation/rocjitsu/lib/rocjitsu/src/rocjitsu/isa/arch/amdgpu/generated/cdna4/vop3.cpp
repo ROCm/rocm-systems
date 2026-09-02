@@ -1297,14 +1297,10 @@ VClrexcpVop3::VClrexcpVop3(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVClrexcpVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
       "v_clrexcp", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_CLREXCP does not support DPP";
   return std::make_unique<VClrexcpVop3>(opcode);
 }
 } // namespace detail
@@ -1880,54 +1876,6 @@ void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-VExpLegacyF32Vop3::VExpLegacyF32Vop3(const MachineInst *inst)
-    : Vop3("v_exp_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VExpLegacyF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-}
-
-namespace detail {
-DecodeResult decodeVExpLegacyF32Vop3(const MachineInst *opcode,
-                                     const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3::validate_encoding(
-      "v_exp_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VExpLegacyF32Vop3>(opcode);
-}
-} // namespace detail
-
-VLogLegacyF32Vop3::VLogLegacyF32Vop3(const MachineInst *inst)
-    : Vop3("v_log_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VLogLegacyF32Vop3)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  num_src_ = 1;
-  num_dst_ = 1;
-  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
-  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-}
-
-namespace detail {
-DecodeResult decodeVLogLegacyF32Vop3(const MachineInst *opcode,
-                                     const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3::validate_encoding(
-      "v_log_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VLogLegacyF32Vop3>(opcode);
-}
-} // namespace detail
-
 VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3)),
@@ -2035,14 +1983,10 @@ VSwapB32Vop3::VSwapB32Vop3(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVSwapB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
       "v_swap_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_SWAP_B32 does not support DPP";
   return std::make_unique<VSwapB32Vop3>(opcode);
 }
 } // namespace detail

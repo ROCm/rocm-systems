@@ -15,6 +15,11 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
+// Count invocations of the Put/PutValue system-scope fence seam (gin_device_common.h).
+// Override must precede gin_anvil_sdma.h so the templates expand our counter.
+__device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
+#undef NCCL_GIN_THREADFENCE_SYSTEM
+#define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 #endif
 
@@ -68,6 +73,17 @@ static void uploadHarness(DeviceBuffer<TemplateHarness>* d_h, TemplateHarness* h
   d_h->upload(*host);
 }
 
+static void resetThreadfenceCount() {
+  unsigned long long z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubThreadfenceCount), &z, sizeof(z)));
+}
+
+static unsigned long long readThreadfenceCount() {
+  unsigned long long c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubThreadfenceCount), sizeof(c)));
+  return c;
+}
+
 // H1: non-leader thread returns immediately.
 __global__ void kernelPutLeaderOnly(TemplateHarness* h, int* executed) {
   ncclGinCtx ginCtx{};
@@ -98,7 +114,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_NonLeaderThreadNoOp) {
   EXPECT_EQ(d_executed.download(), 1);
 }
 
-// H2: thread-scope fence when given > required.
+// H2: system fence when required==system && given<required (HIP scope ordering).
 __global__ void kernelPutScopeFence(TemplateHarness* h) {
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
@@ -121,8 +137,10 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadScopeFence) {
   DeviceBuffer<TemplateHarness> d_h(1);
   TemplateHarness host{};
   uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  resetThreadfenceCount();
   kernelPutScopeFence<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 // H3: SDMA path (threshold 0) with stub put + markSdmaDirty.
@@ -304,7 +322,7 @@ __global__ void kernelFlushQuiet(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 
@@ -330,17 +348,17 @@ __global__ void kernelCounterSignalApi(TemplateHarness* h, uint64_t* outCtr, uin
   if (threadIdx.x != 0) return;
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
-  uint64_t* ctr = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  if (ctr) ctr[0] = 99;
+  ncclGinOffsetPtr ctrOff = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  if (ctrOff.ptr) ctrOff.ptr[0] = 99;
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  outCtr[0] = ctr ? ctr[0] : 0;
-  uint64_t* sig = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
-  if (sig) sig[0] = 11;
+  outCtr[0] = ctrOff.ptr ? ctrOff.ptr[0] : 0;
+  ncclGinOffsetPtr sigOff = ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
+  if (sigOff.ptr) sigOff.ptr[0] = 11;
   ncclGinSignalDescriptor desc{};
   desc.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
   desc.indexedSignal.signalId = 0;
   ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, desc);
-  outSig[0] = sig ? sig[0] : 0;
+  outSig[0] = sigOff.ptr ? sigOff.ptr[0] : 0;
 }
 
 TEST_F(GinAnvilSdmaTemplateTest, CounterSignal_GetReset) {
@@ -373,7 +391,7 @@ __global__ void kernelInvalidCtxApis(bool* ok) {
   ncclGinAnvilSdmaGPUContext bad{};
   bad.layoutMagic = 0;
   ginCtx.handle = &bad;
-  ok[0] = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0) == nullptr;
+  ok[0] = ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0).ptr == nullptr;
   ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, 0);
   ok[1] = true;
 }
@@ -428,7 +446,7 @@ __global__ void kernelFlushMultiDirty(TemplateHarness* h, uint64_t* dirty) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
-  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{},
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
                                                          cuda::memory_order_seq_cst, nullptr);
 }
 

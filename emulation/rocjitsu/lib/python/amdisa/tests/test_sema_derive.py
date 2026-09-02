@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from amdisa.isa_profile import Cdna5Profile
 from amdisa.semantics import derive_semantics
 from amdisa.sema_ast import (
     ExecModel,
@@ -1280,7 +1281,8 @@ class TestDeriveVectorUnary:
         )
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
+        assert 'write_vgpr_region' in cpp
+        assert 'dst_region.set_lane' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1335,6 +1337,8 @@ class TestDeriveVectorUnary:
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
+        assert 'read_vgpr_region' in cpp
+        assert 'write_vgpr_region' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -2032,13 +2036,14 @@ class TestDeriveFlatLoad:
             ('GLOBAL_LOAD_TR4_B64', 2, 1),
             ('GLOBAL_LOAD_TR6_B96', 3, 2),
             ('GLOBAL_LOAD_TR8_B64', 2, 6),
+            ('GLOBAL_LOAD_B64_TR_B8', 2, 6),
             ('GLOBAL_LOAD_TR_B64', 2, 6),
             ('GLOBAL_LOAD_TR16_B128', 4, 4),
             ('GLOBAL_LOAD_TR_B128', 4, 4),
         ],
     )
     def test_gfx1250_global_transpose_loads(self, name, num_elems, transpose_kind):
-        sem = derive_semantics(name, 'ENC_VGLOBAL')
+        sem = derive_semantics(name, 'ENC_VGLOBAL', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.elem_size == 4
@@ -2234,8 +2239,8 @@ class TestDeriveDsRead:
         [
             ('DS_LOAD_TR4_B64', 'ds_read_tr_b4', 2, 1),
             ('DS_LOAD_TR6_B96', 'ds_read_tr_b6', 3, 2),
-            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 6),
-            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 6),
+            ('DS_LOAD_TR8_B64', 'ds_read_tr_b8', 2, 7),
+            ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 7),
             ('DS_LOAD_TR16_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_LOAD_TR_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 5),
@@ -2244,7 +2249,7 @@ class TestDeriveDsRead:
     def test_gfx1250_ds_transpose_loads(
         self, name, semantic_class, num_elems, transpose_kind
     ):
-        sem = derive_semantics(name, 'ENC_DS')
+        sem = derive_semantics(name, 'ENC_DS', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == semantic_class
         assert sem.elem_size == 4
@@ -2487,6 +2492,14 @@ class TestDerivePacked:
         sem = _FakeSem('V_PK_ADD_F32', 'pk_binop_f32', 'add', 'f32')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_pk_lshl_add_u64_has_distinct_packed_width_semantics(self):
+        sem = derive_semantics('V_PK_LSHL_ADD_U64', 'ENC_VOP3P')
+
+        assert sem is not None
+        assert sem.semantic_class == 'pk_lshl_add_u64'
+        assert sem.operation == 'lshl_add'
+        assert sem.data_type == 'u64'
 
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')

@@ -362,10 +362,26 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
     REQUIRE(dispatchBarrierBitForWorkgroup(log, 18) == 0);
     REQUIRE(dispatchBarrierBitForWorkgroup(log, 19) == 1);
 
+    // Runtime init also emits barrier packets before the scenario kernels run.
+    // Scope collection to the event record/wait pair between wg18 and wg19.
+    const std::string wg18_token = "workgroup=[18, 1, 1]";
+    const std::string wg19_token = "workgroup=[19, 1, 1]";
     std::vector<int> barrier_bits;
     std::istringstream log_lines(log);
     std::string log_line;
+    bool after_wg18_dispatch = false;
     while (std::getline(log_lines, log_line)) {
+      if (!after_wg18_dispatch) {
+        if (log_line.find("Dispatch Header") != std::string::npos &&
+            log_line.find(wg18_token) != std::string::npos) {
+          after_wg18_dispatch = true;
+        }
+        continue;
+      }
+      if (log_line.find("Dispatch Header") != std::string::npos &&
+          log_line.find(wg19_token) != std::string::npos) {
+        break;
+      }
       if (log_line.find("Barrier-AND Header") == std::string::npos &&
           log_line.find("BarrierValue Header") == std::string::npos) {
         continue;
@@ -377,7 +393,7 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
         barrier_bits.push_back(1);
       }
     }
-    REQUIRE(barrier_bits.size() >= 2);
+    REQUIRE(barrier_bits.size() == 2);
     REQUIRE(barrier_bits[0] == 1);
     REQUIRE(barrier_bits[1] == 0);
   }

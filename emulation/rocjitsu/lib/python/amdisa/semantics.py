@@ -17,6 +17,7 @@ import re
 
 if TYPE_CHECKING:
     from amdisa.gpuisa import IsaSpec
+    from amdisa.isa_profile import IsaProfile
 
 
 @dataclass
@@ -363,9 +364,13 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'gpr_idx', operation='off')
     if name == 'S_SET_GPR_IDX_MODE':
         return InstructionSemantics(name, 'gpr_idx', operation='mode')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
-    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
-    # instructions that don't affect compute simulation correctness.
+    # The instruction cache is not coherent with data writes, so self-modifying
+    # code is only visible to the fetcher once this instruction retires.
+    if name == 'S_ICACHE_INV':
+        return InstructionSemantics(name, 'icache_inv')
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
+    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
+    # don't affect compute simulation correctness.
     return InstructionSemantics(name, 'true_nop')
 
 
@@ -1598,6 +1603,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'pk_binop_f32', operation='add', data_type='f32'
         )
+    if name == 'V_PK_LSHL_ADD_U64':
+        return InstructionSemantics(
+            name, 'pk_lshl_add_u64', operation='lshl_add', data_type='u64'
+        )
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
 
@@ -1821,17 +1830,20 @@ _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
     # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
-    # B64_TR_B8=3 (CDNA4 MFMA layout), TR16_B128=4, B64_TR_B16=5,
-    # WMMA_TR_B8=6 (CDNA5/RDNA4 16x16 matrix layout).
+    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
+    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
+    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
+    # same default here; instruction-family and ISA-profile overrides below
+    # select the architecture's routing.
     'B64_TR_B4': ('b4', 4, 2, 1),
     'B96_TR_B6': ('b6', 4, 3, 2),
     'B64_TR_B8': ('b8', 4, 2, 3),
     'B64_TR_B16': ('b16', 4, 2, 5),
     'TR4_B64': ('b4', 4, 2, 1),
     'TR6_B96': ('b6', 4, 3, 2),
-    'TR8_B64': ('b8', 4, 2, 6),
+    'TR8_B64': ('b8', 4, 2, 3),
     'TR16_B128': ('b16', 4, 4, 4),
-    'TR_B64': ('b8', 4, 2, 6),
+    'TR_B64': ('b8', 4, 2, 3),
     'TR_B128': ('b16', 4, 4, 4),
 }
 
@@ -2039,7 +2051,9 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
             if prefix == 'GLOBAL_LOAD_':
                 transpose_info = _derive_transpose_load_info(upper)
                 if transpose_info:
-                    _, esz, ne, transpose_kind = transpose_info
+                    kind, esz, ne, transpose_kind = transpose_info
+                    if kind == 'b8':
+                        transpose_kind = 6
                     return InstructionSemantics(
                         name,
                         'flat_load',
@@ -2584,7 +2598,9 @@ _ENC_DERIVE = {
 }
 
 
-def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
+def derive_semantics(
+    name: str, enc_name: str, profile: IsaProfile | None = None
+) -> InstructionSemantics | None:
     """Derive execution semantics for an instruction from its name and encoding.
 
     The encoding format name selects a format-specific derivation function
@@ -2594,6 +2610,7 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
     Args:
         name: Instruction mnemonic (e.g. ``S_ADD_I32``).
         enc_name: Encoding format name (e.g. ``ENC_SOP2``, ``VOP3A``).
+        profile: Optional ISA profile for architecture-specific semantic data.
 
     Returns:
         InstructionSemantics if the instruction could be classified, or
@@ -2620,6 +2637,23 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
             sem = fallback(name)
             if sem is not None:
                 break
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class == 'ds_read_tr_b8'
+    ):
+        sem = replace(sem, transpose_kind=profile.ds_b8_transpose_kind)
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class == 'flat_load'
+        and name.upper().startswith('GLOBAL_LOAD_')
+    ):
+        transpose_info = _derive_transpose_load_info(name.upper())
+        if transpose_info is not None and transpose_info[0] == 'b8':
+            sem = replace(sem, transpose_kind=profile.global_b8_transpose_kind)
 
     return sem
 
@@ -2660,7 +2694,7 @@ def derive_all_semantics(isa_spec: IsaSpec) -> SemanticsSpec:
                     data_type=data_type or None,
                 )
                 continue
-            sem = derive_semantics(inst.name, enc.enc_name)
+            sem = derive_semantics(inst.name, enc.enc_name, isa_spec.profile)
             if sem is not None:
                 semantic_class = class_overrides.get(inst.name)
                 if semantic_class is not None:

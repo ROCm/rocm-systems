@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build and run the RCCL CPU-only host unit tests (rccl-HostUnitTests).
+# Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
+# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached],
+# rccl-UnitTestsMicroEnqueue[-devlinker]).
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -20,8 +22,8 @@
 #   hipify          build the hipify_all target -> stages build/hipify/src, the
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
-#   build           build rccl-HostUnitTests
-#   run             run the suite (timestamped log + JUnit XML)
+#   build           build all host binaries (default target)
+#   run             run every host binary (timestamped log + per-binary JUnit XML)
 #   all             rccl-configure -> hipify -> configure -> build -> run
 #
 # Knobs (environment variables, all optional):
@@ -32,6 +34,10 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
+#   HOST_TEST_SHUFFLE  gtest ordering flag (run)   (default: --gtest_shuffle; set empty to disable
+#                                                   when bisecting a failure. Deliberately NOT named
+#                                                   GTEST_SHUFFLE: gtest owns that name and reads an
+#                                                   empty value as TRUE, so clearing it would shuffle)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -45,6 +51,11 @@ GPU_TARGETS="${GPU_TARGETS:-gfx942}"
 BUILD_TYPE="${BUILD_TYPE:-Debug}"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 GTEST_FILTER="${GTEST_FILTER:-*}"
+HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
+# Split into argv elements. Passing the value as one quoted word makes gtest treat a multi-word
+# setting as a single unknown flag: it prints its help, runs ZERO tests and exits 0 -- a silent green
+# that `|| rc=1` cannot see. An empty value yields an empty array, which still disables shuffling.
+read -ra HOST_TEST_SHUFFLE_ARGS <<< "$HOST_TEST_SHUFFLE"
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
@@ -90,18 +101,60 @@ do_build() {
 do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
-  # tee the full stdout+stderr to LOG_FILE, and preserve the test binary's exit
-  # code (pipefail) so a failure still fails CI.
+  # tee the full stdout+stderr to LOG_FILE, and preserve each binary's exit code
+  # (pipefail) so a failure still fails CI.
   local stamp
   if command -v ts >/dev/null 2>&1; then
     stamp=(env TZ=UTC ts '%Y-%m-%dT%H:%M:%.SZ')
   else
     stamp=(cat)
   fi
-  "$BUILD_DIR/rccl-HostUnitTests" \
-    --gtest_filter="$GTEST_FILTER" \
-    --gtest_output="xml:$XML_FILE" \
-    --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
+
+  # Every host binary the build produces. Each writes its own JUnit XML
+  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+  # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
+  local -a binaries=(
+    "rccl-HostUnitTests:$XML_FILE"
+    "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
+    "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+    "rccl-UnitTestsMicroEnqueue:$SCRIPT_DIR/host_tests_micro_enqueue.xml"
+    # ENABLE_DEVICE_LINKER defaults ON, so this variant is the arm that ships;
+    # enqueue.cc gates rcclShmemDynamicSize on RCCL_DEVICE_LINKER at the
+    # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
+    "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
+  )
+
+  : > "$LOG_FILE"   # truncate; each binary appends below
+  local rc=0 entry name xml
+  for entry in "${binaries[@]}"; do
+    name="${entry%%:*}"
+    xml="${entry#*:}"
+    if [ ! -x "$BUILD_DIR/$name" ]; then
+      echo "ERROR: expected binary not built: $BUILD_DIR/$name" | tee -a "$LOG_FILE"
+      rc=1
+      continue
+    fi
+    echo "----- $name -----" | tee -a "$LOG_FILE"
+    # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
+    # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
+    # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
+    # HOST_TEST_SHUFFLE to run in declaration order while bisecting.
+    "$BUILD_DIR/$name" \
+      --gtest_filter="$GTEST_FILTER" \
+      --gtest_output="xml:$xml" \
+      ${HOST_TEST_SHUFFLE_ARGS[@]+"${HOST_TEST_SHUFFLE_ARGS[@]}"} \
+      --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
+    # A binary that rejects its arguments prints usage, runs nothing and still exits 0, so the exit
+    # status alone cannot tell "all green" from "never started". The report is the second signal:
+    # gtest writes it before returning, and its absence means no suite ran at all.
+    if [ ! -f "$xml" ] || ! grep -q "<testsuites" "$xml"; then
+      echo "ERROR: $name wrote no test report ($xml) -- it likely rejected an argument" \
+        | tee -a "$LOG_FILE"
+      rc=1
+    fi
+  done
+  return "$rc"
 }
 
 # Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so

@@ -30,6 +30,7 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
+    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS

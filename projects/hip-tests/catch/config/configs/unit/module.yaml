@@ -4,7 +4,7 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -22,7 +22,7 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipModuleLaunchKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -73,7 +73,7 @@ module:
     tags: [function, multigpu]
   Unit_hipModuleGetFunction_Positive_Basic:
     <<: *level_2
-    tags: [function]
+    tags: [function, P0]
   Unit_hipModuleGetFunction_Negative_Parameters:
     <<: *level_2
     tags: [function]
@@ -103,7 +103,7 @@ module:
     tags: [function]
   Unit_hipHccModuleLaunchKernel_basic:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipHccModuleLaunchKernel_NegTst:
     <<: *level_2
     tags: [launch]
@@ -118,7 +118,7 @@ module:
     tags: [launch]
   Unit_hipDrvLaunchKernelEx_Functional:
     <<: *level_2
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipDrvLaunchKernelEx_With_Different_Kernels:
     <<: *level_2
     tags: [launch]
@@ -140,7 +140,7 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [load]
+    tags: [load, P0]
   Unit_hipModuleLoadData_Negative_Parameters:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -153,7 +153,7 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [load]
+    tags: [load, P0]
   Unit_hipModuleLoad_Negative_Parameters:
     <<: *level_2
     tags: [load]
@@ -184,7 +184,7 @@ module:
     tags: [load]
   Unit_hipModuleUnload_basic:
     <<: *level_2
-    tags: [load]
+    tags: [load, P0]
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
     # (amd_linux) Rock_Linux_Failures_on_gfx94X
@@ -282,7 +282,7 @@ module:
     tags: [resource, image]
   Unit_hipFuncSetAttribute_Basic:
     <<: *level_2
-    tags: [function]
+    tags: [function, P0]
   Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr:
     <<: *level_2
     tags: [launch]
@@ -308,7 +308,7 @@ module:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
-    tags: [launch]
+    tags: [launch, P0]
   Unit_hipExtModuleLaunchKernel_AnyOrder:
     <<: *level_2
     tags: [launch]

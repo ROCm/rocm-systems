@@ -58,6 +58,14 @@
  * Port instance, for example the Network Port status
  */
 #define IFOE_TELEM_CAT_DERIVED_NETPORT 0x6
+/* enum: Debug telemetry associated with the IFoE data path. Telemetry in this
+ * category is defined per IFoE Station.
+ */
+#define IFOE_TELEM_CAT_IFOE_DEBUG 0x7
+/* enum: Telemetry associated with the ethernet PHYs. Telemetry in this
+ * category is defined as a dataset per Serdes lane.
+ */
+#define IFOE_TELEM_CAT_PHY 0x8
 
 /* IFOE_TELEM_LINK_STATUS structuredef: Flags indicating the IFoE logical link
  * status. The flags defined here apply to the telemetry data for
@@ -1403,9 +1411,9 @@
 #define IFOE_TELEM_ID_NETPORT_LINK_DOWN_TIME 0x6000008
 /* enum: Count of number of FEC codewords with no symbol errors. To support
  * creation of a FEC histogram, telemetry is provided of the number of symbol
- * errors in each codeword. The values reported at the number of symbol errors
- * between snapshots. Host software can accumulate the data over longer periods
- * of time as required.
+ * errors in each codeword. The reported number of codewords are accumulated
+ * values. Host could compare with previous readings to determine the number of
+ * codewords with a given number of symbol errors during a time interval.
  */
 #define IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_0 0x6001001
 /* enum: Count of number of FEC codewords with 1 symbol error */
@@ -1442,5 +1450,470 @@
  * symbol errors (>15)
  */
 #define IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE 0x6001011
+/* enum: Total count of packets that were received from the network but
+ * silently dropped (by firmware). This is the sum of all drop counters below.
+ */
+#define IFOE_TELEM_ID_NETPORT_RX_DROP_TOTAL 0x6002001
+/* enum: Count of packets dropped due to a mismatch between the destination MAC
+ * address and the local accelerator MAC. Excluding broadcast or multicast
+ * addresses.
+ */
+#define IFOE_TELEM_ID_NETPORT_RX_DROP_MAC_FILTERED 0x6002002
+/* enum: Count of packets dropped due to no available host RX descriptor to
+ * deliver the packet into.
+ */
+#define IFOE_TELEM_ID_NETPORT_RX_DROP_NO_DESCRIPTOR 0x6002003
+/* enum: Count of packets dropped due to the DMA transfer of the packet to host
+ * memory failing.
+ */
+#define IFOE_TELEM_ID_NETPORT_RX_DROP_DMA_ERROR 0x6002004
+/* enum: Count of control packets (e.g. IFoE ping) dropped by firmware because
+ * they were malformed, unaddressed to this accelerator or otherwise failed
+ * validation.
+ */
+#define IFOE_TELEM_ID_NETPORT_RX_DROP_INVALID 0x6002005
+/* enum: *** Telemetry IDs for the IFoE debug datapath *** Number of packets
+ * queued by perfmon instance 0
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_PACKETS_QUEUED 0x7001001
+/* enum: Number of packets sent by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_PACKETS_SENT 0x7001002
+/* enum: Number of packets resent by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_PACKETS_RESENT 0x7001003
+/* enum: Number of packets freed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_PACKETS_FREED 0x7001004
+/* enum: Number of granules queued by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_GRANULES_QUEUED 0x7001005
+/* enum: Number of granules sent by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_GRANULES_SENT 0x7001006
+/* enum: Number of granules resent by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_GRANULES_RESENT 0x7001007
+/* enum: Number of granules freed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_GRANULES_FREED 0x7001008
+/* enum: Number of pure ACK packets sent by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_PACKETS_PURE_ACK 0x7001009
+/* enum: Number of TXNAKs observed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_TXNAKS 0x700100a
+/* enum: Number of TXACK timer elapses observed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_TXACK_ELAPSES 0x700100b
+/* enum: Number of RXNAKs observed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_RXNAKS 0x700100c
+/* enum: Number of RXACK timer elapses observed by perfmon instance 0 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_RXACK_ELAPSES 0x700100d
+/* enum: Mean number of packets in-flight measured by perfmon instance 0, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MEAN_PACKETS_INFLIGHT 0x700100e
+/* enum: Mean number of granules in-flight measured by perfmon instance 0, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MEAN_GRANULES_INFLIGHT 0x700100f
+/* enum: Mean send latency in cycles measured by perfmon instance 0, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MEAN_SEND_LATENCY 0x7001010
+/* enum: Mean absolute deviation of send latency in cycles measured by perfmon
+ * instance 0, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MAD_SEND_LATENCY 0x7001011
+/* enum: Mean free latency in cycles measured by perfmon instance 0, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MEAN_FREE_LATENCY 0x7001012
+/* enum: Mean absolute deviation of free latency in cycles measured by perfmon
+ * instance 0, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON0_MAD_FREE_LATENCY 0x7001013
+/* enum: Number of packets queued by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_PACKETS_QUEUED 0x7002001
+/* enum: Number of packets sent by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_PACKETS_SENT 0x7002002
+/* enum: Number of packets resent by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_PACKETS_RESENT 0x7002003
+/* enum: Number of packets freed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_PACKETS_FREED 0x7002004
+/* enum: Number of granules queued by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_GRANULES_QUEUED 0x7002005
+/* enum: Number of granules sent by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_GRANULES_SENT 0x7002006
+/* enum: Number of granules resent by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_GRANULES_RESENT 0x7002007
+/* enum: Number of granules freed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_GRANULES_FREED 0x7002008
+/* enum: Number of pure ACK packets sent by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_PACKETS_PURE_ACK 0x7002009
+/* enum: Number of TXNAKs observed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_TXNAKS 0x700200a
+/* enum: Number of TXACK timer elapses observed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_TXACK_ELAPSES 0x700200b
+/* enum: Number of RXNAKs observed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_RXNAKS 0x700200c
+/* enum: Number of RXACK timer elapses observed by perfmon instance 1 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_RXACK_ELAPSES 0x700200d
+/* enum: Mean number of packets in-flight measured by perfmon instance 1, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MEAN_PACKETS_INFLIGHT 0x700200e
+/* enum: Mean number of granules in-flight measured by perfmon instance 1, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MEAN_GRANULES_INFLIGHT 0x700200f
+/* enum: Mean send latency in cycles measured by perfmon instance 1, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MEAN_SEND_LATENCY 0x7002010
+/* enum: Mean absolute deviation of send latency in cycles measured by perfmon
+ * instance 1, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MAD_SEND_LATENCY 0x7002011
+/* enum: Mean free latency in cycles measured by perfmon instance 1, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MEAN_FREE_LATENCY 0x7002012
+/* enum: Mean absolute deviation of free latency in cycles measured by perfmon
+ * instance 1, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON1_MAD_FREE_LATENCY 0x7002013
+/* enum: Number of packets queued by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_PACKETS_QUEUED 0x7003001
+/* enum: Number of packets sent by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_PACKETS_SENT 0x7003002
+/* enum: Number of packets resent by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_PACKETS_RESENT 0x7003003
+/* enum: Number of packets freed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_PACKETS_FREED 0x7003004
+/* enum: Number of granules queued by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_GRANULES_QUEUED 0x7003005
+/* enum: Number of granules sent by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_GRANULES_SENT 0x7003006
+/* enum: Number of granules resent by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_GRANULES_RESENT 0x7003007
+/* enum: Number of granules freed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_GRANULES_FREED 0x7003008
+/* enum: Number of pure ACK packets sent by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_PACKETS_PURE_ACK 0x7003009
+/* enum: Number of TXNAKs observed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_TXNAKS 0x700300a
+/* enum: Number of TXACK timer elapses observed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_TXACK_ELAPSES 0x700300b
+/* enum: Number of RXNAKs observed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_RXNAKS 0x700300c
+/* enum: Number of RXACK timer elapses observed by perfmon instance 2 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_RXACK_ELAPSES 0x700300d
+/* enum: Mean number of packets in-flight measured by perfmon instance 2, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MEAN_PACKETS_INFLIGHT 0x700300e
+/* enum: Mean number of granules in-flight measured by perfmon instance 2, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MEAN_GRANULES_INFLIGHT 0x700300f
+/* enum: Mean send latency in cycles measured by perfmon instance 2, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MEAN_SEND_LATENCY 0x7003010
+/* enum: Mean absolute deviation of send latency in cycles measured by perfmon
+ * instance 2, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MAD_SEND_LATENCY 0x7003011
+/* enum: Mean free latency in cycles measured by perfmon instance 2, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MEAN_FREE_LATENCY 0x7003012
+/* enum: Mean absolute deviation of free latency in cycles measured by perfmon
+ * instance 2, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON2_MAD_FREE_LATENCY 0x7003013
+/* enum: Number of packets queued by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_PACKETS_QUEUED 0x7004001
+/* enum: Number of packets sent by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_PACKETS_SENT 0x7004002
+/* enum: Number of packets resent by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_PACKETS_RESENT 0x7004003
+/* enum: Number of packets freed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_PACKETS_FREED 0x7004004
+/* enum: Number of granules queued by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_GRANULES_QUEUED 0x7004005
+/* enum: Number of granules sent by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_GRANULES_SENT 0x7004006
+/* enum: Number of granules resent by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_GRANULES_RESENT 0x7004007
+/* enum: Number of granules freed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_GRANULES_FREED 0x7004008
+/* enum: Number of pure ACK packets sent by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_PACKETS_PURE_ACK 0x7004009
+/* enum: Number of TXNAKs observed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_TXNAKS 0x700400a
+/* enum: Number of TXACK timer elapses observed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_TXACK_ELAPSES 0x700400b
+/* enum: Number of RXNAKs observed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_RXNAKS 0x700400c
+/* enum: Number of RXACK timer elapses observed by perfmon instance 3 */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_RXACK_ELAPSES 0x700400d
+/* enum: Mean number of packets in-flight measured by perfmon instance 3, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MEAN_PACKETS_INFLIGHT 0x700400e
+/* enum: Mean number of granules in-flight measured by perfmon instance 3, in
+ * fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MEAN_GRANULES_INFLIGHT 0x700400f
+/* enum: Mean send latency in cycles measured by perfmon instance 3, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MEAN_SEND_LATENCY 0x7004010
+/* enum: Mean absolute deviation of send latency in cycles measured by perfmon
+ * instance 3, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MAD_SEND_LATENCY 0x7004011
+/* enum: Mean free latency in cycles measured by perfmon instance 3, in fixed-
+ * point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MEAN_FREE_LATENCY 0x7004012
+/* enum: Mean absolute deviation of free latency in cycles measured by perfmon
+ * instance 3, in fixed-point format with 8 fractional bits
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PERFMON3_MAD_FREE_LATENCY 0x7004013
+/* enum: *** RX SOP error flags and SEEN counters *** Raw SOP error flags
+ * register. Each bit corresponds to a sticky error condition detected at SOP.
+ * Bit definitions match STA_RX_DECAP_SOP_ERROR_FLAGS in the hardware register
+ * map.
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_SOP_ERROR_FLAGS 0x7005001
+/* enum: Count of times firmware has observed the bad IPv4 protocol field
+ * sticky bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_IPV4_PROTOCOL_SEEN 0x7005002
+/* enum: Count of times firmware has observed the bad IPv4 IHL field sticky bit
+ * set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_IPV4_IHL_SEEN 0x7005003
+/* enum: Count of times firmware has observed the bad sequence number sticky
+ * bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_SEQ_NUM_SEEN 0x7005004
+/* enum: Count of times firmware has observed the bad destination address
+ * sticky bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_DST_ADDR_SEEN 0x7005005
+/* enum: Count of times firmware has observed the zero length payload with no
+ * ACKs sticky bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_LEN_ZERO_NO_ACKS_SEEN 0x7005006
+/* enum: Count of times firmware has observed the request packet carrying ACKs
+ * sticky bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_REQ_HAS_ACKS_SEEN 0x7005007
+/* enum: Count of times firmware has observed the packet length above threshold
+ * sticky bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_LEN_ABOVE_THRESH_SEEN 0x7005008
+/* enum: Count of times firmware has observed the bad destination ID sticky bit
+ * set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_DEST_ID_SEEN 0x7005009
+/* enum: Count of times firmware has observed the bad stream ID sticky bit set
+ * at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_STRM_ID_SEEN 0x700500a
+/* enum: Count of times firmware has observed the bad security status sticky
+ * bit set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_SEC_SOP_STATUS_SEEN 0x700500b
+/* enum: Count of times firmware has observed the bad VLAN ID sticky bit set at
+ * SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_VID_SEEN 0x700500c
+/* enum: Count of times firmware has observed the bad EtherType sticky bit set
+ * at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_ETH_TYPE_SEEN 0x700500d
+/* enum: Count of times firmware has observed the disabled stream ID sticky bit
+ * set at SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_STRM_ID_DISABLED_SEEN 0x700500e
+/* enum: Count of times firmware has observed the RX disabled sticky bit set at
+ * SOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_RX_DISABLED_SEEN 0x700500f
+/* enum: *** RX EOP error flags and SEEN counters *** Raw EOP error flags
+ * register. Each bit corresponds to a sticky error condition detected at EOP.
+ * Bit definitions match STA_RX_DECAP_EOP_ERROR_FLAGS in the hardware register
+ * map.
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_EOP_ERROR_FLAGS 0x7006001
+/* enum: Count of times firmware has observed the bad CRC sticky bit set at EOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_EOP_BAD_CRC_SEEN 0x7006002
+/* enum: Count of times firmware has observed the bad EOP status sticky bit set
+ * at EOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_EOP_BAD_EOP_STATUS_SEEN 0x7006003
+/* enum: Count of times firmware has observed the EOP error flag sticky bit set
+ * at EOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_EOP_ERROR_FLAG_SEEN 0x7006004
+/* enum: Count of times firmware has observed the loss detection sticky bit set
+ * at EOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_LOSS_DETECTION_SEEN 0x7006005
+/* enum: Count of times firmware has observed the padding bytes error sticky
+ * bit set at EOP
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PADDING_BYTES_ERROR_SEEN 0x7006006
+/* enum: Count of packets dropped due to configuration errors */
+#define IFOE_TELEM_ID_IFOE_DEBUG_PKT_CFG_ERRORS 0x7007001
+/* enum: Count of IFoE header errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_IFOE_HDR_ERRORS 0x7007002
+/* enum: Count of SOP security errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_SOP_SEC_ERRORS 0x7007003
+/* enum: Count of EOP security errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_EOP_SEC_ERRORS 0x7007004
+/* enum: Count of destination address errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_DST_ADDR_ERRORS 0x7007005
+/* enum: Count of sequence number errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_SEQ_NUM_ERRORS 0x7007006
+/* enum: Count of loss detection events reported */
+#define IFOE_TELEM_ID_IFOE_DEBUG_LOSS_DETECTION_COUNT 0x7007007
+/* enum: Count of CRC errors detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_CRC_ERRORS 0x7007008
+/* enum: *** Bad packet capture telemetry IDs *** Snapshot of the most recent
+ * packet that latched one of the IFOE_DEBUG_SOP_ERROR_FLAGS /
+ * IFOE_DEBUG_EOP_ERROR_FLAGS sticky bits above. Config error flag captured
+ * from the most recent bad packet
+ */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_CONFIG_ERROR 0x7008001
+/* enum: Metadata fields captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_METADATA 0x7008002
+/* enum: Ethernet header word 0 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ETH_HDR_0 0x7008003
+/* enum: Ethernet header word 1 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ETH_HDR_1 0x7008004
+/* enum: Ethernet header word 2 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ETH_HDR_2 0x7008005
+/* enum: Ethernet header word 3 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ETH_HDR_3 0x7008006
+/* enum: VLAN fields captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_VLAN 0x7008007
+/* enum: IPv4 header word 0 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IPV4_HDR_0 0x7008008
+/* enum: IPv4 header word 1 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IPV4_HDR_1 0x7008009
+/* enum: IPv4 header word 2 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IPV4_HDR_2 0x700800a
+/* enum: IPv4 header word 3 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IPV4_HDR_3 0x700800b
+/* enum: IPv4 header word 4 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IPV4_HDR_4 0x700800c
+/* enum: IFoE header word 0 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IFOE_HDR_0 0x700800d
+/* enum: IFoE header word 1 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IFOE_HDR_1 0x700800e
+/* enum: IFoE header word 2 captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_IFOE_HDR_2 0x700800f
+/* enum: ICV LSB captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ICV_LSB 0x7008010
+/* enum: ICV MSB captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_ICV_MSB 0x7008011
+/* enum: CRC LSB captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_CRC_LSB 0x7008012
+/* enum: CRC MSB captured from the most recent bad packet */
+#define IFOE_TELEM_ID_IFOE_DEBUG_BAD_PKT_CRC_MSB 0x7008013
+/* enum: Sticky bit set when a TX configuration error is detected */
+#define IFOE_TELEM_ID_IFOE_DEBUG_TX_CONFIG_ERROR 0x7009001
+/* enum: Count of TX packet headers generated */
+#define IFOE_TELEM_ID_IFOE_DEBUG_TX_HDR 0x7009002
+/* enum: Count of TX packet CRCs generated */
+#define IFOE_TELEM_ID_IFOE_DEBUG_TX_CRC 0x7009003
+/* enum: TX differential amplitude control (txdiffctrl_sa) */
+#define IFOE_TELEM_ID_PHY_TXDIFFCTRL_SA 0x8000001
+/* enum: TX pre-emphasis pre-cursor tap 1 (txemppre_sa) */
+#define IFOE_TELEM_ID_PHY_TXEMPPRE_SA 0x8000002
+/* enum: TX main cursor amplitude (txempmain_sa) */
+#define IFOE_TELEM_ID_PHY_TXEMPMAIN_SA 0x8000003
+/* enum: TX post-cursor tap amplitude (txemppos_sa) */
+#define IFOE_TELEM_ID_PHY_TXEMPPOS_SA 0x8000004
+/* enum: TX pre-emphasis pre-cursor tap 2 (txemppre2_sa) */
+#define IFOE_TELEM_ID_PHY_TXEMPPRE2_SA 0x8000005
+/* enum: TX pre-emphasis pre-cursor tap 3 (txemppre3_sa) */
+#define IFOE_TELEM_ID_PHY_TXEMPPRE3_SA 0x8000006
+/* enum: RX FFE pre-tap 8 (hm08_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_08_DAC 0x8000007
+/* enum: RX FFE pre-tap 7 (hm07_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_07_DAC 0x8000008
+/* enum: RX FFE pre-tap 6 (hm06_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_06_DAC 0x8000009
+/* enum: RX FFE pre-tap 5 (hm05_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_05_DAC 0x800000a
+/* enum: RX FFE pre-tap 4 (hm04_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_04_DAC 0x800000b
+/* enum: RX FFE pre-tap 3 (hm03_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_03_DAC 0x800000c
+/* enum: RX FFE pre-tap 2 (hm02_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_02_DAC 0x800000d
+/* enum: RX FFE pre-tap 1 (hm01_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_PRE_TAP_01_DAC 0x800000e
+/* enum: RX DFE H1 DAC value */
+#define IFOE_TELEM_ID_PHY_H1_DAC 0x800000f
+/* enum: RX FFE post-tap 1 (hp01_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_01_DAC 0x8000010
+/* enum: RX FFE post-tap 2 (hp02_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_02_DAC 0x8000011
+/* enum: RX FFE post-tap 3 (hp03_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_03_DAC 0x8000012
+/* enum: RX FFE post-tap 4 (hp04_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_04_DAC 0x8000013
+/* enum: RX FFE post-tap 5 (hp05_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_05_DAC 0x8000014
+/* enum: RX FFE post-tap 6 (hp06_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_06_DAC 0x8000015
+/* enum: RX FFE post-tap 7 (hp07_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_07_DAC 0x8000016
+/* enum: RX FFE post-tap 8 (hp08_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_08_DAC 0x8000017
+/* enum: RX FFE post-tap 9 (hp09_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_09_DAC 0x8000018
+/* enum: RX FFE post-tap 10 (hp10_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_10_DAC 0x8000019
+/* enum: RX FFE post-tap 11 (hp11_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_11_DAC 0x800001a
+/* enum: RX FFE post-tap 12 (hp12_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_12_DAC 0x800001b
+/* enum: RX FFE post-tap 13 (hp13_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_13_DAC 0x800001c
+/* enum: RX FFE post-tap 14 (hp14_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_14_DAC 0x800001d
+/* enum: RX FFE post-tap 15 (hp15_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_POST_TAP_15_DAC 0x800001e
+/* enum: RX FFE floating tap 1 (hf01_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_01_DAC 0x800001f
+/* enum: RX FFE floating tap 2 (hf02_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_02_DAC 0x8000020
+/* enum: RX FFE floating tap 3 (hf03_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_03_DAC 0x8000021
+/* enum: RX FFE floating tap 4 (hf04_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_04_DAC 0x8000022
+/* enum: RX FFE floating tap 5 (hf05_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_05_DAC 0x8000023
+/* enum: RX FFE floating tap 6 (hf06_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_06_DAC 0x8000024
+/* enum: RX FFE floating tap 7 (hf07_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_07_DAC 0x8000025
+/* enum: RX FFE floating tap 8 (hf08_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_08_DAC 0x8000026
+/* enum: RX FFE floating tap 9 (hf09_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_09_DAC 0x8000027
+/* enum: RX FFE floating tap 10 (hf10_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_10_DAC 0x8000028
+/* enum: RX FFE floating tap 11 (hf11_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_11_DAC 0x8000029
+/* enum: RX FFE floating tap 12 (hf12_dac) */
+#define IFOE_TELEM_ID_PHY_FFE_FLOAT_TAP_12_DAC 0x800002a
+/* enum: RX CTLE low-frequency peak (kl_dac) */
+#define IFOE_TELEM_ID_PHY_LO_PEAK 0x800002b
+/* enum: RX CTLE high-frequency peak (kh_dac) */
+#define IFOE_TELEM_ID_PHY_HI_PEAK 0x800002c
+/* enum: RX CTLE automatic gain control (agc_dac) */
+#define IFOE_TELEM_ID_PHY_GC_DAC 0x800002d
 #define IFOE_TELEM_ID_ID_LBN 0
 #define IFOE_TELEM_ID_ID_WIDTH 64
