@@ -4156,6 +4156,7 @@ def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
         'V_MAD_U16': 'vop3_integer_mad<uint16_t, 16>',
         'V_MAD_I32_I16': 'vop3_integer_mad<int32_t, 16>',
         'V_MAD_U32_U16': 'vop3_integer_mad<uint32_t, 16>',
+        'V_SAD_HI_U8': 'vop3_integer_sad_hi_u8',
         'V_SAD_U8': 'vop3_integer_sad_u8',
         'V_SAD_U16': 'vop3_integer_sad_u16',
         'V_SAD_U32': 'vop3_integer_sad_u32',

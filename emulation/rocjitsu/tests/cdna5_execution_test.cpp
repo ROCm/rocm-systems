@@ -236,22 +236,34 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
     uint32_t src1;
     uint32_t src2;
     uint32_t expected;
+    bool clamp = true;
   };
   constexpr std::array kCases{
       TestCase{cdna5::kVMulU32U24Vop3, 0x00ffffffu, 0x00ffffffu, 0u, UINT32_MAX},
       TestCase{cdna5::kVMulI32I24Vop3, 0x007fffffu, 0x007fffffu, 0u,
                static_cast<uint32_t>(INT32_MAX)},
+      TestCase{cdna5::kVMulI32I24Vop3, 0x00800000u, 257u, 0u, static_cast<uint32_t>(INT32_MIN)},
       TestCase{cdna5::kVMadU32U24Vop3, 0x00ffffffu, 0x00ffffffu, UINT32_MAX, UINT32_MAX},
       TestCase{cdna5::kVMadI32I24Vop3, 0x007fffffu, 0x007fffffu, static_cast<uint32_t>(INT32_MAX),
                static_cast<uint32_t>(INT32_MAX)},
+      TestCase{cdna5::kVMadI32I24Vop3, 0x00800000u, 256u, UINT32_MAX,
+               static_cast<uint32_t>(INT32_MIN)},
+      TestCase{cdna5::kVMadI32I24Vop3, 0x00800000u, 256u, UINT32_MAX,
+               static_cast<uint32_t>(INT32_MAX), false},
       TestCase{cdna5::kVMadU16Vop3, UINT16_MAX, UINT16_MAX, UINT16_MAX, UINT16_MAX},
       TestCase{cdna5::kVMadI16Vop3, static_cast<uint16_t>(INT16_MAX),
                static_cast<uint16_t>(INT16_MAX), static_cast<uint16_t>(INT16_MAX),
                static_cast<uint16_t>(INT16_MAX)},
+      TestCase{cdna5::kVMadI16Vop3, static_cast<uint16_t>(INT16_MIN), 2u, static_cast<uint16_t>(-1),
+               static_cast<uint16_t>(INT16_MIN)},
       TestCase{cdna5::kVMadU32U16Vop3, UINT16_MAX, UINT16_MAX, UINT32_MAX, UINT32_MAX},
       TestCase{cdna5::kVMadI32I16Vop3, static_cast<uint16_t>(INT16_MAX),
                static_cast<uint16_t>(INT16_MAX), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint32_t>(INT32_MAX)},
+      TestCase{cdna5::kVMadI32I16Vop3, static_cast<uint16_t>(INT16_MIN),
+               static_cast<uint16_t>(INT16_MAX), static_cast<uint32_t>(INT32_MIN),
+               static_cast<uint32_t>(INT32_MIN)},
+      TestCase{cdna5::kVSadHiU8Vop3, UINT32_MAX, 0u, 0xfc040000u, UINT32_MAX},
       TestCase{cdna5::kVSadU32Vop3, 0u, UINT32_MAX, 1u, UINT32_MAX},
       TestCase{cdna5::kVMsadU8Vop3, 0xffffffffu, 0x01010101u, UINT32_MAX, UINT32_MAX},
   };
@@ -268,8 +280,11 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
       cu->write_vgpr(base, 0, test.src0);
       cu->write_vgpr(base + 1, 0, test.src1);
       cu->write_vgpr(base + 2, 0, test.src2);
-      const auto words = cdna5::build_vop3(
-          test.opcode, {.vdst = 3, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+      const auto words = cdna5::build_vop3(test.opcode, {.vdst = 3,
+                                                         .clamp = static_cast<uint8_t>(test.clamp),
+                                                         .src0 = 256,
+                                                         .src1 = 257,
+                                                         .src2 = 258});
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
       ASSERT_NE(decoder, nullptr);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));

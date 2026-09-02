@@ -160,6 +160,20 @@ inline uint32_t vop3_integer_sad_u8(uint32_t lhs, uint32_t rhs, uint32_t addend,
   return vop3_integer_add<uint32_t>(difference, addend, clamp);
 }
 
+/// @brief Execute shifted byte SAD plus accumulation, saturating when CLAMP is set.
+inline uint32_t vop3_integer_sad_hi_u8(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
+  uint32_t difference = 0;
+  for (unsigned i = 0; i < 4; ++i) {
+    const uint32_t a = (lhs >> (i * 8)) & 0xffu;
+    const uint32_t b = (rhs >> (i * 8)) & 0xffu;
+    difference += a > b ? a - b : b - a;
+  }
+  const uint64_t wide = (static_cast<uint64_t>(difference) << 16) + addend;
+  if (clamp && wide > UINT32_MAX)
+    return UINT32_MAX;
+  return static_cast<uint32_t>(wide);
+}
+
 inline uint32_t vop3_integer_sad_u16(uint32_t lhs, uint32_t rhs, uint32_t addend, bool clamp) {
   uint32_t difference = 0;
   for (unsigned i = 0; i < 2; ++i) {

@@ -18569,18 +18569,12 @@ inline void execute_v_sad_hi_u8_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
-      auto a = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-      auto b = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-      auto c = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      uint32_t r = 0;
-      for (int i = 0; i < 4; ++i) {
-        uint8_t ab = (a >> (i * 8)) & 0xFF;
-        uint8_t bb = (b >> (i * 8)) & 0xFF;
-        r += (ab > bb) ? (ab - bb) : (bb - ab);
-      }
-      return (r << 16) + c;
-    }());
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_sad_hi_u8(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                       amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                       amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane),
+                                       inst.inst_.clamp));
   }
 }
 

@@ -1778,6 +1778,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         )
 
     if ctx.integer_saturation_dtype == 'u32' and callee in (
+        'sad_hi_u8',
         'sad_u8',
         'sad_u16',
         'sad_u32',

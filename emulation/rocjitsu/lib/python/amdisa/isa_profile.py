@@ -610,6 +610,7 @@ class IsaProfile(ABC):
             'V_MSAD_U8': 'u32',
             'V_MUL_I32_I24': 'i32',
             'V_MUL_U32_U24': 'u32',
+            'V_SAD_HI_U8': 'u32',
             'V_SAD_U8': 'u32',
             'V_SAD_U16': 'u32',
             'V_SAD_U32': 'u32',
