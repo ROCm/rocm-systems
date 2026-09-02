@@ -51,16 +51,9 @@ using MoiCfgForwardDistanceIndexPtr =
 
 inline constexpr uint32_t kMoiLocalIndirectIslandWords = 8u;
 inline constexpr uint16_t kMoiDispatchStateSgprCount = 2u;
-inline constexpr uint32_t kMoiRecordReplayIndirectIslandWords = 7u;
+inline constexpr uint32_t kMoiCompactIndirectIslandWords = 7u;
 inline constexpr uint32_t kMoiInlineShadowIndirectIslandWords = 8u;
-// A branch-only access layout retains a two-word relay pair after every
-// reserved synchronization island. The island remains available to the later
-// sync pass while the dedicated pair forms a capacity-accounted relay spine.
-inline constexpr uint32_t kMoiRecordReplayBarrierRelayWords = 2u;
-inline constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
-    kMoiRecordReplayIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
 inline constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
-inline constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
 
 [[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry,
                                                               bool key_encodes_scc = false) {
@@ -295,8 +288,8 @@ struct MoiDecodedInstructionRange {
 };
 
 [[nodiscard]] constexpr uint32_t
-moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
-  return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
+moi_compact_entry_island_words(bool spill_backed_scalar_assignment) {
+  return kMoiCompactIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>

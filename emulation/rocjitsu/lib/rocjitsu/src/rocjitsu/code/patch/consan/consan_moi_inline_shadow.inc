@@ -1329,6 +1329,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       barrier_reservation = MoiBarrierIslandReservation{
           .begin = original_text_size,
           .slot_words = static_cast<uint32_t>(kIndirectIslandWords),
+          .protected_prefix_words = static_cast<uint32_t>(kIndirectIslandWords),
           .reserved_slot_count = reserved_barrier_island_count,
       };
     }

@@ -1029,7 +1029,7 @@ void try_apply_sampled_barrier_sync_patch(
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
-  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
+  constexpr uint64_t kIndirectIslandWords = kMoiCompactIndirectIslandWords;
   std::vector<ConSanPatchInfo> patches;
   std::vector<ConSanCommittedLowering> lowering_commits;
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
@@ -1271,7 +1271,7 @@ void try_apply_sampled_barrier_sync_patch(
       };
       const uint64_t island_words_count =
           use_clone_local_routes
-              ? 2u * (indices.size() + 1u) + kMoiRecordReplayIndirectIslandWords
+              ? 2u * (indices.size() + 1u) + kMoiCompactIndirectIslandWords
               : moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
@@ -2034,12 +2034,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   const uint64_t reserved_atomic_island_count = mode_semantics.reserved_atomic_island_count;
   const uint64_t reserved_atomic_island_begin =
       original_text_size +
-      reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t);
+      reserved_barrier_island_count * kMoiCompactIndirectIslandWords * sizeof(uint32_t);
   std::vector<ConSanPreappliedReservedRange> local_island_reserved_ranges(
       moi_resource_reserved_ranges(resource_state).begin(),
       moi_resource_reserved_ranges(resource_state).end());
   const uint64_t reserved_sync_island_bytes =
-      reserved_barrier_island_count * kMoiRecordReplayIndirectIslandWords * sizeof(uint32_t) +
+      reserved_barrier_island_count * kMoiCompactIndirectIslandWords * sizeof(uint32_t) +
       reserved_atomic_island_count * kMoiLocalIndirectIslandWords * sizeof(uint32_t);
   if (reserved_sync_island_bytes != 0u) {
     local_island_reserved_ranges.push_back(

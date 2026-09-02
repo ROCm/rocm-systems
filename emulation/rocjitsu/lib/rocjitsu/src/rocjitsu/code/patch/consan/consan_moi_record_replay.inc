@@ -68,7 +68,7 @@ void try_apply_first_light_access_record_patch(
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
-  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
+  constexpr uint64_t kIndirectIslandWords = kMoiCompactIndirectIslandWords;
   // A branch-only appended body cannot use a live scalar PC pair. Keep one
   // capacity-one entry relay and one capacity-one return relay after its
   // unconditional return branch. Earlier bodies can then extend both sides
@@ -159,7 +159,7 @@ void try_apply_first_light_access_record_patch(
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
     original_text = text_bytes;
     const uint32_t local_entry_island_words =
-        moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
+        moi_compact_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(text_bytes, result.program_inventory, result.patches, arch,
                                 local_entry_island_words,
                                 moi_resource_reserved_ranges(resource_state));
@@ -632,7 +632,7 @@ void try_apply_first_light_access_record_patch(
           candidate, resources->base, resources->count, ignored_overlap_errors);
     }
     const uint32_t candidate_entry_island_words =
-        moi_record_replay_entry_island_words(candidate_point.has_compact_moi_scalar_spill());
+        moi_compact_entry_island_words(candidate_point.has_compact_moi_scalar_spill());
     const auto &access_ranges = candidate.ranges;
     if (access_ranges.empty()) {
       result.warnings.emplace_back(
@@ -1491,6 +1491,10 @@ void try_apply_first_light_access_record_patch(
       access_output.reserved_sync_islands = MoiBarrierIslandReservation{
           .begin = original_text_size,
           .slot_words = static_cast<uint32_t>(reserved_sync_slot_words),
+          .protected_prefix_words = static_cast<uint32_t>(
+              reserved_sync_slot_words == kMoiRecordReplayBarrierRelaySlotWords
+                  ? kIndirectIslandWords
+                  : reserved_sync_slot_words),
           .reserved_slot_count = reserved_sync_island_count,
       };
     }

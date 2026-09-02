@@ -323,9 +323,8 @@ validate_reserved_barrier_island_layout(
     uint64_t expected_slot_count) {
   if (!reservation || barrier_count == 0u || expected_slot_count < barrier_count ||
       reservation->reserved_slot_count != expected_slot_count ||
-      (reservation->slot_words != kMoiRecordReplayIndirectIslandWords &&
-       reservation->slot_words != kMoiLocalIndirectIslandWords &&
-       reservation->slot_words != kMoiRecordReplayBarrierRelaySlotWords) ||
+      reservation->slot_words == 0u || reservation->protected_prefix_words == 0u ||
+      reservation->protected_prefix_words > reservation->slot_words ||
       expected_slot_count > std::numeric_limits<uint64_t>::max() /
                                 (reservation->slot_words * sizeof(uint32_t))) {
     return std::nullopt;
@@ -345,18 +344,15 @@ validate_reserved_barrier_island_layout(
     std::memcpy(&word, text.data() + offset, sizeof(word));
     return (word & 0xffff0000u) == (build_s_branch(0, arch) & 0xffff0000u);
   };
-  const uint32_t barrier_owned_words =
-      reservation->slot_words == kMoiRecordReplayBarrierRelaySlotWords
-          ? kMoiRecordReplayIndirectIslandWords
-          : reservation->slot_words;
   for (uint64_t slot = 0u; slot < expected_slot_count; ++slot) {
     const uint64_t slot_begin =
         reservation->begin + slot * reservation->slot_words * sizeof(uint32_t);
-    for (uint32_t word = 0u; word < barrier_owned_words; ++word) {
+    for (uint32_t word = 0u; word < reservation->protected_prefix_words; ++word) {
       if (!word_is_nop(slot_begin + word * sizeof(uint32_t)))
         return std::nullopt;
     }
-    for (uint32_t word = barrier_owned_words; word < reservation->slot_words; ++word) {
+    for (uint32_t word = reservation->protected_prefix_words; word < reservation->slot_words;
+         ++word) {
       const uint64_t offset = slot_begin + word * sizeof(uint32_t);
       if (!word_is_nop(offset) && !word_is_branch(offset))
         return std::nullopt;
@@ -808,7 +804,7 @@ void try_apply_shared_barrier_patch(
   std::vector<ConSanCommittedLowering> lowering_commits;
   patches.reserve(planned_candidates.size() * 2u);
   lowering_commits.reserve(planned_candidates.size());
-  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
+  constexpr uint64_t kIndirectIslandWords = kMoiCompactIndirectIslandWords;
   const uint64_t indirect_island_bytes = kIndirectIslandWords * sizeof(uint32_t);
   const std::optional<MoiBarrierIslandReservation> barrier_island_layout =
       operating_point.moi_exec_save_sgpr

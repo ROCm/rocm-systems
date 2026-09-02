@@ -84,7 +84,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
-  constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
+  constexpr uint64_t kIndirectIslandWords = kMoiCompactIndirectIslandWords;
   // The fast gate has 26 fixed worst-case words for x/y/z, plus three when a
   // gfx1250 kernel reads the cluster-local workgroup coordinate. Reserving a
   // larger unconditional envelope for an offset-zero profile makes
@@ -163,7 +163,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   std::optional<MoiLocalNopIslandAllocator> local_entry_islands;
   if (use_indirect_appended && !original_text.empty()) {
     const uint32_t local_entry_island_words =
-        moi_record_replay_entry_island_words(has_spill_backed_scalar_assignment);
+        moi_compact_entry_island_words(has_spill_backed_scalar_assignment);
     local_entry_islands.emplace(original_text, result.program_inventory, result.patches, arch,
                                 local_entry_island_words,
                                 moi_resource_reserved_ranges(resource_state));
@@ -340,7 +340,7 @@ void try_apply_direct_sampled_watchpoint_patch(
           candidate, resources->base, resources->count, ignored_overlap_errors);
     }
     const uint32_t candidate_entry_island_words =
-        moi_record_replay_entry_island_words(candidate_point.has_compact_moi_scalar_spill());
+        moi_compact_entry_island_words(candidate_point.has_compact_moi_scalar_spill());
     std::vector<std::string> candidate_errors;
     MoiAccessEntryIslandPlan entry_plan;
     entry_plan.original_size = candidate.size();

@@ -17,6 +17,7 @@ namespace rocjitsu::consan_moi_impl {
 struct MoiBarrierIslandReservation {
   uint64_t begin = 0u;
   uint32_t slot_words = 0u;
+  uint32_t protected_prefix_words = 0u;
   uint64_t reserved_slot_count = 0u;
 };
 

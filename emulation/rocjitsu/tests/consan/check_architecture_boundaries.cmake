@@ -860,6 +860,10 @@ file(READ "${_consan_dir}/consan_moi_record_replay.h"
      _record_replay_contract)
 file(READ "${_consan_dir}/consan_moi_inline_shadow.inc"
      _inline_shadow_access_owner)
+file(READ "${_consan_dir}/consan_moi_record_replay.inc"
+     _record_replay_access_owner)
+file(READ "${_consan_dir}/consan_moi_placement_contracts.h"
+     _moi_placement_contract)
 if(NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
@@ -890,7 +894,8 @@ if(NOT _record_replay_barrier_owner MATCHES
         "the Record/Replay barrier owner must retain its complete mode transaction"
     )
 endif()
-if(NOT _moi_barrier_contract MATCHES "struct MoiBarrierIslandReservation" OR
+if(NOT _moi_barrier_contract MATCHES
+       "struct MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
    NOT _record_replay_contract MATCHES
        "std::optional<MoiBarrierIslandReservation>[ \t]+reserved_sync_islands" OR
    NOT _record_replay_contract MATCHES
@@ -900,7 +905,9 @@ if(NOT _moi_barrier_contract MATCHES "struct MoiBarrierIslandReservation" OR
    NOT _record_replay_barrier_owner MATCHES
        "access_output[.]reserved_sync_islands" OR
    NOT _inline_shadow_access_owner MATCHES
-       "barrier_reservation[ \t]*=[ \t]*MoiBarrierIslandReservation" OR
+       "barrier_reservation[ \t]*=[ \t]*MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
+   NOT _record_replay_access_owner MATCHES
+       "reserved_sync_islands[ \t]*=[ \t]*MoiBarrierIslandReservation[^}]*protected_prefix_words" OR
    NOT _inline_shadow_mode_owner MATCHES
        "std::optional<MoiBarrierIslandReservation>[ \t]+barrier_reservation" OR
    NOT _inline_shadow_mode_owner MATCHES
@@ -911,6 +918,42 @@ if(NOT _moi_barrier_contract MATCHES "struct MoiBarrierIslandReservation" OR
         "access producers and mode entry points must retain exact barrier reservation ownership"
     )
 endif()
+if(NOT _moi_placement_contract MATCHES
+       "kMoiCompactIndirectIslandWords" OR
+   NOT _moi_placement_contract MATCHES
+       "moi_compact_entry_island_words" OR
+   NOT _moi_barrier_planning MATCHES
+       "kMoiCompactIndirectIslandWords")
+    message(FATAL_ERROR
+        "shared compact-entry geometry must retain one mode-neutral contract"
+    )
+endif()
+if(NOT _record_replay_contract MATCHES
+       "kMoiRecordReplayBarrierRelayWords" OR
+   NOT _record_replay_contract MATCHES
+       "kMoiRecordReplayBarrierRelaySlotWords" OR
+   NOT _record_replay_contract MATCHES
+       "kMoiRecordReplayBorrowedEntryIslandWords" OR
+   _moi_placement_contract MATCHES
+       "kMoiRecordReplay(BarrierRelay|BorrowedEntry)")
+    message(FATAL_ERROR
+        "Record/Replay-only relay geometry must remain in its mode contract"
+    )
+endif()
+foreach(
+    _compact_entry_consumer
+    IN ITEMS
+        consan_moi_placement_contracts.h
+        consan_moi_barrier.inc
+        consan_moi_sampled_access.inc
+        consan_moi_sampled_sync.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_compact_entry_consumer}"
+        "kMoiRecordReplayIndirectIslandWords|moi_record_replay_entry_island_words"
+        "shared compact-entry geometry must not carry Record/Replay ownership"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_record_replay_barrier.inc"
     "const MoiRecordEventEmissionPlan [*]emission[ \t]*=[ \t]*nullptr|uint64_t[ \t]+cave_text_offset[ \t]*=[ \t]*0u|bool[ \t]+branch_only_scalar_spill[ \t]*=[ \t]*false"

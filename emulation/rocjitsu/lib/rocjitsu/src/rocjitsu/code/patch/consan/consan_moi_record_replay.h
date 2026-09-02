@@ -10,6 +10,14 @@
 
 namespace rocjitsu::consan_moi_impl {
 
+// A branch-only access layout retains a two-word relay pair after every
+// reserved synchronization island. The island remains available to the later
+// sync pass while the dedicated pair forms a capacity-accounted relay spine.
+inline constexpr uint32_t kMoiRecordReplayBarrierRelayWords = 2u;
+inline constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
+    kMoiCompactIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
+inline constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
+
 /// Record/Replay access-placement facts consumed by the immediately following
 /// synchronization lowering stage.
 struct MoiRecordReplayAccessOutput {
