@@ -8723,3 +8723,66 @@ remove or consolidate superseded patch-state and validation paths instead of
 allowing this cost to stand as another permanent layer. Full architecture
 locality, wider coordinator confinement, material additional deletion, and
 the independent Section 14 audit remain open, so the goal remains active.
+
+### 16.124 Convergence checkpoint 123: one policy-to-report engine vocabulary
+
+The follow-on trace started at each mode-owned access mapping and walked
+backward through semantic policy. It found that checkpoint 121's report-facing
+engine vocabulary was still only locally unified: access policy, barrier
+policy, and atomic/fence policy each retained an independent engine-to-probe
+switch, while report planning repeated all four rows to classify those probe
+kinds. A new mode therefore had four semantic authorities to update before
+any lowering was considered, and mismatches could survive observation-plan
+construction until report planning rejected them.
+
+`ConSanEngineProbeVocabulary` is now the one target-neutral row for an
+engine's access, barrier, atomic, and optional fence intents. The same row also
+states whether access produces sticky-marker rather than access evidence,
+whether address capture is supported, and whether barrier evidence is counted
+per semantic site. Access, barrier, and atomic/fence policy publish intents
+directly from this row. Report planning classifies, validates, and sizes those
+intents from the same row. Engine validity at these policy entry points and in
+`ConSanObservationPlan` is now defined by successful vocabulary lookup instead
+of three additional enum-range helpers.
+
+The three policy switches, the report-private `EngineEvidenceVocabulary`
+type, its four-row table, its lookup helper, and the three duplicate engine
+validity helpers are deleted. The architecture gate requires one complete row
+for SuperCollider, Record/Replay, Sampled, and InlineShadow in the semantic
+observation contract. It rejects a report-private engine vocabulary or the old
+policy mapping helpers. This is deliberately one O(N) mode registration point,
+not duplicated mode implementation: adding a mode declares its semantic probe
+language once, while common policy and reporting retain their shared
+algorithms.
+
+| Signal | Checkpoint 123 | Cumulative change | Slice change from checkpoint 122 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,820 | **-2,156** | **-42** |
+| Nonblank production lines | 96,450 | **-2,634** | **-36** |
+| Production implementation lines | 88,692 | **-2,758** | **-41** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Engine-to-probe semantic vocabulary tables/switches | **1** | n/a | **-4** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `0ee389e10fe`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), all focused access, barrier, atomic/fence,
+observation-plan, evidence-planning, and architecture-boundary tests **92/92**,
+and all **1,296/1,296** nonphysical `ConSan.*` and `ConSanMoi.*` host/component
+tests. The focused suites exhaustively exercise the four access rows, all
+engine barrier and atomic contracts, foreign/cross-engine rejection, evidence
+roles and cardinalities, and invalid engine values. No test was removed,
+renamed, disabled, or replaced, and no physical test was run.
+
+This checkpoint deletes forty-one implementation lines and more importantly
+removes four parallel semantic authorities. Together, checkpoints 122 and 123
+are nineteen implementation lines smaller than checkpoint 121: the explicit
+mode-local access seam is fully paid back while policy-to-report composition
+also becomes simpler. This strengthens Sections 14.1, 14.3, 14.4, 14.6,
+14.7, and 14.8. Full architecture locality, remaining broad coordinator and
+patch-state paths, material additional whole-refactoring shrinkage, and the
+independent Section 14 audit remain open, so the goal remains active.
