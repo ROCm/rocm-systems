@@ -93,9 +93,8 @@ struct event_record_info_t
 void
 record_event_info(uint64_t hip_event_handle, event_record_info_t info);
 
-// Marks the current record generation of an event as completed. Waits registered after
-// this point would be short-circuited by the HIP runtime and never produce a GPU-side
-// dependency, so they are not tracked.
+// Marks the current record generation as complete. CLR short-circuits waits on a
+// completed event, so register_deferred_wait stops tracking them once this is set.
 void
 mark_event_completed(uint64_t hip_event_handle);
 

@@ -419,8 +419,8 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto  _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
         auto  _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
 
-        // Mark before emitting so the window in which a wait can be registered against an
-        // already-completed event is not widened by the duration of tool callbacks.
+        // Mark ahead of the callbacks below so that tool callback duration does not widen
+        // the window in which a wait can still be registered against a completed event.
         if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD)
             hip::event::mark_event_completed(bdata.callback_record.hip_event_handle);
 

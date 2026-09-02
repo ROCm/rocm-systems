@@ -404,13 +404,11 @@ register_deferred_wait(uint64_t hip_event_handle)
     auto event_info = lookup_event_info(hip_event_handle);
     if(event_info.original_signal == 0) return 0;
 
-    // The record barrier for this generation already completed. The HIP runtime drops
-    // dependencies on completed signals when it builds a barrier's dependency list, so
-    // this wait cannot produce GPU-side work and must not be tracked. Erring here is
-    // one-sided: completion is monotonic within a generation, so a wait we refuse would
-    // also have been dropped by the runtime. The reverse case -- the event completing
-    // between this check and the runtime's -- leaves a stale entry that is released by
-    // record_event_info or erase_event_info.
+    // CLR skips completed signals when it assembles a barrier's dependency list, so a
+    // wait issued after the record barrier finished produces no GPU work to trace.
+    // Completion is monotonic within a record generation, so refusing here can only
+    // suppress waits CLR would have dropped as well. An event that completes after this
+    // check leaves an entry that record_event_info or erase_event_info releases.
     if(event_info.completed) return 0;
 
     auto tracing_data = tracing::tracing_data{};
@@ -513,16 +511,17 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info)
         map[hip_event_handle] = info;
     });
 
-    // Drain unconditionally, even when the handle is unchanged. Completion signals come
-    // from a pool and the runtime can hand back the same handle for a new record, so a
-    // matching handle does not imply the outstanding waits belong to this generation.
-    // Any wait registered against the previous generation can no longer be attributed
-    // correctly, so it is released without emitting a record.
+    // A new record supersedes the previous generation. Completion signals are pooled and
+    // the same handle can be handed back for the new record, so a matching handle is not
+    // evidence that outstanding waits belong to the current generation. Those waits can
+    // no longer be attributed to a generation and are released without emitting a record.
+    // The drain is scoped by event handle so that another event holding a recycled signal
+    // keeps its own waits.
     if(old_signal != 0)
     {
         for(;;)
         {
-            auto pw = consume_pending_wait(old_signal);
+            auto pw = consume_pending_wait_for_handle(old_signal, hip_event_handle);
             if(!pw.corr_id_ref) break;
             pw.corr_id_ref->sub_kern_count();
             pw.corr_id_ref->sub_ref_count();
@@ -558,18 +557,9 @@ store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group)
 void
 erase_event_info(uint64_t hip_event_handle)
 {
-    auto info = lookup_event_info(hip_event_handle);
-    if(info.original_signal != 0)
-    {
-        for(;;)
-        {
-            auto pw = consume_pending_wait(info.original_signal);
-            if(!pw.corr_id_ref) break;
-            pw.corr_id_ref->sub_kern_count();
-            pw.corr_id_ref->sub_ref_count();
-        }
-    }
-
+    // Release every pending wait for this event, including any left under the signal of
+    // an earlier record generation. Matching on the event handle rather than the signal
+    // keeps waits owned by another event that holds a recycled signal handle intact.
     get_pending_wait_map()->wlock([&](auto& map) {
         for(auto it = map.begin(); it != map.end();)
         {
