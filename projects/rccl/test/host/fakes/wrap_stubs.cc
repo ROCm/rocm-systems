@@ -8,11 +8,10 @@
 // into rccl-UnitTestsMicro alongside p2p.cc/rma_proxy_progress.cc's own
 // tests. #include-ing the whole 1771-line rccl_wrap.cc (via WRAP_CC_PATH)
 // pulls in the DDA / CE / symmetric-kernel / hierarchical backend-selection
-// machinery even though the current test batch only exercises a handful of
-// low-dependency helpers at the top of the file (see wrap-test.cc).
-// Everything below satisfies the link closure; entries the current tests
-// never reach default to abort()-on-call so an accidentally exercised path
-// fails fast instead of silently returning a wrong answer.
+// machinery even though the covered functions (see wrap-test.cc) don't reach
+// all of it yet. Everything below satisfies the link closure; entries the
+// current tests never reach default to abort()-on-call so an accidentally
+// exercised path fails fast instead of silently returning a wrong answer.
 //
 // Deliberately NOT reusing nccl_stubs.cc / bootstrap_stubs.cc / topo_stubs.cc
 // / transport_stubs.cc here: those are curated for init.cc and each already
@@ -25,18 +24,25 @@
 // rather than duplicated.
 //
 // RCCL_PARAM / NCCL_PARAM: every RCCL_PARAM(...) invocation textually inside
-// rccl_wrap.cc is redirected by wrap-test.cc to return its compile-time
-// default directly (no test in the current batch needs a specific param
-// value, so there is nothing yet to make per-test-controllable -- see
-// wrap-test.cc's redirector comment for the upgrade path) and needs no stub
-// here. The few ncclParamXxx / rcclParamXxx symbols rccl_wrap.cc declares
+// rccl_wrap.cc is redirected by wrap-test.cc to route through a g_loadParam
+// std::function hook (same mechanism as init-test.cc's redirect), so a test
+// can flip one param's value between cases -- see wrap-test.cc's redirector
+// comment. The few ncclParamXxx / rcclParamXxx symbols rccl_wrap.cc declares
 // `extern` and calls without a local RCCL_PARAM/NCCL_PARAM invocation (their
 // generator lives in another .cc) are stubbed below instead.
+
+#include <dlfcn.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
+#include "wrap_stubs.h"
 
 #include "nccl.h"
 #include "comm.h"
@@ -96,12 +102,86 @@ int64_t ncclParamMaxNchannels() { return -2; }              // graph/connect.cc:
 int64_t rcclParamForceCe() { return 1; }                    // enqueue.cc:3785
 int64_t ncclParamLaunchOrderImplicit() { return 0; }        // enqueue.cc:1985
 
-// ncclGetEnv: real signature returns nullptr for an unset var. No test in the
-// current batch reads an env var through this path (rcclOverrideProtocol /
-// rcclOverrideAlgorithm / rcclUseAllGatherDirect are out of scope here);
-// default to "unset" so RCCL_OVERRIDE_PROTO-style static-once guards stay on
-// their no-override arm until a future test batch adds a controllable seam.
-const char* ncclGetEnv(const char* /*name*/) { return nullptr; }
+// ---------------------------------------------------------------------------
+// Settable env-var fake, backing both ncclGetEnv() (below) and rccl_wrap.cc's
+// several bare getenv() call sites (rcclSetPxn, rcclSetP2pNetChunkSize,
+// rcclUpdateCollectiveProtocol, rcclUpdateThreadThreshold, ...). A macro
+// can't intercept a bare getenv() call, so that path needs a link-level
+// override instead -- same two-layer approach as fakes/init_fakes.cc's
+// micro_getenv/SetMicroEnv family, replicated here (see wrap_stubs.h).
+// ---------------------------------------------------------------------------
+namespace {
+// A nullopt entry means "absent". Unmapped names read as unset via
+// micro_getenv, real via the getenv interposer below.
+std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
+  static std::unordered_map<std::string, std::optional<std::string>> m;
+  return m;
+}
+// Resolved past our interposing definition below so the map-miss fallback
+// doesn't recurse into ourselves.
+char* real_getenv(const char* name) {
+  using Fn = char* (*)(const char*);
+  static Fn next = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "getenv"));
+  return next ? next(name) : nullptr;
+}
+
+// Strict: a name the test hasn't scripted reads as unset, so no test can
+// depend on the ambient environment. ncclGetEnv (below, same TU) routes
+// here; no caller outside this file, so it stays out of wrap_stubs.h.
+const char* micro_getenv(const char* name) {
+  if (name == nullptr) return nullptr;
+  auto& m = microEnvMap();
+  auto it = m.find(name);
+  return (it != m.end() && it->second) ? it->second->c_str() : nullptr;
+}
+}  // namespace
+
+// Link-level override rather than a scoped macro: rccl_wrap.cc's several
+// bare getenv() sites can't be caught by a macro. Process-wide, so
+// gtest/libstdc++ reads must still see the real environment -- falls back
+// to real_getenv for anything not explicitly scripted.
+extern "C" char* getenv(const char* name) {
+  if (name != nullptr) {
+    auto& m = microEnvMap();
+    auto it = m.find(name);
+    if (it != m.end()) return it->second ? const_cast<char*>(it->second->c_str()) : nullptr;
+  }
+  return real_getenv(name);
+}
+
+// A null value means "absent", NOT "leave unmapped" -- leaving it unmapped
+// would fall through to the real getenv.
+void SetMicroEnv(const char* name, const char* value) {
+  if (name == nullptr) return;
+  if (value == nullptr) microEnvMap()[name] = std::nullopt;
+  else microEnvMap()[name] = value;
+}
+
+void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
+
+void ClearMicroEnv() { microEnvMap().clear(); }
+
+// ncclGetEnv: real signature returns nullptr for an unset var; routes
+// through the same settable map as the bare-getenv() override above.
+const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
+
+// ncclGroupDepth is NOT faked here: group-test.cc (also part of this binary
+// since the rccl-UnitTestsMicro merge) compiles the real group.cc, which
+// defines it -- a second copy here would be a duplicate-symbol error. Its
+// real default (0, "not grouped") is what every rccl_wrap.cc test so far
+// assumes, same as when this was a hand-copied stub.
+
+// rcclUseAinic: real definition (transport/net.cc:343) does hardware NIC
+// detection via std::call_once; not linked here (pulls in the IB/net
+// transport layer). false -- "not an AINIC" -- is the common-case default.
+bool rcclUseAinic() { return false; }
+
+// ncclPxnDisable: real definition graph/paths.cc:740, reads comm fields set
+// up during channel/topology construction this lean binary doesn't build.
+// Not to be confused with rcclSetPxn (already tested), which computes
+// comm->pxnDisable itself and never calls this getter. 0 -- "PXN not
+// disabled" -- is the common-case default.
+int ncclPxnDisable(struct ncclComm* /*comm*/) { return 0; }
 
 // ncclDevFuncUnrollGenerated: extern bool const[NCCL_NUM_UNROLLS]. Real array,
 // not abort-floor -- commSetUnrollFactor indexes it unconditionally on every
@@ -257,10 +337,17 @@ int rcclKernelPackedChannels(struct ncclComm*, ncclFunc_t, size_t, ncclDataType_
 // rcclLL128ElemsPerThreadFromArch is `inline` in archinfo.h (transitively
 // included), so no stub is needed here.
 
-// getFirmwareVersion()'s sole dependency; getFirmwareVersion() itself is not
-// in the current test batch (Structural: needs a mock AMD-SMI response, not
-// just a comm/task struct -- a future test's seam, not an abort-floor gap).
-ncclResult_t amd_smi_getFirmwareVersion(uint32_t, uint64_t*) { ::abort(); }
+// getFirmwareVersion()'s sole dependency. Settable hook, same std::function
+// shape as fakes/nccl_fakes.cc's, so a test can script a canned firmware
+// response or a failure without touching the real AMD-SMI layer.
+static ncclResult_t DefaultAmdSmiGetFirmwareVersion(uint32_t /*devIdx*/, uint64_t* fwVersion) {
+  *fwVersion = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t, uint64_t*)> g_amdSmiGetFirmwareVersion = DefaultAmdSmiGetFirmwareVersion;
+ncclResult_t amd_smi_getFirmwareVersion(uint32_t devIdx, uint64_t* fwVersion) {
+  return g_amdSmiGetFirmwareVersion(devIdx, fwVersion);
+}
 
 // --- AllReduce DDA (dda_all_reduce.h) ---
 bool ncclAllReduceDdaIpcEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { ::abort(); }

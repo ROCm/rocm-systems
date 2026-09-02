@@ -11,15 +11,25 @@
 // callable, links NO librccl/HIP, and satisfies every external symbol via
 // fakes/wrap_stubs.cc.
 //
-// Covers 17 low-dependency helpers: nine that take no ncclComm* at all, or
-// touch only a handful of plain fields, plus eight more that need a real
-// one-GPU comm+topology (MakeCommWithArch below) but still avoid RCCL_PARAM/
-// getenv/DDA/CE/symmetric-kernel machinery beyond a cached fast-return path.
-// rcclOverrideChannels, rcclSetPipelining, the WarpSpeed helpers, and
-// rcclSelectAllReduce/AllGather/ReduceScatter are unreached by design; each
-// depends on seams this file doesn't build. Mutation-tested directly against
-// this file; residuals are documented at their own test below rather than
-// here.
+// Covers most of rccl_wrap.cc's low- and medium-dependency functions,
+// reached through plain comm/topology setup (MakeCommWithArch below) plus a
+// handful of controllable seams (RCCL_PARAM via g_loadParam below, a
+// settable getenv/ncclGetEnv fake, and a few settable hooks -- all in
+// fakes/wrap_stubs.cc).
+//
+// Not yet covered, each documented further at its own would-be test site or
+// in fakes/wrap_stubs.cc: the WarpSpeed helpers (not even compiled into this
+// binary -- ENABLE_WARP_SPEED is off); and the High-tier
+// group that shares the DDA/CE/symmetric-kernel abort-floor surface --
+// rcclSelectAllReduce/AllGather/ReduceScatter, rcclHierarchicalAlgoInfo,
+// rcclGetAlgoInfo, rcclGetCollImplInfo, and the deep (post-guard) path of
+// rcclSymkQuery/rcclSymKGetInfo. All of these need several abort floors in
+// fakes/wrap_stubs.cc upgraded to controllable hooks first, which is a
+// larger, separate piece of work.
+//
+// Mutation-tested directly against this file; residuals and equivalent
+// mutants found along the way are documented at their own test below
+// rather than here.
 
 #include <gtest/gtest.h>
 
@@ -30,21 +40,30 @@
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
+#include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
+#include "fakes/wrap_stubs.h"                        // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
-// RCCL_PARAM redirector. rccl_wrap.cc's RCCL_PARAM(...) invocations are not
-// exercised by this first test batch (none of the nine units below read a
-// param), so -- unlike init-test.cc's g_loadParam hook -- there is nothing
-// yet to make per-test-controllable. Redirecting straight to deftVal is the
-// minimal correct behaviour: it keeps the real macro (and its mismatched-
-// looking real ncclLoadParam(), see fakes/nccl_fakes.cc's stale 4-arg
-// version vs param.h's real 5-arg declaration) out of this TU entirely.
-// Upgrade to the g_loadParam std::function pattern (fakes/nccl_fakes.h) the
-// moment a future test needs to flip a specific param per test.
+// RCCL_PARAM redirector: routes every generated rcclParamXxx() through
+// g_loadParam on each call (no caching), so a test can flip one param's
+// value between cases -- same mechanism and env-string convention
+// ("RCCL_" + env) as init-test.cc's redirect. g_loadParam itself is NOT
+// declared here: fakes/nccl_fakes.h/.cc (p2p.cc's fakes, already part of
+// this binary since the rccl-UnitTestsMicro merge) already define and
+// export it for exactly this purpose -- p2p-test.cc's own NCCL_PARAM
+// redirect uses the same global, just without the "RCCL_" prefix at its
+// own call site. Declaring a second copy here would be a duplicate-symbol
+// error.
 #include "param.h"
+#include "fakes/nccl_fakes.h"  // extern g_loadParam
+
+#include <functional>
+
+static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal) { return deftVal; }
+
 #undef RCCL_PARAM
 #define RCCL_PARAM(name, env, deftVal) \
-  int64_t rcclParam##name() { return (deftVal); }
+  int64_t rcclParam##name() { return g_loadParam(("RCCL_" env), (deftVal)); }
 
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
@@ -747,4 +766,1558 @@ TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
       << "enqueue.cc's RCCL_PARAM(ForceCe...) changed -- update rcclParamForceCe() in wrap_stubs.cc";
   EXPECT_NE(std::string::npos, enqueueCc.find(R"(NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0))"))
       << "enqueue.cc's NCCL_PARAM(LaunchOrderImplicit...) changed -- update ncclParamLaunchOrderImplicit() in wrap_stubs.cc";
+}
+
+// ===========================================================================
+// symkHostRedOpToDev -- rccl_wrap.cc:527-541. Pure switch, no comm/topology
+// setup needed at all.
+// ===========================================================================
+
+TEST(WrapMicrotest, SymkHostRedOpToDev_MapsEachOpToItsDeviceOp) {
+  EXPECT_EQ((int)ncclDevSum, symkHostRedOpToDev(ncclSum));
+  EXPECT_EQ((int)ncclDevProd, symkHostRedOpToDev(ncclProd));
+  EXPECT_EQ((int)ncclDevMinMax, symkHostRedOpToDev(ncclMin));
+  EXPECT_EQ((int)ncclDevMinMax, symkHostRedOpToDev(ncclMax));
+  EXPECT_EQ((int)ncclDevSumPostDiv, symkHostRedOpToDev(ncclAvg));
+}
+
+TEST(WrapMicrotest, SymkHostRedOpToDev_UnknownOpReturnsNegativeOne) {
+  EXPECT_EQ(-1, symkHostRedOpToDev((ncclRedOp_t)9999));
+}
+
+// ===========================================================================
+// rcclUpdateCollectiveProtocol -- rccl_wrap.cc:109-189. Caches getenv(
+// "NCCL_PROTO") in a function-local static, so every case runs isolated.
+// Covers the top-level user-override gate, one arch/size LL-threshold arm
+// (gfx950 AllGather -- the gfx950/gfx942 ReduceScatter arms right below it
+// are the same shape with different constants, not re-verified here), the
+// gfx120x delegation + NCCL_P2P_DISABLE override (exercises the ncclGetEnv
+// seam), and the nNodes>=2 minMaxLLRange-driven arm including its
+// warn-once undefined-tuning fallback. ENABLE_LL128 is off in this build
+// (confirmed via MICROTEST_README.md's build-config note), so that nested
+// arm is out of scope here, same as rcclIsArchSupportedForFunc's precedent.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx950AllGatherSmallSizeUsesLL) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx950AllGatherSmallSizeUsesLL",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllGather;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
+        EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UserOverrideLeavesProtocolUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_UserOverrideLeavesProtocolUntouched",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL128"); // any value: presence alone is the gate
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllGather;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol); // untouched
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        SetMicroEnv("NCCL_P2P_DISABLE", "1");
+        ncclComm* comm = MakeCommWithArch("gfx1200");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllGather;
+        info.protocol = NCCL_PROTO_LL; // whatever rcclGetProtoForGfx120x would pick, P2P_DISABLE overrides it
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx90a"); // not gfx942/gfx950/gfx120x: falls through to the nNodes>=2 arm
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 400;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllReduce;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        // AllReduce's sizePerRank is nBytes directly (rcclGetSizePerRank doesn't divide for AR).
+        // Exactly at llMax: distinguishes the guard's <= from a plain <.
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/400, &info);
+        EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        // minMaxLLRange left zero-initialized: both llMax and ll128Max read as RCCL_LL_LIMITS_UNDEFINED.
+        ncclTaskColl info{};
+        info.func = ncclFuncAllReduce;
+        std::string log1 = RcclUnitTesting::CaptureLog([&]() { rcclUpdateCollectiveProtocol(comm, 1024, &info); });
+        EXPECT_NE(std::string::npos, log1.find("LL cutoff points not detected"));
+        std::string log2 = RcclUnitTesting::CaptureLog([&]() { rcclUpdateCollectiveProtocol(comm, 1024, &info); });
+        EXPECT_EQ(std::string::npos, log2.find("LL cutoff points not detected")); // warn-once latch
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclUpdateThreadThreshold -- rccl_wrap.cc:333-356. Caches its three-name
+// getenv probe in a function-local static; isolated per case.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UpdateThreadThreshold_TunedValueScalesByNRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateThreadThreshold_TunedValueScalesByNRanks",
+      []() {
+        SetMicroEnvAbsent("NCCL_THREAD_THRESHOLDS");
+        SetMicroEnvAbsent("NCCL_MAX_NCHANNELS");
+        SetMicroEnvAbsent("NCCL_MIN_NCHANNELS");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
+        ncclTaskColl info{};
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_LL;
+        int threadThreshold = -1;
+        rcclUpdateThreadThreshold(comm, /*nBytes=*/1024, &info, threadThreshold);
+        EXPECT_EQ(40, threadThreshold); // 10 * nRanks(4)
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateThreadThreshold_UserOverrideLeavesThresholdUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateThreadThreshold_UserOverrideLeavesThresholdUntouched",
+      []() {
+        SetMicroEnv("NCCL_THREAD_THRESHOLDS", "anything");
+        SetMicroEnvAbsent("NCCL_MAX_NCHANNELS");
+        SetMicroEnvAbsent("NCCL_MIN_NCHANNELS");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
+        ncclTaskColl info{};
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_LL;
+        int threadThreshold = -1;
+        rcclUpdateThreadThreshold(comm, /*nBytes=*/1024, &info, threadThreshold);
+        EXPECT_EQ(-1, threadThreshold); // untouched
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The override test above only ever exercises the first of the three
+// cascaded getenv probes (NCCL_THREAD_THRESHOLDS present short-circuits the
+// other two). These two isolate the second and third probes as the one that
+// actually finds a value, so deleting either line still gets caught.
+TEST(WrapMicrotestIsolated, UpdateThreadThreshold_SecondEnvProbeAloneOverrides) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateThreadThreshold_SecondEnvProbeAloneOverrides",
+      []() {
+        SetMicroEnvAbsent("NCCL_THREAD_THRESHOLDS");
+        SetMicroEnv("NCCL_MAX_NCHANNELS", "anything");
+        SetMicroEnvAbsent("NCCL_MIN_NCHANNELS");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
+        ncclTaskColl info{};
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_LL;
+        int threadThreshold = -1;
+        rcclUpdateThreadThreshold(comm, /*nBytes=*/1024, &info, threadThreshold);
+        EXPECT_EQ(-1, threadThreshold); // untouched
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateThreadThreshold_ThirdEnvProbeAloneOverrides) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateThreadThreshold_ThirdEnvProbeAloneOverrides",
+      []() {
+        SetMicroEnvAbsent("NCCL_THREAD_THRESHOLDS");
+        SetMicroEnvAbsent("NCCL_MAX_NCHANNELS");
+        SetMicroEnv("NCCL_MIN_NCHANNELS", "anything");
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        comm->minMaxLLRange[RCCL_RS_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX] = 10;
+        ncclTaskColl info{};
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_LL;
+        int threadThreshold = -1;
+        rcclUpdateThreadThreshold(comm, /*nBytes=*/1024, &info, threadThreshold);
+        EXPECT_EQ(-1, threadThreshold); // untouched
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclSetPipelining -- rccl_wrap.cc:358-387. Gated on RCCL_PARAM
+// disableReduceCopyPipelining and PipelineAllDTypes, both already routed
+// through g_loadParam by this file's own RCCL_PARAM redirect above -- no new
+// seam needed. No caching, no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetPipelining_ParamDisabledLeavesPipelineOff) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_DISABLE_REDUCE_COPY_PIPELINING") == 0 ? int64_t(1) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline); // would be 1 without the disable check short-circuiting first
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx950ArchLeavesPipelineOffRegardlessOfParam) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceSingleNodeSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceMultiNodeAtLimitSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 2; // log2i(2) == 1, so the bf16 limit equation gives exactly 512MB
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 29), &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16AllReduceMultiNodeAboveLimitLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 2; // same 512MB limit as above, one byte past it
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 29) + 1, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16ReduceScatterSetsPipelineRegardlessOfSize) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4; // arbitrary >1: no size gate applies to this func, unlike AllReduce
+  ncclTaskColl info{};
+  info.func = ncclFuncReduceScatter;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/(1ULL << 40), &info); // deliberately huge
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16ReduceSetsPipeline) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942Bf16OtherFuncDefaultArmLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllGather; // not AllReduce/ReduceScatter/Reduce -- falls to switch's default: arm
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942NonBf16WithoutOverrideLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclFloat32; // not bf16; PipelineAllDTypes defaults to 0, so dtypeOK is false
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_Gfx942NonBf16WithAllDTypesOverrideSetsPipeline) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_PIPELINE_ALL_DATA_TYPES") == 0 ? int64_t(1) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclFloat32; // not bf16, but the override makes dtypeOK true anyway
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(1, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPipelining_NonGfx942ArchLeavesPipelineOff) {
+  ncclComm* comm = MakeCommWithArch("gfx90a"); // not gfx942, not gfx950
+  comm->nNodes = 1;
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.datatype = ncclBfloat16;
+  rcclSetPipelining(comm, /*nBytes=*/1024, &info);
+  EXPECT_EQ(0, info.pipeline);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclOverrideProtocol / rcclOverrideAlgorithm -- rccl_wrap.cc:279-331. Both
+// cache their env var and its parsed table index in function-local statics;
+// isolated per case. rcclOverrideAlgorithm is structurally identical (same
+// shape, algorithm/protocol swapped), so only its unset-passthrough and
+// successful-override arms are re-verified here.
+//
+// Mutation-testing note: rcclOverrideProtocol's `protoVal > NCCL_PROTO_UNDEF`
+// guard (line 293) mutated to `>=` is an equivalent mutant -- protoVal only
+// ever reaches this line as either a successfully-parsed index (always > -1)
+// or after an early return on parse failure, so it can never actually equal
+// NCCL_PROTO_UNDEF(-1) here. No input can distinguish `>` from `>=` at this
+// point. Confirmed by re-applying the mutation directly against this build
+// and observing all four tests below still pass, then reverting.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, OverrideProtocol_UnsetEnvLeavesProtocolUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideProtocol_UnsetEnvLeavesProtocolUntouched",
+      []() {
+        SetMicroEnvAbsent("RCCL_OVERRIDE_PROTO");
+        const char* protoStr[] = {"LL", "LL128", "SIMPLE"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
+        ncclTaskColl info{};
+        info.protocol = NCCL_PROTO_SIMPLE;
+        EXPECT_EQ(ncclSuccess, rcclOverrideProtocol(protoStr, table, &info));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OverrideProtocol_ValidMatchOverridesProtocol) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideProtocol_ValidMatchOverridesProtocol",
+      []() {
+        SetMicroEnv("RCCL_OVERRIDE_PROTO", "LL128");
+        const char* protoStr[] = {"LL", "LL128", "SIMPLE"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {}; // all zero: not NCCL_ALGO_PROTO_IGNORE
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_TREE;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        EXPECT_EQ(ncclSuccess, rcclOverrideProtocol(protoStr, table, &info));
+        EXPECT_EQ(NCCL_PROTO_LL128, info.protocol);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OverrideProtocol_IgnoredComboReturnsInternalError) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideProtocol_IgnoredComboReturnsInternalError",
+      []() {
+        SetMicroEnv("RCCL_OVERRIDE_PROTO", "LL128");
+        const char* protoStr[] = {"LL", "LL128", "SIMPLE"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
+        table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] = NCCL_ALGO_PROTO_IGNORE;
+        ncclTaskColl info{};
+        info.func = ncclFuncAllReduce;
+        info.algorithm = NCCL_ALGO_TREE;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_EQ(ncclInternalError, rcclOverrideProtocol(protoStr, table, &info)); });
+        EXPECT_NE(std::string::npos, log.find("Failed to force unsupported protocol"));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol); // untouched
+      });
+}
+
+TEST(WrapMicrotestIsolated, OverrideProtocol_UnmatchedStringReturnsInvalidUsage) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideProtocol_UnmatchedStringReturnsInvalidUsage",
+      []() {
+        SetMicroEnv("RCCL_OVERRIDE_PROTO", "bogus");
+        const char* protoStr[] = {"LL", "LL128", "SIMPLE"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
+        ncclTaskColl info{};
+        info.protocol = NCCL_PROTO_SIMPLE;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_EQ(ncclInvalidUsage, rcclOverrideProtocol(protoStr, table, &info)); });
+        EXPECT_NE(std::string::npos, log.find("Invalid algo or protocol string"));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol); // untouched
+      });
+}
+
+TEST(WrapMicrotestIsolated, OverrideAlgorithm_UnsetEnvLeavesAlgorithmUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideAlgorithm_UnsetEnvLeavesAlgorithmUntouched",
+      []() {
+        SetMicroEnvAbsent("RCCL_OVERRIDE_ALGO");
+        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {};
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_TREE;
+        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(algoStr, table, &info));
+        EXPECT_EQ(NCCL_ALGO_TREE, info.algorithm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OverrideAlgorithm_ValidMatchOverridesAlgorithm) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideAlgorithm_ValidMatchOverridesAlgorithm",
+      []() {
+        SetMicroEnv("RCCL_OVERRIDE_ALGO", "RING");
+        const char* algoStr[] = {"TREE", "RING", "COLLNET_DIRECT", "COLLNET_CHAIN", "NVLS", "NVLS_TREE", "PAT"};
+        float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {}; // all zero: not NCCL_ALGO_PROTO_IGNORE
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_TREE;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        EXPECT_EQ(ncclSuccess, rcclOverrideAlgorithm(algoStr, table, &info));
+        EXPECT_EQ(NCCL_ALGO_RING, info.algorithm);
+      });
+}
+
+// ===========================================================================
+// rcclSetPxn / rcclSetP2pNetChunkSize -- remaining getenv-driven paths
+// (rccl_wrap.cc:1368-1413; the cached fast-path was covered in an earlier
+// batch). Neither caches across calls itself (comm->pxnDisable/
+// p2pNetChunkSize is the cache, and each test starts from RCCL_VALUE_UNSET),
+// so these run in-process rather than isolated -- just SetMicroEnv/
+// ClearMicroEnv around each call.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetPxn_UnsupportedArchReturnsInvalidRegardlessOfEnv) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  SetMicroEnvAbsent("NCCL_PXN_DISABLE");
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(RCCL_VALUE_INVALID, rcclPxnDisable);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPxn_EnvPresentReturnsInvalidAndSetsCustCollFromValue) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  SetMicroEnv("NCCL_PXN_DISABLE", "0"); // present -- early-returns INVALID regardless of its own value
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(RCCL_VALUE_INVALID, rcclPxnDisable);
+  EXPECT_TRUE(comm->enableCustColl); // gfx942 && inputStr("0") && !atoi("0")==true
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPxn_Gfx942AboveThresholdEnablesPxn) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 64; // >= the gfx942 threshold
+  SetMicroEnvAbsent("NCCL_PXN_DISABLE");
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(0, rcclPxnDisable);
+  EXPECT_TRUE(comm->enableCustColl); // enableCustColl = !pxnDisable = !0 = true
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPxn_Gfx942MidRangeUsesGfx942ThresholdNotGfx950s) {
+  // 40 is between the two archs' real thresholds (32 for gfx950, 64 for
+  // gfx942): distinguishes "used the right arch's threshold" from a
+  // threshold mix-up, which nRanks=64/31 alone (the tests below) can't.
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 40;
+  SetMicroEnvAbsent("NCCL_PXN_DISABLE");
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(1, rcclPxnDisable); // 40 < 64 (gfx942's real threshold)
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetPxn_Gfx950BelowThresholdDisablesPxn) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 31; // below the gfx950 threshold (32)
+  SetMicroEnvAbsent("NCCL_PXN_DISABLE");
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(1, rcclPxnDisable);
+  EXPECT_FALSE(comm->enableCustColl); // enableCustColl = !pxnDisable = !1 = false
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+// rcclSetP2pNetChunkSize's final `else WARN(...)` arm (rccl_wrap.cc:1407-1409)
+// is dead: reaching it requires archGfx942 and archGfx950 both false, but
+// the guard three lines above already returns early whenever neither arch
+// matches. Classified Dead, not contrived, same convention as
+// rcclGetAlgoName's documented unreachable default.
+TEST(WrapMicrotest, SetP2pNetChunkSize_UnsupportedArchReturnsInvalidRegardlessOfEnv) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  SetMicroEnvAbsent("NCCL_P2P_NET_CHUNKSIZE");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(RCCL_VALUE_INVALID, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_Gfx942AboveThresholdUsesLargeChunk) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 64;
+  SetMicroEnvAbsent("NCCL_P2P_NET_CHUNKSIZE");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 19, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_Gfx942BelowThresholdUsesSmallChunk) {
+  // Below 64: distinguishes the gfx942 ternary's small-chunk arm from the
+  // large-chunk one above -- the only other gfx942 case uses nRanks = 64.
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 10;
+  SetMicroEnvAbsent("NCCL_P2P_NET_CHUNKSIZE");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 17, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_Gfx950MidRangeUsesMidChunk) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 16; // >= 16, < 32: the middle tier
+  SetMicroEnvAbsent("NCCL_P2P_NET_CHUNKSIZE");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 18, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_Gfx950LowRangeUsesSmallChunk) {
+  // 10 is below gfx950's real mid-tier threshold (16): distinguishes the
+  // low tier from a threshold that drifted lower (nRanks=16 alone, the test
+  // above, can't tell 16 from a mutated ">= 8").
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 10;
+  SetMicroEnvAbsent("NCCL_P2P_NET_CHUNKSIZE");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 17, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_EnvPresentReturnsInvalid) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  SetMicroEnv("NCCL_P2P_NET_CHUNKSIZE", "12345");
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(RCCL_VALUE_INVALID, rcclP2pNetChunkSize);
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclUseHierarchicalAllGather -- rccl_wrap.cc:706-713. No cached statics
+// (rcclParamHierarchicalAllGather's real default is 1, the "enabled" value,
+// so the interesting branches are reachable without the g_loadParam seam);
+// plain comm-field setup, no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_FewerThan8NodesReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 7;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_NotInitializedReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = false;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_WithinThresholdReturnsTrue) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8; // rcclHierarchicalTempBufferSize(8, true, false) == 32MiB
+  comm->hierarchicalCommsInitialized = true;
+  // Exactly at the threshold: distinguishes the guard's <= from a plain <.
+  EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1ull << 25));
+  delete comm;
+}
+
+TEST(WrapMicrotest, UseHierarchicalAllGather_AboveThresholdReturnsFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/(1ull << 25) + 1)); // > 32MiB
+  delete comm;
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalAllGather_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalAllGather_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_ALLGATHER") == 0 ? int64_t(0) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 8;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// rcclUseAllGatherDirect -- rccl_wrap.cc:715-764. Caches the RCCL_PARAM
+// disable-flag and a real getenv() threshold probe, both in function-local
+// statics; isolated per case.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_DIRECT_ALLGATHER_DISABLE") == 0 ? int64_t(1) : deft;
+        };
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks = 8; // rankMultiple == 0 -- isolates this guard from the final !rankMultiple conjunct
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_Gfx950WithinAutoThresholdReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_Gfx950WithinAutoThresholdReturnsTrue",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1; // auto threshold -> 8MiB
+        comm->nRanks = 8; // rankMultiple == 0
+        size_t msgSize = 1024;
+        EXPECT_TRUE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_CtaPolicyZeroDisablesOnSingleNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_CtaPolicyZeroDisablesOnSingleNode",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 8; // rankMultiple == 0 -- isolates this guard from the final !rankMultiple conjunct
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse",
+      []() {
+        SetMicroEnvAbsent("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 1;
+        comm->nRanks = 9; // 9 % 8 != 0
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclUseReduceScatterDirect -- rccl_wrap.cc:1317-1355. Caches the
+// RCCL_PARAM disable-flag in a function-local static; isolated per case.
+// The "PXN disabled" early-return (line 1332) is out of scope: ncclPxnDisable
+// is a plain stub always returning 0 (see wrap_stubs.cc), not yet a
+// controllable seam -- upgrading it is deferred to a future batch.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ParamDisabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_ParamDisabledReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_DIRECT_REDUCE_SCATTER_DISABLE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        // nNodes=8 + a small msgSize would return true unconditionally (line
+        // 1353) if this guard were deleted -- isolates the guard from the
+        // nNodes==1 default, which otherwise falls through to the same
+        // false via the unrelated final `return false;`.
+        comm->nNodes = 8;
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_NonGfx950ReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_NonGfx950ReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        // Same reasoning as the ParamDisabledReturnsFalse test above: nNodes=8
+        // would make this call return true if the arch guard were deleted.
+        comm->nNodes = 8;
+        size_t msgSize = 1024;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_TwoNodesInRangeReturnsTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // within [128KiB, 2MiB]
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_TwoNodesAtUpperBoundReturnsTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        // Exactly at the 2MiB upper bound: the sibling test above (1MiB) is
+        // comfortably inside the range and can't distinguish this guard's
+        // <= from a plain <.
+        size_t msgSize = 2097152;
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesBelowRangeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_TwoNodesBelowRangeReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 65536; // below the 128KiB floor
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_FourNodesUpToLimitReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_FourNodesUpToLimitReturnsTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 4;
+        size_t msgSize = 4194304; // exactly at the 4-node 4MiB limit
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EightNodesUnconditionallyTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EightNodesUnconditionallyTrue",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 8;
+        size_t msgSize = 8388608; // at the 8MiB hard limit
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_SixteenNodesWithinLimitReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_SixteenNodesWithinLimitReturnsTrue",
+      []() {
+        // The sibling test below only ever exceeds the 8MiB hard limit, which
+        // returns false via the earlier `msgSize > threshold` guard (line
+        // 1348) before the nNodes == 16 disjunct (line 1353) is ever reached.
+        // This one stays within the limit, so the disjunct itself is what
+        // has to fire to get true.
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 16;
+        size_t msgSize = 8388608;
+        EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_SixteenNodesAboveHardLimitReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_SixteenNodesAboveHardLimitReturnsFalse",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 16;
+        size_t msgSize = 8388608 + 1;
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclUseHierarchicalReduceScatter -- rccl_wrap.cc:1359-1366. Unlike its
+// AllGather sibling, rcclParamHierarchicalReduceScatter's real default is 0
+// ("disabled"), so without the g_loadParam seam this function can only be
+// proven to always return false -- the true-arm needs the seam.
+// ===========================================================================
+
+TEST(WrapMicrotest, UseHierarchicalReduceScatter_DefaultParamAlwaysFalse) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 8;
+  comm->hierarchicalCommsInitialized = true;
+  EXPECT_FALSE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024)); // param defaults to 0, not 1
+  delete comm;
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_EightNodesParamEnabledReturnsTrue) {
+  // 8 nodes: distinguishes the real "< 8" gate from a mutated "< 16" -- RS's
+  // own threshold is already nonzero (64MiB) at 8 nodes, so the real gate
+  // lets this through while a widened one would reject it.
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_EightNodesParamEnabledReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_REDUCE_SCATTER") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->nNodes = 8;
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseHierarchicalReduceScatter_ParamEnabledWithinThresholdReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseHierarchicalReduceScatter_ParamEnabledWithinThresholdReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_HIERARCHICAL_REDUCE_SCATTER") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        // rcclHierarchicalTempBufferSize(8, false, true) == 0 (RS needs >= 16 nodes); use 16 for a nonzero threshold.
+        comm->nNodes = 16; // 64MiB threshold
+        comm->hierarchicalCommsInitialized = true;
+        EXPECT_TRUE(rcclUseHierarchicalReduceScatter(comm, /*msgSize=*/1024));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// rcclOptThreadBlockSize -- rccl_wrap.cc:1614-1642. Isolated: its own
+// maxNthreads[] is a function-local static, same pattern as the already-
+// covered rcclSetDefaultBuffSizes.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideUsedDirectlyWhenAligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideUsedDirectlyWhenAligned",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(192) : deft; // 192 = 3*64, aligned
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(192, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideRoundedUpToWarpMultiple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideRoundedUpToWarpMultiple",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(200) : deft; // not a multiple of 64
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(256, nThreads); // (200/64 + 1) * 64
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideBumpedUpToMinimum) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideBumpedUpToMinimum",
+      []() {
+        // The Aligned test above (192 = 3*64) already sits exactly at the
+        // minimum, so its body never actually runs -- this uses a value
+        // below it (and still a warp multiple, so the rounding-up branch
+        // above it doesn't fire either) to reach the bump itself.
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(64) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(192, nThreads); // 3 * WarpSize(64)
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_UserOverrideClampedToMax) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_UserOverrideClampedToMax",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_THREADS_PER_BLOCK") == 0 ? int64_t(1024) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942"); // maxNthreads[SIMPLE] == RCCL_DEFAULT_MAX_NTHREADS (256)
+        comm->WarpSize = 64;
+        ncclTaskColl info{};
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_TreeAlgorithmUsesMaxThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_TreeAlgorithmUsesMaxThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2; // avoid the nNodes==1 arm so the algorithm arm is what sets nThreads
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_TREE;
+        // info.protocol defaults to 0 (NCCL_PROTO_LL); left at that default,
+        // the "else if (protocol == LL)" arm right below the Tree arm
+        // silently overwrites nThreads with the *same* value (all of
+        // RCCL_DEFAULT_MAX_NTHREADS/RCCL_LL_MAX_NTHREADS/
+        // RCCL_GFX950_MAX_NTHREADS/RCCL_SINGLE_NODE_MAX_NTHREADS are 256 --
+        // rccl_common.h:50-53), masking a deletion of the Tree arm entirely.
+        // SIMPLE keeps that else-if from firing so only the Tree arm can set
+        // nThreads.
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_SingleNodeUsesHalfThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 1;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING; // not TREE/PAT, so nNodes==1 is what sets nThreads
+        // Same reasoning as the Tree test above: left at the default LL,
+        // mutating away the nNodes==1 condition would fall into the
+        // protocol==LL else-if arm, which sets the identical 256 value --
+        // SIMPLE closes that off too.
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_ReduceScatterSmallCountUsesLLThreads",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 2;
+        comm->nRanks = 4;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.func = ncclFuncReduceScatter;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024 /* divUp(1024,4)=256 <= 524288 */, nThreads);
+        EXPECT_EQ(RCCL_LL_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// commSetUnrollFactor -- rccl_wrap.cc:1660-1709. No caching, no isolation
+// needed. ncclDevFuncUnrollGenerated is a hardcoded all-true const array in
+// wrap_stubs.cc (not yet a settable hook), so the "not built for this arch"
+// fallback arms (both the user-override one and the default-selection one)
+// are unreachable here -- deferred, documented rather than contrived.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetUnrollFactor_ValidUserOverrideSucceeds) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_UNROLL_FACTOR") == 0 ? int64_t(NCCL_UNROLL_2) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_OutOfRangeOverrideReturnsInvalidArgument) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_UNROLL_FACTOR") == 0 ? int64_t(99) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  std::string log = RcclUnitTesting::CaptureLog([&]() { EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(comm)); });
+  EXPECT_NE(std::string::npos, log.find("Invalid RCCL_UNROLL_FACTOR"));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx950SingleNodeDefaultsToUnroll1) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 1;
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_1, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx950MultiNodeDefaultsToUnroll2) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_Gfx908DefaultsToUnroll2) {
+  ncclComm* comm = MakeCommWithArch("gfx908");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_2, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetUnrollFactor_UnlistedArchDefaultsToUnroll4) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  EXPECT_EQ(ncclSuccess, commSetUnrollFactor(comm));
+  EXPECT_EQ(NCCL_UNROLL_4, comm->unroll);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclCommSetP2pShiftSize -- rccl_wrap.cc:1712-1723. No caching (the
+// RCCL_PARAM redirector doesn't cache), no isolation needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_AtOrAboveLog2UsesBitReversal) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    // Exactly at nChannelsLog2: distinguishes the guard's >= from a plain >.
+    return std::strcmp(env, "RCCL_P2P_SHIFT_SIZE") == 0 ? int64_t(2) : deft;
+  });
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 4; // countOneBits(4-1) == countOneBits(0b11) == 2; shiftSize(2) >= 2
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  EXPECT_EQ(-1, comm->p2pChannelShiftSize);
+  delete comm;
+}
+
+TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_P2P_SHIFT_SIZE") == 0 ? int64_t(1) : deft;
+  });
+  ncclComm* comm = MakeZeroedComm();
+  comm->p2pnChannels = 4; // countOneBits(3) == 2; shiftSize(1) < 2
+  EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
+  EXPECT_EQ(1, comm->p2pChannelShiftSize);
+  delete comm;
+}
+
+// ===========================================================================
+// rcclOverrideChannels -- rccl_wrap.cc:214-276. rcclParamChannelTuningEnable's
+// real default is 1 ("enabled"), so the loop body is reachable without the
+// g_loadParam seam; the seam is only needed to reach the disabled arm.
+// ncclParamMinNchannels/MaxNchannels are the hardcoded scalar fakes from an
+// earlier batch (not RCCL_PARAM-generated inside this file), always -2/-2.
+// ===========================================================================
+
+TEST(WrapMicrotest, OverrideChannels_FewerThan2NodesLeavesNcUntouched) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nNodes = 1;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+  EXPECT_EQ(-100, nc);
+  delete comm;
+}
+
+TEST(WrapMicrotest, OverrideChannels_SingleGpuPerNodeLeavesNcUntouched) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 4; // one GPU per node, not gfx1151
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+  EXPECT_EQ(-100, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotestIsolated, OverrideChannels_DisabledByParamLeavesNcUntouched) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OverrideChannels_DisabledByParamLeavesNcUntouched",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CHANNEL_TUNING_ENABLE") == 0 ? int64_t(0) : deft;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 4;
+        comm->nRanks = 8;
+        int nc = -100;
+        EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/1024, nc));
+        EXPECT_EQ(-100, nc);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotest, OverrideChannels_MatchedThresholdWithinBoundsOverridesNc) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32; // maxNChannels = max(nChannels/scalingFactor, ncclParamMaxNchannels()=-2)
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  // bytesPerRank = divUp(nBytes, nRanks) = divUp(16384, 8) = 2048, exactly at
+  // maxByteThreshold -- distinguishes the range check's <= from a plain <.
+  // minByteThreshold (nonzero: 0 collides with CHAN_THRESHOLDS_UNDEFINED)
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048; // maxByteThreshold
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;    // channelCount
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/16384, nc));
+  EXPECT_EQ(8, nc);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, OverrideChannels_MatchedThresholdOutsideCtaBoundsLeavesNcUntouched) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nNodes = 4;
+  comm->nRanks = 8;
+  comm->nChannels = 32; // maxNChannels well above channelCount -- isolates the CTA-bounds check being tested
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 4; // channelCount(8) below is above maxCTAs
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1; // nonzero: 0 collides with CHAN_THRESHOLDS_UNDEFINED
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+  int nc = -100;
+  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
+  EXPECT_EQ(-100, nc); // conflicting bounds -- not overridden
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclUseCeAllReduce -- rccl_wrap.cc:766-831. Caches rcclParamCeAllReduce
+// ("enabled") and rcclParamForceCeAllReduce ("force") in function-local
+// statics -- rcclParamCeAllReduce's real default (0) fully blocked this
+// function before the g_loadParam seam existed. Isolated per case.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_DisabledByDefaultWarnsOnce) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_DisabledByDefaultWarnsOnce",
+      []() {
+        // "CE AllReduce not enabled" is an INFO log, gated on ncclDebugLevel
+        // (defaults to suppressed) unlike this file's WARN-based messages.
+        RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
+        ncclComm* comm = MakeZeroedComm();
+        std::string log1 = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log1.find("CE AllReduce not enabled"));
+        std::string log2 = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_EQ(std::string::npos, log2.find("CE AllReduce not enabled")); // warn-once latch
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_BiasBufferPresentReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_BiasBufferPresentReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        int bias = 0;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, &bias));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_NoSymmetricSupportReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_NoSymmetricSupportReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 0;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("symmetric support is not enabled"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_MultiNodeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_MultiNodeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 2;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("nNodes is not 1"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 4;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, /*count=*/5, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("is not divisible by nRanks"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_MsgTooLargeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        // count * sizeof(float) must exceed NCCL_CE_AR_MAX_MSG_BYTES (256MiB).
+        size_t count = (256ull * 1024 * 1024 / 4) + 1;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, count, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("msgBytes"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        std::string log = RcclUnitTesting::CaptureLog(
+            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+        EXPECT_NE(std::string::npos, log.find("CTA policy is not ZERO"));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_UnsupportedOpReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_UnsupportedOpReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclAvg, nullptr));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_Float8DatatypeReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_Float8DatatypeReturnsFalse",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          return std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0 ? int64_t(1) : deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat8e4m3, ncclSum, nullptr));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidReturnsTrue) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidReturnsTrue",
+      []() {
+        g_loadParam = [](const char* env, int64_t deft) {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return int64_t(1);
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return int64_t(1);
+          return deft;
+        };
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // not ZERO -- force must bypass this
+        EXPECT_TRUE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// rcclDdaEnabled -- rccl_wrap.cc:648-667. rcclParamDdaEnable's real default
+// (1) and ncclGroupDepth's real default (0) both favor the "enabled" path,
+// so most branches are reachable without the seam; not cached, no isolation
+// needed.
+// ===========================================================================
+
+TEST(WrapMicrotest, DdaEnabled_DisabledByParamReturnsFalse) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_DDA_ENABLE") == 0 ? int64_t(0) : deft;
+  });
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx1250UsesCallerDefaultThreshold) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942BelowRankThresholdReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 7; // below the 8-rank floor
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942WithinThresholdReturnsTrue) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx942AboveThresholdReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*gfx942Default=*/2048, 0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 8;
+  // gfx950Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, /*gfx950Default=*/0, 0));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx90a");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, /*gfx950Default=*/2048, 0));
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclSymkQuery -- rccl_wrap.cc:547-568 (static). Only the four early-return
+// guards, reachable through plain comm/arg setup: everything past
+// ncclSymkInitOnce() is an abort-floor stub (ncclSymkInitOnce/Available/
+// PickKernel), deferred to a future batch that upgrades the whole
+// DDA/CE/symmetric-kernel abort-floor surface to controllable hooks.
+// rcclSymKGetInfo -- rccl_wrap.cc:571-583. Only the null-arg-check arm: its
+// success path calls rcclSymkQuery (fine, low-tier), but the fall-through
+// path calls rcclGetCollImplInfo, itself High-tier (same deferred surface).
+// ===========================================================================
+
+// Isolated (not just plain TEST()): every guard here is one mutation away
+// from falling through into the ncclSymkInitOnce()/etc. abort floor, which
+// would crash the whole binary in an in-process test instead of just
+// failing one case.
+TEST(WrapMicrotestIsolated, SymkQuery_NullCommReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_NullCommReturnsFalse",
+      []() {
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(rcclSymkQuery(nullptr, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol,
+                                    &maxChannels));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_NoSymmetricSupportReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_NoSymmetricSupportReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 0;
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(
+            rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_UnsupportedCollectiveReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_UnsupportedCollectiveReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_FALSE(
+            rcclSymkQuery(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+        delete comm;
+      });
+}
+
+TEST(WrapMicrotestIsolated, SymkQuery_UnmappedRedOpReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymkQuery_UnmappedRedOpReturnsFalse",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        // ncclFuncAllReduce routes op through symkHostRedOpToDev; an op it maps to
+        // -1 short-circuits before any abort-floor symk function is reached.
+        EXPECT_FALSE(rcclSymkQuery(comm, ncclFuncAllReduce, 8, ncclFloat32, (ncclRedOp_t)9999, &algo, &protocol,
+                                    &maxChannels));
+        delete comm;
+      });
+}
+
+// Mutation-testing note: removing any single arm of this null check (e.g.
+// dropping the algo==nullptr check) is an equivalent mutant --
+// rcclGetCollImplInfo (rccl_wrap.cc:484, what this function falls through
+// to whenever rcclSymkQuery returns false) performs the exact same
+// algo/protocol/maxChannels null check redundantly, so no input can
+// observe the difference. Confirmed by re-applying the mutation directly
+// against this build and observing the test still pass, then reverting.
+TEST(WrapMicrotestIsolated, SymKGetInfo_NullOutParamReturnsInvalidArgument) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_NullOutParamReturnsInvalidArgument",
+      []() {
+        ncclComm* comm = MakeZeroedComm();
+        int protocol, maxChannels;
+        EXPECT_EQ(ncclInvalidArgument,
+                  rcclSymKGetInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, /*algo=*/nullptr, &protocol,
+                                  &maxChannels));
+        delete comm;
+      });
+}
+
+// ===========================================================================
+// getFirmwareVersion -- rccl_wrap.cc:1726-1733. amd_smi_getFirmwareVersion
+// upgraded to a settable hook (fakes/wrap_stubs.h) for this batch.
+// ===========================================================================
+
+TEST(WrapMicrotest, GetFirmwareVersion_SuccessReturnsReportedVersion) {
+  ScopedHook fwVersion(g_amdSmiGetFirmwareVersion, [](uint32_t, uint64_t* fw) {
+    *fw = 42;
+    return ncclSuccess;
+  });
+  EXPECT_EQ(42, getFirmwareVersion());
+}
+
+TEST(WrapMicrotest, GetFirmwareVersion_FailureReturnsNegativeOne) {
+  ScopedHook fwVersion(g_amdSmiGetFirmwareVersion, [](uint32_t, uint64_t*) { return ncclInternalError; });
+  EXPECT_EQ(-1, getFirmwareVersion());
 }

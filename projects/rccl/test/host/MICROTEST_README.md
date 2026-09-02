@@ -53,10 +53,10 @@ test TUs and must not export colliding non-`static` symbols:
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Gets its own fail-loud stub
     floor (`fakes/wrap_stubs.cc`) for symbols no other unit here references,
     but shares `fakes/nccl_fakes.cc`'s logging globals rather than
-    duplicating them. Currently covers a first, low-dependency batch of
-    helpers (no `RCCL_PARAM`, no `getenv`, no DDA/CE/symmetric-kernel
-    machinery); see the header comment in `wrap-test.cc` for scope and
-    what's deferred to a future batch.
+    duplicating them. Covers both a low-dependency first batch and a second
+    batch that added controllable `RCCL_PARAM`/`getenv` seams to reach the
+    CE/DDA gates and low-tier symmetric-kernel arms; see the header comment
+    in `wrap-test.cc` for exact scope and what's deferred to a future batch.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. Kept separate rather
   than folded into `rccl-UnitTestsMicro`: `init.cc` calls
