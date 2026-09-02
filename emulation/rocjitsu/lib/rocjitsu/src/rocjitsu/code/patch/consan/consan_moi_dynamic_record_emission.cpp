@@ -69,7 +69,7 @@ namespace {
 // load-only path. A bounded startup race may increment it more than once; the
 // value remains an honest nonzero publication count without serializing the
 // workload on one global atomic.
-[[nodiscard]] bool
+[[nodiscard]] static bool
 append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t counter_address,
                                         uint16_t result_vgpr, uint16_t scratch_vgpr,
                                         uint16_t exec_save_sgpr, rj_code_arch_t arch) {
@@ -88,6 +88,35 @@ append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t c
   if (!sequence.emit_all(mov_address_lo, mov_address_hi, load, wait, is_zero, select_unpublished))
     return false;
   return append_atomic_fetch_add_one_u32(words, counter_address, result_vgpr, scratch_vgpr, arch);
+}
+
+[[nodiscard]] MoiVisibleEvidencePublicationResult
+append_publish_first_active_lane_visible_evidence_if_zero(
+    std::vector<uint32_t> &words, uint64_t counter_address, uint16_t result_vgpr,
+    uint16_t address_vgpr, uint16_t active_exec_sgpr, uint16_t temporary_exec_sgpr,
+    rj_code_arch_t arch) {
+  const auto save_active_exec =
+      instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch);
+  const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
+  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
+      result_vgpr, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
+  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
+      result_vgpr, static_cast<uint16_t>(active_exec_sgpr + 1u), vector_source_vgpr(result_vgpr),
+      arch);
+  const auto first_active =
+      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), result_vgpr, arch);
+  const auto narrow_first =
+      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
+  InstructionSequence sequence(words);
+  if (!sequence.emit_all(save_active_exec, saved_exec_wait, mbcnt_lo, mbcnt_hi, first_active,
+                         narrow_first)) {
+    return MoiVisibleEvidencePublicationResult::ElectionUnsupported;
+  }
+  if (!append_publish_visible_evidence_if_zero(words, counter_address, result_vgpr, address_vgpr,
+                                               temporary_exec_sgpr, arch)) {
+    return MoiVisibleEvidencePublicationResult::PublicationUnsupported;
+  }
+  return MoiVisibleEvidencePublicationResult::Appended;
 }
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,

@@ -93,7 +93,6 @@ using consan_moi_detail::append_moi_prepare_scc_preserving_indirect_jump;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
 using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
-using consan_moi_detail::append_publish_visible_evidence_if_zero;
 using consan_moi_detail::append_store_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_store_u32_literal;
 using consan_moi_detail::append_store_u32_sgpr;

@@ -21,6 +21,12 @@ inline constexpr DynamicRecordLayout kFenceRecordLayout = {sizeof(ConSanMoiFence
 inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoiDiagnosticRecord),
                                                                 4};
 
+enum class MoiVisibleEvidencePublicationResult : uint8_t {
+  Appended,
+  ElectionUnsupported,
+  PublicationUnsupported,
+};
+
 [[nodiscard]] bool append_atomic_fetch_add_one_u32(std::vector<uint32_t> &words,
                                                    uint64_t counter_address, uint16_t result_vgpr,
                                                    uint16_t scratch_vgpr, rj_code_arch_t arch);
@@ -29,10 +35,11 @@ inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoi
                                                 rj_code_arch_t arch);
 [[nodiscard]] bool append_atomic_load_u32(std::vector<uint32_t> &words, uint16_t address_vgpr,
                                           uint16_t result_vgpr, rj_code_arch_t arch);
-[[nodiscard]] bool
-append_publish_visible_evidence_if_zero(std::vector<uint32_t> &words, uint64_t counter_address,
-                                        uint16_t result_vgpr, uint16_t scratch_vgpr,
-                                        uint16_t exec_save_sgpr, rj_code_arch_t arch);
+[[nodiscard]] MoiVisibleEvidencePublicationResult
+append_publish_first_active_lane_visible_evidence_if_zero(
+    std::vector<uint32_t> &words, uint64_t counter_address, uint16_t result_vgpr,
+    uint16_t address_vgpr, uint16_t active_exec_sgpr, uint16_t temporary_exec_sgpr,
+    rj_code_arch_t arch);
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,
                                                  uint64_t field_address, uint16_t slot_vgpr,

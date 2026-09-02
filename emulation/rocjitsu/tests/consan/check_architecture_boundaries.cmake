@@ -832,6 +832,8 @@ file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_planning)
 if(NOT _moi_barrier_planning MATCHES
        "using MoiBarrierBodyPlan[^;]*std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan," OR
    NOT _moi_barrier_planning MATCHES "MoiBarrierBodyPlan[ \t]+body" OR
+   NOT _moi_barrier_planning MATCHES
+       "struct MoiInlineBarrierVisibleEvidencePlan[^}]*result_vgpr[^}]*address_vgpr" OR
    _moi_barrier_planning MATCHES
        "std::optional<(MoiRecordEventEmissionPlan|MoiInlineBarrierEpochEmissionPlan|MoiInlinePrivateEpochBarrierEmissionPlan)>[ \t]+(record_emission|inline_epoch_emission|private_epoch_emission)")
     message(FATAL_ERROR
@@ -840,15 +842,53 @@ if(NOT _moi_barrier_planning MATCHES
 endif()
 file(READ "${_consan_dir}/consan_moi_inline_shadow_private_barrier.inc"
      _inline_private_barrier_owner)
+file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
+     _inline_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
 if(NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
+   NOT _moi_barrier_source MATCHES
+       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc\"" OR
    NOT _inline_private_barrier_owner MATCHES
-       "build_inline_shadow_private_epoch_barrier_cave_words")
+       "build_inline_shadow_private_epoch_barrier_cave_words" OR
+   NOT _inline_barrier_owner MATCHES
+       "build_inline_shadow_barrier_epoch_cave_words" OR
+   NOT _inline_barrier_owner MATCHES
+       "append_inline_shadow_barrier_epilogue" OR
+   NOT _inline_private_barrier_owner MATCHES
+       "append_inline_shadow_barrier_epilogue" OR
+   _inline_private_barrier_owner MATCHES "scalar_spill->restore_words[.]begin")
     message(FATAL_ERROR
-        "InlineShadow private barrier emission must remain in its mode-named owner"
+        "InlineShadow barrier emission must remain in its mode-named owners"
     )
 endif()
+file(READ "${_consan_dir}/consan_capability_contract.h"
+     _visible_evidence_target_contract)
+file(READ "${_consan_dir}/consan_gfx9_cdna_target_profile.h.inc"
+     _gfx9_visible_evidence_profile)
+file(READ "${_consan_dir}/consan_moi_dynamic_record_emission.cpp"
+     _visible_evidence_mechanism)
+file(READ "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+     _inline_shadow_emission_owner)
+if(NOT _visible_evidence_target_contract MATCHES
+       "moi_visible_evidence_address_precedes_result" OR
+   NOT _gfx9_visible_evidence_profile MATCHES
+       "moi_visible_evidence_address_precedes_result = true" OR
+   NOT _visible_evidence_mechanism MATCHES
+       "append_publish_first_active_lane_visible_evidence_if_zero" OR
+   NOT _inline_barrier_owner MATCHES
+       "append_publish_first_active_lane_visible_evidence_if_zero" OR
+   NOT _inline_shadow_emission_owner MATCHES
+       "append_publish_first_active_lane_visible_evidence_if_zero")
+    message(FATAL_ERROR
+        "InlineShadow access and barrier emission must share the target-normalized one-lane evidence publisher"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
+    "consan_uses_gfx|build_v_mbcnt_(lo|hi)_u32_b32|moi_visible_evidence_vgpr_layout"
+    "InlineShadow barrier emission must consume the target-normalized visible-evidence mechanism"
+)
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_anchors_admit_scalar_router_ranges" OR
@@ -2667,11 +2707,13 @@ foreach(_inline_atomic_assignment IN ITEMS
     endif()
 endforeach()
 file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_owner)
+set(_moi_inline_barrier_body_owners
+    "${_inline_barrier_owner}\n${_inline_private_barrier_owner}")
 foreach(_inline_barrier_body IN ITEMS
     build_inline_shadow_barrier_epoch_cave_words
     build_inline_shadow_private_epoch_barrier_cave_words
 )
-    if(_moi_barrier_owner MATCHES
+    if(_moi_inline_barrier_body_owners MATCHES
        "${_inline_barrier_body}[(][^{]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics)")
         message(
             FATAL_ERROR
@@ -3460,6 +3502,7 @@ set(
     consan_moi_barrier.inc
     consan_moi_common_emission.inc
     consan_moi_inline_atomic.inc
+    consan_moi_inline_shadow_barrier.inc
     consan_moi_inline_shadow_private_barrier.inc
     consan_moi_inline_shadow.inc
     consan_moi_pipeline.inc

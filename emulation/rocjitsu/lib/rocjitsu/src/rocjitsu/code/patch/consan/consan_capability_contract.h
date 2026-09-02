@@ -359,6 +359,7 @@ struct ConSanTargetProfile {
   bool has_cluster_facilities = false;
   bool has_selectable_vgpr_bank = false;
   bool requires_even_vgpr_tuples = false;
+  bool moi_visible_evidence_address_precedes_result = false;
   /// Alignment of the encoded new/expected data pair for FLAT compare-swap.
   /// This is distinct from general address/data tuple alignment: translated
   /// targets may require even tuples elsewhere without using this legacy CAS

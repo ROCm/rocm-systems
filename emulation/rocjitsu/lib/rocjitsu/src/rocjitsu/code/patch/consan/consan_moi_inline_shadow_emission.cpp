@@ -44,10 +44,11 @@ using consan_moi_detail::append_dynamic_diagnostic_record_address;
 using consan_moi_detail::append_load_u32_vgpr_at_offset;
 using consan_moi_detail::append_moi_report_dispatch_id_pair;
 using consan_moi_detail::append_moi_report_dispatch_id_word;
-using consan_moi_detail::append_publish_visible_evidence_if_zero;
+using consan_moi_detail::append_publish_first_active_lane_visible_evidence_if_zero;
 using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
+using consan_moi_detail::MoiVisibleEvidencePublicationResult;
 
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate,
@@ -3179,32 +3180,15 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
-    const auto save_active_exec =
-        instrumentation::build_s_mov_b64(active_exec_sgpr, kAmdGpuExecLo, arch);
-    const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-        tmp_vgpr, active_exec_sgpr, scalar_positive_inline_u32(0), arch);
-    const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-        tmp_vgpr, static_cast<uint16_t>(active_exec_sgpr + 1u), vector_source_vgpr(tmp_vgpr), arch);
-    const auto first_active =
-        instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
-    const auto narrow_first =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-    const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
-    if (!save_active_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active ||
-        !narrow_first) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not elect visible evidence");
-      return std::nullopt;
-    }
-    words.push_back(*save_active_exec);
-    words.push_back(*saved_exec_wait);
-    words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
-    words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
-    words.push_back(*first_active);
-    words.push_back(*narrow_first);
-    if (!append_publish_visible_evidence_if_zero(
+    const MoiVisibleEvidencePublicationResult publication =
+        append_publish_first_active_lane_visible_evidence_if_zero(
             words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
-            tmp_vgpr, address_lo_vgpr, temporary_exec_sgpr, arch)) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not publish visible evidence");
+            tmp_vgpr, address_lo_vgpr, active_exec_sgpr, temporary_exec_sgpr, arch);
+    if (publication != MoiVisibleEvidencePublicationResult::Appended) {
+      errors.emplace_back(
+          publication == MoiVisibleEvidencePublicationResult::ElectionUnsupported
+              ? "ConSan MOI inline-shadow probe could not elect visible evidence"
+              : "ConSan MOI inline-shadow probe could not publish visible evidence");
       return std::nullopt;
     }
     if (visible_evidence_sgpr) {

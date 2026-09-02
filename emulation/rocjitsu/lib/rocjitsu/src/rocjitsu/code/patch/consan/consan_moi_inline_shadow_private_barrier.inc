@@ -54,16 +54,9 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
   words.insert(words.end(), store_epoch->begin(), store_epoch->end());
   words.push_back(*wait_store);
-  if (scalar_spill)
-    words.insert(words.end(), scalar_spill->restore_words.begin(),
-                 scalar_spill->restore_words.end());
-  words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
-  if (restore_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
-
-  if (!append_inline_barrier_return(words, cave_text_offset, return_text_offset, call_return_sgpr,
-                                    plan.indirect_jump, arch)) {
+  if (!append_inline_shadow_barrier_epilogue(words, &spill, scalar_spill, selectable_vgpr_bank_mode,
+                                             cave_text_offset, return_text_offset, call_return_sgpr,
+                                             plan.indirect_jump, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow private epoch could not encode long return at " +
                         std::to_string(site.text_offset));
     return std::nullopt;

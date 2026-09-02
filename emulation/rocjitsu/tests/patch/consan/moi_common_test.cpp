@@ -21,6 +21,30 @@
 namespace rocjitsu {
 namespace {
 
+TEST(ConSanMoi, VisibleEvidenceScratchLayoutIsTargetOwned) {
+  struct Case {
+    rj_code_arch_t arch;
+    bool address_precedes_result;
+  };
+  constexpr uint16_t scratch_vgpr = 40u;
+  constexpr std::array cases{
+      Case{ROCJITSU_CODE_ARCH_CDNA3, true},  Case{ROCJITSU_CODE_ARCH_CDNA4, true},
+      Case{ROCJITSU_CODE_ARCH_RDNA3, false}, Case{ROCJITSU_CODE_ARCH_RDNA4, false},
+      Case{ROCJITSU_CODE_ARCH_CDNA5, false},
+  };
+  for (const Case &expected : cases) {
+    SCOPED_TRACE(static_cast<uint32_t>(expected.arch));
+    const ConSanTargetProfile *target = consan_target_profile(expected.arch);
+    ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->moi_visible_evidence_address_precedes_result,
+              expected.address_precedes_result);
+    EXPECT_EQ(static_cast<uint16_t>(scratch_vgpr + (expected.address_precedes_result ? 2u : 0u)),
+              expected.address_precedes_result ? 42u : 40u);
+    EXPECT_EQ(static_cast<uint16_t>(scratch_vgpr + (expected.address_precedes_result ? 0u : 1u)),
+              expected.address_precedes_result ? 40u : 41u);
+  }
+}
+
 TEST(ConSanMoi, DispatchIdSourcePlanningAuthorizesLiteralsAtTheModeBoundary) {
   ConSanMoiOperatingPoint point;
   BoundRuntimeResources resources;

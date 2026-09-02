@@ -76,7 +76,6 @@ using consan_detail::plan_moi_workgroup_shadow_clear;
 using consan_detail::range_overlaps;
 using consan_detail::reject_optional_scratch_range_overlap;
 using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
-using consan_moi_detail::append_publish_visible_evidence_if_zero;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 using consan_moi_detail::count_nop_padding;
