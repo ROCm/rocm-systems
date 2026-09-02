@@ -406,8 +406,9 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
       cu->write_vgpr(base + 3, 0, static_cast<uint32_t>(test.src2 >> 32));
       cu->write_vgpr(base + 4, 0, 0u);
       cu->write_vgpr(base + 5, 0, 0u);
-      // Seed CO with a stale set bit so non-overflowing cases prove it is replaced.
-      write_wave_sgpr(*cu, *wf, 2, test.writes_carry ? 1u : 0u);
+      // Seed CO opposite to the expected bit so every case proves it is replaced.
+      write_wave_sgpr(*cu, *wf, 2,
+                      test.writes_carry ? static_cast<uint32_t>(!test.expected_carry) : 0u);
 
       if (!dpp) {
         std::array<uint32_t, 2> words;
