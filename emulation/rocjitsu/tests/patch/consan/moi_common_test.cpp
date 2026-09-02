@@ -717,8 +717,7 @@ TEST(ConSanMoi, PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries) {
       .owner_offset = 4u,
       .workgroup_key_offset = 8u,
       .dispatch_id_offset = 12u,
-      .exact_workgroup_offsets =
-          ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
+      .exact_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
       .persistent_state_end = 36u,
       .ephemeral_base = 48u,
   };
@@ -3157,7 +3156,27 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
       ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(capture_corruption.replacement.data() + capture_file_offset, &wrong_capture,
               sizeof(wrong_capture));
-  EXPECT_FALSE(validate_consan_modified_elf(bytes, capture_corruption).empty());
+  const auto rejects_dispatch_corruption = [&](const ConSanTransformArtifacts &corrupted) {
+    const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
+    EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
+      return error.find("no complete dispatch-ID capture and restore") != std::string::npos;
+    })) << testing::PrintToString(errors);
+  };
+  rejects_dispatch_corruption(capture_corruption);
+
+  ConSanTransformArtifacts dependency_corruption = valid;
+  const uint32_t wrong_dependency = build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::memcpy(dependency_corruption.replacement.data() + capture_file_offset + sizeof(uint32_t),
+              &wrong_dependency, sizeof(wrong_dependency));
+  rejects_dispatch_corruption(dependency_corruption);
+
+  ConSanTransformArtifacts increment_corruption = valid;
+  const uint16_t capture_sgpr = *prologue->dispatch_id_prologue->capture.sgpr();
+  const uint32_t wrong_increment = build_s_add_u32(
+      capture_sgpr, capture_sgpr, scalar_positive_inline_u32(2u), ROCJITSU_CODE_ARCH_RDNA4);
+  std::memcpy(increment_corruption.replacement.data() + capture_file_offset + 4u * sizeof(uint32_t),
+              &wrong_increment, sizeof(wrong_increment));
+  rejects_dispatch_corruption(increment_corruption);
 }
 
 TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {

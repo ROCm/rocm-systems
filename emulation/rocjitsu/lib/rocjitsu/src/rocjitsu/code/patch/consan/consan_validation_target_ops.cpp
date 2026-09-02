@@ -60,4 +60,13 @@ bool validate_consan_dependency(rj_code_arch_t arch, ConSanDependencyKind kind,
   return false;
 }
 
+bool consan_dependency_is_explicit(rj_code_arch_t arch, ConSanDependencyKind kind) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (!target)
+    return false;
+  if (kind != ConSanDependencyKind::ValuCarryToValu)
+    return true;
+  return target->encoding_family == ConSanEncodingFamily::Gfx12;
+}
+
 } // namespace rocjitsu
