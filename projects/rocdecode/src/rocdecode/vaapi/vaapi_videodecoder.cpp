@@ -77,6 +77,7 @@ VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) 
     pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
     slice_data_buf_id_{0} {
 #ifdef _WIN32
+    va_ctx_id_ = 0;
     d3d12_interop_ = std::make_unique<D3D12Interop>();
 #endif
 };
@@ -109,9 +110,17 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
                 CriticalLog(g_rocdec_logger, "vaDestroyConfig failed");
             }
         }
+#ifdef _WIN32
+        // On Windows, va_display_ is shared with the VaContext singleton. Release our
+        // reference; vaTerminate is called when the last reference drops. This ensures
+        // teardown happens during normal destruction, not during static destruction
+        // where vaon12's D3D12 state may already be partially unloaded.
+        VaContext::GetInstance().ReleaseVaDisplay(va_ctx_id_);
+#else
         if (vaTerminate(va_display_) != VA_STATUS_SUCCESS) {
             CriticalLog(g_rocdec_logger, "Failed to terminate VA");
         }
+#endif
     }
 }
 
@@ -201,6 +210,9 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#ifdef _WIN32
+    va_ctx_id_ = va_ctx_id;
+#endif
     rocdec_status = CreateDecoderConfig();
     if (rocdec_status != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Failed to create a VAAPI decoder configuration.");
@@ -796,9 +808,18 @@ VaContext::~VaContext() {
         }
 #endif
         if (va_contexts_[i].va_display) {
+#ifdef _WIN32
+            // On Windows, vaTerminate should have been called by the last
+            // ReleaseVaDisplay during normal decoder destruction. If we reach
+            // here with a non-null display, it means a decoder was leaked or
+            // the ref count never hit zero. Skip vaTerminate during static
+            // destruction because vaon12's D3D12 teardown path can hang or
+            // crash when DLLs have been partially unloaded at atexit.
+#else
             if (vaTerminate(va_contexts_[i].va_display) != VA_STATUS_SUCCESS) {
                 CriticalLog(g_rocdec_logger, "Failed to terminate VA");
             }
+#endif
         }
     }
 #ifdef ROCDECODE_USE_DLOPEN_VA
@@ -862,6 +883,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         va_contexts_[va_ctx_idx].hip_dev_prop = hip_dev_prop;
 #ifdef _WIN32
         memcpy(&va_contexts_[va_ctx_idx].adapter_luid, hip_dev_prop.luid, sizeof(LUID));
+        va_contexts_[va_ctx_idx].display_ref_count = 0;
 #else
         va_contexts_[va_ctx_idx].drm_fd = -1;
 #endif
@@ -986,10 +1008,19 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
         return ROCDEC_INVALID_PARAMETER;
     } else {
 #ifdef _WIN32
-        VADisplay new_va_display = vaGetDisplayWin32(&va_contexts_[va_ctx_id].adapter_luid);
+        // On Windows, reuse the singleton's existing VA display created by InitVAAPI
+        // instead of creating a second one. This avoids a redundant vaInitialize (~97 ms)
+        // and ensures only the singleton owns the display lifetime.
+        if (!va_contexts_[va_ctx_id].va_display) {
+            CriticalLog(g_rocdec_logger, "VA display not initialized for context " + ROCDEC_TOSTR(va_ctx_id));
+            *va_display = 0;
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_NOT_INITIALIZED;
+        }
+        *va_display = va_contexts_[va_ctx_id].va_display;
+        va_contexts_[va_ctx_id].display_ref_count++;
 #else
         VADisplay new_va_display = vaGetDisplayDRM(va_contexts_[va_ctx_id].drm_fd);
-#endif
         if (!new_va_display) {
             CriticalLog(g_rocdec_logger, "Failed to create VA display.");
             FunctionExitLog(g_rocdec_logger);
@@ -1017,10 +1048,28 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
             InfoLog(g_rocdec_logger, va_driver_path);
         }
         *va_display = new_va_display;
+#endif
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_SUCCESS;
     }
 }
+
+#ifdef _WIN32
+void VaContext::ReleaseVaDisplay(uint32_t va_ctx_id) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (va_ctx_id >= va_contexts_.size()) return;
+    auto& ctx = va_contexts_[va_ctx_id];
+    if (ctx.display_ref_count > 0) {
+        ctx.display_ref_count--;
+    }
+    if (ctx.display_ref_count == 0 && ctx.va_display) {
+        if (vaTerminate(ctx.va_display) != VA_STATUS_SUCCESS) {
+            CriticalLog(g_rocdec_logger, "Failed to terminate VA");
+        }
+        ctx.va_display = 0;
+    }
+}
+#endif
 
 rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(dec_cap));

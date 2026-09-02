@@ -97,6 +97,7 @@ typedef struct {
     std::string gpu_pci_bdf;
 #ifdef _WIN32
     LUID adapter_luid;
+    int display_ref_count;
 #else
     int drm_fd;
 #endif
@@ -145,6 +146,7 @@ private:
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
 #ifdef _WIN32
+    uint32_t va_ctx_id_;
     // All D3D12 device/resource/staging state lives in this helper (see d3d12_interop.h).
     std::unique_ptr<D3D12Interop> d3d12_interop_;
 #endif
@@ -177,6 +179,9 @@ public:
     }
     rocDecStatus GetVaContext(int device_id, uint32_t *va_ctx_id);
     rocDecStatus GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display);
+#ifdef _WIN32
+    void ReleaseVaDisplay(uint32_t va_ctx_id);
+#endif
     rocDecStatus CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap);
 
 private:
