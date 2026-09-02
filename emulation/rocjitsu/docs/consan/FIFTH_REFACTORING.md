@@ -11010,3 +11010,45 @@ but it keeps the next work focused on narrowing planner inputs and deleting
 shared staging that no longer earns its place.  Full target/mode locality,
 broad transaction and operating-point reduction, extension-proof
 revalidation, and the independent Section 14 audit remain open.
+
+### 16.161 Convergence checkpoint 160: derived route diagnostics
+
+`PlannedBarrierLowering` retained a copy of the candidate operating point's
+`moi_branch_only_spill` presence solely to choose one late far-return warning.
+That boolean was not an emission or placement input and duplicated the exact
+owner assignment already accepted by resource planning.  Both mode planners
+had to populate it even though neither owned the eventual routing decision.
+
+The field and both initializers are deleted.  When an emitted plan has no far
+return route, common placement now asks the accepted owner assignments whether
+that exact owner scope uses the branch-only fallback.  The boundary gate
+rejects putting the operating-point flag back into the shared staged product.
+The existing gfx1250 branch-only test caught an initial attempt to make the
+warning generic; deriving the classification from owner assignments preserves
+the established diagnostic while keeping one authority.
+
+| Signal | Checkpoint 160 | Cumulative change | Slice change from checkpoint 159 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,630 | **-2,346** | -3 |
+| Nonblank production lines | 96,212 | **-2,872** | -3 |
+| Production implementation lines | 88,423 | **-3,027** | -3 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **124 / 49** | **-152 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **261 / 52** | **-29 / +1** | 0 / 0 |
+| Diagnostic-only operating-point fields in staged barrier product | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `401480394c8`.  Validation includes a
+successful full `-j16` build and **109/109** nonphysical architecture-boundary
+and barrier-named host tests.  The focused run first demonstrated that the
+gfx1250 branch-only diagnostic was contractual, then passed after the
+owner-assignment derivation replaced the removed field.  All tests used
+`-LE physical`; no test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+The three callback-payback checkpoints have recovered 20 of the 55 interface
+lines while removing five duplicate, provisional, or diagnostic-only pieces
+of state.  Broad transform artifacts remain exposed to both planner seams;
+that is now the highest-leverage unresolved part of this same interaction.
