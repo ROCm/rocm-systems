@@ -50,13 +50,13 @@ find_package(rocjpeg QUIET)
 find_package(rocprofiler-register QUIET)
 
 # threads
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads QUIET)
 
 if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     #threads
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
     # std filesystem
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
