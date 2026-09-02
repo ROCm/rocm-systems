@@ -70,6 +70,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
@@ -1537,11 +1538,20 @@ generate_agent_profiles()
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
 }
 
+// Shared, lazily-built per-agent profile set (one config per counter group). Used by both the
+// non-replay round-robin and the kernel-replay per-dispatch selector so they see identical groups.
+agent_profiles&
+get_agent_profiles()
+{
+    static auto profiles = generate_agent_profiles();
+    return profiles;
+}
+
 // this function creates a rocprofiler profile config on the first entry
 std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto agent_profiles = generate_agent_profiles();
+    auto& agent_profiles = get_agent_profiles();
 
     auto agent_iter = agent_profiles.current_iter.find(agent_id);
     if(agent_iter == agent_profiles.current_iter.end())
@@ -1561,6 +1571,99 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 
     uint64_t profile_pos = my_iter / agent_profiles.rotation;
     return profiles->second[profile_pos % profiles->second.size()];
+}
+
+// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
+// callback) as the single source of truth. The counter dispatch callback runs synchronously on the
+// same thread within a pass, so it reads the pass from this thread-local.
+// The (asynchronous) counter record callback receives it through the per-pass user_data. tid and
+// pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
+// (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
+// still carries.
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
+
+// The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
+// Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
+// plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
+// below rather than assumed.
+struct replay_user_data_t
+{
+    uint32_t tid  = 0;
+    uint32_t pass = 0;
+};
+
+static_assert(sizeof(replay_user_data_t) == sizeof(uint64_t),
+              "replay_user_data_t must exactly fill the 64-bit user_data slot");
+static_assert(std::is_trivially_copyable<replay_user_data_t>::value,
+              "replay_user_data_t must remain trivially copyable for memcpy pack/unpack");
+// The tid half of the slot cannot truncate: common::get_tid() returns gettid(), whose value is a
+// kernel pid_t. Asserting the width here makes that a compile-time guarantee rather than something
+// the pack path has to test for and report on every dispatch.
+static_assert(sizeof(pid_t) == 4,
+              "kernel replay packs a thread id into a uint32_t field of user_data, which assumes "
+              "the kernel's pid_t is 32-bit");
+
+inline uint64_t
+pack_replay_user_data(uint64_t tid, uint64_t pass_index)
+{
+    // The pass index has no equivalent compile-time bound -- it comes from the SDK at runtime --
+    // so it stays checked. Truncating it would put a pass that was never collected into the
+    // record, and from there into the output, so a broken invariant is reported rather than
+    // packed. ROCP_CI_LOG_IF keeps this fatal under ROCPROFILER_CI and logs at ERROR otherwise.
+    ROCP_CI_LOG_IF(ERROR, (pass_index >> 32) != 0U)
+        << "kernel replay: cannot pack pass=" << pass_index
+        << " into user_data without truncation (tid=" << tid << ")";
+
+    const auto fields =
+        replay_user_data_t{static_cast<uint32_t>(tid), static_cast<uint32_t>(pass_index)};
+    uint64_t value = 0;
+    std::memcpy(&value, &fields, sizeof(value));
+    return value;
+}
+
+inline replay_user_data_t
+unpack_replay_user_data(uint64_t value)
+{
+    auto fields = replay_user_data_t{};
+    // Cast to void* so -Wclass-memaccess does not fire: the member initializers above make the
+    // struct non-trivial, which the warning treats as unsafe to memcpy into. Trivially copyable is
+    // the property this actually needs, and it is asserted above.
+    std::memcpy(static_cast<void*>(&fields), &value, sizeof(fields));
+    return fields;
+}
+
+// Kernel replay group selection: pass i -> counter group i for the dispatch's agent. Stateless --
+// the pass index comes from the SDK (see tl_current_replay_pass), not re-derived here.
+std::optional<rocprofiler_counter_config_id_t>
+get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t pass_index)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
+
+    // SDK contract: replay_pass_count reported exactly profiles->second.size() passes for this
+    // agent, so the pass index must land in [0, #groups). A larger index means the SDK drove more
+    // passes than we asked for; scream, then fall back to the wrapped index so a non-CI build stays
+    // in-bounds.
+    ROCP_CI_LOG_IF(ERROR, pass_index >= profiles->second.size())
+        << "kernel replay: pass_index=" << pass_index
+        << " exceeds counter groups=" << profiles->second.size() << " for agent "
+        << agent_id.handle;
+
+    return profiles->second[pass_index % profiles->second.size()];
+}
+
+// Counter groups configured for an agent, or 0 when the agent has none. Lets the asynchronous
+// record path sanity-check a pass index that arrived through user_data without duplicating the
+// lookup in get_replay_profile. Safe to call from any thread: get_agent_profiles() is built once
+// and the profiles map is read-only afterwards.
+size_t
+get_replay_group_count(rocprofiler_agent_id_t agent_id)
+{
+    const auto& profiles_map = get_agent_profiles().profiles;
+    const auto  profiles     = profiles_map.find(agent_id);
+    return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
 }
 
 int64_t
@@ -1847,6 +1950,29 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     {
         return;
     }
+    else if(tool::get_config().kernel_replay)
+    {
+        // Under kernel replay every targeted dispatch selects its group deterministically by pass
+        // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
+        // non-replayed dispatch (single group) is pass 0. Thread the pass index (+ enqueuing tid)
+        // to the async record callback via user_data so replay_pass reflects the group actually
+        // collected rather than async record arrival order.
+        const auto pass    = tl_current_replay_pass.value_or(0);
+        auto       profile = get_replay_profile(agent_id, pass);
+        // If we're inside a replay pass (pass index published on this thread) the agent must have
+        // counter groups -- that's the reason the SDK is replaying this dispatch. Missing groups
+        // here is a tool/SDK mismatch that would silently drop this pass's data.
+        ROCP_CI_LOG_IF(ERROR, tl_current_replay_pass.has_value() && !profile)
+            << "kernel replay: in replay pass " << pass << " but agent " << agent_id.handle
+            << " has no counter groups configured";
+
+        // Packed unconditionally, ahead of the profile check. Without a profile the SDK collects
+        // nothing for this dispatch and the record callback should not fire, but user_data is the
+        // record path's only source of thread id and pass index, and leaving it at its default
+        // would surface as thread_id 0 with replay_pass 0 if a record ever did arrive.
+        user_data->value = pack_replay_user_data(common::get_tid(), pass);
+        if(profile) *config = *profile;
+    }
     else if(auto profile = get_device_counting_service(agent_id))
     {
         *config          = *profile;
@@ -1854,6 +1980,9 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     }
 }
 
+// rocprofv3 registers callback dispatch counting (not buffered dispatch counting), so counter
+// records arrive on this path. replay_pass is populated here; the SDK buffered counter callback
+// path is not wired in this tool.
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_counter_record_t*                record_data,
@@ -1869,8 +1998,42 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     // Must call get_ext_attribution before copying dispatch_data (rewrites external corr id).
     counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
     counter_record.dispatch_data = dispatch_data;
-    counter_record.thread_id     = user_data.value;
-    auto serialized_records      = std::vector<tool::tool_counter_value_t>{};
+
+    if(tool::get_config().kernel_replay)
+    {
+        // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
+        // replay_pass stays tied to the counter group actually collected for this pass rather than
+        // the order in which async records arrive.
+        const auto replay = unpack_replay_user_data(user_data.value);
+
+        // Both fields are validated before they reach the record, because user_data is opaque to
+        // us on the way back: a record whose dispatch never went through counter_dispatch_callback
+        // arrives with a default-constructed slot that unpacks to a plausible-looking (0, 0), which
+        // would otherwise be written out as a real thread id and a real pass index.
+        const auto group_count = get_replay_group_count(dispatch_data.dispatch_info.agent_id);
+
+        ROCP_CI_LOG_IF(ERROR, replay.tid == 0)
+            << "kernel replay: counter record on agent "
+            << dispatch_data.dispatch_info.agent_id.handle
+            << " unpacked thread id 0, so its user_data was never packed by the dispatch callback";
+
+        ROCP_CI_LOG_IF(ERROR, group_count > 0 && replay.pass >= group_count)
+            << "kernel replay: counter record unpacked pass " << replay.pass << " but agent "
+            << dispatch_data.dispatch_info.agent_id.handle << " has only " << group_count
+            << " counter groups";
+
+        counter_record.thread_id = replay.tid;
+        // Clamped so a pass index that survived the checks above cannot be emitted as a group that
+        // was never collected. With group_count == 0 there is nothing to clamp against, so the
+        // unpacked value is passed through and the log above carries the diagnosis.
+        counter_record.replay_pass = (group_count > 0) ? (replay.pass % group_count) : replay.pass;
+    }
+    else
+    {
+        counter_record.thread_id = user_data.value;
+    }
+
+    auto serialized_records = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
 
     for(size_t count = 0; count < record_count; ++count)
@@ -2271,6 +2434,67 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
 }
 
+// Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
+// The pass count must match the number of counter groups collectable on THIS dispatch's agent --
+// the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
+// that pass i maps to group i with no wrap/skip on agents with a different or partial group set
+// (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
+// disables replay.
+uint64_t
+kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                                  rocprofiler_user_data_t /*user_data*/)
+{
+    auto&      agent_profiles = get_agent_profiles();
+    const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
+    const auto n =
+        (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
+    return (n == 0) ? 1 : n;
+}
+
+// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
+// query the number of replay passes for each dispatch.
+void
+kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t* /*user_data*/,
+                       void* /*data*/)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        payload->replay_pass_count = kernel_replay_pass_count_callback;
+    }
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
+    {
+        // Publish the SDK's authoritative pass index for the counter dispatch callback, which runs
+        // synchronously on this same thread within the pass; clear it once the pass ends so
+        // ordinary dispatches don't observe a stale value.
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            // SDK contract: a fixed-count replay (total_passes > 0) numbers passes [0,
+            // total_passes); total_passes == 0 marks an indefinite loop with no upper bound. A pass
+            // outside that range means the SDK drove more passes than it advertised.
+            ROCP_CI_LOG_IF(
+                ERROR, payload->total_passes != 0 && payload->current_pass >= payload->total_passes)
+                << "kernel replay: SDK published current_pass=" << payload->current_pass
+                << " out of range for total_passes=" << payload->total_passes;
+            tl_current_replay_pass = payload->current_pass;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            // Enter/exit are paired per pass on this thread, so an exit with nothing published
+            // means the SDK emitted PASS phases out of order.
+            ROCP_CI_LOG_IF(ERROR, !tl_current_replay_pass)
+                << "kernel replay: PASS exit without a matching enter on this thread";
+            tl_current_replay_pass.reset();
+        }
+    }
+}
+
 struct real_callbacks_t
 {};
 
@@ -2298,6 +2522,7 @@ struct tracing_callbacks_t
     , counter_dispatch{counter_dispatch_callback}
     , counter_record{counter_record_callback}
     , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
+    , kernel_replay{kernel_replay_callback}
     {}
 
     explicit tracing_callbacks_t(dummy_callbacks_t)
@@ -2311,6 +2536,7 @@ struct tracing_callbacks_t
     , pc_sampling{dummy_buffered_tracing_callback}
     , counter_dispatch{dummy_counter_dispatch_callback}
     , counter_record{dummy_counter_record_callback}
+    , kernel_replay{dummy_callback_tracing_callback}
     {}
 
     const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
@@ -2326,6 +2552,7 @@ struct tracing_callbacks_t
     const rocprofiler_dispatch_counting_service_cb_t      counter_dispatch                = nullptr;
     const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
     const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
 };
 
 auto
@@ -3182,6 +3409,41 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                      "runtime initialization tracing configure failed");
 
     start_context(runtime_initialization_ctx, "runtime initialization");
+
+    // Kernel replay: collect every --pmc counter group within a single application run by replaying
+    // each dispatch once per group (device memory is snapshot/restored between passes). The tool
+    // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
+    // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
+    //
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
+    {
+        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        auto kernel_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
+                         "failed to create kernel replay context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             kernel_replay_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                             nullptr,
+                             0,
+                             callbacks.kernel_replay,
+                             nullptr),
+                         "kernel replay tracing configure failed");
+
+        start_context(kernel_replay_ctx, "kernel replay");
+    }
 
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
