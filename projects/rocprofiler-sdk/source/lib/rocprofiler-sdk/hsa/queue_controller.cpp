@@ -893,16 +893,6 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    // Mark global finalization before the sync/drain: this is the global-teardown path, not one
-    // of the per-client finalizer syncs, so the drain below uses its short grace period rather
-    // than its full runtime wait -- a dependency in flight here may never resolve.
-    //
-    // Two bounded waits follow and they do not share a deadline: the drain inside
-    // queue_controller_sync, and the one stop_completion_monitor runs after its forced
-    // retirement sweeps what the monitor still held. Each is bounded by the short grace period,
-    // so this path can spend twice that. The second returns at once when the first drained.
-    queue_interposition::mark_completion_monitor_finalizing();
-
     // synchronize first
     queue_controller_sync();
 

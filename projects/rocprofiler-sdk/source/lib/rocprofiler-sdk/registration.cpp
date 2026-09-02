@@ -1165,7 +1165,9 @@ finalize()
         // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
         // completion. Must precede the sequence below: queue_controller_fini stops the
         // completion monitor that runs these completions, and correlation_id_finalize
-        // consults the loss ledger this populates. No-op unless signal-less is active.
+        // consults the loss ledger this populates. Its drain waits on the in-flight counter,
+        // so it still works when an application hsa_shut_down stopped the monitor first.
+        // No-op unless signal-less is active.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
