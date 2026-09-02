@@ -33,6 +33,13 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 KERNEL_NAME_WRAP_WIDTH = 40
 
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
+
 
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
@@ -750,7 +757,7 @@ def format_table_output(
 
     # Do not print the table if any column is empty. PC sampling table 21.1 is
     # exempt: its source column is all N/A when the workload lacks debug info.
-    if is_empty_columns_exist and table_id_str != "21.1":
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
@@ -762,6 +769,9 @@ def format_table_output(
     ) == "mem_chart" and not _tty_view_is_table(args)
     if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
+
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -837,13 +847,6 @@ def format_table_output(
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
-        )
-
-    if table_id_str == "21.1":
-        content += (
-            "Stall reason definitions: https://rocm.docs.amd.com/projects/"
-            "rocprofiler-sdk/en/latest/how-to/"
-            "cdna3-cdna4-pc-sampling.html#stall-reasons\n"
         )
 
     return content

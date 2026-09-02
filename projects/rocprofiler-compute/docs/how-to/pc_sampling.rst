@@ -43,6 +43,21 @@ The same profile command supports applications that create multiple processes.
 Every process that runs GPU kernels is sampled, and no additional option is
 required.
 
+Stall reasons
+=============
+
+The ``stall_reason`` column of a stochastic PC sampling table holds the raw
+reason names reported by ROCprofiler-SDK for samples where a wave did not
+issue an instruction. Those names are defined in the ROCprofiler-SDK
+documentation, and the analysis output prints a link to it above the table:
+
+.. code-block:: shell-session
+
+   --------------------------------------------------------------------------------
+   21. PC Sampling
+   21.1 PC Sampling
+   Stall reason definitions: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons
+
 Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
@@ -82,14 +97,6 @@ Selecting a single kernel with ``host_trap`` PC sampling:
 
 Selecting a single kernel with ``stochastic`` PC sampling, which adds the
 ``count_issued``, ``count_stalled``, and ``stall_reason`` columns:
-
-Stall reasons
--------------
-
-The ``stall_reason`` column reports the raw ROCprofiler-SDK reason names for
-samples where a wave did not issue an instruction. For definitions of values
-such as ``WAITCNT``, ``ARBITER_NOT_WIN``, and ``ARBITER_WIN_EX_STALL``, see
-the `ROCprofiler-SDK stall reasons table <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons>`_.
 
 .. code-block:: shell-session
 
