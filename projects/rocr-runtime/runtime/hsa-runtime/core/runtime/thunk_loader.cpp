@@ -511,7 +511,8 @@ LOAD_ERROR:
   // than a jump to a non-canonical address. Saying so here is the
   // difference between the caller abandoning the load and the runtime
   // finding out the hard way.
-  fprintf(stderr, "GetExportAddress failed: %s\n", rocr::os::DlError());
+  const char* error = rocr::os::DlError();
+  fprintf(stderr, "GetExportAddress failed: %s\n", error == nullptr ? "unknown error" : error);
   return false;
     } else {
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
