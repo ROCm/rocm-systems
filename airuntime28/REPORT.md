@@ -24,18 +24,11 @@ hint tells the cache not to retain those lines, so in principle the copy stops e
 neighbours.
 
 The ticket assumed the hint required dropping the access width from 128-bit to 64-bit. It does
-not, in either language.
-
-`__builtin_nontemporal_store` does reject HIP's `ulong2`, but because of what that type *is*,
-not how wide it is: HIP's `ulong2` is a struct, `HIP_vector_type<unsigned long, 2>`, and the
-builtin takes "a pointer to integer, float, pointer, or a vector of such types". A native
-128-bit vector satisfies that. So the fix is to change the type, not to narrow the access — the
-benchmark variants in this investigation are HIP, declare their 128-bit type as
-`ext_vector_type(2)`, and emit `global_store_b128 ... th:TH_STORE_NT`, confirmed in the ISA.
-
-The production kernel does not need even that substitution, because `blitcl.cpp` is OpenCL,
-where `ulong2` is already a native vector the builtin accepts. Either way, no width is given
-up — which matters, because width turns out to dominate everything else measured here.
+not. `__builtin_nontemporal_store` rejects HIP's `ulong2` because that type is a struct, not
+because 128 bits is too wide — the builtin takes "a pointer to integer, float, pointer, or a
+vector of such types", and any native 128-bit vector satisfies it. Change the type, not the
+width. No width is given up, which matters, because width turns out to dominate everything else
+measured here.
 
 ## Results
 

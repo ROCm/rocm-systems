@@ -110,8 +110,8 @@ int main(int argc, char** argv) {
   };
 
   // Reported separately because neither is a candidate change. TH_STORE_NT_RT has
-  // no builtin, so reaching it means hand-writing a gfx12 instruction into an
-  // OpenCL kernel that has to compile for every target - not shippable. It is
+  // no builtin, so reaching it means hand-writing a gfx12 instruction into a
+  // kernel that has to compile for every target - not shippable. It is
   // measured anyway so that "did you try the other hint?" has an answer, and it
   // needs its own control because hand-writing the store moves performance on its
   // own, by more than any temporal hint here.

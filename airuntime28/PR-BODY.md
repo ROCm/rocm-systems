@@ -9,8 +9,7 @@ It keeps `ulong2` and tests `aligned_size == sizeof(ulong2)`, so it reaches its 
 Worth stating plainly, because the ticket assumed otherwise: **adding the hint does not cost
 access width.** `__builtin_nontemporal_store` rejects HIP's `ulong2` because that type is a
 struct, not because 128 bits is too wide — the builtin accepts a pointer to any native vector,
-and HIP reaches 128-bit non-temporal stores through `ext_vector_type(2)`. Here the question
-does not arise at all: `blitcl.cpp` is OpenCL, where `ulong2` is already a native vector.
+and HIP reaches 128-bit non-temporal stores through `ext_vector_type(2)`.
 
 ## Why, measured
 
