@@ -2942,6 +2942,15 @@ commit path receives a mode-owned mapping constructor and cannot inspect those
 Sampled facts. Generic diagnostics and hook logging no longer publish a second
 copy. Mechanical patch geometry remains in the patch transaction because
 placement, byte application, and independent validation still consume it.
+The adjacent InlineShadow trace likewise removed a flattened replica of its
+workgroup-local shadow layout from generic patch proof. Planning, committed
+patch effects, prologue composition, descriptor sizing, and independent
+validation now carry one `ConSanMoiWorkgroupShadowLayout`; the prologue only
+resolves its owner-specific initialization-lane count. The compact-cell runtime
+token stays in the InlineShadow emission plan that owns its meaning and never
+enters generic patch telemetry. A narrow workgroup-shadow layout fragment is
+the only additional contract visible through `consan.h`; the broader MOI
+report model remains behind `consan_moi_report_contract.h`.
 
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 

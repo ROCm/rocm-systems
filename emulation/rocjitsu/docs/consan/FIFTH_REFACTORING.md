@@ -9010,3 +9010,61 @@ must harvest deletion rather than add another schema layer. Full architecture
 locality, remaining broad coordinator and patch-state paths, material
 additional whole-refactoring shrinkage, and the independent Section 14 audit
 remain open; the goal therefore remains active.
+
+### 16.129 Convergence checkpoint 128: one typed InlineShadow workgroup-shadow patch effect
+
+The next generic-patch trace found one already-typed InlineShadow planning
+product serialized into eight independent patch fields. Access lowering copied
+the workgroup-shadow base, size, validity range, initialization strategy,
+compact representation, compact runtime token, and descriptor extent into
+`ConSanPatchInfo`. Owner and private prologue construction rebuilt a
+`ConSanMoiWorkgroupShadowLayout` from those scalars, final validation read the
+same flattened pieces, and descriptor publication treated the group extent as
+an unrelated generic scalar. The compact token was only used to construct an
+InlineShadow runtime mapping even though that mapping callable already retained
+the complete mode-owned emission plan.
+
+Committed InlineShadow patch proof now retains the optional
+`ConSanMoiWorkgroupShadowLayout` directly. Both access placement paths and the
+owner prologue publish that exact typed effect; prologue composition copies it
+and resolves only the owner-specific initialization-lane count. Descriptor
+requirements and independent validation consume the retained layout rather
+than reconstructing it. InlineShadow runtime mapping consumes its compact token
+directly from `MoiInlineShadowEmissionPlan`, so that mode-only identity no
+longer crosses generic patch telemetry.
+
+The layout itself has a narrow contract fragment because it is an authentic
+handoff among planning, patch proof, prologue construction, descriptor growth,
+and validation. The broad MOI report-core fragment remains private to
+`consan_moi_report_contract.h`; it was not imported into `consan.h` to obtain
+this one type. Structural checks require the narrow contract, prohibit the
+eight flattened patch fields and prologue reconstruction, and reject exposing
+the broad report model through the shared aggregate header.
+
+| Signal | Checkpoint 128 | Cumulative change | Slice change from checkpoint 127 |
+| --- | ---: | ---: | ---: |
+| Production files | 296 | +67 | +1 narrow contract |
+| Physical production lines | 102,727 | **-2,249** | **-73** |
+| Nonblank production lines | 96,362 | **-2,722** | **-74** |
+| Production implementation lines | 88,597 | **-2,853** | **-82** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Flattened workgroup-shadow patch fields | **0** | n/a | **-8** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `f96fd76ad47`. Validation on its exact tree
+includes a successful compiler-clean `-j16` rebuild (with only the pre-existing
+CMake CMP0174 development warnings), all **1,296/1,296** nonphysical
+`ConSan.*` and `ConSanMoi.*` host/component tests, and all **536/536**
+InlineShadow simulator-device tests across gfx942, gfx950, gfx1100, gfx1201,
+and gfx1250. No test was removed, renamed, disabled, or replaced, and no
+physical test was run.
+
+This slice deletes a parallel representation rather than wrapping it: 82
+implementation lines, the eight scalar fields, their writes, their
+reconstruction, and their mode-token leak are gone. It strengthens Sections
+14.1, 14.3, 14.5, 14.6, 14.7, and 14.8. Full architecture locality, the broad
+coordinator and operating-point surfaces, credible extension exercises, and
+the independent Section 14 audit remain open, so the goal remains active.
