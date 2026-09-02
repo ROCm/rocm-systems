@@ -171,6 +171,23 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   }
 }
 
+TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
+  HostFenvGuard environment_guard;
+  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
+
+  const float multiplicand = std::bit_cast<float>(0x8e0b5904u);
+  const float multiplier = std::bit_cast<float>(0x1ae3bc34u);
+  const float addend = std::bit_cast<float>(0xb6630000u);
+  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(multiplicand, multiplier, addend, 2, false, true),
+            0xb664u);
+  EXPECT_EQ(std::fegetround(), FE_UPWARD);
+
+  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, false, true), 0x8000u);
+  EXPECT_EQ(std::fegetround(), FE_UPWARD);
+  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
+  EXPECT_EQ(std::fegetround(), FE_UPWARD);
+}
+
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
   constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
