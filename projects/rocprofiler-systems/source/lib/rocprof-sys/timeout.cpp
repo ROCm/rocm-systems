@@ -22,8 +22,6 @@
 #include <sstream>
 #include <thread>
 
-#include <unistd.h>
-
 namespace rocprofsys
 {
 namespace timeout
