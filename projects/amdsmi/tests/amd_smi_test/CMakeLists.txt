@@ -59,6 +59,11 @@ message("")
 # re-running cmake.
 file(GLOB_RECURSE unitSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
 file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+# fwupd_carveout_test is built as its own executable below because it compiles
+# fwupd_carveout.cc directly, whose amd::smi::fwupd_* symbols are hidden in the
+# shared library. Keep it out of the main amdsmitst target so shared-only builds
+# do not fail with undefined references.
+list(FILTER unitSources EXCLUDE REGEX "/unit/fwupd_carveout_test\\.cc$")
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")

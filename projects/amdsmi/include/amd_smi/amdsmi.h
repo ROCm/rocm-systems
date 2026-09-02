@@ -9720,6 +9720,12 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
  *  depending on the driver package). No libdrm dependency is required for
  *  these APIs.
  *
+ *  @note On platforms whose amdgpu build does not expose the UMA carveout
+ *  sysfs node (for example some UEFI-HII systems), the carveout is read and
+ *  written through the fwupd daemon over D-Bus instead. That fallback needs
+ *  the fwupd daemon and libdbus present at runtime; writes are authorized by
+ *  PolicyKit (or root).
+ *
  *  @par Supported ASICs (UMA carveout)
  *  UMA carveout is only available on APU parts whose VBIOS exposes the
  *  ATCS function code 0xA ("Set UMA Allocation Size") together with an
@@ -9794,7 +9800,9 @@ typedef struct {
  *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
  *  allocation on APU systems.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note This prefers the amdgpu sysfs interface (not libdrm); where that
+ *  sysfs node is absent it falls back to the fwupd daemon over D-Bus, which
+ *  is brokered by PolicyKit.
  *
  *  @ingroup tagMemConfig
  *
@@ -9817,7 +9825,9 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
  *  This function sets the UMA carveout configuration for the specified GPU.
  *  The system must be rebooted for changes to take effect.
  *
- *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *  @note This prefers the amdgpu sysfs interface (not libdrm); where that
+ *  sysfs node is absent it falls back to the fwupd daemon over D-Bus, which
+ *  is brokered by PolicyKit.
  *
  *  @ingroup tagMemConfig
  *

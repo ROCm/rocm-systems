@@ -8580,21 +8580,27 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  // The fwupd carveout is a platform-wide APU BIOS setting (PolicyKit-brokered,
-  // and the only carveout interface on UEFI-HII platforms); consult it first for
-  // the integrated GPU, then fall back to the amdgpu sysfs node.
-  const bool is_apu = gpu_handle_is_apu(processor_handle);
-
-  // The fwupd path only performs D-Bus I/O and never touches gpu_device, so run
-  // it before taking the device mutex to avoid holding the lock across a
-  // multi-second D-Bus round trip.
-  if (is_apu && amd::smi::fwupd_get_carveout_info(info) == AMDSMI_STATUS_SUCCESS) {
+  // Prefer the amdgpu sysfs node: it is world-readable, so the current carveout
+  // value is visible without privilege and needs no D-Bus round trip. The device
+  // mutex is held only for the sysfs access.
+  amdsmi_status_t sysfs_ret;
+  {
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+    sysfs_ret = get_gpu_uma_carveout_info_internal(gpu_device, info);
+  }
+  if (sysfs_ret == AMDSMI_STATUS_SUCCESS) {
     return AMDSMI_STATUS_SUCCESS;
   }
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+  // On UEFI-HII APU platforms the sysfs node is absent and the carveout is
+  // exposed only by the fwupd daemon over D-Bus. That path performs no
+  // gpu_device access, so it runs without the device mutex held.
+  if (gpu_handle_is_apu(processor_handle) &&
+      amd::smi::fwupd_get_carveout_info(info) == AMDSMI_STATUS_SUCCESS) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
 
-  return get_gpu_uma_carveout_info_internal(gpu_device, info);
+  return sysfs_ret;
 }
 
 amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_handle,
@@ -8610,70 +8616,68 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  // The fwupd carveout is a platform-wide APU BIOS setting; only route the write
-  // there for the integrated GPU. fwupd/PolicyKit brokers privilege, then fall
-  // back to the amdgpu sysfs node when fwupd cannot service the request.
-  const bool is_apu = gpu_handle_is_apu(processor_handle);
+  // Prefer the amdgpu sysfs node (root-writable), the interface documented for
+  // this API. The device mutex is held only for the sysfs access; the fwupd
+  // fallback below performs D-Bus I/O and runs without it.
+  {
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 
-  // The fwupd path only performs D-Bus I/O and never touches gpu_device, so run
-  // it before taking the device mutex to avoid holding the lock across a
-  // multi-second D-Bus round trip.
-  if (is_apu) {
-    amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
-    if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
-      return fwupd_ret;
+    // Get GPU path for sysfs
+    std::string gpu_path = gpu_device->get_gpu_path();
+
+    // Construct sysfs path for UMA carveout
+    std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
+
+    // Use the sysfs node when the platform exposes it.
+    std::ifstream check_file(carveout_path);
+    if (check_file.good()) {
+      check_file.close();
+
+      // Validate option_index is within range (regardless of DRY_RUN mode)
+      amdsmi_uma_carveout_info_t info;
+      ret = get_gpu_uma_carveout_info_internal(gpu_device, &info);
+      if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+      }
+
+      if (option_index >= info.num_options || info.options[option_index].description[0] == '\0') {
+        return AMDSMI_STATUS_INVAL;
+      }
+
+      if (is_dry_run()) {
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would write UMA carveout index " << option_index << " to "
+           << carveout_path;
+        LOG_INFO(ss);
+        return AMDSMI_STATUS_SUCCESS;
+      }
+
+      // Write the new carveout index
+      std::ofstream carveout_file(carveout_path);
+      if (!carveout_file.good()) {
+        return AMDSMI_STATUS_NO_PERM;
+      }
+
+      carveout_file << option_index;
+      carveout_file.flush();
+      if (!carveout_file) {
+        carveout_file.close();
+        return AMDSMI_STATUS_FILE_ERROR;
+      }
+
+      carveout_file.close();
+
+      return AMDSMI_STATUS_SUCCESS;
     }
   }
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-
-  // Get GPU path for sysfs
-  std::string gpu_path = gpu_device->get_gpu_path();
-
-  // Construct sysfs path for UMA carveout
-  std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
-
-  // Check if UMA carveout is available
-  std::ifstream check_file(carveout_path);
-  if (!check_file.good()) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  check_file.close();
-
-  // Validate option_index is within range (regardless of DRY_RUN mode)
-  amdsmi_uma_carveout_info_t info;
-  ret = get_gpu_uma_carveout_info_internal(gpu_device, &info);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    return ret;
+  // The sysfs node is absent (UEFI-HII APU platforms): the carveout is writable
+  // only through the fwupd daemon, which brokers privilege via PolicyKit.
+  if (gpu_handle_is_apu(processor_handle)) {
+    return amd::smi::fwupd_set_carveout(option_index);
   }
 
-  if (option_index >= info.num_options || info.options[option_index].description[0] == '\0') {
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  if (is_dry_run()) {
-    std::ostringstream ss;
-    ss << "[DRY_RUN] Would write UMA carveout index " << option_index << " to " << carveout_path;
-    LOG_INFO(ss);
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  // Write the new carveout index
-  std::ofstream carveout_file(carveout_path);
-  if (!carveout_file.good()) {
-    return AMDSMI_STATUS_NO_PERM;
-  }
-
-  carveout_file << option_index;
-  carveout_file.flush();
-  if (!carveout_file) {
-    carveout_file.close();
-    return AMDSMI_STATUS_FILE_ERROR;
-  }
-
-  carveout_file.close();
-
-  return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 /**
