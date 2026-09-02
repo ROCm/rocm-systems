@@ -576,6 +576,7 @@ void try_apply_first_light_access_record_patch(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
       continue;
     }
+    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (!candidate_point.moi_owner_epoch_vgprs.owner() &&
         !candidate_point.moi_persistent_sgprs.owner()) {
@@ -722,7 +723,7 @@ void try_apply_first_light_access_record_patch(
           std::vector<uint32_t> displaced_words =
               borrowed_entry_words_for_candidate(candidate_ptr).value_or(std::vector<uint32_t>{});
           const size_t candidate_words = candidate.size() / sizeof(uint32_t);
-          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
+          const auto &jump_sgprs = scalar_abi.indirect_jump;
           const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
               resource_state, resources->owner_descriptor_file_offsets, candidate.anchor(),
               resources->required_vgpr_count, moi_persistent_vgpr_state_view(candidate_point));
@@ -782,8 +783,7 @@ void try_apply_first_light_access_record_patch(
         if (borrowed_entry_prototype) {
           actual_borrowed_entry = build_moi_borrowed_record_replay_entry(
               candidate.anchor(), reservation->body_offset, borrowed_entry_prototype->backup_vgpr,
-              *moi_indirect_jump_sgprs(options, candidate_point),
-              displaced_original_size / sizeof(uint32_t), arch);
+              *scalar_abi.indirect_jump, displaced_original_size / sizeof(uint32_t), arch);
         }
         if ((borrowed_entry_prototype && !actual_borrowed_entry) ||
             (!actual_borrowed_entry &&
@@ -1149,6 +1149,7 @@ void try_apply_first_light_access_record_patch(
             "ConSan MOI first-light probe lost its owner-local register assignment");
         return;
       }
+      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
       auto words = build_first_light_access_record_words(
           bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
           planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
@@ -1171,8 +1172,7 @@ void try_apply_first_light_access_record_patch(
               "ConSan MOI first-light borrowed entry lost its branch-only return route");
           return;
         }
-        const ConSanIndirectJumpSgprs jump_sgprs =
-            *moi_indirect_jump_sgprs(options, candidate_point);
+        const ConSanIndirectJumpSgprs jump_sgprs = *scalar_abi.indirect_jump;
         info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
             .jump = jump_sgprs,
             .backup_vgpr = planned_patch.borrowed_entry->backup_vgpr,
@@ -1211,10 +1211,7 @@ void try_apply_first_light_access_record_patch(
         }
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const MoiSpecialStateSgprs special_state =
-              *moi_special_state_sgprs(options, candidate_point);
-          const auto indirect_jump = moi_indirect_jump_sgprs(options, candidate_point);
-          if (!indirect_jump) {
+          if (!scalar_abi.special_state || !scalar_abi.indirect_jump) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe lost its indirect-jump SGPR assignment");
             return;
@@ -1237,7 +1234,7 @@ void try_apply_first_light_access_record_patch(
               island_words = std::move(*gate);
           } else if (append_moi_scc_preserving_indirect_jump(
                          island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                         indirect_jump->pc_sgpr, special_state.scc_save_sgpr,
+                         scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
                          /*capture_scc=*/true, arch)) {
             island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
           }
@@ -1351,13 +1348,11 @@ void try_apply_first_light_access_record_patch(
         if (planned_patch.dense_call_anchor) {
           if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
               candidate_point.has_compact_moi_scalar_spill()) {
-            const MoiSpecialStateSgprs special_state =
-                *moi_special_state_sgprs(options, candidate_point);
             const size_t return_begin = cave_words->size();
             if (!append_moi_scc_preserving_indirect_jump(
                     *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                    moi_indirect_jump_sgprs(options, candidate_point)->pc_sgpr,
-                    special_state.scc_save_sgpr, /*capture_scc=*/true, arch)) {
+                    scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
+                    /*capture_scc=*/true, arch)) {
               result.errors.emplace_back(
                   "ConSan MOI first-light probe could not encode its dense long return");
               return;
@@ -1384,12 +1379,9 @@ void try_apply_first_light_access_record_patch(
           }
           cave_words->push_back(build_s_branch(*direct_return, arch));
         } else if (planned_patch.entry_island_offset) {
-          const MoiSpecialStateSgprs special_state =
-              *moi_special_state_sgprs(options, candidate_point);
           if (!append_moi_scc_preserving_indirect_jump(
                   *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  moi_indirect_jump_sgprs(options, candidate_point)->pc_sgpr,
-                  special_state.scc_save_sgpr,
+                  scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
                   /*capture_scc=*/false, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its long return");

@@ -66,16 +66,8 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
                                      const MoiDenseBarrierRouterScalarAbi &abi,
                                      bool derive_key_at_entry, rj_code_arch_t arch);
 
-[[nodiscard]] std::optional<ConSanIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
-
 [[nodiscard]] bool append_moi_direct_or_indirect_return(
     std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
     const std::optional<ConSanIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch);
-
-[[nodiscard]] bool
-append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
-                                     uint64_t return_text_offset, const ConSanRequest &request,
-                                     const ConSanMoiOperatingPoint &point, rj_code_arch_t arch);
 
 } // namespace rocjitsu::consan_moi_impl

@@ -1241,22 +1241,22 @@ void try_apply_sampled_barrier_sync_patch(
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const auto special_state = moi_special_state_sgprs(options, group_point);
-      const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
-      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !call_state)) {
+      if ((!spill_backed_router &&
+           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
+          !scalar_abi.indirect_jump || (spill_backed_router && !call_state)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": incomplete scalar router state");
         continue;
       }
       const uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      const uint16_t saved_scc_sgpr =
-          spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
+      const uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
+                                                          : scalar_abi.special_state->scc_save_sgpr;
       const uint16_t key_sgpr = spill_backed_router
                                     ? call_state->dispatch_key_sgpr
                                     : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
@@ -2223,12 +2223,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
-      auto special_state = moi_special_state_sgprs(options, group_point);
-      auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
-      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !call_state)) {
+      if ((!spill_backed_router &&
+           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
+          !scalar_abi.indirect_jump || (spill_backed_router && !call_state)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container + ": incomplete scalar router state");
         continue;
@@ -2260,9 +2260,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       };
 
       uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      uint16_t saved_scc_sgpr =
-          spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
+      uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
+                                                    : scalar_abi.special_state->scc_save_sgpr;
       uint16_t key_sgpr = spill_backed_router
                               ? call_state->dispatch_key_sgpr
                               : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
@@ -2297,9 +2297,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                     .jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr},
                     .call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr},
                 };
-                special_state = moi_special_state_sgprs(options, group_point);
-                indirect_state = moi_indirect_jump_sgprs(options, group_point);
-                found = special_state.has_value() && indirect_state.has_value();
+                scalar_abi = plan_moi_scalar_abi(options, group_point);
+                found =
+                    scalar_abi.special_state.has_value() && scalar_abi.indirect_jump.has_value();
                 break;
               }
             }
@@ -2523,6 +2523,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");
       continue;
     }
+    MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, route_point);
     if (route_point.has_compact_moi_scalar_spill()) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
       const std::array anchors{physical_anchor_offset};
@@ -2539,8 +2540,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}};
         return !range_overlaps(pc, 2u, scc, 1u) && ranges_are_safe(ranges);
       };
-      auto route_state = moi_indirect_jump_sgprs(options, route_point);
-      if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {
+      if (!scalar_abi.indirect_jump ||
+          !route_tuple_is_safe(scalar_abi.indirect_jump->pc_sgpr,
+                               scalar_abi.indirect_jump->scc_save_sgpr)) {
         bool found = false;
         for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
           const uint16_t candidate_pair = static_cast<uint16_t>(pair);
@@ -2554,8 +2556,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             route_point.moi_scalar_router = route_point.moi_scalar_router.value_or(
                 ConSanMoiScalarRouterAllocation{.jump = jump});
             route_point.moi_scalar_router->jump = jump;
-            route_state = moi_indirect_jump_sgprs(options, route_point);
-            found = route_state.has_value();
+            scalar_abi = plan_moi_scalar_abi(options, route_point);
+            found = scalar_abi.indirect_jump.has_value();
             if (found)
               break;
           }
@@ -2629,12 +2631,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     std::memcpy(new_text.data() + entry_anchor_offset, anchor.data(),
                 anchor.size() * sizeof(uint32_t));
     if (indirect_entry_island) {
-      const auto indirect_state = moi_indirect_jump_sgprs(options, route_point);
-      if (!indirect_state ||
+      if (!scalar_abi.indirect_jump ||
           !emit_moi_local_indirect_entry_island(
               new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset,
-              *indirect_state, planned.resources.owner_descriptor_file_offsets, arch, patches,
-              result.errors, "ConSan MOI sampled atomic sync patch")) {
+              *scalar_abi.indirect_jump, planned.resources.owner_descriptor_file_offsets, arch,
+              patches, result.errors, "ConSan MOI sampled atomic sync patch")) {
         return;
       }
     }

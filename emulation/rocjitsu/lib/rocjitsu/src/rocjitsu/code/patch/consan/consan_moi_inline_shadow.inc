@@ -410,7 +410,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
+      const auto reload = plan_moi_scalar_abi(options, candidate_point).indirect_jump;
       if (!reload) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");

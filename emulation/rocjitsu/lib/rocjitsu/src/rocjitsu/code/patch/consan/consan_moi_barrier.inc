@@ -222,10 +222,10 @@ struct MoiInlineBarrierCandidateRoutePlan {
 };
 
 [[nodiscard]] MoiInlineBarrierCandidateRoutePlan
-plan_inline_barrier_candidate_route(const ConSanRequest &request,
+plan_inline_barrier_candidate_route(const MoiScalarAbiPlan &scalar_abi,
                                     const ConSanMoiOperatingPoint &point) {
   return {
-      .indirect_jump = moi_indirect_jump_sgprs(request, point),
+      .indirect_jump = scalar_abi.indirect_jump,
       .branch_only_spill = point.moi_branch_only_spill.has_value(),
   };
 }
@@ -248,17 +248,17 @@ plan_inline_barrier_patch_abi(std::span<const uint64_t> owners,
 }
 
 [[nodiscard]] std::optional<MoiInlineBarrierEpochEmissionPlan>
-plan_inline_shadow_barrier_epoch_emission(const ConSanRequest &request,
-                                          const BoundRuntimeResources &bound_resources,
+plan_inline_shadow_barrier_epoch_emission(const BoundRuntimeResources &bound_resources,
                                           const ConSanMoiOperatingPoint &point,
+                                          const MoiScalarAbiPlan &scalar_abi,
                                           std::optional<uint16_t> visible_evidence_scratch_vgpr,
                                           std::vector<std::string> &errors) {
   MoiInlineBarrierEpochEmissionPlan plan{
       .persistent_epoch_sgpr = point.moi_persistent_sgprs.epoch(),
       .epoch_vgpr = point.moi_owner_epoch_vgprs.epoch(),
       .visible_evidence = std::nullopt,
-      .special_state = moi_special_state_sgprs(request, point),
-      .indirect_jump = moi_indirect_jump_sgprs(request, point),
+      .special_state = scalar_abi.special_state,
+      .indirect_jump = scalar_abi.indirect_jump,
   };
   if (visible_evidence_scratch_vgpr) {
     if (!bound_resources.moi_report_buffer_address || !point.moi_exec_save_sgpr) {
@@ -974,8 +974,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
-        const auto record_emission = resolve_moi_record_event_emission_plan(
-            options, options, candidate_point, resources->base, arch, &private_state_layout);
+        const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+        const auto record_emission =
+            resolve_moi_record_event_emission_plan(options, options, candidate_point, scalar_abi,
+                                                   resources->base, arch, &private_state_layout);
         if (!record_emission) {
           result.warnings.emplace_back(
               "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
@@ -1031,7 +1033,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             .record_emission = record_emission,
             .inline_epoch_emission = std::nullopt,
             .private_epoch_emission = std::nullopt,
-            .route = plan_inline_barrier_candidate_route(options, candidate_point),
+            .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
             .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
             .spill = std::move(spill),
             .scalar_spill = std::move(scalar_spill),
@@ -1066,6 +1068,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       ConSanPatchAbiEffects patch_abi =
           plan_inline_barrier_patch_abi(owners, access_patch->scratch_vgpr, private_state_layout,
                                         &*spill, required_private_bytes);
+      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, owner_point);
       planned_candidates.push_back(PlannedInlineEpochBarrier{
           .candidate = candidate,
           .owner_descriptor_file_offsets = owners,
@@ -1076,9 +1079,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
               MoiInlinePrivateEpochBarrierEmissionPlan{
                   .scratch_vgpr = *access_patch->scratch_vgpr,
                   .epoch_offset = private_state_layout.epoch_offset,
-                  .indirect_jump = moi_indirect_jump_sgprs(options, owner_point),
+                  .indirect_jump = scalar_abi.indirect_jump,
               },
-          .route = plan_inline_barrier_candidate_route(options, owner_point),
+          .route = plan_inline_barrier_candidate_route(scalar_abi, owner_point),
           .uses_scalar_epoch = false,
           .spill = std::move(spill),
           .scalar_spill = std::nullopt,
@@ -1209,8 +1212,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
         continue;
       }
+    }
+    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+    if (emits_barrier_record) {
       record_emission = resolve_moi_record_event_emission_plan(options, options, candidate_point,
-                                                               *scratch_vgpr, arch);
+                                                               scalar_abi, *scratch_vgpr, arch);
       if (!record_emission) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
@@ -1220,7 +1226,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     std::optional<MoiInlineBarrierEpochEmissionPlan> inline_epoch_emission;
     if (!emits_barrier_record) {
       inline_epoch_emission = plan_inline_shadow_barrier_epoch_emission(
-          options, options, candidate_point, scratch_vgpr, result.errors);
+          options, candidate_point, scalar_abi, scratch_vgpr, result.errors);
       if (!inline_epoch_emission)
         return;
     }
@@ -1233,7 +1239,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         .record_emission = std::move(record_emission),
         .inline_epoch_emission = std::move(inline_epoch_emission),
         .private_epoch_emission = std::nullopt,
-        .route = plan_inline_barrier_candidate_route(options, candidate_point),
+        .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
         .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -1782,8 +1788,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       case ReusedDenseRelayResult::Unavailable:
         break;
       }
-      const auto special_state = moi_special_state_sgprs(options, group_point);
-      const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
       const auto inline_dense_abi = plan_moi_dense_router(options, group_point, arch);
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
@@ -1791,17 +1796,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       const bool spill_backed_record_replay_router = group_point.has_compact_moi_scalar_spill();
       const bool spill_backed_router =
           spill_backed_inline_router || spill_backed_record_replay_router;
-      if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_inline_router && !inline_dense_abi) ||
+      if ((!spill_backed_router &&
+           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
+          !scalar_abi.indirect_jump || (spill_backed_inline_router && !inline_dense_abi) ||
           (spill_backed_record_replay_router && !call_state)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
       }
       const uint16_t jump_pc_sgpr =
-          spill_backed_router ? indirect_state->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      const uint16_t saved_scc_sgpr =
-          spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
+      const uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
+                                                          : scalar_abi.special_state->scc_save_sgpr;
       uint16_t key_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
       uint16_t call_return_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       if (spill_backed_inline_router) {
@@ -2482,7 +2488,7 @@ void try_apply_record_replay_barrier_record_patch(
           break;
         }
       }
-      const auto jump_sgprs = moi_indirect_jump_sgprs(emission);
+      const auto jump_sgprs = record_event_indirect_jump(emission);
       const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
           *standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
           site.text_offset, planned.resources.required_vgpr_count,
@@ -2686,7 +2692,7 @@ void try_apply_record_replay_barrier_record_patch(
             "ConSan MOI barrier borrowed entry lost its branch-only return route");
         return;
       }
-      const ConSanIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
+      const ConSanIndirectJumpSgprs jump_sgprs = *record_event_indirect_jump(emission);
       info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
           .jump = jump_sgprs,
           .backup_vgpr = staged.borrowed_entry->backup_vgpr,

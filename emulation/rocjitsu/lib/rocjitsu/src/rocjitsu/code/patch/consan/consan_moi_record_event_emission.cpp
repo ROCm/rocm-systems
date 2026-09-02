@@ -126,7 +126,7 @@ using consan_moi_detail::kFenceRecordLayout;
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_save_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI barrier record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -236,7 +236,7 @@ using consan_moi_detail::kFenceRecordLayout;
   words.push_back(*skip_record);
   words.insert(words.end(), record_words.begin(), record_words.end());
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI barrier record patch could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -349,14 +349,9 @@ using consan_moi_detail::kFenceRecordLayout;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
   if (address_plan.requires_materialization()) {
-    const auto special_state = moi_special_state_sgprs(options);
-    if (!special_state) {
-      errors.emplace_back(
-          "ConSan MOI atomic record address materialization requires special-state SGPRs");
-      return std::nullopt;
-    }
     const auto address_words = build_consan_moi_atomic_address_materialization(
-        address_plan, special_state->vcc_save_sgpr, special_state->scc_save_sgpr, arch);
+        address_plan, options.special_state.vcc_save_sgpr, options.special_state.scc_save_sgpr,
+        arch);
     if (!address_words) {
       errors.emplace_back("ConSan MOI atomic record patch could not materialize its address");
       return std::nullopt;
@@ -385,7 +380,7 @@ using consan_moi_detail::kFenceRecordLayout;
                               candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease);
   const uint16_t reserved_event_index_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 7u);
   if (reserve_event_before_guest) {
-    if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+    if (!append_save_moi_special_state(words, options.special_state, arch)) {
       errors.emplace_back(
           "ConSan MOI release CAS could not preserve VCC/SCC before event reservation");
       return std::nullopt;
@@ -423,7 +418,7 @@ using consan_moi_detail::kFenceRecordLayout;
       return std::nullopt;
     }
     words.push_back(*restore_exec);
-    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+    if (!append_restore_moi_special_state(words, options.special_state, arch)) {
       errors.emplace_back(
           "ConSan MOI release CAS could not restore VCC/SCC after event reservation");
       return std::nullopt;
@@ -439,7 +434,7 @@ using consan_moi_detail::kFenceRecordLayout;
       return std::nullopt;
   }
 
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_save_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -690,7 +685,7 @@ using consan_moi_detail::kFenceRecordLayout;
   words.insert(words.end(), record_words.begin(), record_words.end());
   words.push_back(*restore_exec);
 
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -836,14 +831,9 @@ using consan_moi_detail::kFenceRecordLayout;
   const uint16_t recorded_address_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
   const auto append_address_capture = [&]() {
     if (address_plan.requires_materialization()) {
-      const auto special_state = moi_special_state_sgprs(options);
-      if (!special_state) {
-        errors.emplace_back(
-            "ConSan MOI fence record address materialization requires special-state SGPRs");
-        return false;
-      }
       const auto address_words = build_consan_moi_atomic_address_materialization(
-          address_plan, special_state->vcc_save_sgpr, special_state->scc_save_sgpr, arch);
+          address_plan, options.special_state.vcc_save_sgpr, options.special_state.scc_save_sgpr,
+          arch);
       if (!address_words) {
         errors.emplace_back("ConSan MOI fence record patch could not materialize its address");
         return false;
@@ -867,7 +857,7 @@ using consan_moi_detail::kFenceRecordLayout;
   }
   if (!candidate.capture_address_before_guest && !append_address_capture())
     return std::nullopt;
-  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_save_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -1011,7 +1001,7 @@ using consan_moi_detail::kFenceRecordLayout;
     words.insert(words.end(), record_words.begin(), record_words.end());
     words.push_back(*restore_exec);
   }
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
+  if (!append_restore_moi_special_state(words, options.special_state, arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not restore VCC/SCC");
     return std::nullopt;
   }

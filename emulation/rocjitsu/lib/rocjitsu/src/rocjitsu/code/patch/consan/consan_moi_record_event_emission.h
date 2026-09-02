@@ -36,13 +36,8 @@ struct MoiRecordEventEmissionPlan {
   uint16_t required_sgpr_count = 0;
 };
 
-[[nodiscard]] inline std::optional<consan_detail::MoiSpecialStateSgprs>
-moi_special_state_sgprs(const MoiRecordEventEmissionPlan &plan) {
-  return plan.special_state;
-}
-
 [[nodiscard]] inline std::optional<ConSanIndirectJumpSgprs>
-moi_indirect_jump_sgprs(const MoiRecordEventEmissionPlan &plan) {
+record_event_indirect_jump(const MoiRecordEventEmissionPlan &plan) {
   return plan.scalar_router ? std::optional{plan.scalar_router->jump} : std::nullopt;
 }
 
@@ -59,7 +54,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
                                      uint64_t return_text_offset,
                                      const MoiRecordEventEmissionPlan &plan, rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              moi_indirect_jump_sgprs(plan), arch);
+                                              record_event_indirect_jump(plan), arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(

@@ -236,14 +236,15 @@ template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
       errors.emplace_back(std::string(lost_assignment_error));
       return false;
     }
-    const auto jump_sgprs = moi_indirect_jump_sgprs(request, group_point);
-    const auto special_state = moi_special_state_sgprs(request, group_point);
+    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, group_point);
     std::vector<uint32_t> host_words = host.displaced_words;
-    if (!jump_sgprs || (!use_indirect_jump_scc_save && !special_state) ||
+    if (!scalar_abi.indirect_jump || (!use_indirect_jump_scc_save && !scalar_abi.special_state) ||
         !append_moi_scc_preserving_indirect_jump(
             host_words, host.body_offset,
-            host.host_offset + host.displaced_words.size() * sizeof(uint32_t), jump_sgprs->pc_sgpr,
-            use_indirect_jump_scc_save ? jump_sgprs->scc_save_sgpr : special_state->scc_save_sgpr,
+            host.host_offset + host.displaced_words.size() * sizeof(uint32_t),
+            scalar_abi.indirect_jump->pc_sgpr,
+            use_indirect_jump_scc_save ? scalar_abi.indirect_jump->scc_save_sgpr
+                                       : scalar_abi.special_state->scc_save_sgpr,
             /*capture_scc=*/true, arch) ||
         !finalize_host_words(host, host_words)) {
       errors.emplace_back(std::string(return_error));

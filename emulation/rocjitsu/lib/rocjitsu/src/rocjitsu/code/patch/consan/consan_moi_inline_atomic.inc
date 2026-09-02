@@ -8,10 +8,10 @@
   if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
-  const auto special_state = moi_special_state_sgprs(options, point);
+  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, point);
   const auto workgroup_sources = moi_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-  if (!special_state || !workgroup_sources)
+  if (!scalar_abi.special_state || !workgroup_sources)
     return std::nullopt;
   if (!validate_inline_atomic_exec_save_sgpr(point.moi_exec_save_sgpr, errors) ||
       reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.owner(), scratch_vgpr,
@@ -99,11 +99,11 @@
       .exec_save_sgpr = *point.moi_exec_save_sgpr,
       .owner_epoch_vgprs = *owner_epoch_vgprs.operator->(),
       .persistent_sgprs = point.moi_persistent_sgprs,
-      .special_state = *special_state,
+      .special_state = *scalar_abi.special_state,
       .workgroup_key_registers = workgroup_key_registers,
       .workgroup_sources = *workgroup_sources,
       .dispatch_id = dispatch_id,
-      .indirect_jump = moi_indirect_jump_sgprs(options, point),
+      .indirect_jump = scalar_abi.indirect_jump,
       .private_state = std::move(private_state),
       .patch_abi = {},
   };

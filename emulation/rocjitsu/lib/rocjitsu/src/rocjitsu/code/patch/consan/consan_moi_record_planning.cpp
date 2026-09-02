@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
@@ -62,15 +63,14 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 /// this function performs no mutation and cannot choose a different binding.
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    const ConSanMoiPrivateStateLayout *private_layout) {
+    const ConSanMoiOperatingPoint &point, const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
       private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
   const auto workgroup_sources =
       record_replay_persistent_workgroup_sources(request.moi_engine, point, private_offsets);
-  const auto special_state = moi_special_state_sgprs(request, point);
   if (!point.moi_exec_save_sgpr || !bound_resources.moi_report_buffer_address ||
-      !workgroup_sources || !special_state) {
+      !workgroup_sources || !scalar_abi.special_state) {
     return std::nullopt;
   }
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
@@ -88,7 +88,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     }
   }
   std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
-  if (const auto jump = moi_indirect_jump_sgprs(request, point)) {
+  if (const auto jump = scalar_abi.indirect_jump) {
     scalar_router =
         point.moi_scalar_router.value_or(ConSanMoiScalarRouterAllocation{.jump = *jump});
     scalar_router->jump = *jump;
@@ -105,7 +105,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .automatic_moi_record_replay_sgpr_spill = point.has_compact_moi_scalar_spill(),
       .scalar_router = scalar_router,
       .workgroup_sources = *workgroup_sources,
-      .special_state = *special_state,
+      .special_state = *scalar_abi.special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources(
           {point, bound_resources,
            private_layout ? private_layout->dispatch_id_offset : std::nullopt}),
@@ -162,9 +162,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     return std::nullopt;
   }
 
-  auto emission =
-      resolve_moi_record_event_emission_plan(request, bound_resources, event_point, resources.base,
-                                             arch, private_layout ? &*private_layout : nullptr);
+  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, event_point);
+  auto emission = resolve_moi_record_event_emission_plan(
+      request, bound_resources, event_point, scalar_abi, resources.base, arch,
+      private_layout ? &*private_layout : nullptr);
   if (!emission) {
     warnings.emplace_back(std::string(warning_context) +
                           " has an incomplete Record/Replay emission plan");

@@ -19,6 +19,8 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_detail::MoiWorkitemOwnerDerivationPlan;
 
+struct MoiScalarAbiPlan;
+
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
     const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
     std::span<const uint64_t> owner_descriptor_offsets);
@@ -38,8 +40,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    const ConSanMoiPrivateStateLayout *private_layout = nullptr);
+    const ConSanMoiOperatingPoint &point, const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, const ConSanMoiPrivateStateLayout *private_layout = nullptr);
 
 struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   MoiRecordEventEmissionPlan emission;

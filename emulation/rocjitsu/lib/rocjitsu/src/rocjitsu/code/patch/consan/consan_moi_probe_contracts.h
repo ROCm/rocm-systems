@@ -13,9 +13,6 @@ namespace rocjitsu::consan_moi_impl {
                                                                  rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors);
 
-[[nodiscard]] std::optional<consan_detail::MoiSpecialStateSgprs>
-moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point);
-
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_persistent_or_descriptor_workgroup_sources(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, ConSanMoiEngine engine,

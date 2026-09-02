@@ -424,14 +424,14 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
       return std::nullopt;
     }
     const bool spill_backed_scalar_window = point.has_moi_scalar_spill();
-    const auto special_state = moi_special_state_sgprs(request, point);
-    const auto indirect_state = moi_indirect_jump_sgprs(request, point);
-    if (!special_state || (spill_backed_scalar_window && !indirect_state)) {
+    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
+    if (!scalar_abi.special_state || (spill_backed_scalar_window && !scalar_abi.indirect_jump)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
     }
-    const uint16_t saved_scc_sgpr =
-        spill_backed_scalar_window ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
+    const uint16_t saved_scc_sgpr = spill_backed_scalar_window
+                                        ? scalar_abi.indirect_jump->scc_save_sgpr
+                                        : scalar_abi.special_state->scc_save_sgpr;
     const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(request.moi_engine);
     if (!spill_backed_scalar_window &&
         (!saved_frame_offset ||
@@ -444,7 +444,7 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
     }
     const uint16_t saved_frame_base_sgpr =
         spill_backed_scalar_window
-            ? indirect_state->pc_sgpr
+            ? scalar_abi.indirect_jump->pc_sgpr
             : static_cast<uint16_t>(*point.moi_exec_save_sgpr + *saved_frame_offset);
     const uint32_t additional_frame_bytes =
         spill_backed_scalar_window ? static_cast<uint32_t>(moi_exec_save_sgpr_count(
@@ -569,6 +569,7 @@ bool apply_moi_descriptor_requirements(
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return fail("ConSan MOI first-light probe has no target profile");
+  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       request, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
@@ -771,7 +772,7 @@ bool apply_moi_descriptor_requirements(
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
     for (const ConSanAccessRange &range : access_ranges) {
-      if (!append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+      if (!append_save_moi_special_state(words, scalar_abi.special_state, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
       }
@@ -951,7 +952,7 @@ bool apply_moi_descriptor_requirements(
       // EXEC are still intact, so wave termination cannot race those stores.
       words.push_back(*wait_store);
       words.push_back(*restore_exec);
-      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+      if (!append_restore_moi_special_state(words, scalar_abi.special_state, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not restore VCC/SCC");
         return std::nullopt;
       }
@@ -1086,7 +1087,7 @@ bool apply_moi_descriptor_requirements(
     return false;
   };
   if (!point.moi_exec_save_sgpr ||
-      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+      !append_save_moi_special_state(words, scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
   }
@@ -2097,7 +2098,7 @@ bool apply_moi_descriptor_requirements(
     return fail("ConSan MOI first-light probe could not bind its EXEC restore");
   }
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+  if (!append_restore_moi_special_state(words, scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not restore VCC/SCC");
     return std::nullopt;
   }

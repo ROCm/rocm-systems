@@ -767,6 +767,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "moi_(special_state|indirect_jump)_sgprs"
+        "scalar ABI consumers must retain and project one complete mode-owned plan"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "(^|[^A-Za-z0-9_])moi_(owner|epoch)_vgpr[(]"
         "accepted owner and epoch projections must stay on the typed pair"
     )
@@ -803,6 +808,13 @@ if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_(anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
     message(FATAL_ERROR
         "scalar-router anchor liveness and physical-VCC safety must retain one owner proof"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_record_planning.h" _moi_record_planning_contract)
+if(NOT _moi_record_planning_contract MATCHES
+       "resolve_moi_record_event_emission_plan[^;]*MoiScalarAbiPlan")
+    message(FATAL_ERROR
+        "Record/Replay event resolution must consume an already-selected scalar ABI plan"
     )
 endif()
 if(NOT _consan_options_contract MATCHES
