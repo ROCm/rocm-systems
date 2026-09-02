@@ -346,6 +346,16 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
+SuperCollider dense placement retains one mode-local
+`ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry
+host, and served body. The value names its dispatcher, jump-PC pair, saved SCC,
+and either a call-return pair or an explicit scalar key. A body adds its VCC
+save register and exact indirect-return location as one typed facet. Dense
+patches do not also populate the generic indirect-control fields, and final
+validation independently rejects an incomplete, overlapping, mismatched, or
+dually represented route. Descriptor allocation consumes the patch's one total
+SGPR high-water mark; there is no second indirect-only count.
+
 Inline Shadow's acquired-epoch token ABI also owns one canonical list of its
 32-bit payload-word offsets. Reservation, empty-slot recognition, token scans,
 and final native-code validation use that list; the seqlock version word and

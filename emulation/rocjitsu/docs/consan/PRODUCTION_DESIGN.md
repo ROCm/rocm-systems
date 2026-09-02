@@ -508,6 +508,17 @@ sticky mismatch marker. Placement includes inline substitutions, local caves,
 dense dispatchers, relay reservoirs, register selection, spill handling, and
 transactional ELF replacement.
 
+Dense SuperCollider routing is one exact mode-owned effect rather than a loose
+patch-field convention. Dispatcher and relocated-host patches retain the same
+dispatcher identity, jump-PC pair, SCC save, and exact key strategy. Each body
+retains that route plus one body facet containing its VCC save and return
+location. The three patch roles no longer duplicate those facts in generic
+indirect-control fields, and final validation joins them through the typed
+route while rejecting overlap, role mismatch, generic-field duplication, and
+insufficient total SGPR allocation. Ordinary indirect islands and relay
+reservoirs still use their pre-existing generic fields and remain a separate
+convergence opportunity.
+
 SuperCollider does not build a happens-before relation. Barrier and atomic
 semantics enter only through the separate perturbation/fault-validation path.
 A mismatch is evidence of value instability, not proof of a data race; a

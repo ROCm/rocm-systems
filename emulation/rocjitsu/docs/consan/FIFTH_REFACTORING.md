@@ -9306,14 +9306,12 @@ inspect the complete durable value rather than individual patch fields.
 | `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
 | `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
 | `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | **263 / 51** | **-27 / 0** | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
 | Flattened MOI VGPR-state patch fields | **0** | n/a | **-6** |
 | Test inventory | **5,416** | **+71** | **+1** |
 
-The operating-point figure corrects a ten-reference transcription error in the
-preceding ledger rows: an exact lexical recount of both checkpoint 131 and this
-checkpoint gives 263 references in 51 files, so this slice changes neither
-value.
+The operating-point figure is an exact lexical recount of this checkpoint;
+this slice changes neither its reference nor file count.
 
 The implementation is committed as `8b3705807b2`. Validation includes a
 successful compiler-clean `-j16` rebuild, the architecture-boundary and typed-
@@ -9379,7 +9377,7 @@ effect's unused comparison operator are gone.
 | `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
 | `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
 | `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | **259 / 51** | **-31 / 0** | **-4 / 0** |
+| `ConSanMoiOperatingPoint` references / files | **269 / 51** | **-21 / 0** | **-4 / 0** |
 | Flattened SuperCollider scalar-VCC patch fields | **0** | n/a | **-3** |
 | Test inventory | **5,417** | **+72** | **+1** |
 
@@ -9401,3 +9399,75 @@ Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target and mode
 locality, remaining broad transaction and operating-point surfaces, final
 extension-proof revalidation, and the independent Section 14 audit remain
 open, so the goal remains active.
+
+### 16.135 Convergence checkpoint 134: exact SuperCollider dense routes
+
+This checkpoint traced SuperCollider dense-call state from large-LDS grouping
+and host selection through body planning, anchor and dispatcher emission,
+descriptor growth, patch publication, and independent final validation. The
+same semantic route was previously encoded by three SuperCollider-only
+optionals—dispatcher offset, call-return SGPR, and explicit-key SGPR—plus five
+generic indirect-control fields. Dispatcher, relocated host, and every served
+body could therefore publish incomplete, contradictory, or duplicated views
+of one route, while validation reconstructed the intended key strategy from
+which optional happened to be populated.
+
+The converged path retains one
+`ConSanSuperColliderDenseRouteEffect`. It owns dispatcher identity, the jump-PC
+pair, saved SCC, and an explicit call-return-pair or explicit-scalar key kind.
+Coordinator patches carry that route without a body facet; each served body
+adds its VCC-save SGPR and exact return location. Planning constructs the route
+once in the dense group and carries it unchanged through emission. Dense
+patches no longer populate generic indirect-control fields, and final
+validation independently proves route structure, scalar disjointness, role,
+host/body pairing, target-dependent VCC width, total SGPR allocation, anchor
+bytes, returns, and dispatcher geometry. A corrupted body route is rejected.
+
+The same trace showed that `indirect_required_sgpr_count` had no independent
+meaning: every consumer immediately took its maximum with the existing total
+`required_sgpr_count`. FLAT and LDS indirect bodies, relay reservoirs, dense
+coordinators, descriptor mutation, final resource validation, and tests now
+publish or consume the one total high-water mark. The second count and its
+merge sites are deleted. Candidate-local and planned-patch call-return copies
+that could be derived from the selected dense group are deleted as well.
+
+Structural enforcement requires the mode-named route contract and typed patch
+field, prohibits all three former dense fields and the retired indirect-only
+SGPR count throughout production, requires final validation to use the route's
+structural and pairing predicates, and keeps the value independent of target,
+MOI, and report-policy vocabulary.
+
+| Signal | Checkpoint 134 | Cumulative change | Slice change from checkpoint 133 |
+| --- | ---: | ---: | ---: |
+| Production files | 302 | +73 | +1 mode-local contract |
+| Physical production lines | 102,703 | **-2,273** | +42 |
+| Nonblank production lines | 96,313 | **-2,771** | +34 |
+| Production implementation lines | 88,545 | **-2,905** | +28 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 31 | +10 / +3 | +1 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **269 / 51** | **-21 / 0** | 0 / 0 |
+| Flattened SuperCollider dense-route patch fields | **0** | n/a | **-3** |
+| Separate indirect-only SGPR requirement fields | **0** | n/a | **-1** |
+| Test inventory | **5,418** | **+73** | **+1** |
+
+The implementation is committed as `2365921975b`. Validation includes three
+successful `-j16` rebuilds after shared-header changes, the architecture
+boundary and six owning dense/indirect-route tests, all **1,301/1,301**
+nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests, and all
+**542/542** SuperCollider simulator-device tests across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250. Removing two unused comparison operators after
+the broad gates was followed by another complete rebuild and focused
+**7/7** rerun. No test was removed, renamed, disabled, or replaced, and no
+physical test was run.
+
+This slice makes one mode interaction explicit and deletes four flattened
+fields and two local replicas, but the invariant and typed body/coordinator
+representation cost 28 net production implementation lines. It is therefore
+an interface investment rather than Section 14.8 progress. The next
+checkpoint must be deletion-bearing and should harvest the adjacent generic
+indirect-body, branch-entry, and relay-reservoir schemas or another comparably
+complete authority migration; another growth-only wrapper would violate the
+anti-circling rule. Full target and mode locality, remaining broad transaction
+and operating-point surfaces, final extension-proof revalidation, and the
+independent Section 14 audit remain open, so the goal remains active.
