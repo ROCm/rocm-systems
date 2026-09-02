@@ -5794,19 +5794,13 @@ void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requ
 ///
 /// The engine still owns semantic kind, placement, evidence, and any private
 /// identity fields not present in the common access plan. This projection owns
-/// scratch and descriptor identity, common private epoch/owner state, fixed
+/// scratch and descriptor identity, the complete private-state layout, fixed
 /// and dynamic spill extent, and the selected branch-only relay route.
 void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
                                 const MoiPlannedAccessPatch &patch) {
   effects.scratch_vgpr = patch.resources.base;
   effects.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
-  effects.persistent_epoch_private_offset = patch.private_epoch_offset;
-  effects.persistent_dispatch_id_private_offset = patch.private_dispatch_id_offset;
-  effects.persistent_owner_private_offset =
-      patch.owner_derivation ? patch.owner_derivation->entry_workitem_x_private_offset
-                             : std::nullopt;
-  if (patch.private_epoch_offset)
-    effects.persistent_private_state_end = patch.persistent_private_state_end;
+  effects.private_state_layout = patch.private_state_layout;
   effects.required_private_segment_size = patch.required_private_bytes;
   effects.branch_only_continuation = patch.branch_only_route.has_value();
   if (patch.branch_only_route) {
@@ -5817,14 +5811,6 @@ void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
     effects.spilled_vgpr_count = patch.spill->vgpr_count;
     note_dynamic_stack_private_requirement(effects, &*patch.spill);
   }
-}
-
-/// Publish the extra private-workgroup and persistent-state facts carried by
-/// an access body that relocates and replays the guest instruction.
-void note_moi_replay_access_patch_info(ConSanPatchPlacementEffects &effects,
-                                       const MoiPlannedReplayAccessPatch &patch) {
-  note_moi_access_patch_info(effects, patch);
-  effects.persistent_record_replay_workgroup_private_offsets = patch.private_workgroup_offsets;
 }
 
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,

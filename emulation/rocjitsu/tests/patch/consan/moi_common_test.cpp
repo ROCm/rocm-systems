@@ -687,9 +687,45 @@ TEST(ConSanMoi, DispatchPrologueEffectCombinesPreloadAndCaptureSgprRequirements)
   EXPECT_EQ(effect.required_sgpr_count(), 96u);
 }
 
+TEST(ConSanMoi, PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries) {
+  const ConSanMoiPrivateStateLayout valid{
+      .epoch_offset = 0u,
+      .owner_offset = 4u,
+      .workgroup_key_offset = 8u,
+      .dispatch_id_offset = 12u,
+      .record_replay_workgroup_offsets =
+          ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
+      .persistent_state_end = 36u,
+      .ephemeral_base = 48u,
+  };
+  EXPECT_TRUE(valid.is_well_formed());
+
+  ConSanMoiPrivateStateLayout malformed = valid;
+  malformed.owner_offset = valid.epoch_offset;
+  EXPECT_FALSE(malformed.is_well_formed());
+  malformed = valid;
+  malformed.dispatch_id_offset = 30u;
+  EXPECT_FALSE(malformed.is_well_formed());
+  malformed = valid;
+  malformed.persistent_state_end -= sizeof(uint32_t);
+  EXPECT_FALSE(malformed.is_well_formed());
+  malformed = valid;
+  malformed.ephemeral_base = malformed.persistent_state_end - sizeof(uint32_t);
+  EXPECT_FALSE(malformed.is_well_formed());
+}
+
 TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
   consan_detail::MoiPrivateEpochPrologueEmissionPlan plan;
   plan.scratch_vgpr = 255u;
+  plan.private_state_layout = ConSanMoiPrivateStateLayout{
+      .epoch_offset = 0u,
+      .owner_offset = std::nullopt,
+      .workgroup_key_offset = std::nullopt,
+      .dispatch_id_offset = std::nullopt,
+      .record_replay_workgroup_offsets = {},
+      .persistent_state_end = 4u,
+      .ephemeral_base = 16u,
+  };
   plan.spill.vgpr_base = plan.scratch_vgpr;
   plan.spill.vgpr_count = 1u;
   EXPECT_EQ(plan.required_scratch_vgpr_count(), 1u);
@@ -703,13 +739,17 @@ TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
 
   plan.scratch_vgpr = 253u;
   plan.spill.vgpr_base = plan.scratch_vgpr;
-  plan.workgroup_key_offset = 64u;
+  plan.private_state_layout.workgroup_key_offset = 64u;
+  plan.private_state_layout.persistent_state_end = 68u;
+  plan.private_state_layout.ephemeral_base = 80u;
   plan.spill.vgpr_count = 3u;
   EXPECT_EQ(plan.required_scratch_vgpr_count(), 3u);
   EXPECT_TRUE(plan.is_well_formed());
 
-  plan.workgroup_key_offset = std::nullopt;
-  plan.dispatch_id_offset = 96u;
+  plan.private_state_layout.workgroup_key_offset = std::nullopt;
+  plan.private_state_layout.dispatch_id_offset = 96u;
+  plan.private_state_layout.persistent_state_end = 104u;
+  plan.private_state_layout.ephemeral_base = 112u;
   EXPECT_FALSE(plan.is_well_formed());
   plan.dispatch_plan = ConSanMoiDispatchIdPreloadPlan{};
   plan.dispatch_capture = ConSanMoiDispatchIdCapture::in_vgprs(plan.scratch_vgpr);
@@ -722,6 +762,15 @@ TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
 TEST(ConSanMoi, PrivateEpochProloguePlanValidatesRuntimeSelectionDomain) {
   consan_detail::MoiPrivateEpochPrologueEmissionPlan plan;
   plan.scratch_vgpr = 20u;
+  plan.private_state_layout = ConSanMoiPrivateStateLayout{
+      .epoch_offset = 0u,
+      .owner_offset = std::nullopt,
+      .workgroup_key_offset = std::nullopt,
+      .dispatch_id_offset = std::nullopt,
+      .record_replay_workgroup_offsets = {},
+      .persistent_state_end = 4u,
+      .ephemeral_base = 16u,
+  };
   plan.spill.vgpr_base = plan.scratch_vgpr;
   plan.spill.vgpr_count = 1u;
   plan.runtime_sample_stride = 8u;
@@ -903,8 +952,15 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
   patch.persistent_record_replay_workgroup_vgprs = {};
-  patch.persistent_record_replay_workgroup_private_offsets =
-      ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u};
+  patch.private_state_layout = ConSanMoiPrivateStateLayout{
+      .epoch_offset = 12u,
+      .owner_offset = std::nullopt,
+      .workgroup_key_offset = std::nullopt,
+      .dispatch_id_offset = std::nullopt,
+      .record_replay_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u},
+      .persistent_state_end = 16u,
+      .ephemeral_base = 16u,
+  };
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA3, patch));
 

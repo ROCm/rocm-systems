@@ -495,7 +495,10 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         .scalar_vcc_spill_sgpr = patch.scalar_vcc_spill_sgpr,
         .scalar_vcc_spill_vgpr = patch.scalar_vcc_spill_vgpr,
         .scalar_vcc_spill_vgpr_count = patch.scalar_vcc_spill_vgpr_count,
-        .persistent_epoch_private_offset = patch.persistent_epoch_private_offset,
+        .persistent_epoch_private_offset =
+            patch.private_state_layout
+                ? std::optional<uint32_t>(patch.private_state_layout->epoch_offset)
+                : std::nullopt,
         .spilled_vgpr_count = patch.spilled_vgpr_count,
         .required_private_segment_size = patch.required_private_segment_size,
         .dynamic_private_segment_addend = patch.dynamic_private_segment_addend,

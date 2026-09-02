@@ -17,7 +17,7 @@ struct MoiPlannedProbeResources {
   ResolvedMoiScratchPlan resources;
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
-  std::optional<MoiPrivateEpochLayout> private_layout;
+  std::optional<ConSanMoiPrivateStateLayout> private_layout;
   uint32_t required_private_bytes = 0;
 };
 
@@ -27,7 +27,7 @@ plan_moi_probe_resources(const ProgramInventory &inventory, ResolvedMoiScratchPl
                          const ConSanMoiOperatingPoint &point,
                          const MoiObjectModeSemantics &mode_semantics,
                          MoiSpillManagers &spill_managers, rj_code_arch_t arch,
-                         std::optional<MoiPrivateEpochLayout> private_layout,
+                         std::optional<ConSanMoiPrivateStateLayout> private_layout,
                          bool scalar_spill_required, std::vector<std::string> &warnings,
                          std::optional<uint32_t> active_private_segment_size = std::nullopt);
 

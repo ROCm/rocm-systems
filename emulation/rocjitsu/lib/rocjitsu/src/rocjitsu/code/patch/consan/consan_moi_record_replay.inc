@@ -498,7 +498,7 @@ void try_apply_first_light_access_record_patch(
                              });
   }
   MoiSpillManagers spill_managers;
-  MoiPrivateEpochLayoutCache private_layout_cache;
+  MoiPrivateStateLayoutCache private_layout_cache;
   uint64_t planned_anchor_end = 0;
   for (const ConSanMoiCandidate *candidate_ptr : planning_candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
@@ -548,7 +548,7 @@ void try_apply_first_light_access_record_patch(
           "ConSan MOI first-light probe found no common persistent assignment");
       continue;
     }
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     if (candidate_point.automatic_moi_private_epoch) {
       const std::optional<uint64_t> cache_descriptor =
           resources->owner_descriptor_file_offsets.size() == 1u
@@ -571,7 +571,7 @@ void try_apply_first_light_access_record_patch(
     if (!apply_record_replay_entry_workgroup_assignment(
             options, candidate_point, result.moi_operating_point,
             resources->owner_descriptor_file_offsets,
-            private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr)) {
+            private_layout ? &*private_layout : nullptr)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
       continue;
@@ -665,12 +665,8 @@ void try_apply_first_light_access_record_patch(
     auto words = build_first_light_access_record_words(
         bytes, candidate, options, options, candidate_point, resources->base, arch, 0, 0,
         planned_logical_range_count, layout, spill_overlaps_guest_operands,
-        spill ? &*spill : nullptr,
-        private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? private_layout->dispatch_id_offset : std::nullopt,
-        private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
-        owner_derivation, candidate_errors, &probe_guest_instruction_offset,
-        &guest_instruction_word_count);
+        spill ? &*spill : nullptr, private_layout ? &*private_layout : nullptr, owner_derivation,
+        candidate_errors, &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -918,12 +914,7 @@ void try_apply_first_light_access_record_patch(
     planned.spill = std::move(probe->spill);
     planned.scalar_spill = std::move(probe->scalar_spill);
     planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
-    if (private_layout) {
-      planned.private_epoch_offset = private_layout->epoch_offset;
-      planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
-      planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
-      planned.persistent_private_state_end = private_layout->ephemeral_base;
-    }
+    planned.private_state_layout = private_layout;
     planned.owner_derivation = owner_derivation;
     planned.required_private_bytes = probe->required_private_bytes;
     planned.spill_overlaps_guest_operands = spill_overlaps_guest_operands;
@@ -1108,7 +1099,7 @@ void try_apply_first_light_access_record_patch(
     if (!apply_record_replay_entry_workgroup_assignment(
             options, candidate_point, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets,
-            &planned_patch.private_workgroup_offsets))
+            planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr))
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
                                candidate_point, mode_semantics, arch);
@@ -1151,7 +1142,8 @@ void try_apply_first_light_access_record_patch(
           !apply_record_replay_entry_workgroup_assignment(
               options, candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets,
-              &planned_patch.private_workgroup_offsets) ||
+              planned_patch.private_state_layout ? &*planned_patch.private_state_layout
+                                                 : nullptr) ||
           !candidate_point.moi_exec_save_sgpr) {
         result.errors.emplace_back(
             "ConSan MOI first-light probe lost its owner-local register assignment");
@@ -1161,8 +1153,8 @@ void try_apply_first_light_access_record_patch(
           bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
           planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
           layout, planned_patch.spill_overlaps_guest_operands,
-          planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          planned_patch.private_dispatch_id_offset, &planned_patch.private_workgroup_offsets,
+          planned_patch.spill ? &*planned_patch.spill : nullptr,
+          planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr,
           planned_patch.owner_derivation, result.errors);
       if (!words)
         return;
@@ -1172,7 +1164,7 @@ void try_apply_first_light_access_record_patch(
                       ? ConSanPatchKind::TrampolineMoiAccessRecordStore
                       : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.anchor();
-      note_moi_replay_access_patch_info(info, planned_patch);
+      note_moi_access_patch_info(info, planned_patch);
       info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
         const ConSanMoiIndirectJumpSgprs jump_sgprs =
@@ -1517,7 +1509,8 @@ void try_apply_first_light_access_record_patch(
                 !apply_record_replay_entry_workgroup_assignment(
                     options, candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets,
-                    &planned_patch.private_workgroup_offsets))
+                    planned_patch.private_state_layout ? &*planned_patch.private_state_layout
+                                                       : nullptr))
               return std::optional<std::vector<uint32_t>>{};
             return build_first_light_access_record_words(
                 bytes, *planned_patch.candidate, options, options, candidate_point,
@@ -1525,9 +1518,8 @@ void try_apply_first_light_access_record_patch(
                 planned_record_count, planned_patch.logical_range_index, layout,
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, planned_patch.private_dispatch_id_offset,
-                &planned_patch.private_workgroup_offsets, planned_patch.owner_derivation,
-                result.errors);
+                planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr,
+                planned_patch.owner_derivation, result.errors);
           },
           [](const PlannedAccessRecordPatch &planned_patch) {
             const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -1536,7 +1528,7 @@ void try_apply_first_light_access_record_patch(
             info.anchor_offset = candidate.anchor();
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            note_moi_replay_access_patch_info(info, planned_patch);
+            note_moi_access_patch_info(info, planned_patch);
             info.relocated_guest_instruction_offset =
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;

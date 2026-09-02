@@ -26,7 +26,7 @@ namespace rocjitsu::consan_moi_impl {
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
     MoiSpillManagers &spill_managers, rj_code_arch_t arch,
-    std::optional<MoiPrivateEpochLayout> private_layout, bool scalar_spill_required,
+    std::optional<ConSanMoiPrivateStateLayout> private_layout, bool scalar_spill_required,
     std::vector<std::string> &warnings, std::optional<uint32_t> active_private_segment_size) {
   if (active_private_segment_size)
     resources.original_private_segment_size = *active_private_segment_size;
@@ -82,8 +82,8 @@ void note_moi_probe_private_requirements(MoiDescriptorPrivateRequirements &requi
 ///
 /// The caller owns the patch's semantic kind, placement, covered event, and
 /// engine-specific evidence fields. This function owns the common telemetry
-/// derived from the preservation plan: scratch and kernel owners, every
-/// private identity offset, the complete fixed private extent, and VGPR spill
+/// derived from the preservation plan: scratch and kernel owners, the complete
+/// private identity layout and extent, and VGPR spill
 /// metadata including a dynamic-stack addend. Keeping this projection beside
 /// the plan prevents engines from publishing different metadata for the same
 /// preservation transaction.
@@ -91,15 +91,7 @@ void note_moi_probe_patch_info(ConSanPatchAbiEffects &effects,
                                const MoiPlannedProbeResources &probe) {
   effects.scratch_vgpr = probe.resources.base;
   effects.owner_descriptor_file_offsets = probe.resources.owner_descriptor_file_offsets;
-  if (probe.private_layout) {
-    effects.persistent_epoch_private_offset = probe.private_layout->epoch_offset;
-    effects.persistent_owner_private_offset = probe.private_layout->owner_offset;
-    effects.persistent_workgroup_key_private_offset = probe.private_layout->workgroup_key_offset;
-    effects.persistent_dispatch_id_private_offset = probe.private_layout->dispatch_id_offset;
-    effects.persistent_record_replay_workgroup_private_offsets =
-        probe.private_layout->record_replay_workgroup_offsets;
-    effects.persistent_private_state_end = probe.private_layout->ephemeral_base;
-  }
+  effects.private_state_layout = probe.private_layout;
   effects.required_private_segment_size = probe.required_private_bytes;
   if (probe.spill) {
     effects.spilled_vgpr_count = probe.spill->vgpr_count;

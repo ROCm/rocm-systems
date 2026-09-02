@@ -102,9 +102,11 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
          !point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner();
 }
 
-[[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan> resolve_moi_private_workitem_owner(
-    std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
-    const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &warnings) {
+[[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan>
+resolve_moi_private_workitem_owner(std::span<const uint8_t> image,
+                                   const ResolvedMoiScratchPlan &resources,
+                                   const ConSanMoiPrivateStateLayout &layout, rj_code_arch_t arch,
+                                   std::vector<std::string> &warnings) {
   if (!layout.owner_offset) {
     warnings.emplace_back("ConSan MOI private owner requires an entry-captured owner slot");
     return std::nullopt;
@@ -208,8 +210,8 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return common;
 }
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout>
-build_moi_private_epoch_layout(const ProgramInventory &program_inventory,
+[[nodiscard]] std::optional<ConSanMoiPrivateStateLayout>
+build_moi_private_state_layout(const ProgramInventory &program_inventory,
                                const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
                                std::vector<std::string> &warnings, MoiPrivateStateDemand demand) {
   if (resources.owner_descriptor_file_offsets.empty()) {
@@ -288,7 +290,7 @@ build_moi_private_epoch_layout(const ProgramInventory &program_inventory,
     warnings.emplace_back("ConSan MOI private epoch exceeds address-free scratch capacity");
     return std::nullopt;
   }
-  return MoiPrivateEpochLayout{
+  return ConSanMoiPrivateStateLayout{
       .epoch_offset = static_cast<uint32_t>(epoch_offset),
       .owner_offset = owner_offset ? std::optional<uint32_t>(static_cast<uint32_t>(*owner_offset))
                                    : std::nullopt,
@@ -304,12 +306,12 @@ build_moi_private_epoch_layout(const ProgramInventory &program_inventory,
       .ephemeral_base = *ephemeral_base};
 }
 
-std::optional<MoiPrivateEpochLayout> MoiPrivateEpochLayoutCache::resolve(
+std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
     std::optional<uint64_t> descriptor, const ProgramInventory &program_inventory,
     const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
     std::vector<std::string> &warnings, MoiPrivateStateDemand demand) {
   if (!descriptor)
-    return build_moi_private_epoch_layout(program_inventory, resources, arch, warnings, demand);
+    return build_moi_private_state_layout(program_inventory, resources, arch, warnings, demand);
   const uint8_t demand_key = static_cast<uint8_t>(demand.owner) |
                              static_cast<uint8_t>(demand.workgroup_key) << 1u |
                              static_cast<uint8_t>(demand.record_replay_workgroup) << 2u |
@@ -317,14 +319,15 @@ std::optional<MoiPrivateEpochLayout> MoiPrivateEpochLayoutCache::resolve(
   auto [cached, inserted] = layouts_.try_emplace(std::pair{*descriptor, demand_key}, std::nullopt);
   if (inserted)
     cached->second =
-        build_moi_private_epoch_layout(program_inventory, resources, arch, warnings, demand);
+        build_moi_private_state_layout(program_inventory, resources, arch, warnings, demand);
   return cached->second;
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
     bool automatic_private_epoch, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    const ConSanMoiPrivateStateLayout &layout, rj_code_arch_t arch,
+    std::vector<std::string> &errors) {
   if (!automatic_private_epoch || !owner_epoch_vgprs.owner || !owner_epoch_vgprs.epoch ||
       !layout.owner_offset) {
     errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
@@ -549,12 +552,16 @@ bool apply_moi_descriptor_requirements(
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
     uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
     const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
-    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
-    std::optional<uint32_t> private_dispatch_id_offset,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
+    const VgprSpillSequence *spill, const ConSanMoiPrivateStateLayout *private_layout,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
     uint32_t *guest_instruction_word_count) {
+  const std::optional<uint32_t> private_epoch_offset =
+      private_layout ? std::optional{private_layout->epoch_offset} : std::nullopt;
+  const std::optional<uint32_t> private_dispatch_id_offset =
+      private_layout ? private_layout->dispatch_id_offset : std::nullopt;
+  const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets =
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
     errors.emplace_back(message);
     return std::nullopt;

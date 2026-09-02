@@ -98,7 +98,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::unordered_map<uint64_t, std::optional<ConSanMoiOperatingPoint>> direct_points_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupShadowLayout>>
       direct_workgroup_shadow_by_descriptor;
-  MoiPrivateEpochLayoutCache direct_private_layout_cache;
+  MoiPrivateStateLayoutCache direct_private_layout_cache;
   std::unordered_map<uint64_t, std::optional<uint16_t>> direct_owner_shift_by_descriptor;
   std::unordered_map<uint64_t, std::optional<ConSanMoiWorkgroupSources>>
       direct_workgroup_sources_by_descriptor;
@@ -366,7 +366,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
     }
 
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_point.automatic_moi_private_epoch) {
       // Every supported target exposes workgroup identity as an entry ABI
@@ -835,11 +835,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.resources = *resources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
-    if (private_layout) {
-      planned.private_epoch_offset = private_layout->epoch_offset;
-      planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
-      planned.persistent_private_state_end = private_layout->persistent_state_end;
-    }
+    planned.private_state_layout = private_layout;
     planned.owner_derivation = owner_derivation;
     planned.emission = std::move(emission);
     planned.required_private_bytes = required_private_bytes;
@@ -981,10 +977,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                       : ConSanPatchKind::InlineMoiExactShadowStore;
       info.anchor_offset = candidate.anchor();
       note_moi_access_patch_info(info, planned_patch);
-      info.persistent_workgroup_key_private_offset =
-          planned_patch.emission.private_workgroup_key_offset;
-      info.persistent_dispatch_id_private_offset =
-          planned_patch.emission.private_dispatch_id_offset;
       info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1348,10 +1340,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
             note_moi_access_patch_info(info, planned_patch);
-            info.persistent_workgroup_key_private_offset =
-                planned_patch.emission.private_workgroup_key_offset;
-            info.persistent_dispatch_id_private_offset =
-                planned_patch.emission.private_dispatch_id_offset;
             info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
             return info;
           },

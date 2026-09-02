@@ -501,18 +501,18 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
-  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
-  ASSERT_TRUE(access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id());
+  ASSERT_TRUE(access->private_state_layout->record_replay_workgroup_offsets.complete());
+  ASSERT_TRUE(access->private_state_layout->record_replay_workgroup_offsets.cluster_workgroup_id());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
   for (uint32_t offset : {
-           *access->persistent_record_replay_workgroup_private_offsets.x(),
-           *access->persistent_record_replay_workgroup_private_offsets.y(),
-           *access->persistent_record_replay_workgroup_private_offsets.z(),
-           *access->persistent_record_replay_workgroup_private_offsets.cluster_workgroup_id(),
+           *access->private_state_layout->record_replay_workgroup_offsets.x(),
+           *access->private_state_layout->record_replay_workgroup_offsets.y(),
+           *access->private_state_layout->record_replay_workgroup_offsets.z(),
+           *access->private_state_layout->record_replay_workgroup_offsets.cluster_workgroup_id(),
        }) {
     const auto load =
         instrumentation::build_private_load_b32(coordinate_vgpr, offset, ROCJITSU_CODE_ARCH_CDNA5);
@@ -1743,18 +1743,22 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         ASSERT_NE(access, result.patches.end());
         ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
         ASSERT_NE(prologue, result.patches.end());
-        EXPECT_EQ(atomic->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-        EXPECT_EQ(atomic->persistent_owner_private_offset, access->persistent_owner_private_offset);
-        ASSERT_TRUE(atomic->persistent_record_replay_workgroup_private_offsets.complete());
-        EXPECT_EQ(atomic->persistent_record_replay_workgroup_private_offsets,
-                  access->persistent_record_replay_workgroup_private_offsets);
-        EXPECT_EQ(atomic->persistent_record_replay_workgroup_private_offsets,
-                  prologue->persistent_record_replay_workgroup_private_offsets);
-        EXPECT_EQ(atomic->persistent_private_state_end, access->persistent_private_state_end);
-        EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
+        EXPECT_EQ(atomic->private_state_layout->epoch_offset,
+                  access->private_state_layout->epoch_offset);
+        EXPECT_EQ(atomic->private_state_layout->owner_offset,
+                  access->private_state_layout->owner_offset);
+        ASSERT_TRUE(atomic->private_state_layout->record_replay_workgroup_offsets.complete());
+        EXPECT_EQ(atomic->private_state_layout->record_replay_workgroup_offsets,
+                  access->private_state_layout->record_replay_workgroup_offsets);
+        EXPECT_EQ(atomic->private_state_layout->record_replay_workgroup_offsets,
+                  prologue->private_state_layout->record_replay_workgroup_offsets);
+        EXPECT_EQ(atomic->private_state_layout->ephemeral_base,
+                  access->private_state_layout->ephemeral_base);
+        EXPECT_EQ(prologue->private_state_layout->ephemeral_base,
+                  access->private_state_layout->ephemeral_base);
 
         ASSERT_TRUE(atomic->scratch_vgpr);
-        ASSERT_TRUE(atomic->persistent_owner_private_offset);
+        ASSERT_TRUE(atomic->private_state_layout->owner_offset);
         EXPECT_EQ(atomic->spilled_vgpr_count, 11u);
         EXPECT_EQ(atomic->relocated_guest_instruction_offset, atomic->trampoline_offset);
         AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -1763,22 +1767,22 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
             text_words_at_offset(patched, atomic->trampoline_offset, atomic->trampoline_size);
         const uint16_t owner_vgpr = static_cast<uint16_t>(*atomic->scratch_vgpr + 6u);
         const auto owner_load = instrumentation::build_private_load_b32(
-            owner_vgpr, *atomic->persistent_owner_private_offset, target.arch);
+            owner_vgpr, *atomic->private_state_layout->owner_offset, target.arch);
         ASSERT_TRUE(owner_load);
         EXPECT_TRUE(contains_subsequence(cave, *owner_load));
         const uint16_t workgroup_value_vgpr = static_cast<uint16_t>(
             *atomic->scratch_vgpr + (deferred_acquire ? kValueOffset : kExpectedOffset));
         for (uint32_t offset : {
-                 *atomic->persistent_record_replay_workgroup_private_offsets.x(),
-                 *atomic->persistent_record_replay_workgroup_private_offsets.y(),
-                 *atomic->persistent_record_replay_workgroup_private_offsets.z(),
+                 *atomic->private_state_layout->record_replay_workgroup_offsets.x(),
+                 *atomic->private_state_layout->record_replay_workgroup_offsets.y(),
+                 *atomic->private_state_layout->record_replay_workgroup_offsets.z(),
              }) {
           const auto workgroup_load =
               instrumentation::build_private_load_b32(workgroup_value_vgpr, offset, target.arch);
           ASSERT_TRUE(workgroup_load);
           EXPECT_TRUE(contains_subsequence(cave, *workgroup_load));
         }
-        ASSERT_TRUE(atomic->persistent_private_state_end);
+        ASSERT_TRUE(atomic->private_state_layout);
         ASSERT_LE(*atomic->scratch_vgpr, 4u);
         ASSERT_GT(static_cast<uint32_t>(*atomic->scratch_vgpr) + atomic->spilled_vgpr_count, 7u);
         const uint32_t scratch_end =
@@ -1793,7 +1797,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
           if (source >= *atomic->scratch_vgpr && source < scratch_end) {
             const auto load = instrumentation::build_private_load_b32(
                 destination,
-                *atomic->persistent_private_state_end +
+                atomic->private_state_layout->ephemeral_base +
                     static_cast<uint32_t>(source - *atomic->scratch_vgpr) * sizeof(uint32_t),
                 target.arch);
             ASSERT_TRUE(load);
@@ -1811,7 +1815,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
         if (is_cas) {
           const auto compare_load = instrumentation::build_private_load_b32(
               static_cast<uint16_t>(*atomic->scratch_vgpr + kCasCompareOffset),
-              *atomic->persistent_private_state_end +
+              atomic->private_state_layout->ephemeral_base +
                   static_cast<uint32_t>(7u - *atomic->scratch_vgpr) * sizeof(uint32_t),
               target.arch);
           ASSERT_TRUE(compare_load);
@@ -1819,7 +1823,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
           if (cas_result_vgpr >= *atomic->scratch_vgpr && cas_result_vgpr < scratch_end) {
             const auto result_load = instrumentation::build_private_load_b32(
                 static_cast<uint16_t>(*atomic->scratch_vgpr + kCasResultOffset),
-                *atomic->persistent_private_state_end +
+                atomic->private_state_layout->ephemeral_base +
                     static_cast<uint32_t>(cas_result_vgpr - *atomic->scratch_vgpr) *
                         sizeof(uint32_t),
                 target.arch);
@@ -2196,13 +2200,14 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(atomic->owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_TRUE(atomic->persistent_owner_private_offset);
+  ASSERT_TRUE(atomic->private_state_layout->owner_offset);
   ASSERT_TRUE(atomic->scratch_vgpr);
-  ASSERT_TRUE(atomic->persistent_private_state_end);
-  EXPECT_EQ(atomic->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-  EXPECT_EQ(atomic->persistent_owner_private_offset, access->persistent_owner_private_offset);
-  EXPECT_EQ(atomic->persistent_private_state_end, access->persistent_private_state_end);
-  EXPECT_EQ(atomic->persistent_private_state_end, 64u);
+  ASSERT_TRUE(atomic->private_state_layout);
+  EXPECT_EQ(atomic->private_state_layout->epoch_offset, access->private_state_layout->epoch_offset);
+  EXPECT_EQ(atomic->private_state_layout->owner_offset, access->private_state_layout->owner_offset);
+  EXPECT_EQ(atomic->private_state_layout->ephemeral_base,
+            access->private_state_layout->ephemeral_base);
+  EXPECT_EQ(atomic->private_state_layout->ephemeral_base, 64u);
   EXPECT_EQ(atomic->required_private_segment_size, 112u);
   EXPECT_EQ(atomic->spilled_vgpr_count, 11u);
 
@@ -2211,7 +2216,8 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, atomic->trampoline_offset, atomic->trampoline_size);
   const auto first_spill = instrumentation::build_private_store_b32(
-      *atomic->scratch_vgpr, *atomic->persistent_private_state_end, ROCJITSU_CODE_ARCH_CDNA4);
+      *atomic->scratch_vgpr, atomic->private_state_layout->ephemeral_base,
+      ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(first_spill);
   EXPECT_TRUE(contains_subsequence(cave, *first_spill));
   for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
@@ -3877,8 +3883,8 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   const auto sampled_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(sampled_patch, result.patches.end());
-  EXPECT_TRUE(sampled_patch->persistent_epoch_private_offset);
-  EXPECT_TRUE(sampled_patch->persistent_owner_private_offset);
+  EXPECT_TRUE(sampled_patch->private_state_layout);
+  EXPECT_TRUE(sampled_patch->private_state_layout->owner_offset);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -3939,7 +3945,7 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
-  EXPECT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
+  EXPECT_TRUE(access->private_state_layout->record_replay_workgroup_offsets.complete());
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("spill-safe body gate") != std::string::npos;
   }));
@@ -3950,9 +3956,9 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
   ASSERT_TRUE(access->scratch_vgpr);
   const uint16_t coordinate_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
   for (uint32_t offset : {
-           *access->persistent_record_replay_workgroup_private_offsets.x(),
-           *access->persistent_record_replay_workgroup_private_offsets.y(),
-           *access->persistent_record_replay_workgroup_private_offsets.z(),
+           *access->private_state_layout->record_replay_workgroup_offsets.x(),
+           *access->private_state_layout->record_replay_workgroup_offsets.y(),
+           *access->private_state_layout->record_replay_workgroup_offsets.z(),
        }) {
     const auto load = instrumentation::build_private_load_b32(coordinate_vgpr, offset, kArch);
     ASSERT_TRUE(load);
@@ -3994,7 +4000,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
-  ASSERT_TRUE(patch->persistent_private_state_end);
+  ASSERT_TRUE(patch->private_state_layout);
   EXPECT_EQ(patch->scratch_vgpr, 0u);
   EXPECT_EQ(patch->spilled_vgpr_count, 8u);
 
@@ -4006,8 +4012,8 @@ TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
       (*patch->relocated_guest_instruction_offset - patch->trampoline_offset) / sizeof(uint32_t);
   ASSERT_LE(guest_index + guest->size(), cave.size());
   EXPECT_TRUE(std::equal(guest->begin(), guest->end(), cave.begin() + guest_index));
-  const auto spill_base =
-      normalize_address_free_scratch_private_size(kArch, *patch->persistent_private_state_end);
+  const auto spill_base = normalize_address_free_scratch_private_size(
+      kArch, patch->private_state_layout->ephemeral_base);
   ASSERT_TRUE(spill_base);
   const uint32_t address_slot = *spill_base + 7u * sizeof(uint32_t);
   const auto reload = build_cdna4_address_free_scratch_load_b32(/*vdst=*/2u, address_slot, kArch);
@@ -4174,29 +4180,33 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
       ASSERT_NE(access, result.patches.end());
       ASSERT_NE(barrier_patch, result.patches.end());
       ASSERT_NE(prologue, result.patches.end());
-      EXPECT_TRUE(access->persistent_epoch_private_offset);
-      EXPECT_TRUE(access->persistent_owner_private_offset);
-      EXPECT_EQ(barrier_patch->persistent_epoch_private_offset,
-                access->persistent_epoch_private_offset);
-      EXPECT_EQ(barrier_patch->persistent_owner_private_offset,
-                access->persistent_owner_private_offset);
-      EXPECT_EQ(barrier_patch->persistent_private_state_end, access->persistent_private_state_end);
-      EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-      EXPECT_EQ(prologue->persistent_owner_private_offset, access->persistent_owner_private_offset);
-      EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
+      EXPECT_TRUE(access->private_state_layout);
+      EXPECT_TRUE(access->private_state_layout->owner_offset);
+      EXPECT_EQ(barrier_patch->private_state_layout->epoch_offset,
+                access->private_state_layout->epoch_offset);
+      EXPECT_EQ(barrier_patch->private_state_layout->owner_offset,
+                access->private_state_layout->owner_offset);
+      EXPECT_EQ(barrier_patch->private_state_layout->ephemeral_base,
+                access->private_state_layout->ephemeral_base);
+      EXPECT_EQ(prologue->private_state_layout->epoch_offset,
+                access->private_state_layout->epoch_offset);
+      EXPECT_EQ(prologue->private_state_layout->owner_offset,
+                access->private_state_layout->owner_offset);
+      EXPECT_EQ(prologue->private_state_layout->ephemeral_base,
+                access->private_state_layout->ephemeral_base);
 
       ASSERT_TRUE(barrier_patch->scratch_vgpr);
-      ASSERT_TRUE(barrier_patch->persistent_owner_private_offset);
-      ASSERT_TRUE(barrier_patch->persistent_record_replay_workgroup_private_offsets.complete());
+      ASSERT_TRUE(barrier_patch->private_state_layout->owner_offset);
+      ASSERT_TRUE(barrier_patch->private_state_layout->record_replay_workgroup_offsets.complete());
       AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(patched.is_valid());
       const std::vector<uint32_t> cave = text_words_at_offset(
           patched, barrier_patch->trampoline_offset, barrier_patch->trampoline_size);
       const uint16_t workgroup_vgpr = static_cast<uint16_t>(*barrier_patch->scratch_vgpr + 3u);
       for (const uint32_t offset : {
-               *barrier_patch->persistent_record_replay_workgroup_private_offsets.x(),
-               *barrier_patch->persistent_record_replay_workgroup_private_offsets.y(),
-               *barrier_patch->persistent_record_replay_workgroup_private_offsets.z(),
+               *barrier_patch->private_state_layout->record_replay_workgroup_offsets.x(),
+               *barrier_patch->private_state_layout->record_replay_workgroup_offsets.y(),
+               *barrier_patch->private_state_layout->record_replay_workgroup_offsets.z(),
            }) {
         const auto workgroup_load =
             instrumentation::build_private_load_b32(workgroup_vgpr, offset, target.arch);
@@ -4205,7 +4215,7 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
       }
       const uint16_t owner_vgpr = static_cast<uint16_t>(*barrier_patch->scratch_vgpr + 7u);
       const auto owner_load = instrumentation::build_private_load_b32(
-          owner_vgpr, *barrier_patch->persistent_owner_private_offset, target.arch);
+          owner_vgpr, *barrier_patch->private_state_layout->owner_offset, target.arch);
       const auto captured_owner = instrumentation::build_v_lshrrev_b32(
           owner_vgpr, scalar_positive_inline_u32(6u), owner_vgpr, target.arch);
       const auto live_owner = instrumentation::build_v_lshrrev_b32(
@@ -7444,7 +7454,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
-  EXPECT_FALSE(access->persistent_record_replay_workgroup_private_offsets.complete());
+  EXPECT_FALSE(access->private_state_layout->record_replay_workgroup_offsets.complete());
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
@@ -7557,7 +7567,7 @@ TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchCl
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
   ASSERT_TRUE(prologue->scratch_vgpr);
-  ASSERT_TRUE(prologue->persistent_owner_private_offset);
+  ASSERT_TRUE(prologue->private_state_layout->owner_offset);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7566,7 +7576,7 @@ TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchCl
   std::vector<uint32_t> owner_capture = {build_v_mov_b32_e32(
       *prologue->scratch_vgpr, vector_source_vgpr(/*workitem_id_x=*/0u), kArch)};
   const auto owner_store = instrumentation::build_private_store_b32(
-      *prologue->scratch_vgpr, *prologue->persistent_owner_private_offset, kArch);
+      *prologue->scratch_vgpr, *prologue->private_state_layout->owner_offset, kArch);
   ASSERT_TRUE(owner_store);
   owner_capture.insert(owner_capture.end(), owner_store->begin(), owner_store->end());
   const auto capture =
@@ -8651,9 +8661,11 @@ TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_NE(barrier, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(access->persistent_epoch_private_offset);
-  EXPECT_EQ(barrier->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
-  EXPECT_EQ(prologue->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+  ASSERT_TRUE(access->private_state_layout);
+  EXPECT_EQ(barrier->private_state_layout->epoch_offset,
+            access->private_state_layout->epoch_offset);
+  EXPECT_EQ(prologue->private_state_layout->epoch_offset,
+            access->private_state_layout->epoch_offset);
   EXPECT_GT(barrier->required_private_segment_size, 0u);
 }
 

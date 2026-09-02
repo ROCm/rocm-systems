@@ -819,7 +819,7 @@ if(_workgroup_source_placement MATCHES "kTtmp|ConSanWorkgroupIdentitySource")
 endif()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
 if(NOT _moi_private_layout_contract MATCHES "struct MoiPrivateStateDemand" OR
-   NOT _moi_private_layout_contract MATCHES "class MoiPrivateEpochLayoutCache")
+   NOT _moi_private_layout_contract MATCHES "class MoiPrivateStateLayoutCache")
     message(FATAL_ERROR
         "ConSan private-state lowering lost its typed demand or shared descriptor cache"
     )
@@ -1162,6 +1162,59 @@ _consan_assert_no_match(
     "${_consan_dir}/consan_moi_entry_scalar_backup.h"
     "ConSanMoi(Sampled|RecordReplay|Inline|Report)|consan_moi_(sampled|record_replay|inline|report|shadow)|ConSanMoiShadow"
     "entry scalar-backup effects must remain independent of mode and report policy"
+)
+
+# Owner-local persistent identity is one layout from planning through emission,
+# patch proof, synchronization composition, and independent validation. Its
+# persistent end and target-normalized ephemeral base must remain distinct.
+file(READ
+    "${_consan_dir}/consan_moi_private_state_layout.h.inc"
+    _private_state_layout_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_moi_private_state_layout[.]h[.]inc" OR
+   NOT _private_state_layout_contract MATCHES
+       "struct ConSanMoiPrivateStateLayout" OR
+   NOT _private_state_layout_contract MATCHES
+       "uint32_t persistent_state_end" OR
+   NOT _private_state_layout_contract MATCHES
+       "uint32_t ephemeral_base" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanMoiPrivateStateLayout>[ \t]+private_state_layout" OR
+   NOT _moi_private_layout_contract MATCHES
+       "std::optional<ConSanMoiPrivateStateLayout>")
+    message(FATAL_ERROR
+        "ConSan private-state planning and proof lost their typed layout"
+    )
+endif()
+foreach(_private_layout_owner IN ITEMS
+    consan_code_object_types.h.inc
+    consan_moi_placement_contracts.h
+    consan_moi_probe_planning.cpp
+    consan_moi_prologue.cpp
+    consan_moi_barrier.inc
+    consan_validation.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_private_layout_owner}"
+        "persistent_(epoch|owner|workgroup_key|dispatch_id)_private_offset|persistent_record_replay_workgroup_private_offsets|persistent_private_state_end"
+        "private-state boundaries must retain the typed layout"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_probe_contracts.h"
+    "struct[ \t]+MoiPrivateEpochLayout"
+    "private-state layout authority must remain in its narrow shared contract"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_shared_lowering.h"
+    "build_moi_private_epoch_layout"
+    "private-state layout construction must not regress to epoch-only naming"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_private_state_layout.h.inc"
+    "ConSanMoi(Sampled|RecordReplay|Inline|Report)|consan_moi_(sampled|record_replay|inline|report|shadow)|ConSanMoiShadow"
+    "private-state layout must remain independent of mode and report policy"
 )
 
 # Scalar allocations carry their selection provenance. The owner scalar must

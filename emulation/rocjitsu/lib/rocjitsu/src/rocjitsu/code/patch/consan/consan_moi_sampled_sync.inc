@@ -20,7 +20,7 @@ struct SampledBarrierCandidate {
     std::span<const uint8_t> bytes, uint64_t descriptor_file_offset, bool uses_cluster_workgroup_id,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &accepted_point,
-    std::span<const uint64_t> owner_descriptors, const MoiPrivateEpochLayout *private_layout,
+    std::span<const uint64_t> owner_descriptors, const ConSanMoiPrivateStateLayout *private_layout,
     uint16_t scratch_vgpr, uint16_t scratch_owner_vgpr, uint16_t scratch_epoch_vgpr,
     rj_code_arch_t arch, bool transient_assignment_already_resolved,
     std::string_view diagnostic_subject, std::vector<std::string> &errors) {
@@ -175,7 +175,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     const MoiSampledSyncEmissionPlan &plan, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
-    uint64_t return_text_offset, const MoiPrivateEpochLayout *private_layout,
+    uint64_t return_text_offset, const ConSanMoiPrivateStateLayout *private_layout,
     std::optional<uint16_t> selectable_vgpr_bank_mode, std::vector<std::string> &errors) {
   const bool scalar_persistent = plan.persistent_sgprs.complete();
   if (!plan.owner_epoch_vgprs.epoch || !plan.exec_save_sgpr || !plan.owner_epoch_vgprs.owner ||
@@ -969,9 +969,9 @@ void try_apply_sampled_barrier_sync_patch(
         resolve_moi_scratch_plan(plan, candidate_point, result.moi_operating_point, scratch_count);
     if (!resources)
       continue;
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     if (candidate_point.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(
+      private_layout = build_moi_private_state_layout(
           result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
            .record_replay_workgroup = true});
@@ -1975,9 +1975,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       if (!candidate.atomic.kernel_descriptor_file_offset)
         continue;
     }
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     if (operating_point.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(
+      private_layout = build_moi_private_state_layout(
           result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
            .record_replay_workgroup = true});

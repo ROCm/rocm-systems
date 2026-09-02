@@ -649,22 +649,9 @@ struct ConSanPatchAbiEffects {
   std::optional<uint64_t> sc_dense_dispatcher_offset;
   std::optional<uint16_t> sc_dense_call_return_sgpr;
   std::optional<uint16_t> sc_dense_explicit_key_sgpr;
-  std::optional<uint32_t> persistent_epoch_private_offset;
-  /// Entry-captured raw workitem identity used to derive a stable logical
-  /// wave owner after the guest has reused v0.
-  std::optional<uint32_t> persistent_owner_private_offset;
-  /// Entry-captured exact workgroup identity for kernels whose ordinary VGPR
-  /// bank has no lifetime-safe persistent slot below ACCUM_OFFSET.
-  std::optional<uint32_t> persistent_workgroup_key_private_offset;
-  /// Entry-captured hardware dispatch identity for an owner whose guest SGPR
-  /// pressure excludes the object-wide persistent pair. The high dword is in
-  /// the immediately following private slot.
-  std::optional<uint32_t> persistent_dispatch_id_private_offset;
-  /// Full Record/Replay coordinates captured at entry. Unlike the compact
-  /// Inline key above, these offsets preserve x/y/z without packing limits.
-  ConSanMoiPersistentWorkgroupPrivateOffsets persistent_record_replay_workgroup_private_offsets;
-  /// First private byte available after all persistent MOI state.
-  std::optional<uint32_t> persistent_private_state_end;
+  /// Complete owner-local persistent identity layout and the distinct,
+  /// target-normalized base available to ephemeral spill state.
+  std::optional<ConSanMoiPrivateStateLayout> private_state_layout;
   /// Exact preload transformation and unique persistent register
   /// representation proved by an emitted dispatch-ID entry prologue.
   std::optional<ConSanMoiDispatchIdPrologueEffect> dispatch_id_prologue;

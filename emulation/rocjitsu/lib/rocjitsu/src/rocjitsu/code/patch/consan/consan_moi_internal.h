@@ -253,22 +253,9 @@ struct MoiPrivateEpochPrologueEmissionPlan {
   /// First VGPR in the entry-local temporary window.
   uint16_t scratch_vgpr = 0;
 
-  /// Private-memory byte offset initialized to epoch zero.
-  uint32_t epoch_offset = 0;
-
-  /// Optional private-memory byte offset receiving entry workitem-x.
-  std::optional<uint32_t> owner_offset;
-
-  /// Optional private-memory byte offset receiving the compact workgroup key.
-  std::optional<uint32_t> workgroup_key_offset;
-
-  /// Optional first private-memory byte offset receiving the 64-bit dispatch
-  /// identity. The high half occupies the next private slot.
-  std::optional<uint32_t> dispatch_id_offset;
-
-  /// Private slots receiving the exact x/y/z/cluster workgroup tuple used by
-  /// Record/Replay evidence.
-  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
+  /// Complete persistent identity and ephemeral-allocation layout selected by
+  /// private-state planning.
+  ConSanMoiPrivateStateLayout private_state_layout;
 
   /// Owned save/restore program for the borrowed temporary VGPR window.
   VgprSpillSequence spill;
@@ -309,9 +296,9 @@ struct MoiPrivateEpochPrologueEmissionPlan {
   /// Number of consecutive temporary VGPRs required by the selected semantic
   /// operations, independent of their target instruction encodings.
   [[nodiscard]] uint16_t required_scratch_vgpr_count() const {
-    if (workgroup_key_offset)
+    if (private_state_layout.workgroup_key_offset)
       return 3u;
-    if (dispatch_id_offset || workgroup_shadow)
+    if (private_state_layout.dispatch_id_offset || workgroup_shadow)
       return 2u;
     return 1u;
   }
@@ -325,8 +312,10 @@ struct MoiPrivateEpochPrologueEmissionPlan {
         scratch_end > 256u) {
       return false;
     }
-    if (dispatch_id_offset && (!dispatch_plan || dispatch_capture.sgpr() ||
-                               dispatch_capture.vgpr() != std::optional<uint16_t>{scratch_vgpr})) {
+    if (!private_state_layout.is_well_formed() ||
+        (private_state_layout.dispatch_id_offset &&
+         (!dispatch_plan || dispatch_capture.sgpr() ||
+          dispatch_capture.vgpr() != std::optional<uint16_t>{scratch_vgpr}))) {
       return false;
     }
     return runtime_sample_stride != 0u &&
@@ -1186,9 +1175,11 @@ patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_
   if (consan_uses_gfx9_cdna_encoding(arch)) {
     const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-    return entry_capture && (patch.persistent_sgpr_state.record_replay_workgroup.complete() ||
-                             patch.persistent_record_replay_workgroup_vgprs.complete() ||
-                             patch.persistent_record_replay_workgroup_private_offsets.complete());
+    return entry_capture &&
+           (patch.persistent_sgpr_state.record_replay_workgroup.complete() ||
+            patch.persistent_record_replay_workgroup_vgprs.complete() ||
+            (patch.private_state_layout &&
+             patch.private_state_layout->record_replay_workgroup_offsets.complete()));
   }
   return (patch.kind >= ConSanPatchKind::InlineMoiAccessRecordStore &&
           patch.kind <= ConSanPatchKind::TrampolineMoiFenceRecord) ||

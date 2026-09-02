@@ -1381,12 +1381,13 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
     return std::nullopt;
   }
   const uint16_t scratch_vgpr = plan.scratch_vgpr;
-  const uint32_t epoch_offset = plan.epoch_offset;
-  const std::optional<uint32_t> owner_offset = plan.owner_offset;
-  const std::optional<uint32_t> workgroup_key_offset = plan.workgroup_key_offset;
-  const std::optional<uint32_t> dispatch_id_offset = plan.dispatch_id_offset;
+  const ConSanMoiPrivateStateLayout &private_state_layout = plan.private_state_layout;
+  const uint32_t epoch_offset = private_state_layout.epoch_offset;
+  const std::optional<uint32_t> owner_offset = private_state_layout.owner_offset;
+  const std::optional<uint32_t> workgroup_key_offset = private_state_layout.workgroup_key_offset;
+  const std::optional<uint32_t> dispatch_id_offset = private_state_layout.dispatch_id_offset;
   const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets =
-      plan.record_replay_workgroup_offsets;
+      private_state_layout.record_replay_workgroup_offsets;
   const VgprSpillSequence &spill = plan.spill;
   const std::optional<SgprSpillSequence> &entry_scalar_spill = plan.entry_scalar_spill;
   const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow = plan.workgroup_shadow;
@@ -1801,7 +1802,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     uint64_t active_descriptor_file_offset = 0;
     uint64_t active_entry_text_offset = 0;
     MoiPrivateEpochPrologueEmissionPlan emission;
-    uint32_t persistent_private_state_end = 0;
+    ConSanMoiPrivateStateLayout private_state_layout;
     uint32_t required_private_bytes = 0;
     bool has_kernarg_preload = false;
   };
@@ -1810,7 +1811,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     const auto access_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {
-          return patch.persistent_epoch_private_offset && patch.scratch_vgpr &&
+          return patch.private_state_layout && patch.scratch_vgpr &&
                  kernel_owns_patch(kernel, patch);
         });
     if (access_patch == result.patches.end())
@@ -1834,8 +1835,11 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     }
     const KD &descriptor = *descriptor_value;
 
-    if (!access_patch->persistent_epoch_private_offset)
-      continue;
+    const ConSanMoiPrivateStateLayout &layout = *access_patch->private_state_layout;
+    if (!layout.is_well_formed()) {
+      result.errors.emplace_back("ConSan MOI private-epoch prologue found an invalid layout");
+      return;
+    }
     ConSanMoiOperatingPoint kernel_point = operating_point;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
     if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
@@ -1846,8 +1850,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
           kernel.name + "'");
       return;
     }
-    const bool has_private_dispatch_id =
-        access_patch->persistent_dispatch_id_private_offset.has_value();
+    const bool has_private_dispatch_id = layout.dispatch_id_offset.has_value();
     const ConSanMoiDispatchIdCapture dispatch_capture =
         has_private_dispatch_id ? ConSanMoiDispatchIdCapture::in_vgprs(*access_patch->scratch_vgpr)
                                 : dispatch_id_capture(kernel_point);
@@ -1880,38 +1883,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       }
       return;
     }
-    const bool has_private_owner = access_patch->persistent_owner_private_offset.has_value();
-    const bool has_private_workgroup_key =
-        access_patch->persistent_workgroup_key_private_offset.has_value();
+    const bool has_private_workgroup_key = layout.workgroup_key_offset.has_value();
     const bool has_private_record_replay_workgroup =
-        access_patch->persistent_record_replay_workgroup_private_offsets.complete();
-    uint32_t persistent_end =
-        *access_patch->persistent_epoch_private_offset + SpillManager::kSlotBytes;
-    if (has_private_owner)
-      persistent_end = std::max(persistent_end, *access_patch->persistent_owner_private_offset +
-                                                    SpillManager::kSlotBytes);
-    if (has_private_workgroup_key)
-      persistent_end =
-          std::max(persistent_end, *access_patch->persistent_workgroup_key_private_offset +
-                                       SpillManager::kSlotBytes);
-    if (has_private_dispatch_id)
-      persistent_end =
-          std::max(persistent_end, *access_patch->persistent_dispatch_id_private_offset +
-                                       2u * SpillManager::kSlotBytes);
-    for (const std::optional<uint32_t> offset :
-         access_patch->persistent_record_replay_workgroup_private_offsets.values()) {
-      if (offset)
-        persistent_end = std::max(persistent_end, *offset + SpillManager::kSlotBytes);
-    }
-    MoiPrivateEpochLayout layout{
-        .epoch_offset = *access_patch->persistent_epoch_private_offset,
-        .owner_offset = access_patch->persistent_owner_private_offset,
-        .workgroup_key_offset = access_patch->persistent_workgroup_key_private_offset,
-        .dispatch_id_offset = access_patch->persistent_dispatch_id_private_offset,
-        .record_replay_workgroup_offsets =
-            access_patch->persistent_record_replay_workgroup_private_offsets,
-        .persistent_state_end = persistent_end,
-        .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
+        layout.record_replay_workgroup_offsets.complete();
 
     const auto private_limit = consan_address_free_private_limit(arch);
     if (!private_limit) {
@@ -2030,11 +2004,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     }
     MoiPrivateEpochPrologueEmissionPlan emission{
         .scratch_vgpr = *access_patch->scratch_vgpr,
-        .epoch_offset = layout.epoch_offset,
-        .owner_offset = layout.owner_offset,
-        .workgroup_key_offset = layout.workgroup_key_offset,
-        .dispatch_id_offset = layout.dispatch_id_offset,
-        .record_replay_workgroup_offsets = layout.record_replay_workgroup_offsets,
+        .private_state_layout = layout,
         .spill = std::move(*spill),
         .entry_scalar_spill = std::move(entry_scalar_spill),
         .workgroup_shadow = std::move(prologue_workgroup_shadow),
@@ -2052,7 +2022,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
         .active_descriptor_file_offset = active_kernel->descriptor_file_offset,
         .active_entry_text_offset = active_kernel->entry_text_offset,
         .emission = std::move(emission),
-        .persistent_private_state_end = layout.ephemeral_base,
+        .private_state_layout = layout,
         .required_private_bytes = required_private_bytes,
         .has_kernarg_preload = has_kernarg_preload,
     });
@@ -2159,13 +2129,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     info.dispatch_id_primary_prologue_offset = primary_body_offset;
     info.dispatch_id_secondary_prologue_offset = secondary_body_offset;
     info.scratch_vgpr = item.emission.scratch_vgpr;
-    info.persistent_epoch_private_offset = item.emission.epoch_offset;
-    info.persistent_owner_private_offset = item.emission.owner_offset;
-    info.persistent_workgroup_key_private_offset = item.emission.workgroup_key_offset;
-    info.persistent_dispatch_id_private_offset = item.emission.dispatch_id_offset;
-    info.persistent_record_replay_workgroup_private_offsets =
-        item.emission.record_replay_workgroup_offsets;
-    info.persistent_private_state_end = item.persistent_private_state_end;
+    info.private_state_layout = item.private_state_layout;
     info.spilled_vgpr_count = item.emission.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
     note_dynamic_stack_private_requirement(info, &item.emission.spill);

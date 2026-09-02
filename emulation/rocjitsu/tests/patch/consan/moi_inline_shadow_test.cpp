@@ -825,11 +825,13 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   });
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->scratch_vgpr);
+  ASSERT_TRUE(patch->private_state_layout);
   EXPECT_EQ(patch->spilled_vgpr_count, 16u);
-  ASSERT_EQ(patch->persistent_epoch_private_offset, 0u);
-  EXPECT_FALSE(patch->persistent_owner_private_offset);
-  ASSERT_EQ(patch->persistent_workgroup_key_private_offset, 4u);
-  ASSERT_EQ(patch->persistent_private_state_end, 8u);
+  ASSERT_EQ(patch->private_state_layout->epoch_offset, 0u);
+  EXPECT_FALSE(patch->private_state_layout->owner_offset);
+  ASSERT_EQ(patch->private_state_layout->workgroup_key_offset, 4u);
+  EXPECT_EQ(patch->private_state_layout->persistent_state_end, 8u);
+  EXPECT_EQ(patch->private_state_layout->ephemeral_base, 16u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   ASSERT_TRUE(patch->workgroup_shadow);
   EXPECT_GT(patch->workgroup_shadow->size, 0u);
@@ -844,8 +846,10 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_EQ(prologue->persistent_workgroup_key_private_offset, 4u);
-  EXPECT_EQ(prologue->persistent_private_state_end, 8u);
+  ASSERT_TRUE(prologue->private_state_layout);
+  ASSERT_EQ(prologue->private_state_layout->workgroup_key_offset, 4u);
+  EXPECT_EQ(prologue->private_state_layout->persistent_state_end, 8u);
+  EXPECT_EQ(prologue->private_state_layout->ephemeral_base, 16u);
   EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -947,11 +951,13 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->scratch_vgpr);
-  ASSERT_EQ(prologue->persistent_private_state_end, 8u);
+  ASSERT_TRUE(prologue->private_state_layout);
+  EXPECT_EQ(prologue->private_state_layout->persistent_state_end, 8u);
+  EXPECT_EQ(prologue->private_state_layout->ephemeral_base, 16u);
   EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
   EXPECT_GE(prologue->required_private_segment_size, 48u);
 
-  SpillManager expected_manager(/*original_private_bytes=*/8u,
+  SpillManager expected_manager(/*original_private_bytes=*/16u,
                                 kMaxCdnaAddressFreeScratchPrivateBytes);
   ASSERT_TRUE(build_vgpr_spill_sequence(expected_manager, *prologue->scratch_vgpr,
                                         /*vgpr_count=*/3u, kArch));
@@ -1070,11 +1076,11 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_FALSE(access->persistent_epoch_private_offset);
+  EXPECT_FALSE(access->private_state_layout);
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end());
-  EXPECT_FALSE(barrier_patch->persistent_epoch_private_offset);
+  EXPECT_FALSE(barrier_patch->private_state_layout);
   EXPECT_EQ(barrier_patch->required_private_segment_size, 0u);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -1237,10 +1243,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans)
       << " patches=" << testing::PrintToString(result.patches);
-  ASSERT_TRUE(full_access->persistent_dispatch_id_private_offset);
-  ASSERT_TRUE(full_access->persistent_private_state_end);
-  EXPECT_GE(*full_access->persistent_private_state_end,
-            *full_access->persistent_dispatch_id_private_offset + 2u * SpillManager::kSlotBytes);
+  ASSERT_TRUE(full_access->private_state_layout);
+  ASSERT_TRUE(full_access->private_state_layout->dispatch_id_offset);
+  EXPECT_GE(full_access->private_state_layout->ephemeral_base,
+            *full_access->private_state_layout->dispatch_id_offset + 2u * SpillManager::kSlotBytes);
 
   const auto full_prologue =
       std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
@@ -1251,9 +1257,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors)
       << " patches=" << testing::PrintToString(result.patches);
+  ASSERT_TRUE(full_prologue->private_state_layout);
   ASSERT_TRUE(full_prologue->dispatch_id_prologue);
-  ASSERT_EQ(full_prologue->persistent_dispatch_id_private_offset,
-            full_access->persistent_dispatch_id_private_offset);
+  ASSERT_EQ(full_prologue->private_state_layout->dispatch_id_offset,
+            full_access->private_state_layout->dispatch_id_offset);
   ASSERT_TRUE(full_prologue->dispatch_id_prologue->capture.vgpr());
   EXPECT_EQ(full_prologue->dispatch_id_prologue->capture.vgpr(), full_access->scratch_vgpr);
   EXPECT_FALSE(full_prologue->dispatch_id_prologue->capture.sgpr());
@@ -1288,10 +1295,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << "an empty wave must skip per-lane scalar save/restore but still build the "
          "indirect return before reaching the inert guest LDS operation";
   const auto load_low = instrumentation::build_private_load_b32(
-      *full_access->scratch_vgpr, *full_access->persistent_dispatch_id_private_offset, kArch);
+      *full_access->scratch_vgpr, *full_access->private_state_layout->dispatch_id_offset, kArch);
   const auto load_high = instrumentation::build_private_load_b32(
       static_cast<uint16_t>(*full_access->scratch_vgpr + 1u),
-      *full_access->persistent_dispatch_id_private_offset + SpillManager::kSlotBytes, kArch);
+      *full_access->private_state_layout->dispatch_id_offset + SpillManager::kSlotBytes, kArch);
   const auto read_low = instrumentation::build_v_readfirstlane_b32(
       full_assignment->router_jump->pc_sgpr, *full_access->scratch_vgpr, kArch);
   const auto read_high = instrumentation::build_v_readfirstlane_b32(
@@ -1306,13 +1313,14 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end());
-  EXPECT_EQ(atomic_patch->persistent_epoch_private_offset,
-            full_access->persistent_epoch_private_offset);
-  EXPECT_EQ(atomic_patch->persistent_workgroup_key_private_offset,
-            full_access->persistent_workgroup_key_private_offset);
-  EXPECT_EQ(atomic_patch->persistent_dispatch_id_private_offset,
-            full_access->persistent_dispatch_id_private_offset);
-  EXPECT_EQ(atomic_patch->persistent_private_state_end, full_access->persistent_private_state_end);
+  EXPECT_EQ(atomic_patch->private_state_layout->epoch_offset,
+            full_access->private_state_layout->epoch_offset);
+  EXPECT_EQ(atomic_patch->private_state_layout->workgroup_key_offset,
+            full_access->private_state_layout->workgroup_key_offset);
+  EXPECT_EQ(atomic_patch->private_state_layout->dispatch_id_offset,
+            full_access->private_state_layout->dispatch_id_offset);
+  EXPECT_EQ(atomic_patch->private_state_layout->ephemeral_base,
+            full_access->private_state_layout->ephemeral_base);
 
   ConSanTransformArtifacts invalid = result;
   const auto invalid_access =
@@ -1320,11 +1328,11 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
         return is_access(patch) && owns(patch, full_kernel->descriptor_file_offset);
       });
   ASSERT_NE(invalid_access, invalid.patches.end());
-  invalid_access->persistent_dispatch_id_private_offset =
-      invalid_access->persistent_private_state_end;
+  invalid_access->private_state_layout->dispatch_id_offset =
+      invalid_access->private_state_layout->ephemeral_base;
   const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, invalid);
   EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
-    return error.find("private dispatch identity outside persistent state") != std::string::npos;
+    return error.find("invalid private-state layout") != std::string::npos;
   })) << testing::PrintToString(validation_errors);
 }
 
@@ -1433,7 +1441,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end());
-  EXPECT_FALSE(atomic_patch->persistent_dispatch_id_private_offset);
+  EXPECT_FALSE(atomic_patch->private_state_layout->dispatch_id_offset);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -1499,7 +1507,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
     ASSERT_NE(patch, result.patches.end());
     ASSERT_EQ(patch->scratch_vgpr, 0u);
     ASSERT_EQ(patch->spilled_vgpr_count, 16u);
-    ASSERT_TRUE(patch->persistent_private_state_end);
+    ASSERT_TRUE(patch->private_state_layout);
     EXPECT_FALSE(patch->workgroup_shadow);
 
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -1515,8 +1523,8 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
         << "live accumulator storage must never be relocated for instrumentation scratch";
     const std::vector<uint32_t> cave_words =
         text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-    const auto spill_base =
-        normalize_address_free_scratch_private_size(arch, *patch->persistent_private_state_end);
+    const auto spill_base = normalize_address_free_scratch_private_size(
+        arch, patch->private_state_layout->ephemeral_base);
     ASSERT_TRUE(spill_base);
     const uint32_t address_slot = *spill_base + 6u * sizeof(uint32_t);
     auto reload_address =
@@ -2185,10 +2193,12 @@ TEST(ConSanMoi, Cdna4ExternalInlineShadowRetainsPrivateWorkgroupKey) {
     return item.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  ASSERT_EQ(access->persistent_epoch_private_offset, 0u);
-  EXPECT_FALSE(access->persistent_owner_private_offset);
-  ASSERT_EQ(access->persistent_workgroup_key_private_offset, 4u);
-  EXPECT_EQ(access->persistent_private_state_end, 8u);
+  ASSERT_TRUE(access->private_state_layout);
+  ASSERT_EQ(access->private_state_layout->epoch_offset, 0u);
+  EXPECT_FALSE(access->private_state_layout->owner_offset);
+  ASSERT_EQ(access->private_state_layout->workgroup_key_offset, 4u);
+  EXPECT_EQ(access->private_state_layout->persistent_state_end, 8u);
+  EXPECT_EQ(access->private_state_layout->ephemeral_base, 16u);
   EXPECT_FALSE(access->workgroup_shadow);
 }
 
@@ -2803,9 +2813,7 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_FALSE(access->persistent_epoch_private_offset);
-  EXPECT_FALSE(access->persistent_owner_private_offset);
-  EXPECT_FALSE(access->persistent_workgroup_key_private_offset);
+  EXPECT_FALSE(access->private_state_layout);
   EXPECT_FALSE(access->workgroup_shadow);
   EXPECT_EQ(access->required_group_segment_size(), 0u);
   EXPECT_NE(std::ranges::find(
@@ -4652,7 +4660,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
                patch.anchor_offset == fixed_access->anchor_offset;
       });
   ASSERT_NE(private_reload, with_component_assignment.patches.end());
-  private_reload->persistent_dispatch_id_private_offset = 0u;
+  private_reload->private_state_layout->dispatch_id_offset = 0u;
   // Reinterpret the already-emitted capture pair as the fixed +12:+13 reload
   // window used by a private-dispatch body, without changing the instruction
   // semantics under test.
@@ -4758,7 +4766,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
                patch.owner_descriptor_file_offsets.end();
   });
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(access->persistent_dispatch_id_private_offset);
+  EXPECT_FALSE(access->private_state_layout->dispatch_id_offset);
 }
 
 TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
@@ -5052,7 +5060,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   });
   ASSERT_NE(access, result.patches.end());
   ASSERT_EQ(access->scratch_vgpr, 1);
-  EXPECT_FALSE(access->persistent_owner_private_offset);
+  EXPECT_FALSE(access->private_state_layout->owner_offset);
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const uint16_t owner_sgpr = *test_moi_exec_save_sgpr(result);
 
@@ -5155,10 +5163,10 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->scratch_vgpr);
-  EXPECT_EQ(access->persistent_workgroup_key_private_offset, 4u);
-  EXPECT_EQ(prologue->persistent_workgroup_key_private_offset, 4u);
-  EXPECT_EQ(access->persistent_private_state_end, 8u);
-  EXPECT_EQ(prologue->persistent_private_state_end, 8u);
+  EXPECT_EQ(access->private_state_layout->workgroup_key_offset, 4u);
+  EXPECT_EQ(prologue->private_state_layout->workgroup_key_offset, 4u);
+  EXPECT_EQ(access->private_state_layout->ephemeral_base, 8u);
+  EXPECT_EQ(prologue->private_state_layout->ephemeral_base, 8u);
   EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
   ASSERT_TRUE(access->workgroup_shadow);
   EXPECT_EQ(access->workgroup_shadow->base, 4352u);
@@ -5243,15 +5251,15 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
   ASSERT_TRUE(access->scratch_vgpr);
   EXPECT_EQ(access->scratch_vgpr, 1);
   EXPECT_EQ(access->spilled_vgpr_count, 16u);
-  EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(access->private_state_layout->epoch_offset, 0u);
   EXPECT_EQ(access->required_private_segment_size, 80u);
   EXPECT_EQ(barrier->scratch_vgpr, access->scratch_vgpr);
   EXPECT_EQ(barrier->spilled_vgpr_count, 1u);
-  EXPECT_EQ(barrier->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(barrier->private_state_layout->epoch_offset, 0u);
   EXPECT_EQ(barrier->required_private_segment_size, 80u);
   EXPECT_EQ(prologue->scratch_vgpr, access->scratch_vgpr);
   EXPECT_EQ(prologue->spilled_vgpr_count, 3u);
-  EXPECT_EQ(prologue->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(prologue->private_state_layout->epoch_offset, 0u);
   EXPECT_EQ(prologue->required_private_segment_size, 80u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -6297,10 +6305,9 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore)
       continue;
-    ASSERT_TRUE(patch.persistent_epoch_private_offset);
-    ASSERT_TRUE(patch.persistent_private_state_end);
-    EXPECT_GT(*patch.persistent_private_state_end, *patch.persistent_epoch_private_offset);
-    EXPECT_GE(patch.required_private_segment_size, *patch.persistent_private_state_end);
+    ASSERT_TRUE(patch.private_state_layout);
+    EXPECT_GT(patch.private_state_layout->ephemeral_base, patch.private_state_layout->epoch_offset);
+    EXPECT_GE(patch.required_private_segment_size, patch.private_state_layout->ephemeral_base);
   }
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
@@ -7392,7 +7399,7 @@ TEST(ConSanMoi, Rdna4SharedHelperBarrierUsesCommonPrivateEpochState) {
   ASSERT_NE(barrier, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(barrier->owner_descriptor_file_offsets, access->owner_descriptor_file_offsets);
-  EXPECT_EQ(barrier->persistent_epoch_private_offset, access->persistent_epoch_private_offset);
+  EXPECT_EQ(barrier->private_state_layout, access->private_state_layout);
 }
 
 TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLargeKernel) {
@@ -8197,12 +8204,12 @@ TEST(ConSanMoi, SharedPrivateEpochCapturesFullKeyAcrossDescriptorCoordinateViews
   });
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_TRUE(access->persistent_workgroup_key_private_offset);
+  ASSERT_TRUE(access->private_state_layout->workgroup_key_offset);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue)
       continue;
-    EXPECT_EQ(patch.persistent_workgroup_key_private_offset,
-              access->persistent_workgroup_key_private_offset);
+    EXPECT_EQ(patch.private_state_layout->workgroup_key_offset,
+              access->private_state_layout->workgroup_key_offset);
   }
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue,
                                &ConSanPatchInfo::kind),
@@ -8253,9 +8260,9 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_EQ(access->persistent_epoch_private_offset, 32u);
-  EXPECT_FALSE(access->persistent_owner_private_offset);
-  EXPECT_EQ(access->persistent_workgroup_key_private_offset, 36u);
+  EXPECT_EQ(access->private_state_layout->epoch_offset, 32u);
+  EXPECT_FALSE(access->private_state_layout->owner_offset);
+  EXPECT_EQ(access->private_state_layout->workgroup_key_offset, 36u);
   EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
                           [](const ConSanPatchInfo &patch) {
@@ -8267,9 +8274,9 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) {
       prologue_anchors.push_back(patch.anchor_offset);
-      EXPECT_EQ(patch.persistent_epoch_private_offset, 32u);
-      EXPECT_FALSE(patch.persistent_owner_private_offset);
-      EXPECT_EQ(patch.persistent_workgroup_key_private_offset, 36u);
+      EXPECT_EQ(patch.private_state_layout->epoch_offset, 32u);
+      EXPECT_FALSE(patch.private_state_layout->owner_offset);
+      EXPECT_EQ(patch.private_state_layout->workgroup_key_offset, 36u);
       EXPECT_EQ(patch.required_private_segment_size, 60u);
     }
   }

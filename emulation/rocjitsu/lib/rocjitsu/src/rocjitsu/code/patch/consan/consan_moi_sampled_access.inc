@@ -227,7 +227,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   bool capacity_limited = false;
   bool patch_limited = false;
   MoiSpillManagers spill_managers;
-  MoiPrivateEpochLayoutCache private_layout_cache;
+  MoiPrivateStateLayoutCache private_layout_cache;
   uint64_t planned_anchor_end = 0;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const uint32_t current_sample_index = sampled_candidate_index++;
@@ -293,7 +293,7 @@ void try_apply_direct_sampled_watchpoint_patch(
     }
     if (!workgroup_descriptor)
       continue;
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (candidate_point.automatic_moi_private_epoch) {
       const std::optional<uint64_t> cache_descriptor =
@@ -612,13 +612,8 @@ void try_apply_direct_sampled_watchpoint_patch(
       add_unique_warning(
           "ConSan MOI sampled runtime workgroup selection uses the spill-safe body gate");
     }
-    if (private_layout)
-      planned.private_epoch_offset = private_layout->epoch_offset;
+    planned.private_state_layout = private_layout;
     planned.owner_derivation = owner_derivation;
-    if (private_layout)
-      planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
-    if (private_layout)
-      planned.persistent_private_state_end = private_layout->ephemeral_base;
     planned.required_private_bytes = probe->required_private_bytes;
     planned.probe_guest_instruction_offset = probe_guest_instruction_offset;
     planned.guest_instruction_word_count = guest_instruction_word_count;
@@ -777,7 +772,7 @@ void try_apply_direct_sampled_watchpoint_patch(
                       ? ConSanPatchKind::TrampolineMoiSampledWatchpointStore
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.anchor();
-      note_moi_replay_access_patch_info(info, planned_patch);
+      note_moi_access_patch_info(info, planned_patch);
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
@@ -1051,7 +1046,7 @@ void try_apply_direct_sampled_watchpoint_patch(
             info.anchor_offset = candidate.anchor();
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            note_moi_replay_access_patch_info(info, planned_patch);
+            note_moi_access_patch_info(info, planned_patch);
             info.relocated_guest_instruction_offset =
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;

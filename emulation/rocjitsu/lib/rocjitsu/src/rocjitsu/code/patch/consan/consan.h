@@ -38,6 +38,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_private_state_layout.h.inc"
+
 #include "rocjitsu/code/patch/consan/consan_request_contract.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_workgroup_shadow_layout.h.inc"

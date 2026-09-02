@@ -2,8 +2,9 @@
     std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanOptions &options, const ConSanMoiOperatingPoint &point,
     const ConSanMoiOperatingPoint &allocation, const MoiObjectModeSemantics &semantics,
-    uint16_t scratch_vgpr, uint16_t scratch_count, const MoiPrivateEpochLayout *private_layout,
-    const MoiTargetFacts &target_facts, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    uint16_t scratch_vgpr, uint16_t scratch_count,
+    const ConSanMoiPrivateStateLayout *private_layout, const MoiTargetFacts &target_facts,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
@@ -294,9 +295,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           "ConSan MOI inline atomic patch found no common persistent VGPR assignment");
       continue;
     }
-    std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<ConSanMoiPrivateStateLayout> private_layout;
     if (candidate_point.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(
+      private_layout = build_moi_private_state_layout(
           result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
            .workgroup_key = true,

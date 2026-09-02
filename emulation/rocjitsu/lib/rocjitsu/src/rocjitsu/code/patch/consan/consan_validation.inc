@@ -3060,7 +3060,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && !patch.workgroup_shadow &&
-               !patch.persistent_dispatch_id_private_offset &&
+               !(patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) &&
                !result.moi_operating_point.moi_dispatch_identity.sgpr() &&
                !result.moi_operating_point.moi_dispatch_identity.vgpr() &&
                !owner_local_dispatch_vgpr(patch) &&
@@ -3272,7 +3272,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     std::optional<uint16_t> expected_dispatch_vgpr =
         result.moi_operating_point.moi_dispatch_identity.vgpr();
     const auto &assignments = result.moi_operating_point.owner_transient_sgprs;
-    if (!patch.persistent_dispatch_id_private_offset && !assignments.empty()) {
+    if (!(patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) &&
+        !assignments.empty()) {
       // A partially admitted code-object-wide pair can be unavailable to one
       // owner component. Resolve the exact shared-site choice before checking
       // the emitted capture; an explicit null pair selects the persistent
@@ -3298,7 +3299,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           }
         }
       }
-    } else if (patch.persistent_dispatch_id_private_offset) {
+    } else if (patch.private_state_layout && patch.private_state_layout->dispatch_id_offset) {
       expected_dispatch_sgpr.reset();
       std::optional<uint16_t> owner_reload_sgpr;
       bool saw_owner_assignment = false;
@@ -3512,7 +3513,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
     uint16_t owner_vgpr = 0;
-    if (patch.persistent_epoch_private_offset || patch.persistent_sgpr_state.owner()) {
+    if (patch.private_state_layout || patch.persistent_sgpr_state.owner()) {
       const auto resource_plan = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Atomic &&
                plan.text_offset == patch.anchor_offset && plan.scratch_vgpr == patch.scratch_vgpr;
@@ -3776,49 +3777,14 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   for (const ConSanPatchInfo &patch : result.patches) {
     const bool requires_full_workgroup_id = consan_detail::patch_requires_full_workgroup_id_payload(
         result.observation_plan().engine, arch, patch);
-    if (patch.persistent_dispatch_id_private_offset) {
-      const uint32_t offset = *patch.persistent_dispatch_id_private_offset;
-      if (!patch.persistent_epoch_private_offset || !patch.persistent_private_state_end ||
-          offset % sizeof(uint32_t) != 0u ||
-          offset > std::numeric_limits<uint32_t>::max() - 2u * sizeof(uint32_t) ||
-          offset + 2u * sizeof(uint32_t) > *patch.persistent_private_state_end ||
-          patch.required_private_segment_size < *patch.persistent_private_state_end) {
-        errors.emplace_back(
-            "ConSan final validation found private dispatch identity outside persistent state");
+    if (patch.private_state_layout) {
+      if (!patch.private_state_layout->is_well_formed()) {
+        errors.emplace_back("ConSan final validation found an invalid private-state layout");
       }
-    }
-    const ConSanMoiPersistentWorkgroupPrivateOffsets &private_workgroup =
-        patch.persistent_record_replay_workgroup_private_offsets;
-    if (!private_workgroup.empty()) {
-      std::vector<uint32_t> offsets = {*private_workgroup.x(), *private_workgroup.y(),
-                                       *private_workgroup.z()};
-      if (private_workgroup.cluster_workgroup_id())
-        offsets.push_back(*private_workgroup.cluster_workgroup_id());
-      if (!patch.persistent_private_state_end) {
+      if (patch.required_private_segment_size < patch.private_state_layout->ephemeral_base) {
         errors.emplace_back(
-            "ConSan final validation found a private Record/Replay workgroup tuple without a "
-            "persistent-state boundary");
-      } else {
-        for (uint32_t offset : offsets) {
-          if (offset % sizeof(uint32_t) != 0u ||
-              offset > std::numeric_limits<uint32_t>::max() - sizeof(uint32_t) ||
-              offset + sizeof(uint32_t) > *patch.persistent_private_state_end) {
-            errors.emplace_back(
-                "ConSan final validation found a private Record/Replay workgroup coordinate "
-                "outside persistent state");
-            break;
-          }
-        }
-        if (std::ranges::adjacent_find(offsets) != offsets.end() || offsets[0] == offsets[2]) {
-          errors.emplace_back(
-              "ConSan final validation found overlapping private Record/Replay workgroup "
-              "coordinates");
-        }
-        if (patch.required_private_segment_size < *patch.persistent_private_state_end) {
-          errors.emplace_back(
-              "ConSan final validation found private Record/Replay state beyond the patch's "
-              "private-segment requirement");
-        }
+            "ConSan final validation found private state beyond the patch's private-segment "
+            "requirement");
       }
     }
     if (patch.dynamic_private_segment_addend != 0) {

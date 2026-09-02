@@ -34,7 +34,9 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
     const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
+    const ConSanMoiPrivateStateLayout *private_layout) {
+  const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
   if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
                                                                                private_offsets))
     return false;
@@ -61,8 +63,9 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 [[nodiscard]] std::optional<MoiRecordEventEmissionPlan> resolve_moi_record_event_emission_plan(
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets,
-    std::optional<uint32_t> private_dispatch_id_offset) {
+    const ConSanMoiPrivateStateLayout *private_layout) {
+  const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
+      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
   const auto workgroup_sources =
       record_replay_persistent_workgroup_sources(request.moi_engine, point, private_offsets);
   const auto special_state = moi_special_state_sgprs(request, point);
@@ -102,8 +105,9 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                      : std::nullopt,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
-      .dispatch_id_sources =
-          moi_bound_dispatch_id_sources({point, bound_resources, private_dispatch_id_offset}),
+      .dispatch_id_sources = moi_bound_dispatch_id_sources(
+          {point, bound_resources,
+           private_layout ? private_layout->dispatch_id_offset : std::nullopt}),
       .runtime_workgroup_gate = runtime_workgroup_gate,
       .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };
@@ -139,9 +143,9 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     return std::nullopt;
   }
 
-  std::optional<MoiPrivateEpochLayout> private_layout;
+  std::optional<ConSanMoiPrivateStateLayout> private_layout;
   if (event_point.automatic_moi_private_epoch) {
-    private_layout = build_moi_private_epoch_layout(
+    private_layout = build_moi_private_state_layout(
         inventory, resources, arch, warnings,
         {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
          .record_replay_workgroup =
@@ -152,16 +156,15 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   }
   if (!apply_record_replay_entry_workgroup_assignment(
           request, event_point, allocation, resources.owner_descriptor_file_offsets,
-          private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr)) {
+          private_layout ? &*private_layout : nullptr)) {
     warnings.emplace_back(std::string(warning_context) +
                           " found no common entry workgroup assignment");
     return std::nullopt;
   }
 
-  auto emission = resolve_moi_record_event_emission_plan(
-      request, bound_resources, event_point, resources.base, arch,
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
-      private_layout ? private_layout->dispatch_id_offset : std::nullopt);
+  auto emission =
+      resolve_moi_record_event_emission_plan(request, bound_resources, event_point, resources.base,
+                                             arch, private_layout ? &*private_layout : nullptr);
   if (!emission) {
     warnings.emplace_back(std::string(warning_context) +
                           " has an incomplete Record/Replay emission plan");

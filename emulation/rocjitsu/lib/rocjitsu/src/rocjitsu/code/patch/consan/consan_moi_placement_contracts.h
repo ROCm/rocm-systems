@@ -106,10 +106,8 @@ struct MoiPlannedAccessPatch {
   ResolvedMoiScratchPlan resources;
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
-  std::optional<uint32_t> private_epoch_offset;
-  std::optional<uint32_t> private_dispatch_id_offset;
+  std::optional<ConSanMoiPrivateStateLayout> private_state_layout;
   std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> owner_derivation;
-  uint32_t persistent_private_state_end = 0;
   uint32_t required_private_bytes = 0;
   uint32_t guest_instruction_word_count = 0;
 };
@@ -118,7 +116,6 @@ struct MoiPlannedAccessPatch {
 struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   uint64_t entry_island_word_count = 0;
   std::optional<uint16_t> incoming_vgpr_bank_mode;
-  ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
   uint32_t probe_guest_instruction_offset = 0;
   bool spill_overlaps_guest_operands = false;
   bool wrap_embedded_guest_vgpr_bank = false;
@@ -531,9 +528,6 @@ void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
                                const ResolvedMoiScratchPlan &plan,
                                const ConSanMoiWorkgroupShadowLayout &layout);
-
-void note_moi_replay_access_patch_info(ConSanPatchPlacementEffects &effects,
-                                       const MoiPlannedReplayAccessPatch &patch);
 
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &descriptor);
 [[nodiscard]] uint16_t moi_descriptor_system_sgpr_count(const KD &descriptor);
