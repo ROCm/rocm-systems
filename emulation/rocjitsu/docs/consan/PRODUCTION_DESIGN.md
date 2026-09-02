@@ -2952,6 +2952,15 @@ enters generic patch telemetry. A narrow workgroup-shadow layout fragment is
 the only additional contract visible through `consan.h`; the broader MOI
 report model remains behind `consan_moi_report_contract.h`.
 
+The following entry-prologue trace applies the same rule to dispatch identity.
+The already-typed `ConSanMoiDispatchIdPreloadPlan` and its unique scalar-or-
+vector capture now remain together as one `ConSanMoiDispatchIdPrologueEffect`
+from prologue emission through committed patch proof, descriptor accounting,
+and independent validation. Seventeen flattened patch fields and the
+validator's second partial projection are gone. The shared patch contract sees
+only a narrow effect header; the preload construction algorithm remains in
+the private lowering header.
+
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 
 - **Authoritative allocation facts:** The selected owner and dispatch-ID

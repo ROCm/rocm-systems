@@ -9068,3 +9068,65 @@ reconstruction, and their mode-token leak are gone. It strengthens Sections
 14.1, 14.3, 14.5, 14.6, 14.7, and 14.8. Full architecture locality, the broad
 coordinator and operating-point surfaces, credible extension exercises, and
 the independent Section 14 audit remain open, so the goal remains active.
+
+### 16.130 Convergence checkpoint 129: one typed dispatch-ID prologue effect
+
+The adjacent entry-prologue trace found another typed planning product being
+serialized into generic patch telemetry. `ConSanMoiDispatchIdPreloadPlan`
+already described the complete AMDHSA preload transformation, but prologue
+emission copied it into fifteen scalar fields and copied the mutually exclusive
+scalar/vector capture into two more optionals. Final validation consumed those
+seventeen fields directly and built a second partial descriptor-requirement
+projection from five of them. The capture value itself lived in the broad MOI
+internal header even though patch proof and validation now needed its exact
+type.
+
+Committed prologue proof now retains one optional
+`ConSanMoiDispatchIdPrologueEffect`, containing the original preload plan and
+the unique `ConSanMoiDispatchIdCapture`. Prologue emission assigns that value
+once. Exact instruction validation reads it directly, descriptor accounting
+retains the typed preload plan rather than five new scalars, and the effect
+computes the combined scalar-register extent from the plan and capture. No
+consumer reconstructs the planning product or infers capture representation
+from two independent optionals.
+
+The value types have moved to the narrow
+`consan_moi_dispatch_prologue_effect.h` contract. The shared patch aggregate
+imports that contract, while the preload-construction algorithm remains in the
+private `consan_moi_dispatch_preload.h` lowering header. Structural checks
+require the typed patch field and narrow include, prohibit all seventeen old
+fields and their prologue/validation accesses, prevent the capture class from
+returning to the broad internal header, and keep the effect independent of
+mode and report policy. A direct contract test pins scalar-extent composition
+for scalar and vector capture alternatives.
+
+| Signal | Checkpoint 129 | Cumulative change | Slice change from checkpoint 128 |
+| --- | ---: | ---: | ---: |
+| Production files | 297 | +68 | +1 narrow contract |
+| Physical production lines | 102,715 | **-2,261** | **-12** |
+| Nonblank production lines | 96,340 | **-2,744** | **-22** |
+| Production implementation lines | 88,573 | **-2,877** | **-24** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Flattened dispatch-ID prologue patch fields | **0** | n/a | **-17** |
+| Test inventory | **5,414** | **+69** | **+1** |
+
+The implementation is committed as `34138234d01`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), the focused dispatch/preload/prologue and
+architecture-boundary tests, all **1,297/1,297** nonphysical `ConSan.*` and
+`ConSanMoi.*` host/component tests, and all **1,706/1,706** Record/Replay,
+Sampled, and InlineShadow simulator-device tests across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250. No test was removed, renamed, disabled, or
+replaced, and no physical test was run.
+
+This slice deletes the seventeen-field patch replica, its field-by-field
+publication, validator reconstruction, and a partial descriptor replica. The
+narrow contract adds no alternate authority, yielding a net deletion of 24
+production implementation lines while preserving a directly tested value.
+It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target
+and mode locality, the remaining broad coordinator and operating-point
+surfaces, final extension-proof revalidation, and the independent Section 14
+audit remain open, so the goal remains active.
