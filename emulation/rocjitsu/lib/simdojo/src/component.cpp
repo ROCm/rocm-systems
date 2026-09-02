@@ -12,10 +12,6 @@ void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Mes
 }
 
 bool Component::attached() const {
-  // Both halves are needed: shutdown() destroys the partition contexts but
-  // leaves every component holding its engine pointer, so a non-null engine_
-  // is not on its own a promise that contexts_[partition_id_] exists. Nor is a
-  // component that no partition claimed, whose ID is still INVALID_PARTITION_ID.
   return engine_ != nullptr && partition_id_ < engine_->num_contexts();
 }
 

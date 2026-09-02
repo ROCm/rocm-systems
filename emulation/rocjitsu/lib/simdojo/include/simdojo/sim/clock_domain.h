@@ -199,11 +199,9 @@ public:
     // NaN lands here too, deliberately: it is not a rate.
     if (!(units_per_cycle > 0.0))
       return units == 0 ? 1 : units;
-    // A whole-number rate is done in integers. static_cast<double>(units) drops
-    // the low bits above 2^53, so the double path *under*-charges a large
-    // request -- the wrong direction for a rounding mode whose whole purpose is
-    // that no server comes out free -- and it would make a rate of 1.0 disagree
-    // with the rate of 0.0 handled above, which returns `units` exactly.
+    // A whole-number rate is done in integers: static_cast<double>(units) drops
+    // the low bits above 2^53, so the double path under-charges a large request
+    // and makes a rate of 1.0 disagree with the rate of 0.0 handled above.
     if (units_per_cycle <= 9007199254740992.0 && units_per_cycle == std::floor(units_per_cycle)) {
       if (units == 0)
         return 1;

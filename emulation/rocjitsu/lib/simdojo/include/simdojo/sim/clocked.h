@@ -170,11 +170,8 @@ private:
     this->schedule_wake(&clock_event_, edge);
   }
 
-  /// @brief The earliest edge wake_at() may arm.
-  ///
-  /// @details The partition's current tick normally, but strictly past it
-  /// while this component is inside advance(): that edge has already been
-  /// serviced, so arming it again is a same-tick re-entry rather than a visit.
+  /// @brief The earliest edge wake_at() may arm: the partition's current tick,
+  ///        or strictly past it while inside advance(), whose edge is served.
   /// @returns Floor tick for the next wake.
   Tick wake_floor() const {
     const Tick now = this->current_tick();
