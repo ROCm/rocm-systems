@@ -33,6 +33,7 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "patch/consan/consan_record_replay_model_test_support.h"
+#include "patch/consan/consan_report_test_support.h"
 #include "patch/consan/consan_sampled_model_test_support.h"
 #include "patch/consan/lowering_commit_test_support.h"
 #include "patch/consan/transform_result_test_access.h"

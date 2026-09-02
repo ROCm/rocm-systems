@@ -7453,3 +7453,59 @@ physical ownership, and cumulative shrinkage remains non-material relative to
 the 91,450-line baseline. Broad lowering mutation surfaces, further legacy
 harvesting, and the independent completion audit also remain open. The goal
 therefore remains active.
+
+### 16.103 Convergence checkpoint 102: physically mode-owned report contracts
+
+The surviving runtime-report trace separated exact shared mechanics from the
+three mode protocols. The former 325-line `consan_moi_report_helpers.h.inc`
+mixed Record/Replay replay declarations and direct layout construction,
+Sampled layout construction, InlineShadow table constants, token decoding, and
+layout construction with genuinely common capacity and header validation.
+Every mode constructor already consumed the shared report-layout value and ABI
+record types; none needed another mode's policy.
+
+Record/Replay, Sampled, and InlineShadow now each own a mode-named report
+contract fragment. The common report contract imports all three explicitly in
+dependency order, and structural checks require those owners, prevent any
+owner from selecting another engine, and prevent their APIs from returning to
+the common helper. Shared capacity clamping, minimum-byte arithmetic, header
+matching, report-region composition, and exact-subset models remain single
+common implementations rather than being copied into the modes.
+
+The same caller trace proved that the old field-by-field
+`make_consan_moi_report_header` constructor had no production caller.
+Production already constructs headers from the complete typed layout. The old
+API is therefore removed from production and retained only as a focused-test
+fixture builder for deliberately partial and malformed headers. The production
+layout constructor's stale compatibility comment was removed with it. The
+mixed common helper is now 49 physical lines and contains one reviewed mode
+check for InlineShadow's versioned layout flag, down from three explicit mode
+references and 325 lines at checkpoint 101.
+
+| Signal | Checkpoint 102 | Cumulative change | Slice change from checkpoint 101 |
+| --- | ---: | ---: | ---: |
+| Production files | 277 | +48 | +3 mode owners |
+| Physical production lines | 102,690 | **-2,286** | **-16** |
+| Nonblank production lines | 96,457 | **-2,627** | **-18** |
+| Production implementation lines | 88,762 | **-2,688** | **-27** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Explicit mode references in common report helper | **1** | n/a | **-2** |
+| Production field-by-field report-header constructors | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild and all **133/133** focused
+report, layout, header, direct-map, token, runtime decoder, and architecture-
+boundary tests across the three report-backed modes. Checkpoint 101 passed all
+1,295 host/component tests immediately before this declaration-only locality
+migration. No test was added, removed, renamed, disabled, or replaced, and no
+physical gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.3, 14.7, and 14.8. Runtime report
+analysis and presentation still contain mode-specific decisions in common
+files, and the one shared layout-flag check warrants normalization in a later
+layout trace. Broad lowering mutation surfaces, larger legacy harvesting,
+material whole-refactoring shrinkage, and the independent completion audit
+remain open. The goal therefore remains active.

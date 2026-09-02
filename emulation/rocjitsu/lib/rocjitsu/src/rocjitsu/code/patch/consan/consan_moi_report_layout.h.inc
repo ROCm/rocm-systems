@@ -42,9 +42,9 @@ struct alignas(8) ConSanMoiCompactDiagnosticTokenMapping {
 };
 static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
 
-/// Creates a header from the exact heterogeneous layout. The legacy
-/// make_consan_moi_report_header helper intentionally keeps its historical
-/// single Sampled capacity contract for explicit size-derived buffers.
+/// Creates a production header from the exact heterogeneous layout. Focused
+/// tests that deliberately construct partial headers own their convenience
+/// builder outside the production contract.
 [[nodiscard]] constexpr ConSanMoiReportHeader
 make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_id,
                                          const ConSanMoiReportBufferLayout &layout) {

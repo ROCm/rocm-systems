@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_record_replay_model_test_support.h"
+#include "consan_report_test_support.h"
 #include "consan_test_support.h"
 
 namespace rocjitsu {

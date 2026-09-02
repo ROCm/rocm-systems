@@ -480,6 +480,34 @@ _consan_assert_no_match(
     "ConSanMoiInline(AtomicLookup|AcquiredEpochTokenLookup|AcquiredTokenTransactionResult)|consan_moi_inline_(atomic_release_slot_index|atomic_release_lookup|acquired_epoch_token_slot_index|acquired_token_identity_matches|publish_acquired_token_transaction|acquired_epoch_token_lookup)"
     "host-only InlineShadow table and publication oracles must remain test-owned"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_report_helpers.h.inc"
+    "make_consan_moi_report_header[(]|consan_moi_(report_buffer_layout_for_bytes|direct_sampled_report_buffer_layout_for_bytes|inline_shadow_report_buffer_layout_for_bytes|record_replay_resolved_atomic_outcome|record_replay_atomic_event_is_unpublished|record_replay_fence_event_is_unpublished)|kConSanMoiInline(Token|Metadata|Shadow)|ConSanMoiInlineAcquiredToken"
+    "mode-specific report layout and decoding contracts must remain physically mode-owned"
+)
+file(READ "${_consan_dir}/consan_moi_report_contract.h" _report_contract_includes)
+foreach(_mode_report_owner IN ITEMS record_replay sampled inline_shadow)
+    if(NOT _report_contract_includes MATCHES
+       "consan_moi_${_mode_report_owner}_report_contract[.]h[.]inc")
+        message(FATAL_ERROR
+            "ConSan report contract is missing the ${_mode_report_owner} owner")
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_replay_report_contract.h.inc"
+    "ConSanMoiEngine::(Sampled|InlineShadow)"
+    "Record/Replay report construction must not select another mode"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_report_contract.h.inc"
+    "ConSanMoiEngine::(RecordReplay|InlineShadow)"
+    "Sampled report construction must not select another mode"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow_report_contract.h.inc"
+    "ConSanMoiEngine::(RecordReplay|Sampled)"
+    "InlineShadow report construction must not select another mode"
+)
 foreach(
     _record_replay_capture_type_owner
     IN ITEMS
