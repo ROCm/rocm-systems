@@ -1096,6 +1096,16 @@ int main() {
       printf("\tVendor Name: %s\n", asic_info.vendor_name);
       printf("\tSubVendorID: 0x%04x\n", asic_info.subvendor_id);
       printf("\tRevisionID: 0x%02x\n", asic_info.rev_id);
+      if (asic_info.chip_rev_id != UINT32_MAX) {
+        printf("\tChip RevisionID: 0x%02x\n", asic_info.chip_rev_id);
+      } else {
+        printf("\tChip RevisionID: N/A\n");
+      }
+      if (asic_info.external_rev_id != UINT32_MAX) {
+        printf("\tExternal RevisionID: 0x%02x\n", asic_info.external_rev_id);
+      } else {
+        printf("\tExternal RevisionID: N/A\n");
+      }
       printf("\tSubSystemID: 0x%04x\n", asic_info.subsystem_id);
       printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
       if (asic_info.oam_id != UINT32_MAX) {

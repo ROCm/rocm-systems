@@ -33,6 +33,8 @@ on:
       - opened
       - synchronize
       - reopened
+      - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -90,16 +92,33 @@ concurrency:
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: >-
+    ${{
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'ci:multi-arch'
+    }}
 
 jobs:
-  configure:
-    name: Configure Changed Projects
+  ci-gate:
+    name: Check CI Label
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for multi-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:multi-arch') }}" >> "${GITHUB_OUTPUT}"
+
+  configure:
+    name: Configure Changed Projects
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -116,8 +135,9 @@ jobs:
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
-      - name: Configure CI
-        id: configure
+      - name: Configure CI for pull request
+        id: configure-pr
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -128,8 +148,17 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
+      - name: Configure CI for manual run
+        id: configure-manual
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "changed_projects=" >> "${GITHUB_OUTPUT}"
+          echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
+          echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
+
   setup:
-    needs: configure
+    needs: [ci-gate, configure]
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
@@ -226,12 +255,15 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
+      - ci-gate
+      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -240,8 +272,21 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python build_tools/github_actions/workflow_summary.py \
+          python3 build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
+
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
+        run: |
+          echo "TheRock Multi-Arch CI is skipped by default for pull requests."
+          echo "Add the ci:multi-arch label to enable it."
+
+      - name: Report gate failure
+        if: ${{ needs.ci-gate.result != 'success' }}
+        run: |
+          echo "TheRock Multi-Arch CI gate did not complete successfully."
+          exit 1

@@ -23,6 +23,8 @@ target_include_directories(hrr_reader PUBLIC
   ${HIP_COMMON_INCLUDE_DIR}
   ${PROJECT_BINARY_DIR}/include
 )
+
+target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
 target_compile_definitions(hrr_reader PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
@@ -44,6 +46,8 @@ target_include_directories(hrr-playback PRIVATE
   ${PROJECT_SOURCE_DIR}/include
   ${PROJECT_BINARY_DIR}/include
 )
+
+target_compile_definitions(hrr-playback PRIVATE HIP_ABI_IMPL)
 target_compile_definitions(hrr-playback PRIVATE
   __HIP_PLATFORM_AMD__
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>

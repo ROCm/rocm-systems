@@ -620,7 +620,9 @@ Field | Content
 `vendor_id` |  vendor id
 `vendor_name` |  vendor name
 `device_id` |  device id
-`rev_id` |  revision id
+`rev_id` |  PCI config-space revision id (`"N/A"` if not supported)
+`chip_rev_id` | amdgpu `chip_rev`; internal chip revision (stepping) as the driver reports it, not decoded (`"N/A"` if not supported)
+`external_rev_id` | amdgpu `external_rev`; family-scoped, so interpret it alongside `device_id` (`"N/A"` if not supported)
 `asic_serial` | asic serial
 `oam_id` | oam id
 `physical_acc_id` | physical accelerator ID (UALoE-backed; `"N/A"` if not supported)
