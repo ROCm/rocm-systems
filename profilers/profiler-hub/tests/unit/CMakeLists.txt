@@ -58,29 +58,10 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/source/queries
 )
 
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub_unit_tests
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub_unit_tests
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub_unit_tests
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub_unit_tests
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
+target_include_directories(
+    profiler-hub_unit_tests
+    PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+)
 
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)

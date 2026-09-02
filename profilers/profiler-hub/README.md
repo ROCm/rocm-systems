@@ -19,8 +19,7 @@ This library is part of the [rocm-systems](https://github.com/ROCm/rocm-systems)
 - CMake 3.21+
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
-- spdlog (for logging)
-- Optional: `rocprofiler-sdk-rocpd` for schema compatibility
+- spdlog and fmt (system packages or FetchContent fallback)
 
 ### System Package Dependencies
 
@@ -42,6 +41,10 @@ sudo zypper install sqlite3-devel spdlog-devel fmt-devel
 ## Building
 
 ### Standalone Build
+
+At configure time, profiler-hub clones RocPD schema SQL from `rocm-systems` and
+embeds it as generated C++ headers. No installed `rocprofiler-sdk-rocpd` package
+is required.
 
 ```bash
 cmake -S . -B build
