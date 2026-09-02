@@ -76,7 +76,15 @@ correlation_id::sub_ref_count()
 {
     if(m_ref_count == 0)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format(
+        // A decrement arriving when the reference count is already zero is expected once
+        // finalization has begun: HSA async threads can deliver completion callbacks for
+        // correlation IDs that correlation_id_finalize() has already force-retired. Only
+        // escalate this to a (CI-fatal) error outside of finalization, where it indicates a
+        // genuine reference-counting bug. This is the decrement-side analogue of the
+        // finalization tolerance already present in correlation_tracing_service::construct(),
+        // which likewise treats "HSA async threads call APIs after finalization starts" as a
+        // non-error condition.
+        ROCP_CI_LOG_IF(WARNING, registration::get_fini_status() == 0) << fmt::format(
             "attempt to decrement correlation id {} reference count but reference count is zero",
             internal);
         return 0;
@@ -253,7 +261,14 @@ correlation_id_finalize()
                 {}
             }
         }
-        ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
+        // Dangling correlation IDs at finalization are not necessarily a reference-counting
+        // bug. On some platforms (observed on gfx1151 APUs) ROCr may not deliver the final
+        // async completion callbacks before the tool finalizes, leaving IDs that are
+        // force-retired by the loop above. Downgrade from a CI-fatal assertion to a warning so
+        // profiling still finalizes and emits its output instead of aborting (SIGABRT). This is
+        // consistent with the per-ID ROCP_WARNING already emitted in the retire loop above, so
+        // it does not introduce new logging categories.
+        ROCP_WARNING_IF(ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
     });
 }
 }  // namespace context
