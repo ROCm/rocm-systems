@@ -668,6 +668,16 @@ foreach(_mode_registry_owner IN ITEMS
         "MOI mode operations must not duplicate the semantic engine probe vocabulary"
     )
 endforeach()
+foreach(_common_fence_consumer IN ITEMS
+    consan_atomic_fence_policy.cpp
+    consan_moi_placement.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_common_fence_consumer}"
+        "ConSanProbeIntentKind::FenceRecord"
+        "common fence composition must consume the engine probe vocabulary"
+    )
+endforeach()
 
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from

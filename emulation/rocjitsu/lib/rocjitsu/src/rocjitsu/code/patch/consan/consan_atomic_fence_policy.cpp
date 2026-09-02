@@ -525,11 +525,11 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                      ConSanProbeIntentKind::AtomicAddressCapture, ConSanProbePosition::Before,
                      *decision.association, ConSanDynamicResultRequirement::None);
       decision.intent_ids.push_back(capture);
-      const bool record_replay_fence_owns_ordinary =
-          request.engine == ConSanCapabilityEngine::RecordReplay &&
+      const bool independent_fence_owns_ordinary =
+          vocabulary->fence != ConSanProbeIntentKind::Count &&
           event.kind == ConSanSyncEventKind::OrdinaryMemory &&
           has_qualified_fence_for(synchronization, event.semantic_id);
-      if (!record_replay_fence_owns_ordinary) {
+      if (!independent_fence_owns_ordinary) {
         decision.intent_ids.push_back(add_intent(result.plan, semantic_id.physical, {semantic_id},
                                                  vocabulary->atomic, ConSanProbePosition::After,
                                                  *decision.association, decision.dynamic_result));
@@ -628,7 +628,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
         decision.kind = ConSanSiteDecisionKind::Admitted;
         decision.reason = ConSanFencePolicyReason::None;
         decision.communication_lowering_form = atomic_decision->lowering_form;
-        if (request.engine == ConSanCapabilityEngine::RecordReplay) {
+        if (vocabulary->fence != ConSanProbeIntentKind::Count) {
           if (!atomic_decision->intent_ids.empty()) {
             const ConSanProbeIntentId capture = atomic_decision->intent_ids.front();
             add_covered_site(result.plan, capture, fence_id);
@@ -636,8 +636,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
           }
           const ConSanProbeIntentId record =
               add_intent(result.plan, fence_id.physical, {atomic_decision->semantic_site, fence_id},
-                         ConSanProbeIntentKind::FenceRecord, ConSanProbePosition::After,
-                         *decision.association, ConSanDynamicResultRequirement::None);
+                         vocabulary->fence, ConSanProbePosition::After, *decision.association,
+                         ConSanDynamicResultRequirement::None);
           decision.intent_ids.push_back(record);
           atomic_decision->intent_ids.push_back(record);
         } else {
@@ -650,19 +650,20 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
     result.plan.fence_site_decisions.push_back(std::move(decision));
   }
 
-  // A qualified ordinary Record/Replay sequence normally delegates its after
-  // evidence to a fence. If a corrupt inventory claimed a qualified candidate
-  // but no usable fence decision survived, fall back to the direct atomic
-  // record rather than publishing a before-only admitted contract.
-  if (request.engine == ConSanCapabilityEngine::RecordReplay) {
+  // An engine with independent fence evidence normally delegates a qualified
+  // ordinary sequence's after evidence to that fence. If a corrupt inventory
+  // claimed a qualified candidate but no usable fence decision survived, fall
+  // back to the engine's direct atomic evidence rather than publishing a
+  // before-only admitted contract.
+  if (vocabulary->fence != ConSanProbeIntentKind::Count) {
     for (ConSanAtomicSiteDecision &decision : result.plan.atomic_site_decisions) {
       if (decision.kind != ConSanSiteDecisionKind::Admitted || !decision.association ||
           decision.intent_ids.size() != 1u)
         continue;
-      decision.intent_ids.push_back(
-          add_intent(result.plan, decision.semantic_site.physical, {decision.semantic_site},
-                     ConSanProbeIntentKind::AtomicRecord, ConSanProbePosition::After,
-                     *decision.association, decision.dynamic_result));
+      decision.intent_ids.push_back(add_intent(result.plan, decision.semantic_site.physical,
+                                               {decision.semantic_site}, vocabulary->atomic,
+                                               ConSanProbePosition::After, *decision.association,
+                                               decision.dynamic_result));
     }
   }
 

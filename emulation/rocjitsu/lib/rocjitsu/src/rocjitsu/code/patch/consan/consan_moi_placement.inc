@@ -74,11 +74,11 @@ first_admitted_moi_register_range(uint32_t begin, uint16_t width, uint16_t limit
 /// adjacent barriers coalesced by policy form a generated relay spine whose
 /// reach is independent of the number of admitted evidence intents.
 ///
-/// Record/Replay's dense barrier router deliberately uses one entry for a
-/// signal/wait sequence: the completing non-signal member owns that shared
-/// route. Record/Replay runtime-kernel decisions are the one excluded class,
-/// matching the engine's explicit no-instrumentation contract. Only
-/// Record/Replay emits independent admitted `FenceRecord` probes.
+/// A dense barrier router deliberately uses one entry for a signal/wait
+/// sequence: the completing non-signal member owns that shared route. Runtime-
+/// kernel decisions are the one excluded class, matching the mode's explicit
+/// no-instrumentation contract. An engine's vocabulary declares whether it
+/// emits independent admitted fence probes.
 [[nodiscard]] uint64_t
 moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                                       const ConSanObservationPlan &observation_plan,
@@ -104,10 +104,11 @@ moi_reserved_access_sync_island_count(const ProgramInventory &program_inventory,
                     }),
                 policy.max_patches)
           : 0u;
+  const ConSanEngineProbeVocabulary &evidence =
+      *consan_engine_probe_vocabulary(observation_plan.engine);
   const uint64_t fence_count =
-      request.moi_track_atomics
-          ? std::min<uint64_t>(std::ranges::count(observation_plan.probe_intents,
-                                                  ConSanProbeIntentKind::FenceRecord,
+      request.moi_track_atomics && evidence.fence != ConSanProbeIntentKind::Count
+          ? std::min<uint64_t>(std::ranges::count(observation_plan.probe_intents, evidence.fence,
                                                   &ConSanProbeIntent::kind),
                                policy.max_patches)
           : 0u;
