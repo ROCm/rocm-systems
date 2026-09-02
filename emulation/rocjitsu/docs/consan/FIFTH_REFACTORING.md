@@ -10638,3 +10638,55 @@ further representational fields.  The aggregate barrier translation unit still
 compiles mode bodies beside the common mechanism.  Full target/mode locality,
 broad transaction and operating-point reduction, extension-proof revalidation,
 and the independent Section 14 audit remain open.
+
+### 16.154 Convergence checkpoint 153: InlineShadow owns its barrier entry
+
+After the shared reservation contract stopped depending on Record/Replay, its
+remaining public function was an InlineShadow mode entry point.  The declaration
+lived in the common barrier header and the wrapper implementation lived at the
+end of the common barrier body even though its only caller is the InlineShadow
+mode transaction.  The wrapper applies InlineShadow policy by disabling the
+shared exec-save route for an inline scalar spill before invoking the common
+mechanism; that policy is not part of the shared barrier abstraction.
+
+The declaration now lives in `consan_moi_inline_shadow.h` and the wrapper lives
+in the InlineShadow barrier implementation fragment beside the mode's epoch
+emission.  The common barrier header now exposes only the exact shared island-
+reservation product, and the InlineShadow translation unit drops its redundant
+direct include of that header because its mode contract already names the
+dependency.  No adapter or duplicate wrapper remains.
+
+The structural gate requires the declaration and definition in the
+InlineShadow-named owners and rejects the symbol in both the common barrier
+contract and common implementation.  This makes the physical file boundary
+match the already established runtime call direction.
+
+| Signal | Checkpoint 153 | Cumulative change | Slice change from checkpoint 152 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,593 | **-2,383** | **-7** |
+| Nonblank production lines | 96,176 | **-2,908** | **-7** |
+| Production implementation lines | 88,390 | **-3,060** | **-7** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| InlineShadow barrier entry declarations/definitions in common owners | **0 / 0** | n/a | **-2 / -2 files** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `e4ad8933418`.  Validation includes a
+successful full `-j16` build and a **322/322** barrier-matched sweep including
+the architecture-boundary gate, **100** simulator-device cases across the five
+targets, and **27** physical gfx1201 cases.  The physical cases were selected by
+an overly broad barrier-name regex rather than by checkpoint policy; subsequent
+sweeps return to explicit physical-test exclusion.  No test was removed,
+renamed, disabled, or replaced.
+
+This slice pays back the two-line checkpoint-152 product investment and removes
+five additional implementation lines.  It also leaves a sharper next question:
+the common barrier transaction still declares and plans InlineShadow body
+products internally even though emission and the public entry are mode-owned.
+That seam needs a deep trace of the plan/emit dependency before attempting a
+compiled split.  Full target/mode locality, broad transaction and operating-
+point reduction, extension-proof revalidation, and the independent Section 14
+audit remain open.
