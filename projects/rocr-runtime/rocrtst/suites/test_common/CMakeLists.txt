@@ -463,7 +463,11 @@ set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodese
 
 include_directories(${ROCRTST_ROOT})
 include_directories(${ROCRTST_ROOT}/gtest/include)
-include_directories(${ROCRTST_ROOT}/thirdparty/include/)
+# NOTE: ${ROCRTST_ROOT}/thirdparty/include holds a bundled hwloc 1.x header only.
+# It must NOT be on the global include path when we link a system/TheRock hwloc
+# 2.x library, otherwise the stale 1.x header shadows the 2.x one and enum/flag
+# values (e.g. HWLOC_TOPOLOGY_FLAG_IO_DEVICES) silently mismatch the runtime lib.
+# It is added below only in the bundled-hwloc fallback branch.
 
 # Custom command set for code objects.
 set (HSACO_TARG_LIST "")
@@ -763,6 +767,8 @@ if(NOT HAVE_HWLOC)
     )
     set(HWLOC_TARGET hwloc_imported)
     set(HAVE_HWLOC TRUE)
+    # The bundled thirdparty hwloc is 1.x; expose its matching header only here.
+    include_directories(${ROCRTST_ROOT}/thirdparty/include/)
     message(STATUS "Found hwloc library (fallback): ${HWLOC_LIBRARY}")
     message(WARNING "Using pre-built hwloc from thirdparty/lib - may have symbol version incompatibilities with TheRock's numa")
   else()
