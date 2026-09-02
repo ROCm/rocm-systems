@@ -128,23 +128,19 @@ void Link::send_at(std::unique_ptr<Message> msg, Tick ready_tick) {
 Tick Link::depart_now() const {
   SimulationEngine *engine = src_->owner()->engine();
   const PartitionID pid = src_->owner()->partition_id();
-  // The test is whether the partition context exists, not whether create() has
-  // finished. create() runs every component's initialize() hook before it
-  // marks the engine created, and a component that primes a link from that
-  // hook has a perfectly good tick to depart at. shutdown() destroys the
-  // contexts, so the same test still refuses a send against freed state --
-  // which is the case that actually matters, the one the old assert missed.
+  // Whether the partition context exists, not whether create() has finished:
+  // create() runs every component's initialize() hook before it marks the
+  // engine created, and a component priming a link from that hook has a
+  // perfectly good tick to depart at. This still refuses a send against the
+  // freed contexts shutdown() leaves, which is the case that matters.
   if (engine == nullptr || pid >= engine->num_contexts())
     throw std::logic_error("a clocked link requires a component attached to a live engine");
   return engine->context(pid).current_tick();
 }
 
 Tick Link::depart_now_or_zero() const {
-  // A functional link has no simulated time, and asking for the current tick
-  // is itself what requires an engine, so "now" on one is tick zero. Settling
-  // the mode here rather than inside depart_now() is what lets a buffered
-  // functional link -- which stamps but never schedules -- work between
-  // engineless components, as it did before departures were a parameter.
+  // Settled here rather than inside depart_now() so that a buffered functional
+  // link -- which stamps but never schedules -- needs no engine at all.
   return exec_mode_ == ExecMode::FUNCTIONAL ? Tick{0} : depart_now();
 }
 
@@ -172,13 +168,10 @@ Tick Link::stamp_for_send(Message &message, Tick ready_tick) const {
 
   const Tick arrival = message.arrival_tick();
   if (arrival == TICK_MAX) {
-    // The departure was representable but the crossing is not. Refusing the
-    // arrival matters as much as refusing the departure: TICK_MAX is what an
-    // empty event queue and an empty message queue both report as their next
-    // time, so a message landing on it is indistinguishable from no message
-    // at all -- it never lowers a partition's min-outgoing tick, so LBTS
-    // advances straight past it, and a buffered one strands itself at the
-    // head of a queue its owner has been told is empty.
+    // The departure was representable but the crossing is not. A message
+    // landing on TICK_MAX is indistinguishable from no message at all: LBTS
+    // advances straight past it, and a buffered one strands itself at the head
+    // of a queue its owner has been told is empty.
     throw std::invalid_argument("a link cannot carry a message arriving at TICK_MAX");
   }
   return arrival;

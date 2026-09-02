@@ -315,9 +315,8 @@ public:
   ///         engine. A functional link needs no engine and needs no tick.
   void send(std::unique_ptr<Message> msg) {
     // Read into a local first: the departure and the moved-from message are
-    // two arguments of one call, and their evaluation order is unspecified,
-    // so sequencing the throwing one ahead of the move keeps which frame owns
-    // the message on a refusal from depending on the compiler.
+    // two arguments of one call with unspecified evaluation order, so this is
+    // what keeps who owns the message on a refusal off the compiler.
     const Tick ready_tick = depart_now_or_zero();
     send_at(std::move(msg), ready_tick);
   }
