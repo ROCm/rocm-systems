@@ -649,7 +649,7 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
         append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
                                               body->anchor_offset + body->original_size, pc,
                                               scc_save, *environment.target_profile);
-    if (!disjoint || body->indirect_required_sgpr_count < required || !encoded ||
+    if (!disjoint || body->required_sgpr_count < required || !encoded ||
         expected_entry.size() != kLdsCheckTrapIndirectJumpWords ||
         expected_return.size() != kLdsCheckTrapIndirectJumpWords ||
         !environment.replacement_text.matches(island.trampoline_offset, expected_entry) ||
@@ -882,28 +882,32 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     return;
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
+  const auto has_generic_indirect_state = [](const ConSanPatchInfo &patch) {
+    return patch.indirect_pc_sgpr || patch.indirect_saved_scc_sgpr ||
+           patch.indirect_saved_vcc_sgpr || patch.indirect_return_offset ||
+           patch.indirect_return_pc_sgpr || patch.indirect_return_saved_scc_sgpr ||
+           patch.indirect_return_saved_vcc_sgpr;
+  };
 
   for (const ConSanPatchInfo &dispatcher : result.patches) {
     if (dispatcher.kind != ConSanPatchKind::TrampolineScDenseCallDispatcher)
       continue;
-    if (!dispatcher.sc_dense_dispatcher_offset ||
-        *dispatcher.sc_dense_dispatcher_offset != dispatcher.trampoline_offset ||
-        dispatcher.sc_dense_call_return_sgpr.has_value() ==
-            dispatcher.sc_dense_explicit_key_sgpr.has_value() ||
-        !dispatcher.indirect_pc_sgpr || !dispatcher.indirect_saved_scc_sgpr) {
+    if (!dispatcher.sc_dense_route || dispatcher.sc_dense_route->body ||
+        dispatcher.sc_dense_route->dispatcher_offset != dispatcher.trampoline_offset ||
+        !dispatcher.sc_dense_route->is_well_formed() || has_generic_indirect_state(dispatcher) ||
+        dispatcher.required_sgpr_count < dispatcher.sc_dense_route->minimum_required_sgpr_count()) {
       errors.emplace_back("ConSan dense-call proof found incomplete dispatcher metadata");
       continue;
     }
+    const ConSanSuperColliderDenseRouteEffect &route = *dispatcher.sc_dense_route;
     const auto host = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.kind == ConSanPatchKind::TrampolineScDenseEntryHost &&
-             patch.sc_dense_dispatcher_offset == dispatcher.sc_dense_dispatcher_offset;
+      return patch.kind == ConSanPatchKind::TrampolineScDenseEntryHost && patch.sc_dense_route &&
+             patch.sc_dense_route->same_route(route);
     });
     if (host == result.patches.end() || host->original_size != 8u * sizeof(uint32_t) ||
-        host->trampoline_size != 15u * sizeof(uint32_t) ||
-        host->sc_dense_call_return_sgpr != dispatcher.sc_dense_call_return_sgpr ||
-        host->sc_dense_explicit_key_sgpr != dispatcher.sc_dense_explicit_key_sgpr ||
-        host->indirect_pc_sgpr != dispatcher.indirect_pc_sgpr ||
-        host->indirect_saved_scc_sgpr != dispatcher.indirect_saved_scc_sgpr ||
+        host->trampoline_size != 15u * sizeof(uint32_t) || host->sc_dense_route->body ||
+        has_generic_indirect_state(*host) ||
+        host->required_sgpr_count < route.minimum_required_sgpr_count() ||
         host->anchor_offset > original_text.size() ||
         host->original_size > original_text.size() - host->anchor_offset ||
         host->trampoline_offset > replacement_text.size() ||
@@ -911,25 +915,14 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       errors.emplace_back("ConSan dense-call proof found an invalid entry-host pairing");
       continue;
     }
-    const uint16_t jump_pc = *dispatcher.indirect_pc_sgpr;
-    const uint16_t saved_scc = *dispatcher.indirect_saved_scc_sgpr;
-    const bool explicit_key = dispatcher.sc_dense_explicit_key_sgpr.has_value();
-    const uint16_t dispatch_key = explicit_key ? *dispatcher.sc_dense_explicit_key_sgpr
-                                               : *dispatcher.sc_dense_call_return_sgpr;
-    const uint16_t dispatch_key_width = explicit_key ? 1u : 2u;
-    const bool resources_disjoint = dispatch_key + dispatch_key_width - 1u < jump_pc ||
-                                    dispatch_key > static_cast<uint16_t>(jump_pc + 1u);
-    if (!resources_disjoint || saved_scc == dispatch_key ||
-        (!explicit_key && saved_scc == dispatch_key + 1u) || saved_scc == jump_pc ||
-        saved_scc == jump_pc + 1u ||
-        dispatcher.indirect_required_sgpr_count < dispatch_key + dispatch_key_width) {
-      errors.emplace_back("ConSan dense-call proof found overlapping scalar resources");
-      continue;
-    }
+    const uint16_t jump_pc = route.jump_pc_sgpr;
+    const uint16_t saved_scc = route.saved_scc_sgpr;
+    const bool explicit_key = route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
+    const uint16_t dispatch_key = route.key_sgpr;
 
     std::vector<const ConSanPatchInfo *> bodies;
     for (const ConSanPatchInfo &patch : result.patches) {
-      if (patch.sc_dense_dispatcher_offset != dispatcher.sc_dense_dispatcher_offset)
+      if (!patch.sc_dense_route || !patch.sc_dense_route->same_route(route))
         continue;
       if (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
           patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap)
@@ -1012,32 +1005,43 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     bool valid = append_target(0u, host->trampoline_offset);
     for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
       const ConSanPatchInfo *body = bodies[body_index];
+      const auto body_route = body->sc_dense_route->body;
+      const bool isolated_route = !has_generic_indirect_state(*body);
+      const uint16_t vcc_save_width =
+          environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
+                  environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4
+              ? 2u
+              : 1u;
+      const uint32_t body_required_sgprs =
+          body_route ? std::max<uint32_t>(route.minimum_required_sgpr_count(),
+                                          static_cast<uint32_t>(body_route->vcc_save_sgpr) +
+                                              vcc_save_width)
+                     : std::numeric_limits<uint32_t>::max();
       const auto delta = compute_sopp_branch_simm16(
           body->anchor_offset + (explicit_key ? sizeof(uint32_t) : 0u), island_offset);
       std::optional<std::array<uint32_t, 2>> anchor;
-      if (explicit_key && delta && body_index < 64u &&
-          body->sc_dense_explicit_key_sgpr == dispatcher.sc_dense_explicit_key_sgpr &&
-          body->indirect_saved_vcc_sgpr == dispatcher.sc_dense_explicit_key_sgpr) {
+      if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
+          body_required_sgprs <= body->required_sgpr_count && explicit_key && delta &&
+          body_index < 64u) {
         anchor = std::array<uint32_t, 2>{
             build_s_mov_b32(dispatch_key,
                             scalar_positive_inline_u32(static_cast<uint16_t>(body_index + 1u)),
                             arch),
             build_s_branch(*delta, arch)};
-      } else if (!explicit_key && delta &&
-                 body->sc_dense_call_return_sgpr == dispatcher.sc_dense_call_return_sgpr) {
+      } else if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
+                 body_required_sgprs <= body->required_sgpr_count && !explicit_key && delta) {
         const auto call = instrumentation::build_s_call_i64(dispatch_key, *delta, arch);
         if (call)
           anchor = std::array<uint32_t, 2>{*call, nop};
       }
       std::vector<uint32_t> expected_return;
       valid &=
-          anchor.has_value() &&
+          body_route && anchor.has_value() &&
           environment.replacement_text.matches(body->anchor_offset, *anchor) &&
-          body->indirect_return_offset &&
-          append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
+          append_lds_check_trap_indirect_return(expected_return, body_route->return_offset,
                                                 body->anchor_offset + body->original_size, jump_pc,
                                                 saved_scc, *environment.target_profile) &&
-          environment.replacement_text.matches(*body->indirect_return_offset, expected_return) &&
+          environment.replacement_text.matches(body_route->return_offset, expected_return) &&
           append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
                                      : static_cast<uint32_t>(body->anchor_offset +
                                                              sizeof(uint32_t) - island_offset),
@@ -3831,8 +3835,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
         requirement.required_group_bytes =
             std::max(requirement.required_group_bytes, patch.required_group_segment_size());
         requirement.required_sgpr_count =
-            std::max({requirement.required_sgpr_count, patch.required_sgpr_count,
-                      patch.indirect_required_sgpr_count});
+            std::max(requirement.required_sgpr_count, patch.required_sgpr_count);
         requirement.allow_entry_delta |=
             patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
             patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;

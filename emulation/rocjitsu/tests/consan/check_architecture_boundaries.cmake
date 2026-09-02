@@ -1295,6 +1295,42 @@ _consan_assert_no_match(
     "SuperCollider scalar-VCC spill effects must remain target independent"
 )
 
+# SuperCollider dense dispatch retains one mode-local route product. The
+# dispatcher, relocated host, and bodies must not reconstruct that route from
+# generic indirect fields or the former three independently optional fields.
+file(READ
+    "${_consan_dir}/consan_supercollider_dense_route.h.inc"
+    _sc_dense_route_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_supercollider_dense_route[.]h[.]inc" OR
+   NOT _sc_dense_route_contract MATCHES
+       "struct ConSanSuperColliderDenseRouteEffect" OR
+   NOT _sc_dense_route_contract MATCHES
+       "enum class ConSanSuperColliderDenseKeyKind" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanSuperColliderDenseRouteEffect>[ \\t]+sc_dense_route" OR
+   NOT _consan_validation MATCHES
+       "sc_dense_route->is_well_formed" OR
+   NOT _consan_validation MATCHES
+       "sc_dense_route->same_route")
+    message(FATAL_ERROR
+        "SuperCollider dense dispatch lost its typed route effect"
+    )
+endif()
+foreach(_sc_dense_route_owner IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_sc_dense_route_owner}"
+        "sc_dense_(dispatcher_offset|call_return_sgpr|explicit_key_sgpr)|indirect_required_sgpr_count"
+        "dense routes and total SGPR requirements must retain one authority"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_dense_route.h.inc"
+    "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|consan_moi_|ConSanTargetProfile"
+    "SuperCollider dense-route effects must remain target and MOI independent"
+)
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(

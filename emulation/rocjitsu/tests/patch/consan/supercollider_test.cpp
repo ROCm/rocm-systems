@@ -696,7 +696,7 @@ TEST(ConSan, FlatCheckTrapProofUsesIndirectIslandForFarAppendedCave) {
   EXPECT_EQ(island->trampoline_offset, 9u * sizeof(uint32_t));
   EXPECT_EQ(island->trampoline_size, 7u * sizeof(uint32_t));
   EXPECT_EQ(body->trampoline_offset, original_text_size);
-  EXPECT_GT(body->indirect_required_sgpr_count, 0u);
+  EXPECT_GT(body->required_sgpr_count, 0u);
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_TRUE(body->indirect_return_offset.has_value());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -5775,7 +5775,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
   EXPECT_EQ(island->trampoline_size, 7u * sizeof(uint32_t));
   EXPECT_EQ(body->anchor_offset, 0u);
   EXPECT_EQ(body->trampoline_offset, original_text_size);
-  EXPECT_GT(body->indirect_required_sgpr_count, 0u);
+  EXPECT_GT(body->required_sgpr_count, 0u);
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
   ASSERT_TRUE(body->indirect_pc_sgpr.has_value());
   ASSERT_TRUE(body->indirect_saved_scc_sgpr.has_value());
@@ -5799,7 +5799,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
               sizeof(descriptor));
   const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  EXPECT_GE((sgpr_granulated + 1u) * 8u, body->indirect_required_sgpr_count);
+  EXPECT_GE((sgpr_granulated + 1u) * 8u, body->required_sgpr_count);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
   ConSanTransformArtifacts corrupted = result;
@@ -5862,7 +5862,7 @@ TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
     EXPECT_FALSE(overlaps(vcc_save, 2u, pc, 2u));
     EXPECT_FALSE(overlaps(vcc_save, 2u, scc_save, 1u));
     EXPECT_FALSE(overlaps(pc, 2u, scc_save, 1u));
-    EXPECT_GE(body->indirect_required_sgpr_count, static_cast<uint16_t>(vcc_save + 2u));
+    EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(vcc_save + 2u));
   }
 }
 
@@ -5989,20 +5989,52 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
                                &ConSanPatchInfo::kind),
             kSiteCount);
   const auto explicit_dispatcher = std::ranges::find_if(result.patches, [](const auto &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher &&
-           patch.sc_dense_explicit_key_sgpr.has_value();
+    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher && patch.sc_dense_route &&
+           patch.sc_dense_route->key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
   });
   ASSERT_NE(explicit_dispatcher, result.patches.end());
-  EXPECT_FALSE(explicit_dispatcher->sc_dense_call_return_sgpr.has_value());
+  ASSERT_TRUE(explicit_dispatcher->sc_dense_route);
+  EXPECT_FALSE(explicit_dispatcher->sc_dense_route->body.has_value());
+  EXPECT_TRUE(explicit_dispatcher->sc_dense_route->is_well_formed());
+  EXPECT_FALSE(explicit_dispatcher->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(explicit_dispatcher->indirect_saved_scc_sgpr.has_value());
 
   const auto first_host = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
   ASSERT_NE(first_host, result.patches.end());
-  ASSERT_TRUE(first_host->indirect_pc_sgpr);
-  ASSERT_TRUE(first_host->indirect_saved_scc_sgpr);
+  ASSERT_TRUE(first_host->sc_dense_route);
+  EXPECT_TRUE(first_host->sc_dense_route->same_route(*explicit_dispatcher->sc_dense_route));
+  EXPECT_FALSE(first_host->sc_dense_route->body.has_value());
+  EXPECT_FALSE(first_host->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(first_host->indirect_saved_scc_sgpr.has_value());
+  const auto first_body = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap && patch.sc_dense_route;
+  });
+  ASSERT_NE(first_body, result.patches.end());
+  ASSERT_TRUE(first_body->sc_dense_route->body);
+  EXPECT_TRUE(first_body->sc_dense_route->same_route(*explicit_dispatcher->sc_dense_route));
+  EXPECT_EQ(first_body->sc_dense_route->body->vcc_save_sgpr,
+            explicit_dispatcher->sc_dense_route->key_sgpr);
+  EXPECT_FALSE(first_body->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(first_body->indirect_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(first_body->indirect_saved_vcc_sgpr.has_value());
+  EXPECT_FALSE(first_body->indirect_return_offset.has_value());
+
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  ConSanTransformArtifacts corrupted = result;
+  const auto corrupted_body =
+      std::ranges::find_if(corrupted.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap && patch.sc_dense_route;
+      });
+  ASSERT_NE(corrupted_body, corrupted.patches.end());
+  corrupted_body->sc_dense_route->key_sgpr++;
+  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("dense-call proof") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
   const uint64_t first_host_word = first_host->anchor_offset / sizeof(uint32_t);
   ASSERT_LE(first_host_word + 17u, text_words.size());
-  const uint16_t jump_pc = *first_host->indirect_pc_sgpr;
+  const uint16_t jump_pc = first_host->sc_dense_route->jump_pc_sgpr;
   // Define only the high half of the return pair inside the eight displaced
   // words and consume it at the boundary instruction. The tuple is dead at
   // host entry but partially live at the appended return endpoint, so this
@@ -6026,13 +6058,12 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
       std::ranges::find(boundary_partial_result.patches,
                         ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
   ASSERT_NE(boundary_replacement_host, boundary_partial_result.patches.end());
-  ASSERT_TRUE(boundary_replacement_host->indirect_pc_sgpr);
-  ASSERT_TRUE(boundary_replacement_host->indirect_saved_scc_sgpr);
+  ASSERT_TRUE(boundary_replacement_host->sc_dense_route);
   EXPECT_NE(boundary_replacement_host->anchor_offset, first_host->anchor_offset)
-      << "first jump=" << *first_host->indirect_pc_sgpr
-      << " first scc=" << *first_host->indirect_saved_scc_sgpr
-      << " replacement jump=" << *boundary_replacement_host->indirect_pc_sgpr
-      << " replacement scc=" << *boundary_replacement_host->indirect_saved_scc_sgpr;
+      << "first jump=" << first_host->sc_dense_route->jump_pc_sgpr
+      << " first scc=" << first_host->sc_dense_route->saved_scc_sgpr
+      << " replacement jump=" << boundary_replacement_host->sc_dense_route->jump_pc_sgpr
+      << " replacement scc=" << boundary_replacement_host->sc_dense_route->saved_scc_sgpr;
 
   // Split the block immediately after the displaced prefix with a backward
   // branch whose target is the high-half consumer. This leaves no boundary
@@ -6056,6 +6087,42 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
                         ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
   ASSERT_NE(block_exit_replacement_host, block_exit_partial_result.patches.end());
   EXPECT_NE(block_exit_replacement_host->anchor_offset, first_host->anchor_offset);
+}
+
+TEST(ConSan, SuperColliderDenseRouteOwnsExactKeyAndBodyProtocol) {
+  const ConSanSuperColliderDenseRouteEffect call_route{
+      .dispatcher_offset = 128u,
+      .jump_pc_sgpr = 4u,
+      .saved_scc_sgpr = 6u,
+      .key_sgpr = 8u,
+      .key_kind = ConSanSuperColliderDenseKeyKind::CallReturnPair,
+      .body = ConSanSuperColliderDenseBodyRoute{.vcc_save_sgpr = 10u, .return_offset = 256u},
+  };
+  EXPECT_EQ(call_route.key_width(), 2u);
+  EXPECT_EQ(call_route.minimum_required_sgpr_count(), 10u);
+  EXPECT_TRUE(call_route.is_well_formed());
+
+  ConSanSuperColliderDenseRouteEffect explicit_route{
+      .dispatcher_offset = 128u,
+      .jump_pc_sgpr = 4u,
+      .saved_scc_sgpr = 6u,
+      .key_sgpr = 8u,
+      .key_kind = ConSanSuperColliderDenseKeyKind::ExplicitScalar,
+      .body = ConSanSuperColliderDenseBodyRoute{.vcc_save_sgpr = 8u, .return_offset = 256u},
+  };
+  EXPECT_EQ(explicit_route.key_width(), 1u);
+  EXPECT_EQ(explicit_route.minimum_required_sgpr_count(), 9u);
+  EXPECT_TRUE(explicit_route.is_well_formed());
+  EXPECT_FALSE(explicit_route.same_route(call_route));
+
+  explicit_route.body->vcc_save_sgpr = 9u;
+  EXPECT_FALSE(explicit_route.is_well_formed());
+  explicit_route.body->vcc_save_sgpr = explicit_route.key_sgpr;
+  explicit_route.saved_scc_sgpr = explicit_route.jump_pc_sgpr;
+  EXPECT_FALSE(explicit_route.is_well_formed());
+  explicit_route.saved_scc_sgpr = 6u;
+  explicit_route.key_kind = static_cast<ConSanSuperColliderDenseKeyKind>(2u);
+  EXPECT_FALSE(explicit_route.is_well_formed());
 }
 
 TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
@@ -6158,13 +6225,13 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
                                &ConSanPatchInfo::kind),
             kSiteCount);
   const auto explicit_dispatcher = std::ranges::find_if(result.patches, [](const auto &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher &&
-           patch.sc_dense_explicit_key_sgpr.has_value();
+    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher && patch.sc_dense_route &&
+           patch.sc_dense_route->key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
   });
   ASSERT_NE(explicit_dispatcher, result.patches.end());
-  ASSERT_TRUE(explicit_dispatcher->indirect_pc_sgpr);
-  EXPECT_EQ(*explicit_dispatcher->indirect_pc_sgpr, 10u);
-  EXPECT_GE(explicit_dispatcher->indirect_required_sgpr_count, 12u);
+  ASSERT_TRUE(explicit_dispatcher->sc_dense_route);
+  EXPECT_EQ(explicit_dispatcher->sc_dense_route->jump_pc_sgpr, 10u);
+  EXPECT_GE(explicit_dispatcher->required_sgpr_count, 12u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -6208,11 +6275,12 @@ TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
                                &ConSanPatchInfo::kind),
             kSiteCount);
   const auto explicit_dispatcher = std::ranges::find_if(result.patches, [](const auto &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher &&
-           patch.sc_dense_explicit_key_sgpr.has_value();
+    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher && patch.sc_dense_route &&
+           patch.sc_dense_route->key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
   });
   ASSERT_NE(explicit_dispatcher, result.patches.end());
-  EXPECT_FALSE(explicit_dispatcher->sc_dense_call_return_sgpr.has_value());
+  ASSERT_TRUE(explicit_dispatcher->sc_dense_route);
+  EXPECT_FALSE(explicit_dispatcher->sc_dense_route->body.has_value());
 }
 
 TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
@@ -7199,7 +7267,7 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-    EXPECT_GE((granulated + 1u) * 8u, patch->indirect_required_sgpr_count);
+    EXPECT_GE((granulated + 1u) * 8u, patch->required_sgpr_count);
   }
 }
 

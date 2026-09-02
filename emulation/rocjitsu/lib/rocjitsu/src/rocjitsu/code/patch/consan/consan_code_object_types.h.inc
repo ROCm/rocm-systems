@@ -620,18 +620,13 @@ struct ConSanPatchAbiEffects {
   /// instead preserve SCC in inactive EXEC_HI and populate the VCC-save field.
   std::optional<uint16_t> indirect_return_saved_scc_sgpr;
   std::optional<uint16_t> indirect_return_saved_vcc_sgpr;
-  uint16_t indirect_required_sgpr_count = 0;
   /// Entry island paired with this MOI dense dispatcher. This explicit
   /// relation lets later synchronization composition reuse an access router
   /// without depending on incidental result.patches ordering.
   std::optional<uint64_t> moi_dense_entry_island_offset;
-  /// Shared SuperCollider dense-call dispatcher selected by this access body.
-  /// A call-return pair is distinct from the absolute-jump scratch pair. A
-  /// bounded explicit-key fallback instead reuses the body's dead VCC-save
-  /// SGPR and keeps each two-word anchor spill-free.
-  std::optional<uint64_t> sc_dense_dispatcher_offset;
-  std::optional<uint16_t> sc_dense_call_return_sgpr;
-  std::optional<uint16_t> sc_dense_explicit_key_sgpr;
+  /// Exact SuperCollider-only dispatcher route used by this coordinator or
+  /// body. Other modes and non-dense SuperCollider patches leave it absent.
+  std::optional<ConSanSuperColliderDenseRouteEffect> sc_dense_route;
   /// Complete owner-local persistent identity layout and the distinct,
   /// target-normalized base available to ephemeral spill state.
   std::optional<ConSanMoiPrivateStateLayout> private_state_layout;

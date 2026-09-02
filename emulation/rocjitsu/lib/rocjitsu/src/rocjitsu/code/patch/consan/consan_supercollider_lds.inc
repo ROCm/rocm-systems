@@ -189,7 +189,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::vector<uint64_t> entry_relay_offsets = {};
     std::optional<uint16_t> selectable_vgpr_bank_mode;
     std::optional<size_t> dense_call_group_index;
-    std::optional<uint16_t> dense_call_return_sgpr;
     std::optional<uint16_t> dense_explicit_key;
     std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
     bool requires_branch_only_route = false;
@@ -216,12 +215,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint64_t descriptor_file_offset = 0;
     uint64_t entry_host_offset = 0;
     std::vector<uint32_t> displaced_host_words;
-    uint64_t dispatcher_offset = 0;
     uint64_t entry_host_body_offset = 0;
-    uint16_t jump_pc_sgpr = 0;
-    uint16_t saved_scc_sgpr = 0;
-    uint16_t call_return_sgpr = 0;
-    std::optional<uint16_t> explicit_key_sgpr;
+    ConSanSuperColliderDenseRouteEffect route;
     uint16_t required_sgpr_count = 0;
     std::vector<const ConSanAccessInventorySite *> sites;
   };
@@ -1190,7 +1185,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             selectable_vgpr_bank_mode,
                                             std::nullopt,
                                             std::nullopt,
-                                            std::nullopt,
                                             std::nullopt};
             candidate.scalar_vcc_spill = scalar_vcc_spill;
             appended_cave_candidates.push_back(candidate);
@@ -1217,7 +1211,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           std::nullopt,
                                           {},
                                           selectable_vgpr_bank_mode,
-                                          std::nullopt,
                                           std::nullopt,
                                           std::nullopt,
                                           std::nullopt};
@@ -1277,7 +1270,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             selectable_vgpr_bank_mode,
                                             std::nullopt,
                                             std::nullopt,
-                                            std::nullopt,
                                             scalar_vcc_spill};
             candidate.requires_branch_only_route = true;
             branch_only_candidates.push_back(std::move(candidate));
@@ -1298,7 +1290,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                  std::nullopt,
                                                  {},
                                                  selectable_vgpr_bank_mode,
-                                                 std::nullopt,
                                                  std::nullopt,
                                                  std::nullopt,
                                                  std::nullopt};
@@ -1331,7 +1322,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                 selectable_vgpr_bank_mode,
                                                 std::nullopt,
                                                 std::nullopt,
-                                                std::nullopt,
                                                 std::nullopt};
                 appended_cave_candidates.push_back(candidate);
               }
@@ -1361,7 +1351,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           selectable_vgpr_bank_mode,
                                           std::nullopt,
                                           std::nullopt,
-                                          std::nullopt,
                                           scalar_vcc_spill};
           candidate.requires_branch_only_route = true;
           branch_only_candidates.push_back(std::move(candidate));
@@ -1387,7 +1376,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                       std::nullopt,
                                       {},
                                       selectable_vgpr_bank_mode,
-                                      std::nullopt,
                                       std::nullopt,
                                       std::nullopt,
                                       std::nullopt};
@@ -1840,8 +1828,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         candidate.dense_call_group_index = group_index;
         if (use_explicit_key)
           candidate.dense_explicit_key = static_cast<uint16_t>(candidate_index + 1u);
-        else
-          candidate.dense_call_return_sgpr = call_return_sgpr;
         planned_candidates.push_back(std::move(candidate));
       }
       if (!complete_group) {
@@ -1868,12 +1854,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       group.descriptor_file_offset = seed_group.descriptor_file_offset;
       group.entry_host_offset = *best_host_offset;
       group.displaced_host_words = std::move(best_displaced_words);
-      group.dispatcher_offset = dispatcher_offset;
       group.entry_host_body_offset = host_body_offset;
-      group.jump_pc_sgpr = seed_group.jump_pc_sgpr;
-      group.saved_scc_sgpr = seed_group.saved_scc_sgpr;
-      group.call_return_sgpr = call_return_sgpr;
-      group.explicit_key_sgpr = explicit_key_sgpr;
+      group.route = {
+          .dispatcher_offset = dispatcher_offset,
+          .jump_pc_sgpr = seed_group.jump_pc_sgpr,
+          .saved_scc_sgpr = seed_group.saved_scc_sgpr,
+          .key_sgpr = explicit_key_sgpr.value_or(call_return_sgpr),
+          .key_kind = use_explicit_key ? ConSanSuperColliderDenseKeyKind::ExplicitScalar
+                                       : ConSanSuperColliderDenseKeyKind::CallReturnPair,
+          .body = std::nullopt,
+      };
       group.required_sgpr_count = use_explicit_key
                                       ? static_cast<uint16_t>(highest_instrumentation_sgpr + 1u)
                                       : static_cast<uint16_t>(call_return_sgpr + 2u);
@@ -3209,7 +3199,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<BranchOnlyRelayRoute> branch_only_route = std::nullopt;
     std::vector<uint64_t> trailing_relay_offsets;
     std::optional<size_t> dense_call_group_index;
-    std::optional<uint16_t> dense_call_return_sgpr;
   };
 
   std::vector<PlannedLdsCheckTrapPatch> planned_patches;
@@ -3356,7 +3345,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.entry_relay_offsets = candidate.entry_relay_offsets;
     planned.branch_only_route = candidate.branch_only_route;
     planned.dense_call_group_index = candidate.dense_call_group_index;
-    planned.dense_call_return_sgpr = candidate.dense_call_return_sgpr;
     if (auto relay = direct_body_relay_slots.find(candidate.site);
         candidate.entry_island == nullptr && relay != direct_body_relay_slots.end()) {
       planned.trailing_relay_offsets = relay->second;
@@ -3441,21 +3429,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                 static_cast<uint16_t>(*candidate.indirect_pc_sgpr + 2u),
                 static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(target))),
             static_cast<uint16_t>(*candidate.indirect_scc_save_sgpr + 1u));
-        planned.info.indirect_pc_sgpr = *candidate.indirect_pc_sgpr;
-        planned.info.indirect_saved_scc_sgpr = *candidate.indirect_scc_save_sgpr;
-        planned.info.indirect_saved_vcc_sgpr = candidate.vcc_save_sgpr;
-        planned.info.indirect_return_offset =
+        const uint64_t indirect_return_offset =
             candidate.placement->body_offset + planned.cave_words.size() * sizeof(uint32_t);
-        planned.info.indirect_required_sgpr_count =
-            candidate.dense_call_return_sgpr
-                ? std::max<uint16_t>(required_sgpr_count,
-                                     static_cast<uint16_t>(*candidate.dense_call_return_sgpr + 2u))
-                : required_sgpr_count;
         if (candidate.dense_call_group_index) {
           const ScDenseCallGroup &group = dense_call_groups[*candidate.dense_call_group_index];
-          planned.info.sc_dense_dispatcher_offset = group.dispatcher_offset;
-          planned.info.sc_dense_call_return_sgpr = candidate.dense_call_return_sgpr;
-          planned.info.sc_dense_explicit_key_sgpr = group.explicit_key_sgpr;
+          planned.info.sc_dense_route = group.route;
+          planned.info.sc_dense_route->body = ConSanSuperColliderDenseBodyRoute{
+              .vcc_save_sgpr = candidate.vcc_save_sgpr,
+              .return_offset = indirect_return_offset,
+          };
+          planned.info.required_sgpr_count = std::max(
+              {planned.info.required_sgpr_count, required_sgpr_count, group.required_sgpr_count});
+        } else {
+          planned.info.indirect_pc_sgpr = *candidate.indirect_pc_sgpr;
+          planned.info.indirect_saved_scc_sgpr = *candidate.indirect_scc_save_sgpr;
+          planned.info.indirect_saved_vcc_sgpr = candidate.vcc_save_sgpr;
+          planned.info.indirect_return_offset = indirect_return_offset;
+          planned.info.required_sgpr_count =
+              std::max(planned.info.required_sgpr_count, required_sgpr_count);
         }
         if (!append_lds_check_trap_indirect_return(
                 planned.cave_words, candidate.placement->body_offset,
@@ -3517,7 +3508,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
         const ScDenseCallGroup &group = dense_call_groups[*candidate.dense_call_group_index];
         const uint64_t island_offset = group.entry_host_offset + sizeof(uint32_t);
-        if (group.explicit_key_sgpr) {
+        if (group.route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar) {
           const auto branch_delta = compute_sopp_branch_simm16(
               candidate.placement->anchor_offset + sizeof(uint32_t), island_offset);
           if (!candidate.dense_explicit_key || *candidate.dense_explicit_key == 0u ||
@@ -3527,16 +3518,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             return;
           }
           planned.anchor_words = {
-              build_s_mov_b32(*group.explicit_key_sgpr,
+              build_s_mov_b32(group.route.key_sgpr,
                               scalar_positive_inline_u32(*candidate.dense_explicit_key), arch),
               build_s_branch(*branch_delta, arch)};
         } else {
           const auto call_delta =
               compute_sopp_branch_simm16(candidate.placement->anchor_offset, island_offset);
-          const auto call = candidate.dense_call_return_sgpr && call_delta
-                                ? instrumentation::build_s_call_i64(
-                                      *candidate.dense_call_return_sgpr, *call_delta, arch)
-                                : std::nullopt;
+          const auto call = call_delta ? instrumentation::build_s_call_i64(group.route.key_sgpr,
+                                                                           *call_delta, arch)
+                                       : std::nullopt;
           if (!call) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap proof could not encode its dense-call anchor");
@@ -3702,8 +3692,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
   ConSanDescriptorRegisterRequirements descriptor_sgpr_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-    const uint16_t required =
-        std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count);
+    const uint16_t required = planned.info.required_sgpr_count;
     if (required != 0)
       for (uint64_t owner : planned.info.owner_descriptor_file_offsets)
         note_maximum_descriptor_extent(descriptor_sgpr_growths, owner, required);
@@ -3936,7 +3925,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           info.indirect_return_saved_vcc_sgpr = reservoir.return_saved_vcc_sgpr;
         else
           info.indirect_return_saved_scc_sgpr = reservoir.return_saved_scc_sgpr;
-        info.indirect_required_sgpr_count = reservoir.required_sgpr_count;
+        info.required_sgpr_count = reservoir.required_sgpr_count;
         info.owner_descriptor_file_offsets = reservoir.owner_descriptor_file_offsets;
         patch_infos.push_back(std::move(info));
       }
@@ -3947,23 +3936,24 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto append_dense_call_groups_if_due = [&]() -> bool {
       while (next_dense_group < dense_call_groups.size()) {
         const ScDenseCallGroup &group = dense_call_groups[next_dense_group];
-        if (new_text.size() != group.dispatcher_offset)
+        const ConSanSuperColliderDenseRouteEffect &route = group.route;
+        const bool explicit_key = route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
+        if (new_text.size() != route.dispatcher_offset)
           return true;
         const uint64_t island_offset = group.entry_host_offset + sizeof(uint32_t);
         std::vector<uint32_t> island_words;
         if (!append_lds_check_trap_indirect_jump(island_words, island_offset,
-                                                 group.dispatcher_offset, group.jump_pc_sgpr,
-                                                 group.saved_scc_sgpr, target) ||
+                                                 route.dispatcher_offset, route.jump_pc_sgpr,
+                                                 route.saved_scc_sgpr, target) ||
             island_words.size() != kLdsCheckTrapIndirectJumpWords) {
           result.errors.emplace_back(
               "ConSan LDS check/trap could not encode its dense-call entry host");
           return false;
         }
         const std::optional<uint32_t> host_entry =
-            group.explicit_key_sgpr
-                ? std::optional<uint32_t>(build_s_mov_b32(*group.explicit_key_sgpr,
-                                                          scalar_positive_inline_u32(0), arch))
-                : instrumentation::build_s_call_i64(group.call_return_sgpr, 0, arch);
+            explicit_key ? std::optional<uint32_t>(
+                               build_s_mov_b32(route.key_sgpr, scalar_positive_inline_u32(0), arch))
+                         : instrumentation::build_s_call_i64(route.key_sgpr, 0, arch);
         if (!host_entry || group.entry_host_offset > new_text.size() ||
             (1u + island_words.size()) * sizeof(uint32_t) >
                 new_text.size() - group.entry_host_offset) {
@@ -3976,26 +3966,23 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     island_words.size() * sizeof(uint32_t));
 
         std::vector<uint32_t> dispatcher_words;
-        const uint16_t dispatch_key_sgpr = group.explicit_key_sgpr.value_or(group.call_return_sgpr);
-        if (!group.explicit_key_sgpr) {
-          const auto subtract_pc = instrumentation::build_s_sub_u32(
-              group.call_return_sgpr, group.call_return_sgpr, group.jump_pc_sgpr, arch);
+        if (!explicit_key) {
+          const auto subtract_pc = instrumentation::build_s_sub_u32(route.key_sgpr, route.key_sgpr,
+                                                                    route.jump_pc_sgpr, arch);
           if (!subtract_pc) {
             result.errors.emplace_back(
                 "ConSan LDS check/trap could not encode its dense-call dispatch key");
             return false;
           }
           dispatcher_words.push_back(*subtract_pc);
+          dispatcher_words.push_back(build_s_add_u32(route.key_sgpr, route.key_sgpr, 255u, arch));
           dispatcher_words.push_back(
-              build_s_add_u32(group.call_return_sgpr, group.call_return_sgpr, 255u, arch));
-          dispatcher_words.push_back(
-              static_cast<uint32_t>(group.dispatcher_offset - island_offset));
+              static_cast<uint32_t>(route.dispatcher_offset - island_offset));
         }
 
         const auto append_target = [&](uint32_t key, uint64_t destination) -> bool {
-          const bool explicit_key = group.explicit_key_sgpr.has_value();
           const auto compare = instrumentation::build_s_cmp_eq_u32(
-              dispatch_key_sgpr, explicit_key || key == 0u ? scalar_positive_inline_u32(key) : 255u,
+              route.key_sgpr, explicit_key || key == 0u ? scalar_positive_inline_u32(key) : 255u,
               arch);
           if (!compare)
             return false;
@@ -4004,9 +3991,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             dispatcher_words.push_back(key);
           std::vector<uint32_t> matched_words;
           const uint64_t matched_offset =
-              group.dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+              route.dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
           if (!append_lds_check_trap_indirect_return(matched_words, matched_offset, destination,
-                                                     group.jump_pc_sgpr, group.saved_scc_sgpr,
+                                                     route.jump_pc_sgpr, route.saved_scc_sgpr,
                                                      target) ||
               matched_words.size() != kLdsCheckTrapIndirectJumpWords)
             return false;
@@ -4029,7 +4016,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           const auto planned =
               std::ranges::find(planned_patches, site, &PlannedLdsCheckTrapPatch::site);
           if (planned == planned_patches.end() || !planned->placement ||
-              !append_target(group.explicit_key_sgpr
+              !append_target(explicit_key
                                  ? static_cast<uint32_t>(site_index + 1u)
                                  : static_cast<uint32_t>(site->physical_id.original_text_offset +
                                                          sizeof(uint32_t) - island_offset),
@@ -4041,8 +4028,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
         dispatcher_words.push_back(build_s_endpgm(arch));
         if (dispatcher_words.size() * sizeof(uint32_t) !=
-                group.entry_host_body_offset - group.dispatcher_offset ||
-            new_text.size() != group.dispatcher_offset) {
+                group.entry_host_body_offset - route.dispatcher_offset ||
+            new_text.size() != route.dispatcher_offset) {
           result.errors.emplace_back(
               "ConSan LDS check/trap dense-call dispatcher changed after planning");
           return false;
@@ -4053,7 +4040,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         if (!append_lds_check_trap_indirect_jump(
                 host_body, group.entry_host_body_offset,
                 group.entry_host_offset + group.displaced_host_words.size() * sizeof(uint32_t),
-                group.jump_pc_sgpr, group.saved_scc_sgpr, target) ||
+                route.jump_pc_sgpr, route.saved_scc_sgpr, target) ||
             host_body.size() !=
                 group.displaced_host_words.size() + kLdsCheckTrapIndirectJumpWords) {
           result.errors.emplace_back(
@@ -4065,19 +4052,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         ConSanPatchInfo dispatcher_info;
         dispatcher_info.kind = ConSanPatchKind::TrampolineScDenseCallDispatcher;
         dispatcher_info.anchor_offset = group.sites.front()->physical_id.original_text_offset;
-        dispatcher_info.trampoline_offset = group.dispatcher_offset;
+        dispatcher_info.trampoline_offset = route.dispatcher_offset;
         dispatcher_info.trampoline_size =
             static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
-        dispatcher_info.indirect_pc_sgpr = group.jump_pc_sgpr;
-        dispatcher_info.indirect_saved_scc_sgpr = group.saved_scc_sgpr;
-        if (!group.explicit_key_sgpr)
-          dispatcher_info.indirect_return_pc_sgpr = group.call_return_sgpr;
-        dispatcher_info.indirect_required_sgpr_count = group.required_sgpr_count;
-        dispatcher_info.sc_dense_dispatcher_offset = group.dispatcher_offset;
-        if (group.explicit_key_sgpr)
-          dispatcher_info.sc_dense_explicit_key_sgpr = group.explicit_key_sgpr;
-        else
-          dispatcher_info.sc_dense_call_return_sgpr = group.call_return_sgpr;
+        dispatcher_info.required_sgpr_count = group.required_sgpr_count;
+        dispatcher_info.sc_dense_route = route;
         dispatcher_info.owner_descriptor_file_offsets = {group.descriptor_file_offset};
         patch_infos.push_back(std::move(dispatcher_info));
         ConSanPatchInfo host_info;
@@ -4087,16 +4066,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         host_info.original_size =
             static_cast<uint32_t>(group.displaced_host_words.size() * sizeof(uint32_t));
         host_info.trampoline_size = static_cast<uint32_t>(host_body.size() * sizeof(uint32_t));
-        host_info.indirect_pc_sgpr = group.jump_pc_sgpr;
-        host_info.indirect_saved_scc_sgpr = group.saved_scc_sgpr;
-        if (!group.explicit_key_sgpr)
-          host_info.indirect_return_pc_sgpr = group.call_return_sgpr;
-        host_info.indirect_required_sgpr_count = group.required_sgpr_count;
-        host_info.sc_dense_dispatcher_offset = group.dispatcher_offset;
-        if (group.explicit_key_sgpr)
-          host_info.sc_dense_explicit_key_sgpr = group.explicit_key_sgpr;
-        else
-          host_info.sc_dense_call_return_sgpr = group.call_return_sgpr;
+        host_info.required_sgpr_count = group.required_sgpr_count;
+        host_info.sc_dense_route = route;
         host_info.owner_descriptor_file_offsets = {group.descriptor_file_offset};
         patch_infos.push_back(std::move(host_info));
         ++next_dense_group;

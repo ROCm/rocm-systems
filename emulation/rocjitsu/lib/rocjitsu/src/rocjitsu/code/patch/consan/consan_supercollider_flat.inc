@@ -1582,10 +1582,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         }
         planned.info.indirect_return_offset =
             candidate.placement->body_offset + planned.cave_words.size() * sizeof(uint32_t);
-        planned.info.indirect_required_sgpr_count =
+        planned.info.required_sgpr_count = std::max<uint16_t>(
+            planned.info.required_sgpr_count,
             std::max<uint16_t>(std::max<uint16_t>(static_cast<uint16_t>(scalar.pc_sgpr_pair + 2u),
                                                   static_cast<uint16_t>(scalar.scc_save_sgpr + 1u)),
-                               static_cast<uint16_t>(scalar.vcc_save_sgpr + 2u));
+                               static_cast<uint16_t>(scalar.vcc_save_sgpr + 2u)));
         const bool return_encoded = candidate.entry_island_at_anchor
                                         ? append_lds_check_trap_indirect_jump(
                                               planned.cave_words, candidate.placement->body_offset,
@@ -1746,9 +1747,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::unordered_map<uint64_t, uint32_t> descriptor_private_requirements;
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
     for (uint64_t owner : planned.info.owner_descriptor_file_offsets) {
-      note_maximum_descriptor_extent(
-          descriptor_sgpr_growths, owner,
-          std::max(planned.info.required_sgpr_count, planned.info.indirect_required_sgpr_count));
+      note_maximum_descriptor_extent(descriptor_sgpr_growths, owner,
+                                     planned.info.required_sgpr_count);
       if (planned.info.required_private_segment_size != 0) {
         uint32_t &required = descriptor_private_requirements[owner];
         required = std::max(required, planned.info.required_private_segment_size);

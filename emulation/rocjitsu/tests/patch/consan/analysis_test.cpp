@@ -2852,12 +2852,9 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
   EXPECT_FALSE(
       ranges_overlap(*body->indirect_saved_scc_sgpr, 1u, *body->indirect_saved_vcc_sgpr, 2u));
   EXPECT_FALSE(ranges_overlap(*body->indirect_saved_scc_sgpr, 1u, *body->indirect_pc_sgpr, 2u));
-  EXPECT_GE(body->indirect_required_sgpr_count,
-            static_cast<uint16_t>(*body->indirect_saved_vcc_sgpr + 2u));
-  EXPECT_GE(body->indirect_required_sgpr_count,
-            static_cast<uint16_t>(*body->indirect_pc_sgpr + 2u));
-  EXPECT_GE(body->indirect_required_sgpr_count,
-            static_cast<uint16_t>(*body->indirect_saved_scc_sgpr + 1u));
+  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_saved_vcc_sgpr + 2u));
+  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_pc_sgpr + 2u));
+  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_saved_scc_sgpr + 1u));
   EXPECT_GT(body->trampoline_offset, body->anchor_offset);
 }
 
