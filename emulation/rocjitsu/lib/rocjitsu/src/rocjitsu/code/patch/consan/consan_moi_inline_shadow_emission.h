@@ -8,26 +8,6 @@
 
 namespace rocjitsu::consan_moi_impl {
 
-[[nodiscard]] uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate);
-[[nodiscard]] uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                                   const MoiAccessResourceFacts &resource_facts,
-                                                   const ConSanMoiCandidate &candidate);
-[[nodiscard]] uint16_t
-inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
-                                         const MoiAccessResourceFacts &resource_facts,
-                                         const ConSanMoiCandidate &candidate);
-
-[[nodiscard]] bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
-                                                         const BoundRuntimeResources &resources,
-                                                         const ConSanMoiOperatingPoint &point,
-                                                         const MoiObjectModeSemantics &semantics,
-                                                         rj_code_arch_t arch,
-                                                         std::vector<std::string> &errors);
-
-[[nodiscard]] std::optional<uint16_t>
-inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point);
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,

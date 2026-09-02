@@ -1151,6 +1151,33 @@ foreach(_relocation_client IN ITEMS
         "mode emitters must publish relocated guest words through one shared append boundary"
     )
 endforeach()
+# InlineShadow resource/scalar projection is mode planning, not instruction
+# emission. Keep its exact state contract in the mode owner so body emission
+# and entry prologues cannot regain independent broad-state helpers.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow_emission.h"
+    "inline_shadow_(scratch_count|spill_backed_scratch_count|visible_evidence_sgpr)|validate_inline_shadow_exec_save_sgpr"
+    "InlineShadow planning helpers must not return to the emission contract"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+    "inline_shadow_(scratch_count|spill_backed_scratch_count|visible_evidence_sgpr)[(].*ConSan(Request|MoiOperatingPoint)"
+    "InlineShadow emission must consume exact scalar and resource facts"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_prologue.cpp"
+    "consan_moi_inline_shadow_emission[.]h"
+    "common prologue planning must not depend on a mode body emitter"
+)
+file(READ "${_consan_dir}/consan_moi_inline_shadow.h" _moi_inline_shadow_contract)
+if(NOT _moi_inline_shadow_contract MATCHES "struct MoiInlineShadowScalarState")
+    message(FATAL_ERROR "ConSan InlineShadow lost its exact scalar-state product")
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow.cpp"
+    "inline_shadow_(scratch_count|spill_backed_scratch_count)[(]const ConSanRequest"
+    "InlineShadow scratch sizing must consume its exact atomic-tracking fact"
+)
 file(READ "${_consan_dir}/consan_moi_relocation.cpp" _moi_relocation_owner)
 string(REGEX MATCHALL "append_pc_delta_builder" _moi_indirect_target_recipes
        "${_moi_relocation_owner}")

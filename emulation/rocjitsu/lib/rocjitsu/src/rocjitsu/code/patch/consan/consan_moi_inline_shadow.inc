@@ -21,8 +21,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const ConSanMoiReportBufferLayout &layout = semantics.report_layout;
   if (options.max_patches == 0)
     return;
-  if (!validate_inline_shadow_exec_save_sgpr(options, options, operating_point, semantics, arch,
-                                             result.warnings))
+  if (!validate_inline_shadow_exec_save_sgpr(
+          project_inline_shadow_scalar_state(operating_point), semantics.inline_access_present,
+          moi_exec_save_sgpr_count(
+              resolve_moi_exec_save_requirement(options, options, operating_point, semantics),
+              arch),
+          arch, result.warnings))
     return;
   if (!operating_point.moi_owner_epoch_vgprs.owner() &&
       result.moi_operating_point.owner_persistent_vgprs.empty() &&
@@ -275,8 +279,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         resolve_moi_access_resource_facts(operating_point, candidate, arch);
     const uint16_t expected_scratch_count =
         selected_reduced_spill_recovery
-            ? inline_shadow_spill_backed_scratch_count(options, access_resource_facts, candidate)
-            : inline_shadow_scratch_count(options, access_resource_facts, candidate);
+            ? inline_shadow_spill_backed_scratch_count(options.moi_track_atomics,
+                                                       access_resource_facts, candidate)
+            : inline_shadow_scratch_count(options.moi_track_atomics, access_resource_facts,
+                                          candidate);
     const auto resources = resolve_moi_scratch_plan(
         *resource_plan, operating_point, result.moi_operating_point, expected_scratch_count);
     if (!resources)

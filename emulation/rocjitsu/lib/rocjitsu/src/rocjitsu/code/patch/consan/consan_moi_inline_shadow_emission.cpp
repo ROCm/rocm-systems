@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
@@ -48,75 +49,6 @@ using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
-
-std::optional<uint16_t> inline_shadow_visible_evidence_sgpr(const ConSanRequest &request,
-                                                            const ConSanMoiOperatingPoint &point) {
-  if (request.moi_engine != ConSanMoiEngine::InlineShadow || !point.moi_exec_save_sgpr)
-    return std::nullopt;
-  if (point.has_inline_moi_scalar_spill())
-    return point.moi_inline_visible_evidence_sgpr;
-  if (!point.moi_exec_save_sgprs_persistent)
-    return std::nullopt;
-  return static_cast<uint16_t>(*point.moi_exec_save_sgpr +
-                               (point.moi_dynamic_stack_spill ? 25u : 24u));
-}
-
-uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
-  // Wide local accesses retain an offset and iteration counter. Wide external
-  // accesses retain an iteration counter and the workgroup key, since the
-  // versioned transaction reuses all of its ordinary address temporaries.
-  return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits(),
-                                                         consan_moi_shadow_cell::granule_bytes);
-}
-
-bool validate_inline_shadow_exec_save_sgpr(const ConSanRequest &request,
-                                           const BoundRuntimeResources &resources,
-                                           const ConSanMoiOperatingPoint &point,
-                                           const MoiObjectModeSemantics &semantics,
-                                           rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if (!point.moi_exec_save_sgpr)
-    return true;
-  if (point.has_inline_moi_scalar_spill() && semantics.inline_access_present &&
-      (!point.moi_router_call && !point.moi_branch_only_spill)) {
-    errors.emplace_back(
-        "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
-        "scalar spill");
-    return false;
-  }
-  const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
-  const uint16_t required_sgpr_count = moi_exec_save_sgpr_count(
-      resolve_moi_exec_save_requirement(request, resources, point, semantics), arch);
-  const uint16_t max_exec_save_sgpr =
-      static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
-  if (*point.moi_exec_save_sgpr > max_exec_save_sgpr || *point.moi_exec_save_sgpr % 2u != 0u) {
-    errors.emplace_back("ConSan MOI inline-shadow diagnostics require an even "
-                        "RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0.." +
-                        std::to_string(max_exec_save_sgpr));
-    return false;
-  }
-  return true;
-}
-
-uint16_t inline_shadow_scratch_count(const ConSanRequest &request,
-                                     const MoiAccessResourceFacts &resource_facts,
-                                     const ConSanMoiCandidate &candidate) {
-  return static_cast<uint16_t>(consan_detail::inline_shadow_transaction_scratch_count(
-                                   resource_facts.has_exec_save, request.moi_track_atomics) +
-                               inline_shadow_loop_scratch_count(candidate) +
-                               resource_facts.address_scratch_vgpr_count +
-                               resource_facts.dynamic_stack_reservoir_vgpr_count +
-                               resource_facts.two_address_replay_vgpr_count);
-}
-
-uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
-                                                  const MoiAccessResourceFacts &resource_facts,
-                                                  const ConSanMoiCandidate &candidate) {
-  const uint16_t normal_count = inline_shadow_scratch_count(request, resource_facts, candidate);
-  // A spill-backed CDNA probe can recover an overlapping guest address from
-  // its authoritative private slot into a phase-shared transaction register.
-  return static_cast<uint16_t>(normal_count -
-                               (resource_facts.supports_clobbered_address_spill_reload ? 1u : 0u));
-}
 
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
@@ -2506,9 +2438,9 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   const MoiAccessResourceFacts access_resource_facts =
       resolve_moi_access_resource_facts(point, candidate, arch);
   const uint16_t normal_scratch_count =
-      inline_shadow_scratch_count(request, access_resource_facts, candidate);
-  const uint16_t spill_scratch_count =
-      inline_shadow_spill_backed_scratch_count(request, access_resource_facts, candidate);
+      inline_shadow_scratch_count(request.moi_track_atomics, access_resource_facts, candidate);
+  const uint16_t spill_scratch_count = inline_shadow_spill_backed_scratch_count(
+      request.moi_track_atomics, access_resource_facts, candidate);
   if (scratch_count != normal_scratch_count &&
       (spill == nullptr || scratch_count != spill_scratch_count)) {
     errors.emplace_back(
@@ -2528,8 +2460,11 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
   }
-  if (!validate_inline_shadow_exec_save_sgpr(request, bound_resources, point, semantics, arch,
-                                             errors))
+  if (!validate_inline_shadow_exec_save_sgpr(
+          project_inline_shadow_scalar_state(point), semantics.inline_access_present,
+          moi_exec_save_sgpr_count(
+              resolve_moi_exec_save_requirement(request, bound_resources, point, semantics), arch),
+          arch, errors))
     return std::nullopt;
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
@@ -3245,7 +3180,7 @@ uint16_t inline_shadow_spill_backed_scratch_count(const ConSanRequest &request,
   }
   if (workgroup_shadow) {
     const std::optional<uint16_t> visible_evidence_sgpr =
-        inline_shadow_visible_evidence_sgpr(request, point);
+        inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(point));
     std::optional<size_t> skip_visible_evidence_index;
     if (visible_evidence_sgpr) {
       const auto already_published = instrumentation::build_s_cmp_lg_u32(

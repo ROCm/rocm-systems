@@ -87,6 +87,85 @@ using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
+MoiInlineShadowScalarState
+project_inline_shadow_scalar_state(const ConSanMoiOperatingPoint &point) {
+  return {
+      .exec_save_sgpr = point.moi_exec_save_sgpr,
+      .router_call = point.moi_router_call,
+      .visible_evidence_sgpr = point.moi_inline_visible_evidence_sgpr,
+      .inline_scalar_spill = point.has_inline_moi_scalar_spill(),
+      .scalar_spill = point.has_moi_scalar_spill(),
+      .branch_only_spill = point.moi_branch_only_spill.has_value(),
+      .exec_save_persistent = point.moi_exec_save_sgprs_persistent,
+      .dynamic_stack_spill = point.moi_dynamic_stack_spill,
+  };
+}
+
+std::optional<uint16_t>
+inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state) {
+  if (!state.exec_save_sgpr)
+    return std::nullopt;
+  if (state.inline_scalar_spill)
+    return state.visible_evidence_sgpr;
+  if (!state.exec_save_persistent)
+    return std::nullopt;
+  return static_cast<uint16_t>(*state.exec_save_sgpr + (state.dynamic_stack_spill ? 25u : 24u));
+}
+
+uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
+  // Wide local accesses retain an offset and iteration counter. Wide external
+  // accesses retain an iteration counter and the workgroup key, since the
+  // versioned transaction reuses all of its ordinary address temporaries.
+  return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits(),
+                                                         consan_moi_shadow_cell::granule_bytes);
+}
+
+bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &state,
+                                           bool inline_access_present, uint16_t required_sgpr_count,
+                                           rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!state.exec_save_sgpr)
+    return true;
+  if (state.inline_scalar_spill && inline_access_present &&
+      (!state.router_call && !state.branch_only_spill)) {
+    errors.emplace_back(
+        "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
+        "scalar spill");
+    return false;
+  }
+  const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
+  const uint16_t max_exec_save_sgpr =
+      static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
+  if (*state.exec_save_sgpr > max_exec_save_sgpr || *state.exec_save_sgpr % 2u != 0u) {
+    errors.emplace_back("ConSan MOI inline-shadow diagnostics require an even "
+                        "RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0.." +
+                        std::to_string(max_exec_save_sgpr));
+    return false;
+  }
+  return true;
+}
+
+uint16_t inline_shadow_scratch_count(bool track_atomics,
+                                     const MoiAccessResourceFacts &resource_facts,
+                                     const ConSanMoiCandidate &candidate) {
+  return static_cast<uint16_t>(consan_detail::inline_shadow_transaction_scratch_count(
+                                   resource_facts.has_exec_save, track_atomics) +
+                               inline_shadow_loop_scratch_count(candidate) +
+                               resource_facts.address_scratch_vgpr_count +
+                               resource_facts.dynamic_stack_reservoir_vgpr_count +
+                               resource_facts.two_address_replay_vgpr_count);
+}
+
+uint16_t inline_shadow_spill_backed_scratch_count(bool track_atomics,
+                                                  const MoiAccessResourceFacts &resource_facts,
+                                                  const ConSanMoiCandidate &candidate) {
+  const uint16_t normal_count =
+      inline_shadow_scratch_count(track_atomics, resource_facts, candidate);
+  // A spill-backed CDNA probe can recover an overlapping guest address from
+  // its authoritative private slot into a phase-shared transaction register.
+  return static_cast<uint16_t>(normal_count -
+                               (resource_facts.supports_clobbered_address_spill_reload ? 1u : 0u));
+}
+
 MoiObjectModePlan plan_inline_shadow_object_mode(const ConSanRequest &request,
                                                  const BoundRuntimeResources &resources,
                                                  const TransformPolicy &,
@@ -151,7 +230,7 @@ uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
                                                  const BoundRuntimeResources &,
                                                  const MoiAccessResourceFacts &resource_facts,
                                                  const ConSanMoiCandidate &candidate) {
-  return inline_shadow_scratch_count(request, resource_facts, candidate);
+  return inline_shadow_scratch_count(request.moi_track_atomics, resource_facts, candidate);
 }
 
 MoiPersistentStateDemand
@@ -190,8 +269,8 @@ inline_shadow_access_spill_fallback(const MoiAccessSpillFallbackContext &context
   // The compact transaction omits a dedicated address snapshot. Emission
   // either recovers a spilled address or consumes the original address before
   // the deferred application load.
-  return inline_shadow_spill_backed_scratch_count(context.request, context.resource_facts,
-                                                  context.candidate);
+  return inline_shadow_spill_backed_scratch_count(context.request.moi_track_atomics,
+                                                  context.resource_facts, context.candidate);
 }
 
 MoiDispatchIdentityPlan

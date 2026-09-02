@@ -11,7 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
@@ -2072,7 +2072,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(options, kernel_point);
+          inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(kernel_point));
     }
     MoiPrivateEpochPrologueEmissionPlan emission{
         .scratch_vgpr = *access_patch->scratch_vgpr,
@@ -2568,7 +2568,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(options, kernel_point);
+          inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(kernel_point));
     }
     MoiOwnerEpochPrologueEmissionPlan emission{
         .owner_vgpr = *owner_epoch_vgprs.owner,
