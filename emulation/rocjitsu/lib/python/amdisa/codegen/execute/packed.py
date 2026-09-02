@@ -731,6 +731,46 @@ def gen_pk_binop_f64(dst: list[str], src: list[str], op: str) -> str:
     )
 
 
+def gen_pk_ternary_f64(dst: list[str], src: list[str], op: str) -> str:
+    """Generate two-element packed F64 fused multiply-add execution."""
+    if op != 'fma':
+        raise ValueError(f'unsupported packed F64 ternary operation: {op}')
+
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto multiplicand = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto multiplier = read_pk_u64_pair({s1}, wf, lane);',
+            f'    const auto addend = read_pk_u64_pair({s2}, wf, lane);',
+            '    constexpr uint64_t kSignBit = 0x8000000000000000ULL;',
+            '    const auto apply = [&](uint64_t multiplicand_bits, uint64_t multiplier_bits,',
+            '                           uint64_t addend_bits, bool negate_multiplicand,',
+            '                           bool negate_multiplier, bool negate_addend) {',
+            '      if (negate_multiplicand) multiplicand_bits ^= kSignBit;',
+            '      if (negate_multiplier) multiplier_bits ^= kSignBit;',
+            '      if (negate_addend) addend_bits ^= kSignBit;',
+            '      uint64_t result = amdgpu::fp_mode::fma_f64(',
+            '          multiplicand_bits, multiplier_bits, addend_bits,',
+            '          wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());',
+            '      return amdgpu::fp_mode::finish_f64(',
+            '          result, wf.fp_round_mode_f16_f64(), 0, inst_.clamp,',
+            '          amdgpu::floating_clamp_nan_to_zero(wf));',
+            '    };',
+            '    const uint64_t result_lo = apply(',
+            '        multiplicand.lo, multiplier.lo, addend.lo, (inst_.neg & 1u) != 0,',
+            '        (inst_.neg & 2u) != 0, (inst_.neg & 4u) != 0);',
+            '    const uint64_t result_hi = apply(',
+            '        multiplicand.hi, multiplier.hi, addend.hi, (inst_.neg_hi & 1u) != 0,',
+            '        (inst_.neg_hi & 2u) != 0, (inst_.neg_hi & 4u) != 0);',
+            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '  }',
+        ]
+    )
+
+
 def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
     """Generate packed U64 shift-left-add over two independent elements.
 

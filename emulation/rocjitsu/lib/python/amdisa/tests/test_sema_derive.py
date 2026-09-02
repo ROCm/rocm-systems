@@ -2527,6 +2527,14 @@ class TestDerivePacked:
             assert sem.operation == operation
             assert sem.data_type == 'f64'
 
+    def test_pk_f64_fma_has_fused_ternary_semantics(self):
+        sem = derive_semantics('V_PK_FMA_F64', 'ENC_VOP3P')
+
+        assert sem is not None
+        assert sem.semantic_class == 'pk_ternary_f64'
+        assert sem.operation == 'fma'
+        assert sem.data_type == 'f64'
+
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)

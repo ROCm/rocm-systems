@@ -1616,6 +1616,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
             operation=packed_f64_binary[name],
             data_type='f64',
         )
+    if name == 'V_PK_FMA_F64':
+        return InstructionSemantics(
+            name, 'pk_ternary_f64', operation='fma', data_type='f64'
+        )
     if name in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64'):
         operation = 'add' if name == 'V_PK_ADD_NC_U64' else 'sub'
         return InstructionSemantics(
