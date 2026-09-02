@@ -88,6 +88,16 @@ option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profile
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
+set(ENABLE_DEVICE_COVERAGE "OFF" CACHE STRING
+  "Enable device-side coverage: AUTO, ON, or OFF (implies ENABLE_CODE_COVERAGE)")
+set_property(CACHE ENABLE_DEVICE_COVERAGE PROPERTY STRINGS AUTO ON OFF)
+string(TOUPPER "${ENABLE_DEVICE_COVERAGE}" ENABLE_DEVICE_COVERAGE)
+set(_enable_device_coverage_request "${ENABLE_DEVICE_COVERAGE}")
+if(NOT ENABLE_DEVICE_COVERAGE MATCHES "^(AUTO|ON|OFF)$")
+  message(FATAL_ERROR
+    "ENABLE_DEVICE_COVERAGE must be AUTO, ON, or OFF; "
+    "received '${ENABLE_DEVICE_COVERAGE}'.")
+endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
@@ -302,7 +312,10 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
+# Keep version detection on the same toolchain selected for the build.
+get_filename_component(_cxx_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(compiler_executable ${COMPILER_EXE_NAME}
+  HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
   COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
@@ -340,6 +353,16 @@ else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
 string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})
+set(RCCL_DEVICE_PROFILE_RT "")
+set(_device_coverage_capability_error "")
+if(NOT _enable_device_coverage_request STREQUAL "OFF")
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeviceCoverage.cmake")
+  rccl_find_device_profile_runtime(
+    "${CMAKE_CXX_COMPILER}"
+    RCCL_DEVICE_PROFILE_RT
+    _device_coverage_capability_error)
+endif()
+
 if (rocm_version_matches)
     set(ROCM_MAJOR_VERSION ${CMAKE_MATCH_1})
     set(ROCM_MINOR_VERSION ${CMAKE_MATCH_2})
@@ -350,8 +373,51 @@ if (rocm_version_matches)
     # Convert the version components to int for comparison
     math(EXPR ROCM_VERSION "(10000 * ${ROCM_MAJOR_VERSION}) + (100 * ${ROCM_MINOR_VERSION}) + ${ROCM_PATCH_VERSION}")
     add_definitions("-DROCM_VERSION=${ROCM_VERSION}")
+
+    if(ENABLE_DEVICE_COVERAGE STREQUAL "AUTO")
+      if(ROCM_VERSION VERSION_LESS "71500")
+        set(ENABLE_DEVICE_COVERAGE OFF)
+        message(STATUS
+          "Device coverage requires ROCm 7.15 or newer; "
+          "detected ROCm ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}. "
+          "Falling back to host-only coverage.")
+      elseif(_device_coverage_capability_error)
+        set(ENABLE_DEVICE_COVERAGE OFF)
+        message(STATUS
+          "Device coverage is unavailable with the selected compiler: "
+          "${_device_coverage_capability_error}. Falling back to host-only coverage.")
+      else()
+        set(ENABLE_DEVICE_COVERAGE ON)
+        message(STATUS
+          "Device coverage is supported by ROCm "
+          "${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}; "
+          "profile runtime: ${RCCL_DEVICE_PROFILE_RT}")
+      endif()
+    elseif(ENABLE_DEVICE_COVERAGE AND ROCM_VERSION VERSION_LESS "71500")
+      message(FATAL_ERROR
+        "ENABLE_DEVICE_COVERAGE=ON requires ROCm 7.15 or newer; "
+        "detected ROCm ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}.${ROCM_PATCH_VERSION}.")
+    elseif(ENABLE_DEVICE_COVERAGE AND _device_coverage_capability_error)
+      message(FATAL_ERROR
+        "ENABLE_DEVICE_COVERAGE=ON is unsupported by the selected compiler: "
+        "${_device_coverage_capability_error}.")
+    endif()
 else()
+    if(ENABLE_DEVICE_COVERAGE STREQUAL "AUTO")
+      set(ENABLE_DEVICE_COVERAGE OFF)
+      message(STATUS
+        "The ROCm version could not be parsed; falling back to host-only coverage.")
+    elseif(ENABLE_DEVICE_COVERAGE)
+      message(FATAL_ERROR
+        "ENABLE_DEVICE_COVERAGE=ON requires ROCm 7.15 or newer, but the ROCm version could not be parsed.")
+    endif()
     message(WARNING "Failed to extract ROCm version.")
+endif()
+
+if((ENABLE_DEVICE_COVERAGE OR _enable_device_coverage_request STREQUAL "AUTO")
+   AND NOT ENABLE_CODE_COVERAGE)
+  message(STATUS "Device coverage request implies ENABLE_CODE_COVERAGE=ON")
+  set(ENABLE_CODE_COVERAGE ON CACHE BOOL "Enable code coverage" FORCE)
 endif()
 
 ### Required for checking HIP device symbols when building with amdclang++
