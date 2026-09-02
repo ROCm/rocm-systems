@@ -1986,6 +1986,42 @@ foreach(_inline_atomic_assignment IN ITEMS
         )
     endif()
 endforeach()
+file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_owner)
+foreach(_inline_barrier_body IN ITEMS
+    build_inline_shadow_barrier_epoch_cave_words
+    build_inline_shadow_private_epoch_barrier_cave_words
+)
+    if(_moi_barrier_owner MATCHES
+       "${_inline_barrier_body}[(][^{]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics)")
+        message(
+            FATAL_ERROR
+            "ConSan InlineShadow barrier body emission must consume its retained exact plan"
+        )
+    endif()
+endforeach()
+if(_moi_barrier_owner MATCHES
+   "build_engine_barrier_body[^=]*=[^{]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics)")
+    message(
+        FATAL_ERROR
+        "ConSan exact-subset barrier dispatch must not reopen broad body state"
+    )
+endif()
+foreach(_inline_barrier_assignment_count IN ITEMS 6 2)
+    if(_inline_barrier_assignment_count EQUAL 6)
+        set(_inline_barrier_assignment apply_moi_transient_sgpr_assignment)
+    else()
+        set(_inline_barrier_assignment apply_moi_persistent_vgpr_assignment)
+    endif()
+    string(REGEX MATCHALL "${_inline_barrier_assignment}[(]"
+           _inline_barrier_assignment_calls "${_moi_barrier_owner}")
+    list(LENGTH _inline_barrier_assignment_calls _inline_barrier_actual_assignment_count)
+    if(NOT _inline_barrier_actual_assignment_count EQUAL _inline_barrier_assignment_count)
+        message(
+            FATAL_ERROR
+            "ConSan exact-subset barrier lowering has an unexpected ${_inline_barrier_assignment} replay"
+        )
+    endif()
+endforeach()
 foreach(_sampled_assignment IN ITEMS
     apply_moi_transient_sgpr_assignment
     apply_moi_persistent_vgpr_assignment
