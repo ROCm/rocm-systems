@@ -8786,3 +8786,61 @@ also becomes simpler. This strengthens Sections 14.1, 14.3, 14.4, 14.6,
 14.7, and 14.8. Full architecture locality, remaining broad coordinator and
 patch-state paths, material additional whole-refactoring shrinkage, and the
 independent Section 14 audit remain open, so the goal remains active.
+
+### 16.125 Convergence checkpoint 124: remove the operational vocabulary replica
+
+The resource-planning follow-through found one last replica of the semantic
+engine vocabulary. `MoiModeOperations` separately published a
+`MoiOperationalEvidenceKinds` tuple for barrier, atomic, and fence operations.
+Common resource solving and exact barrier lowering consumed that tuple even
+though the observation plan already carried an engine whose newly canonical
+vocabulary defines the same facts. Record/Replay, Sampled, and InlineShadow
+therefore each repeated their synchronization intent names in two registries.
+
+The operational resource solver now resolves the observation plan's
+`ConSanEngineProbeVocabulary` once and uses its barrier, atomic, and optional
+fence intents. The shared Record/Replay/InlineShadow barrier body uses that
+same row to select its already-existing record or exact-epoch implementation.
+Mode operations continue to own scratch demand and emission callbacks—the
+facts that actually vary in implementation—but no longer republish semantic
+intent identities owned by policy.
+
+`MoiOperationalEvidenceKinds`, its `MoiModeOperations` field, all three mode
+initializers, and the hypothetical-mode test's duplicate tuple are deleted.
+The architecture gate rejects restoration of either the type or field in the
+mode registry and concrete mode owners. A new mode now declares its semantic
+probe language once and composes existing common resource-solving mechanics
+without a second synchronization vocabulary.
+
+| Signal | Checkpoint 124 | Cumulative change | Slice change from checkpoint 123 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,807 | **-2,169** | **-13** |
+| Nonblank production lines | 96,438 | **-2,646** | **-12** |
+| Production implementation lines | 88,683 | **-2,767** | **-9** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Duplicate MOI operational evidence registries | **0** | n/a | **-1** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `d7d3abd9de4`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), all focused mode-registry, evidence-site-plan,
+and architecture-boundary tests **21/21**, and all **1,296/1,296** nonphysical
+`ConSan.*` and `ConSanMoi.*` host/component tests. The focused set includes the
+hypothetical-mode extension fixture and each access/barrier/atomic/fence
+policy-to-resource join. No test was removed, renamed, disabled, or replaced,
+and no physical test was run.
+
+This is a pure follow-through harvest: nine implementation lines and one
+parallel registry disappear without adding a replacement layer. Across
+checkpoints 122–124, mode-local runtime mapping, policy publication, report
+classification, resource planning, and barrier lowering now meet at one
+explicit semantic vocabulary and the combined production surface is
+twenty-eight implementation lines smaller than checkpoint 121. This further
+strengthens Sections 14.1, 14.3, 14.4, 14.6, 14.7, and 14.8. Full architecture
+locality, remaining broad coordinator and patch-state paths, material
+additional whole-refactoring shrinkage, and the independent Section 14 audit
+remain open, so the goal remains active.
