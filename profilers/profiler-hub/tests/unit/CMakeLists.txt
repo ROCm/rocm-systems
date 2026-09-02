@@ -82,8 +82,6 @@ else()
     )
 endif()
 
-target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_20)
-
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
 endif()
