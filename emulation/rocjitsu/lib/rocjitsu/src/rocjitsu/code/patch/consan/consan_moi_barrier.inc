@@ -216,6 +216,10 @@ struct MoiInlinePrivateEpochBarrierEmissionPlan {
   std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
+using MoiBarrierBodyPlan =
+    std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan,
+                 MoiInlinePrivateEpochBarrierEmissionPlan>;
+
 struct MoiInlineBarrierCandidateRoutePlan {
   std::optional<ConSanIndirectJumpSgprs> indirect_jump;
   bool branch_only_spill = false;
@@ -906,9 +910,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     MoiBarrierEvidenceSitePlan candidate;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-    std::optional<MoiRecordEventEmissionPlan> record_emission;
-    std::optional<MoiInlineBarrierEpochEmissionPlan> inline_epoch_emission;
-    std::optional<MoiInlinePrivateEpochBarrierEmissionPlan> private_epoch_emission;
+    MoiBarrierBodyPlan body;
     MoiInlineBarrierCandidateRoutePlan route;
     bool uses_scalar_epoch = false;
     std::optional<VgprSpillSequence> spill;
@@ -1031,9 +1033,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             .candidate = candidate,
             .owner_descriptor_file_offsets = owners,
             .derived_owner = derived_owner,
-            .record_emission = record_emission,
-            .inline_epoch_emission = std::nullopt,
-            .private_epoch_emission = std::nullopt,
+            .body = *record_emission,
             .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
             .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
             .spill = std::move(spill),
@@ -1075,9 +1075,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
           .candidate = candidate,
           .owner_descriptor_file_offsets = owners,
           .derived_owner = std::nullopt,
-          .record_emission = std::nullopt,
-          .inline_epoch_emission = std::nullopt,
-          .private_epoch_emission =
+          .body =
               MoiInlinePrivateEpochBarrierEmissionPlan{
                   .scratch_vgpr = *access_patch->scratch_vgpr,
                   .epoch_offset = private_state_layout.epoch_offset,
@@ -1143,7 +1141,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     std::optional<uint16_t> scratch_vgpr;
     std::optional<VgprSpillSequence> spill;
     std::optional<SgprSpillSequence> scalar_spill;
-    std::optional<MoiRecordEventEmissionPlan> record_emission;
+    std::optional<MoiBarrierBodyPlan> body;
     uint32_t required_private_bytes = 0u;
     const uint16_t scratch_count = mode.barrier_scratch_vgpr_count(
         project_moi_barrier_scratch_facts(options, candidate_point, semantics));
@@ -1218,20 +1216,20 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     const MoiScalarAbiPlan scalar_abi =
         plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
     if (emits_barrier_record) {
-      record_emission = resolve_moi_record_event_emission_plan(options, options, candidate_point,
-                                                               scalar_abi, *scratch_vgpr, arch);
-      if (!record_emission) {
+      auto record = resolve_moi_record_event_emission_plan(options, options, candidate_point,
+                                                           scalar_abi, *scratch_vgpr, arch);
+      if (!record) {
         result.warnings.emplace_back(
             "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
         continue;
       }
-    }
-    std::optional<MoiInlineBarrierEpochEmissionPlan> inline_epoch_emission;
-    if (!emits_barrier_record) {
-      inline_epoch_emission = plan_inline_shadow_barrier_epoch_emission(
+      body = std::move(*record);
+    } else {
+      auto inline_epoch = plan_inline_shadow_barrier_epoch_emission(
           options, candidate_point, scalar_abi, scratch_vgpr, result.errors);
-      if (!inline_epoch_emission)
+      if (!inline_epoch)
         return;
+      body = std::move(*inline_epoch);
     }
     ConSanPatchAbiEffects patch_abi = plan_inline_barrier_patch_abi(
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);
@@ -1239,9 +1237,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         .candidate = candidate,
         .owner_descriptor_file_offsets = std::move(owners),
         .derived_owner = std::nullopt,
-        .record_emission = std::move(record_emission),
-        .inline_epoch_emission = std::move(inline_epoch_emission),
-        .private_epoch_emission = std::nullopt,
+        .body = std::move(*body),
         .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
         .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
         .spill = std::move(spill),
@@ -1289,32 +1285,28 @@ void try_apply_inline_shadow_barrier_epoch_patch(
           uint64_t body_offset, uint64_t return_offset, std::optional<uint16_t> call_return_sgpr,
           std::optional<uint16_t> selectable_vgpr_bank_mode)
       -> std::optional<std::vector<uint32_t>> {
-    if (emits_barrier_record) {
-      if (!planned.record_emission) {
-        result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback lost its planned emission state");
-        return std::nullopt;
-      }
+    if (const auto *record = std::get_if<MoiRecordEventEmissionPlan>(&planned.body)) {
       return build_barrier_record_cave_words(
-          active_bytes, planned.candidate, *planned.record_emission,
-          planned.spill ? &*planned.spill : nullptr,
+          active_bytes, planned.candidate, *record, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
           original_barrier_word, body_offset, return_offset, planned.derived_owner, result.errors);
     }
-    if (planned.private_epoch_emission && planned.spill) {
+    if (const auto *private_epoch =
+            std::get_if<MoiInlinePrivateEpochBarrierEmissionPlan>(&planned.body);
+        private_epoch && planned.spill) {
       return build_inline_shadow_private_epoch_barrier_cave_words(
-          planned.candidate.site, *planned.private_epoch_emission, *planned.spill,
+          planned.candidate.site, *private_epoch, *planned.spill,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, original_barrier_word,
           body_offset, return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
     }
-    if (!planned.inline_epoch_emission) {
+    const auto *inline_epoch = std::get_if<MoiInlineBarrierEpochEmissionPlan>(&planned.body);
+    if (!inline_epoch) {
       result.errors.emplace_back("ConSan MOI inline barrier lost its planned epoch emission state");
       return std::nullopt;
     }
     return build_inline_shadow_barrier_epoch_cave_words(
-        planned.candidate.site, *planned.inline_epoch_emission, arch,
-        planned.spill ? &*planned.spill : nullptr,
+        planned.candidate.site, *inline_epoch, arch, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, original_barrier_word, body_offset,
         return_offset, call_return_sgpr, selectable_vgpr_bank_mode, result.errors);
   };
@@ -1337,7 +1329,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     // consuming temporary SGPR state on both the entry and return paths. The
     // private-epoch form is larger and continues to use the general appended
     // placement below.
-    if (!planned.private_epoch_emission && !planned.uses_scalar_epoch) {
+    if (!std::holds_alternative<MoiInlinePrivateEpochBarrierEmissionPlan>(planned.body) &&
+        !planned.uses_scalar_epoch) {
       if (const auto local_body_offset =
               local_indirect_allocator.claim_reachable(site.text_offset)) {
         const uint64_t return_text_offset = site.text_offset + site.size;

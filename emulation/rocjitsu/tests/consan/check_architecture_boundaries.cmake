@@ -828,6 +828,16 @@ _consan_assert_no_match(
     "moi_scalar_router_call|spill_backed_(inline|record_replay)_router|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
     "shared dense-barrier lowering must consume the mode-owned barrier router plan"
 )
+file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_planning)
+if(NOT _moi_barrier_planning MATCHES
+       "using MoiBarrierBodyPlan[^;]*std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan," OR
+   NOT _moi_barrier_planning MATCHES "MoiBarrierBodyPlan[ \t]+body" OR
+   _moi_barrier_planning MATCHES
+       "std::optional<(MoiRecordEventEmissionPlan|MoiInlineBarrierEpochEmissionPlan|MoiInlinePrivateEpochBarrierEmissionPlan)>[ \t]+(record_emission|inline_epoch_emission|private_epoch_emission)")
+    message(FATAL_ERROR
+        "planned shared barriers must retain exactly one typed mode body"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_anchors_admit_scalar_router_ranges" OR
