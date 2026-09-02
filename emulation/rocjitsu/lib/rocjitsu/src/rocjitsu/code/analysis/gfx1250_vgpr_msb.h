@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>

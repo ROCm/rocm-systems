@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "rocjitsu/analysis/liveness.h" // KernelBlockScope, ScopedCfgEdge
+#include "rocjitsu/code/analysis/liveness.h" // KernelBlockScope, ScopedCfgEdge
 
 #include <cstdint>
 #include <span>

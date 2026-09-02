@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 
-#include "rocjitsu/analysis/control_flow.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"

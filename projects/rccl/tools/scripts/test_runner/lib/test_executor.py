@@ -2178,7 +2178,8 @@ class TestExecutor:
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroInit-uncached"]:
+                       "rccl-UnitTestsMicroInit-uncached",
+                       "rccl-UnitTestsMicroEnqueue"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

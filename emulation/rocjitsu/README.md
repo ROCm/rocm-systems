@@ -46,7 +46,7 @@ lib/
       code/             Code object loader, basic block analysis
       code/dbt/         Dynamic binary translator
       code/patch/       Code object patcher, spill manager
-      analysis/         Register liveness and def-use analysis
+      code/analysis/    Register liveness and def-use analysis
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline

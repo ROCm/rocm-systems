@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include "rocjitsu/analysis/liveness.h" // ScopedCfgEdge
+#include "rocjitsu/code/analysis/liveness.h" // ScopedCfgEdge
 
 #include <cstdint>
 #include <span>
