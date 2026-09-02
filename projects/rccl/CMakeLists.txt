@@ -122,7 +122,7 @@ if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
+option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -807,6 +807,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/profiler/accl)
   endif()
   add_subdirectory(test)
 

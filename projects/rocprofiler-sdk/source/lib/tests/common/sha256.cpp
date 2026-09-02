@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <string>
 
@@ -54,4 +55,48 @@ TEST(common, sha256)
         EXPECT_EQ(_raw, _extract) << fmt::format(
             "i={}, raw[i]={}, hex={}, hexdigest={}", i, _raw, _sub, _hex_digest);
     }
+}
+
+TEST(common, sha256_digest_bytes)
+{
+    // digest() must be the big-endian serialisation of the same state that
+    // hexdigest() prints, so the two can never disagree.
+    auto _val = rocprofiler::common::sha256{};
+    _val.update("rocprofiler-sdk|rocprofiler-sdk-roctx|rocprofiler-sdk-rocpd");
+
+    auto _hex_digest = _val.hexdigest();
+
+    auto _bytes = _val.digest();
+
+    auto _from_bytes = std::string{};
+    for(auto _b : _bytes)
+        _from_bytes += fmt::format("{:02x}", _b);
+
+    EXPECT_EQ(_from_bytes, _hex_digest);
+
+    // Calling it twice must not change the answer.
+    EXPECT_EQ(_bytes, _val.digest());
+}
+
+TEST(common, sha256_fips_vectors)
+{
+    auto hex_of = [](const std::string& _msg) {
+        auto _h = rocprofiler::common::sha256{};
+        if(!_msg.empty()) _h.update(_msg);
+        return _h.hexdigest();
+    };
+
+    // FIPS 180-4 published examples, including the empty message and the
+    // 56-byte case that forces a second padding block.
+    EXPECT_EQ(hex_of(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    EXPECT_EQ(hex_of("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    EXPECT_EQ(hex_of("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+
+    // Long message fed in chunks: exercises update() across block boundaries.
+    auto _h     = rocprofiler::common::sha256{};
+    auto _chunk = std::string(1000, 'a');
+    for(int i = 0; i < 1000; ++i)
+        _h.update(_chunk);
+    EXPECT_EQ(_h.hexdigest(), "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 }

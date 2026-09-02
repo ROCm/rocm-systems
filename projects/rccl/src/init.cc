@@ -105,8 +105,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"AllGather",    "AllReduce", "AlltoAllPivot", "AlltoAllGda",
-                                                   "AlltoAllvGda", "Broadcast", "Reduce",        "ReduceScatter",
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
@@ -764,8 +764,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   CUDACHECK(hipEventCreateWithFlags(&doneEvent, hipEventDisableTiming));
 
   comm->doneEvent = doneEvent;
-  comm->lastStream = nullptr;
-  comm->lastStreamValid = false;
+  comm->lastStreamTag = 0;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold
@@ -1088,6 +1087,52 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 #endif
   info->busId = comm->busId;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP names do not contain "MLOPart". DPX/XCP/CPX logical GPUs are exposed as PCI function .N of
+  // one physical device. Use that function as the partition index so ranks share the physical
+  // function-0 PCI node (see ncclTopoFillGpu) with distinct overlay DEV ids. Whether the device is
+  // partitioned at all is a property of the hardware, not of this BDF: an unpartitioned GPU and CPX
+  // partition 0 are both function 0 with an accelerator class, so read the mode from sysfs and
+  // leave mloPart undefined on an unpartitioned GPU, which must not get the DEV overlay (it breaks
+  // Rome gpuId matching and disables GIN/GDR).
+  if (info->mloPart == NCCL_TOPO_UNDEF) {
+    int fn = (int)(info->busId & 0xf);
+    if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+      char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      // The partition mode lives on the physical device. A CPX alias at .1-.7 is usually absent
+      // from sysfs entirely, so ask function 0 rather than our own BDF.
+      char physBusIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char partition[MAX_STR_LEN];
+      partition[0] = '\0';
+      if (int64ToBusId(info->busId & ~0xfLL, physBusIdStr) == ncclSuccess) {
+        (void)ncclOsGetPciDeviceComputePartitionByBusId(physBusIdStr, partition, sizeof(partition));
+      }
+      // A partitioned device makes every function a partition, function 0 included: partition 0 is
+      // a partition, not an unpartitioned GPU, and must carry index 0 so all of a device's
+      // partitions share one DEV overlay group. An empty string means the platform does not report
+      // a mode, which is not the same as SPX, so it falls through to the class probe below.
+      int partitioned = partition[0] != '\0' && strcmp(partition, "SPX") != 0;
+      if (partitioned) {
+        info->mloPart = fn;
+        INFO(NCCL_INIT, "MLOPart: physical device %s is in %s mode, this rank is partition %d", physBusIdStr, partition,
+             fn);
+      } else if (fn > 0) {
+        // No usable partition mode. Fall back to the shape a HIP alias has: a function that is not
+        // a GPU in sysfs. This cannot see partition 0, which is why it is only the fallback.
+        char deviceClass[MAX_STR_LEN];
+        deviceClass[0] = '\0';
+        if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
+          (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
+          int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+                      strncmp(deviceClass, "0x03", 4) == 0;
+          if (!isGpu) {
+            info->mloPart = fn;
+          }
+        }
+      }
+    }
+  }
+#endif
   CUCHECK(cuDeviceGetUuid((CUuuid*)&info->gpuUuid, (CUdevice)comm->cudaDev));
 
   // detect if fine grained memory is available on this GPU
@@ -1802,7 +1847,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // AllGather3 - begin
   NCCLCHECKGOTO(ncclCalloc(&allGather3Data, nranks), ret, fail);
   int idx;
-  NCCLCHECK(ncclTopoIdToIndex(comm->topo, GPU, NCCL_TOPO_ID(comm->topo->systemId, comm->busId), &idx));
+  // GPU node ids include the MLOPart overlay (and a local-rank-on-DEV field), so they
+  // no longer match the raw PCI busId. Look up this rank's GPU node instead.
+  NCCLCHECK(ncclTopoRankToIndex(comm->topo, rank, &idx, /*showWarn=*/true));
   allGather3Data[rank].nc = 2;
   if (comm->topo->nodes[GPU].count == comm->topo->nRanks &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx906") && allXgmi)

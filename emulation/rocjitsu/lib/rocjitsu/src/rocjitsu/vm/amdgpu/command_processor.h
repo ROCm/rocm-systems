@@ -73,6 +73,14 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  /// @brief Set when a packet faulted; the queue stops until it is torn down.
+  /// @details A faulted packet is retired rather than retried, because its
+  /// endpoint will never resolve. Continuing the scan would then run the FENCE
+  /// or signal packet behind it and publish completion for work that never
+  /// happened, which is the same lie the faulted copy was stopped from telling.
+  /// Hardware halts the engine on a VM fault and waits for the driver; this
+  /// models that, and the violation has already been reported to the process.
+  bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
   /// A command-processor pass observed this queue while its debugger gate was closed.
@@ -177,6 +185,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
+  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
+    scratch_xcc_id_ = xcc_id;
+    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
 
@@ -215,6 +229,10 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    scratch_shader_engine_count_ =
+        std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
   }
@@ -246,20 +264,25 @@ public:
 
   [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
 
-  /// @brief Deepest (@p queue_id, @p process_id) ever got on this CP.
+  /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
   ///
-  /// @details Test-only. A replica's entry list is otherwise unobservable: a packet
-  /// that runs no shader retires in zero time, so once a run finishes every queue is
-  /// empty whether or not those packets were ever placed on the peers at all. The
-  /// peak is recorded by the owning CP as it pushes, under its own queue mutex, so
-  /// this is read AFTER a run rather than sampled during one. Sampling was the
-  /// earlier design and was wrong: it reached into every peer CP from inside a
-  /// workgroup callback that already held the dispatching CP's mutex, which is a
-  /// lock-order inversion between any two CPs the moment more than one thread runs.
-  [[nodiscard]] size_t peak_queued_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
+  /// @details Test-only. Acceptance is recorded at the queue's single ordered push
+  /// site under this CP's queue mutex and read AFTER a run. Unlike queue depth, the
+  /// count does not depend on whether a peer retires an earlier entry before the
+  /// next one arrives.
+  [[nodiscard]] size_t accepted_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const auto *qs = find_queue_state(queue_id, process_id);
-    return qs == nullptr ? 0 : qs->peak_entries;
+    return qs == nullptr ? 0 : qs->accepted_entries;
+  }
+
+  /// @brief Kinds of the first two entries accepted on this CP for the queue.
+  /// @details Test-only. The order matches the queue's ordered push site.
+  [[nodiscard]] std::array<DispatchPacketKind, 2>
+  first_accepted_entry_kinds_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? std::array<DispatchPacketKind, 2>{} : qs->first_accepted_entry_kinds;
   }
 
   /// @brief Hardware queues registered with this CP, including fan-out replicas.
@@ -658,7 +681,7 @@ private:
   void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
 
   /// @brief Write a block of bytes to GPU virtual address space from a buffer.
-  void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+  amdgpu::AccessOutcome write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
   /// @brief Stop and join the monitor only when no polled queue remains.
@@ -681,6 +704,10 @@ private:
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
+  uint32_t scratch_shader_engine_count_ = 1;
+  uint32_t scratch_waves_per_se_ = 1;
+  uint32_t scratch_xcc_id_ = 0;
+  uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};

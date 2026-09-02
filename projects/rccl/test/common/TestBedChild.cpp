@@ -71,6 +71,12 @@ namespace RcclUnitTesting
     this->verbose = verbose;
     this->printValues = printValues;
     this->useRankThreading = useRankThreading;
+    // -1 sentinel: teardown skips waitpid()/close() for a never-forked child.
+    this->pid          = -1;
+    this->parentWriteFd = -1;
+    this->parentReadFd  = -1;
+    this->childWriteFd  = -1;
+    this->childReadFd   = -1;
   }
 
   int TestBedChild::InitPipes()
@@ -182,11 +188,24 @@ namespace RcclUnitTesting
     PIPE_READ(this->totalRanks);
     PIPE_READ(this->rankOffset);
     PIPE_READ(this->numGroupCalls);
-    PIPE_READ(this->numCollectivesInGroup);
+    // Read by value to match TestBed::InitComms: no fork-COW in a pool worker.
+    int numColls = 0;
+    PIPE_READ(numColls);
+    this->numCollectivesInGroup.resize(numColls);
+    for (int i = 0; i < numColls; ++i)
+    {
+      PIPE_READ(this->numCollectivesInGroup[i]);
+    }
     PIPE_READ(this->useBlocking);
     bool useMultiRankPerGpu;
     PIPE_READ(useMultiRankPerGpu);
-    PIPE_READ(this->numStreamsPerGroup);
+    int numStreams = 0;
+    PIPE_READ(numStreams);
+    this->numStreamsPerGroup.resize(numStreams);
+    for (int i = 0; i < numStreams; ++i)
+    {
+      PIPE_READ(this->numStreamsPerGroup[i]);
+    }
 
     // Read the GPUs this child uses and prepare storage for collective args / datasets
     int numGpus;

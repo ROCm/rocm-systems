@@ -92,14 +92,17 @@ profiler_serializer::add_queue(hsa_queue_t** hsa_queues, const Queue& queue)
 }
 
 void
-profiler_serializer::kernel_completion_signal(const Queue& completed)
+profiler_serializer::kernel_completion_signal(const Queue& completed, bool is_serialized)
 {
     const auto qid          = completed.get_id().handle;
     uint64_t   completed_id = 0;
-    if(auto it = _serial.find(qid); it != _serial.end())
-        completed_id = it->second.completed.fetch_add(1, std::memory_order_relaxed) + 1;
+    if(is_serialized)
+    {
+        if(auto it = _serial.find(qid); it != _serial.end())
+            completed_id = it->second.completed.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    drain_barriers(_barrier, qid, completed_id);
+        drain_barriers(_barrier, qid, completed_id);
+    }
 
     // We do not want to track kernel completion signals before we have reached the barrier
     clear_complete_barriers(_barrier);
@@ -122,7 +125,9 @@ profiler_serializer::kernel_completion_signal(const Queue& completed)
         }
     }
 
-    if(state == Status::DISABLED) return;
+    // Transition barriers count every active intercepted dispatch. Dispatches that did not request
+    // serialization must decrement those barriers without releasing or transferring a queue token.
+    if(!is_serialized || state == Status::DISABLED) return;
 
     CHECK(_dispatch_queue);
     _dispatch_queue = nullptr;

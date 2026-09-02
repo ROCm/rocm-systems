@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "test_base.h"
 
@@ -31,7 +12,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const int kOutputLineLength = 80;
+static const size_t kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
 static const char kDescriptionLabel[] = "TEST DESCRIPTION";
 static const char kTitleLabel[] = "TEST NAME";
@@ -115,7 +96,7 @@ void TestBase::SetUp(uint64_t init_flags) {
 
     if (!found_amdgpu || !found_amd_hsmp) {
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      exit(err);
+      exit(static_cast<int>(err));
     }
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
@@ -331,7 +312,7 @@ void TestBase::DisplayTestInfo(void) {
 }
 
 void TestBase::set_description(std::string d) {
-  int le = kOutputLineLength - 4;
+  size_t le = kOutputLineLength - 4;
 
   description_ = d;
   size_t endlptr;
@@ -421,7 +402,7 @@ uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
     }
   } while (true);
 
-  return_value = std::stoi(devices_to_test);
+  return_value = static_cast<uint32_t>(std::stoi(devices_to_test));
   if (return_value > current_num_devices) {
     std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
               << std::endl;
