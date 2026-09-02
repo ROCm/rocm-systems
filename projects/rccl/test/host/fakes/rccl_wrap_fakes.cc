@@ -90,6 +90,39 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
   g_rcclCeAllReduceGraphLatchTickLastCapturing = ceCapturing;
 }
 
+// WARP_SPEED. Defined UNCONDITIONALLY, not behind `#ifdef ENABLE_WARP_SPEED`:
+// the fake set must not depend on the same build option as the code it fakes,
+// or it goes missing in exactly the configuration that needs it. Unreferenced
+// definitions are dropped by --gc-sections when the option is off.
+bool g_rcclWarpSpeedSupported = false;
+int g_rcclWarpSpeedSupportedCalls = 0;
+bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
+  ++g_rcclWarpSpeedSupportedCalls;
+  return g_rcclWarpSpeedSupported;
+}
+
+// Identity by default, so an ENABLE_WARP_SPEED=ON build computes the same
+// channel count as an OFF one and the existing topoGetAlgoInfo expectations hold.
+static int DefaultWarpSpeedAdjustChannels(struct ncclComm*, struct ncclTaskColl*, int nc) {
+  return nc;
+}
+std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
+    g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc) {
+  return g_rcclWarpSpeedAdjustChannels(comm, info, nc);
+}
+
+ncclResult_t g_rcclSetWarpSpeedAutoResult = ncclSuccess;
+int g_rcclSetWarpSpeedAutoCalls = 0;
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm*, struct ncclTaskColl*, size_t) {
+  ++g_rcclSetWarpSpeedAutoCalls;
+  return g_rcclSetWarpSpeedAutoResult;
+}
+
+// Leaves the caller's channel count untouched, matching the OFF configuration.
+int g_rcclSetWarpSpeedCUsCalls = 0;
+void rcclSetWarpSpeedCUs(struct ncclComm*, int, int, int&) { ++g_rcclSetWarpSpeedCUsCalls; }
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
@@ -107,6 +140,12 @@ void ResetRcclWrapFakes() {
   g_rcclCeAllReduceAllowed = false;
   g_rcclCeAllReduceGraphLatchTickCalls = 0;
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
+  g_rcclWarpSpeedSupported = false;
+  g_rcclWarpSpeedSupportedCalls = 0;
+  g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
+  g_rcclSetWarpSpeedAutoResult = ncclSuccess;
+  g_rcclSetWarpSpeedAutoCalls = 0;
+  g_rcclSetWarpSpeedCUsCalls = 0;
 }
 
 // ===========================================================================

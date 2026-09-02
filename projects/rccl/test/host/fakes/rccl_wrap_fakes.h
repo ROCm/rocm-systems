@@ -52,6 +52,30 @@ extern bool g_rcclCeAllReduceAllowed;  // UNDRIVEN
 extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
 extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 
+// -------------------------------------------------------------------------
+// WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
+// inside `#ifdef ENABLE_WARP_SPEED` (:318, :2221, :2615, :2736, :2738), two of
+// which are in functions this suite covers (finishPlan and topoGetAlgoInfo).
+//
+// ENABLE_WARP_SPEED defaults OFF and is forced OFF unless GPU_TARGETS is gfx950
+// (CMakeLists.txt:582-592), so on most configurations those five lines are
+// preprocessed away and these symbols are never referenced. A gfx950 build with
+// the option ON compiles them, and without these fakes the target fails to LINK.
+//
+// The defaults make an ENABLE_WARP_SPEED=ON build behave exactly like an OFF
+// one: report unsupported, return the channel count unchanged, succeed, no-op.
+// That keeps every test written against the OFF configuration honest on both.
+// -------------------------------------------------------------------------
+extern bool g_rcclWarpSpeedSupported;  // UNDRIVEN
+extern int g_rcclWarpSpeedSupportedCalls;  // UNDRIVEN
+extern ncclResult_t g_rcclSetWarpSpeedAutoResult;  // UNDRIVEN
+extern int g_rcclSetWarpSpeedAutoCalls;  // UNDRIVEN
+extern int g_rcclSetWarpSpeedCUsCalls;  // UNDRIVEN
+// Applied to the caller's nc by rcclWarpSpeedAdjustChannels. Identity by
+// default; production may shrink the count.
+extern std::function<int(struct ncclComm*, struct ncclTaskColl*, int)>
+    g_rcclWarpSpeedAdjustChannels;  // UNDRIVEN
+
 void ResetRcclWrapFakes();
 
 #endif  // RCCL_TEST_HOST_RCCL_WRAP_FAKES_H_
