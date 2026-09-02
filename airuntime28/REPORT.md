@@ -54,7 +54,8 @@ two ways at once and comparing them to it would credit the effect to the wrong c
 | 64-bit instead of 128-bit | `plain-128` | **+77.26% [+76.75, +77.69]** |
 | 32-bit instead of 128-bit | `plain-128` | **+220.10% [+218.77, +220.62]** |
 
-Resolution limit for this run: 0.74 pp. Baseline 0.5253 ms, 4088 GB/s read+write.
+Resolution limit for this run: 0.74 percentage points (pp) — an effect has to beat that in
+magnitude, it is not a plus-or-minus band. Baseline 0.5253 ms, 4088 GB/s read+write.
 
 No temporal hint is separable from noise here; access width dominates by two orders of
 magnitude. The middle rows use width-matched controls because `nt-store-64` reads +77.55%
