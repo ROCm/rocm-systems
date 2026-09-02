@@ -925,7 +925,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // Terminal fail-closed fence: client detach frees the tool's callback
             // and buffer machinery next, so no callback-capable signal-less completion
             // may survive. On timeout this abandons+disables signal-less process-wide
             // (correct here -- the client is going away). No-op with the feature off.
@@ -982,7 +982,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                // F23 terminal fail-closed fence: the client finalizer frees the
+                // Terminal fail-closed fence: the client finalizer frees the
                 // tool's callback/buffer machinery next, so no callback-capable
                 // signal-less completion may survive. On timeout abandon+disable
                 // process-wide. No-op with the feature off.

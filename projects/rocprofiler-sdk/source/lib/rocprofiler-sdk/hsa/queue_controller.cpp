@@ -506,7 +506,7 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // at any instant, so no lock cycle exists. Never blocks on the reader.
     if(kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
     {
-        // F1: hold drain_mu across the whole close/drain/close-window sequence, so
+        // Hold drain_mu across the whole close/drain/close-window sequence, so
         // finalization's concurrent drain either wins the mutex (and blocks us before
         // the runtime queue is freed) or observes rdid_valid==false and skips. The
         // state shared_ptr keeps QueueState (and drain_mu) alive across the erase.
