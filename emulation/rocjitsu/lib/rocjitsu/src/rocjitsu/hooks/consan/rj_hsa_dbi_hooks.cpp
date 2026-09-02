@@ -2393,7 +2393,7 @@ public:
         static_cast<unsigned long long>(moi_report_summary.current_live_report_bytes_after_cleanup),
         static_cast<unsigned long long>(moi_report_summary.peak_live_report_bytes),
         static_cast<unsigned long long>(
-            rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(moi_engine)),
+            rocjitsu::consan_moi_mode_policy(moi_engine).auto_report_buffer_ceiling_bytes),
         static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
         static_cast<unsigned long long>(moi_report_summary.allocation_failure_count),
         static_cast<unsigned long long>(moi_report_summary.capacity_failure_count),

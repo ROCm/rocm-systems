@@ -458,8 +458,8 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   uint64_t diagnostic_count = 0;
   for (uint64_t candidate_fences = 0; candidate_fences < 20u; ++candidate_fences) {
     const uint64_t fence_bytes = candidate_fences * sizeof(ConSanMoiFenceRecord);
-    const uint64_t remaining = kRecordReplayCeilingBytes -
-                               sizeof(ConSanMoiReportHeader) - fence_bytes;
+    const uint64_t remaining =
+        kRecordReplayCeilingBytes - sizeof(ConSanMoiReportHeader) - fence_bytes;
     if (remaining % sizeof(ConSanMoiDiagnosticRecord) == 0u) {
       fence_count = candidate_fences;
       diagnostic_count = remaining / sizeof(ConSanMoiDiagnosticRecord);
@@ -484,8 +484,7 @@ TEST(ConSanMoiAutoReportPlan, PerBufferCeilingIsInclusiveAndRetainsRequiredBytes
   EXPECT_EQ(rejected.reason, ConSanMoiAutoReportPlanReason::PerBufferCeiling);
   EXPECT_GT(rejected.required_bytes, kRecordReplayCeilingBytes);
   EXPECT_FALSE(rejected.layout.valid);
-  EXPECT_EQ(rejected.required_bytes,
-            kRecordReplayCeilingBytes + sizeof(ConSanMoiDiagnosticRecord));
+  EXPECT_EQ(rejected.required_bytes, kRecordReplayCeilingBytes + sizeof(ConSanMoiDiagnosticRecord));
   EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(rejected.outcome),
             "insufficient_report_capacity");
 }
@@ -741,11 +740,11 @@ TEST(ConSanMoiAutoReportPlan, RepresentableHugeCountsAreCapacityInsufficientNotO
 TEST(ConSanMoiAutoReportPlan, FrozenSafetyCeilingsRemainDistinct) {
   EXPECT_EQ(kConSanMoiOrdinaryAutoReportBufferCeilingBytes, 128u * 1024u * 1024u);
   EXPECT_EQ(kConSanMoiAutoReportProcessCeilingBytes, 1024u * 1024u * 1024u);
-  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::Sampled),
+  EXPECT_EQ(consan_moi_mode_policy(ConSanMoiEngine::Sampled).auto_report_buffer_ceiling_bytes,
             kConSanMoiOrdinaryAutoReportBufferCeilingBytes);
-  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::InlineShadow),
+  EXPECT_EQ(consan_moi_mode_policy(ConSanMoiEngine::InlineShadow).auto_report_buffer_ceiling_bytes,
             kConSanMoiOrdinaryAutoReportBufferCeilingBytes);
-  EXPECT_EQ(consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::RecordReplay),
+  EXPECT_EQ(consan_moi_mode_policy(ConSanMoiEngine::RecordReplay).auto_report_buffer_ceiling_bytes,
             kRecordReplayCeilingBytes);
   EXPECT_GT(kConSanMoiAutoReportProcessCeilingBytes, kRecordReplayCeilingBytes);
   EXPECT_EQ(
@@ -804,12 +803,12 @@ TEST(ConSanMoiAutoReportPlan, CanonicalLayoutRoundTripsHeterogeneousSampledLayou
 TEST(ConSanMoiAutoReportPlan, ModeOwnedLayoutFlagsDriveHeaderConstructionAndRevalidation) {
   const ConSanMoiAutoReportPlan record = plan_consan_moi_auto_report(
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
-  const ConSanMoiAutoReportPlan sampled = plan_consan_moi_auto_report(
-      {.engine = ConSanMoiEngine::Sampled,
-       .sampled_range_bank_count = 1,
-       .sampled_watchpoint_count = 1});
-  const ConSanMoiAutoReportPlan inline_shadow = plan_consan_moi_auto_report(
-      {.engine = ConSanMoiEngine::InlineShadow, .inline_lds_bytes = 4});
+  const ConSanMoiAutoReportPlan sampled =
+      plan_consan_moi_auto_report({.engine = ConSanMoiEngine::Sampled,
+                                   .sampled_range_bank_count = 1,
+                                   .sampled_watchpoint_count = 1});
+  const ConSanMoiAutoReportPlan inline_shadow =
+      plan_consan_moi_auto_report({.engine = ConSanMoiEngine::InlineShadow, .inline_lds_bytes = 4});
   ASSERT_TRUE(record.complete());
   ASSERT_TRUE(sampled.complete());
   ASSERT_TRUE(inline_shadow.complete());
@@ -823,8 +822,8 @@ TEST(ConSanMoiAutoReportPlan, ModeOwnedLayoutFlagsDriveHeaderConstructionAndReva
 
   ConSanMoiReportBufferLayout stale = inline_shadow.layout;
   stale.layout_flags = 0u;
-  EXPECT_FALSE(revalidate_consan_moi_report_layout(
-                   stale, ConSanMoiEngine::InlineShadow, inline_shadow.required_bytes)
+  EXPECT_FALSE(revalidate_consan_moi_report_layout(stale, ConSanMoiEngine::InlineShadow,
+                                                   inline_shadow.required_bytes)
                    .valid);
 }
 

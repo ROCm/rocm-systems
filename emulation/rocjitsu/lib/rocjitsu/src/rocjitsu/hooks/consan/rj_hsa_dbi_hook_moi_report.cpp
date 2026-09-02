@@ -71,7 +71,7 @@ public:
     const bool direct_sampled = layout.engine == rocjitsu::ConSanMoiEngine::Sampled;
     const bool inline_shadow = layout.engine == rocjitsu::ConSanMoiEngine::InlineShadow;
     const uint64_t engine_ceiling =
-        rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(layout.engine);
+        rocjitsu::consan_moi_mode_policy(layout.engine).auto_report_buffer_ceiling_bytes;
     if (required_size > configured_cap || requested_size > configured_cap ||
         requested_size > engine_ceiling) {
       record_allocation_failure(required_size, /*capacity_failure=*/true);

@@ -549,7 +549,8 @@ if(NOT _target_extension_test MATCHES
 endif()
 if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count" OR
    NOT _mode_extension_test MATCHES "atomic_scratch_vgpr_count" OR
-   NOT _mode_extension_test MATCHES "auto_report_buffer_ceiling_bytes")
+   NOT _mode_extension_test MATCHES "operations[.]policy" OR
+   NOT _mode_extension_test MATCHES "default_runtime_sample_stride")
     message(FATAL_ERROR
         "ConSan hypothetical mode must publish synchronization scratch and report capacity demand"
     )
@@ -581,19 +582,27 @@ foreach(_atomic_scratch_mode IN ITEMS record_replay sampled inline_shadow)
     endif()
 endforeach()
 file(READ "${_consan_dir}/consan_moi_mode_planning.h" _moi_mode_planning_contract)
-if(NOT _moi_mode_planning_contract MATCHES
-   "uint64_t auto_report_buffer_ceiling_bytes")
-    message(FATAL_ERROR "ConSan MOI mode operations lost report-capacity ownership")
+if(NOT _moi_mode_planning_contract MATCHES "ConSanMoiModePolicy policy")
+    message(FATAL_ERROR "ConSan MOI mode operations lost cross-runtime policy ownership")
 endif()
 foreach(_report_capacity_mode IN ITEMS record_replay sampled inline_shadow)
     file(
         READ "${_consan_dir}/consan_moi_${_report_capacity_mode}.cpp"
         _report_capacity_mode_owner
     )
-    if(NOT _report_capacity_mode_owner MATCHES
-       "[.]auto_report_buffer_ceiling_bytes[ ]*=")
+    if(NOT _report_capacity_mode_owner MATCHES "[.]policy[ ]*=" OR
+       NOT _report_capacity_mode_owner MATCHES
+           "[.]auto_report_buffer_ceiling_bytes[ ]*=" OR
+       NOT _report_capacity_mode_owner MATCHES
+           "[.]default_runtime_sample_stride[ ]*=" OR
+       NOT _report_capacity_mode_owner MATCHES
+           "[.]initialize_owner_epoch_by_default[ ]*=" OR
+       NOT _report_capacity_mode_owner MATCHES
+           "[.]owner_source_applies_without_initialization[ ]*=" OR
+       NOT _report_capacity_mode_owner MATCHES
+           "[.]requires_entry_workgroup_capture[ ]*=")
         message(FATAL_ERROR
-            "ConSan ${_report_capacity_mode} must own its report-buffer ceiling selection"
+            "ConSan ${_report_capacity_mode} must own its complete cross-runtime policy"
         )
     endif()
 endforeach()
@@ -614,6 +623,13 @@ foreach(_file IN LISTS _consan_production_files)
         "${_file}"
         "record_replay_requires_entry_workgroup_capture"
         "retired common RR/Sampled entry-capture predicate must not return"
+    )
+endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "consan_moi_auto_report_buffer_ceiling_bytes|kMoi(RecordReplay|Sampled)StandardRuntimeStride"
+        "retired report-capacity and hook-default adapters must not return"
     )
 endforeach()
 _consan_assert_no_match(

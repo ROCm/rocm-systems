@@ -645,8 +645,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
         warn_ignored_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
                          "only applies to RJ_CONSAN_MODE=record-replay");
     }
-    const bool probe_local_owner = config.moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow;
-    if (!config.moi_init_owner_epoch && !probe_local_owner &&
+    const auto mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
+    if (!config.moi_init_owner_epoch && !mode_policy.owner_source_applies_without_initialization &&
         (env_has_value("RJ_CONSAN_MOI_OWNER_SOURCE") ||
          env_has_value("RJ_CONSAN_MOI_OWNER_SGPR"))) {
       if (env_has_value("RJ_CONSAN_MOI_OWNER_SOURCE"))
@@ -934,10 +934,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   // profile, not an expert opt-in. Engine-specific lowering still reports
   // unsupported sites honestly. Explicit false values remain useful for
   // focused compatibility and bring-up tests.
-  const bool persistent_owner_defaults =
-      config.flavor == rocjitsu::ConSanFlavor::Moi &&
-      (config.moi_engine == rocjitsu::ConSanMoiEngine::RecordReplay ||
-       config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled);
+  const auto moi_mode_policy = rocjitsu::consan_moi_mode_policy(config.moi_engine);
+  const bool persistent_owner_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi &&
+                                         moi_mode_policy.initialize_owner_epoch_by_default;
   const bool ordinary_moi_defaults = config.flavor == rocjitsu::ConSanFlavor::Moi;
   if (!parse_bool_env("RJ_CONSAN_MOI_INIT_OWNER_EPOCH", persistent_owner_defaults,
                       &config.moi_init_owner_epoch))
@@ -1090,13 +1089,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   }
   config.moi_runtime_sample_stride_explicit = env_has_value("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE");
-  uint32_t runtime_sample_stride_default = 1u;
-  if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
-    if (config.moi_engine == rocjitsu::ConSanMoiEngine::RecordReplay)
-      runtime_sample_stride_default = kMoiRecordReplayStandardRuntimeStride;
-    else if (config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled)
-      runtime_sample_stride_default = kMoiSampledStandardRuntimeStride;
-  }
+  const uint32_t runtime_sample_stride_default = config.flavor == rocjitsu::ConSanFlavor::Moi
+                                                     ? moi_mode_policy.default_runtime_sample_stride
+                                                     : 1u;
   if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", runtime_sample_stride_default,
                      &config.moi_runtime_sample_stride))
     return std::nullopt;
@@ -1242,7 +1237,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   } else {
     config->moi_auto_report_buffer_size =
         config->flavor == rocjitsu::ConSanFlavor::Moi && !config->moi_report_buffer_address
-            ? rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(config->moi_engine)
+            ? rocjitsu::consan_moi_mode_policy(config->moi_engine).auto_report_buffer_ceiling_bytes
             : 0;
   }
   if (config->moi_auto_report_buffer_size != 0 &&
@@ -1256,7 +1251,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return false;
   }
   const uint64_t auto_report_buffer_ceiling =
-      rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(config->moi_engine);
+      rocjitsu::consan_moi_mode_policy(config->moi_engine).auto_report_buffer_ceiling_bytes;
   if (config->moi_auto_report_buffer_size > auto_report_buffer_ceiling) {
     std::fprintf(stderr,
                  "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE='%s'; "

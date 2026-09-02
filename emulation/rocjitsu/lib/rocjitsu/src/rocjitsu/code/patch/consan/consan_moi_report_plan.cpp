@@ -338,7 +338,8 @@ ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInv
                                                     uint64_t caller_ceiling_bytes) {
   ConSanMoiAutoReportPlan plan;
   plan.layout.engine = inventory.engine;
-  const uint64_t engine_ceiling = consan_moi_auto_report_buffer_ceiling_bytes(inventory.engine);
+  const uint64_t engine_ceiling =
+      consan_moi_mode_policy(inventory.engine).auto_report_buffer_ceiling_bytes;
   plan.ceiling_bytes =
       caller_ceiling_bytes == 0u ? engine_ceiling : std::min(caller_ceiling_bytes, engine_ceiling);
   mark_report_regions_unplanned(plan.layout);

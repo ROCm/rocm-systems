@@ -334,7 +334,7 @@ const MoiModeOperations kSampledModeOperations = {
     .atomic_scratch_vgpr_count = sampled_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 8u,
     .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
-    .prologue = {.requires_entry_workgroup_capture = true},
+    .prologue = {},
     .persistent_state_demand = plan_sampled_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, true, false, 8u},
     .dynamic_stack_spill_without_target_backend = false,
@@ -346,7 +346,14 @@ const MoiModeOperations kSampledModeOperations = {
     .dense_access_route = {},
     .dense_router = plan_sampled_dense_router,
     .plan_evidence = plan_sampled_evidence_requirements,
-    .auto_report_buffer_ceiling_bytes = kConSanMoiOrdinaryAutoReportBufferCeilingBytes,
+    .policy =
+        {
+            .auto_report_buffer_ceiling_bytes = kConSanMoiOrdinaryAutoReportBufferCeilingBytes,
+            .default_runtime_sample_stride = 256u,
+            .initialize_owner_epoch_by_default = true,
+            .owner_source_applies_without_initialization = false,
+            .requires_entry_workgroup_capture = true,
+        },
     .plan_report_layout = plan_sampled_report_layout,
     .reconstruct_report_inventory = reconstruct_sampled_report_inventory,
 };

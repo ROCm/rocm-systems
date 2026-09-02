@@ -90,17 +90,6 @@ struct HookConfig : rocjitsu::ConSanRequest,
 };
 
 constexpr std::string_view kMoiStandardProfile = "standard-v1";
-// Automatic Record/Replay retains exact events for a bounded set of
-// dispatch/workgroup identities. Gate ordinary workloads at the same effective
-// evidence density as Sampled's independent workgroup and cell selectors so a
-// large launch does not spend unbounded time probing identities the frozen
-// report cannot retain.
-constexpr uint32_t kMoiRecordReplayStandardRuntimeStride = 65536u;
-// Sampled uses this stride independently for its workgroup fast gate and LDS
-// cell selector, so the effective evidence rate is the square of the configured
-// stride. Keep the standard operating point sparse without making ordinary
-// bounded workloads statistically likely to publish no evidence at all.
-constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
 
 [[nodiscard]] inline const char *fault_site_kind_name(rocjitsu::ConSanFaultSiteKind kind) {
   switch (kind) {

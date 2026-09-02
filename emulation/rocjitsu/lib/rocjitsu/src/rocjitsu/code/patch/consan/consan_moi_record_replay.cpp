@@ -253,8 +253,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .atomic_scratch_vgpr_count = record_replay_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 5u,
     .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
-    .prologue = {.backup_compact_spill_for_runtime_sampling = true,
-                 .requires_entry_workgroup_capture = true},
+    .prologue = {.backup_compact_spill_for_runtime_sampling = true},
     .persistent_state_demand = plan_record_replay_persistent_state_demand,
     .transient_scalar_placement = {ConSanMoiScalarSpillLayout::Compact, false, true, 0u},
     .dynamic_stack_spill_without_target_backend = false,
@@ -267,8 +266,15 @@ const MoiModeOperations kRecordReplayModeOperations = {
                            .preserves_replay_ordering = true},
     .dense_router = plan_record_replay_dense_router,
     .plan_evidence = plan_record_replay_evidence_requirements,
-    // Full identities and dispatch/access hash tables need the larger tier.
-    .auto_report_buffer_ceiling_bytes = 512u * 1024u * 1024u,
+    .policy =
+        {
+            // Full identities and dispatch/access hash tables need the larger tier.
+            .auto_report_buffer_ceiling_bytes = 512u * 1024u * 1024u,
+            .default_runtime_sample_stride = 65536u,
+            .initialize_owner_epoch_by_default = true,
+            .owner_source_applies_without_initialization = false,
+            .requires_entry_workgroup_capture = true,
+        },
     .plan_report_layout = plan_record_replay_report_layout,
     .reconstruct_report_inventory = reconstruct_record_replay_report_inventory,
 };

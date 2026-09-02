@@ -510,6 +510,19 @@ enum class ConSanSuperColliderEvidenceMode : uint8_t {
   Count,
 };
 
+/// Stable cross-runtime policy selected by one MOI mode registration.
+/// Configuration and lowering consume this product without reconstructing an
+/// engine matrix; mechanics that depend on object facts remain mode callbacks.
+struct ConSanMoiModePolicy {
+  uint64_t auto_report_buffer_ceiling_bytes = 0;
+  uint32_t default_runtime_sample_stride = 1;
+  bool initialize_owner_epoch_by_default = false;
+  bool owner_source_applies_without_initialization = false;
+  bool requires_entry_workgroup_capture = false;
+};
+
+[[nodiscard]] ConSanMoiModePolicy consan_moi_mode_policy(ConSanMoiEngine engine);
+
 /// User-visible sanitizer choices that determine which semantic observations
 /// ConSan requests from a code object.
 ///

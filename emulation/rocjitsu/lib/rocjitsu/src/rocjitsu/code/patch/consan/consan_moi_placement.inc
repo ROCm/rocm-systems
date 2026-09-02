@@ -362,7 +362,7 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
     ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
-  if (!moi_mode_operations(engine).prologue.requires_entry_workgroup_capture ||
+  if (!moi_mode_operations(engine).policy.requires_entry_workgroup_capture ||
       !record_replay_has_entry_workgroup_capture(point, private_offsets) ||
       !record_replay_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
     return std::nullopt;
@@ -463,8 +463,7 @@ struct MoiKernelResourceContext {
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments,
-                               uint64_t descriptor_offset) {
+moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(assignments.persistent_vgprs, descriptor_offset,
                         &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
@@ -472,8 +471,7 @@ moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments,
 }
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-moi_transient_sgpr_assignment(MoiOwnerAssignments assignments,
-                              uint64_t descriptor_offset) {
+moi_transient_sgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(assignments.transient_sgprs, descriptor_offset,
                         &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
@@ -2882,8 +2880,8 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
-                         const ConSanMoiOperatingPoint &site_point,
-                         MoiOwnerAssignments assignments, uint16_t expected_count) {
+                         const ConSanMoiOperatingPoint &site_point, MoiOwnerAssignments assignments,
+                         uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
        plan.source == ConSanRegisterAllocationSource::LivenessDead ||

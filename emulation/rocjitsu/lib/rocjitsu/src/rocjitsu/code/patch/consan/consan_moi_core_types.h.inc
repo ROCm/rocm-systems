@@ -330,11 +330,9 @@ consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport support) {
 
 /// Shared ordinary per-buffer safety bound used by Sampled and InlineShadow.
 /// Each mode publishes its selected ceiling through the MOI mode registry.
-inline constexpr uint64_t kConSanMoiOrdinaryAutoReportBufferCeilingBytes =
-    128u * 1024u * 1024u;
+inline constexpr uint64_t kConSanMoiOrdinaryAutoReportBufferCeilingBytes = 128u * 1024u * 1024u;
 /// G6B3 owns aggregate reservation against this process-wide ceiling.
 inline constexpr uint64_t kConSanMoiAutoReportProcessCeilingBytes = 1024u * 1024u * 1024u;
-[[nodiscard]] uint64_t consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine engine);
 // Record/replay synchronization probes can execute many times per static site,
 // and a code-object-scoped report remains live across repeated dispatches.
 // Barriers publish once per wave, while atomic and fence probes publish once

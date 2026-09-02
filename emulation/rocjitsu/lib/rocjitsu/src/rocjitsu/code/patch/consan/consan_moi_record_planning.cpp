@@ -33,15 +33,15 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
 }
 
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    MoiOwnerAssignments assignments, std::span<const uint64_t> owner_descriptor_offsets,
+    const ConSanRequest &request, ConSanMoiOperatingPoint &point, MoiOwnerAssignments assignments,
+    std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
       private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
   if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
                                                                                private_offsets))
     return false;
-  if (!moi_mode_operations(request.moi_engine).prologue.requires_entry_workgroup_capture ||
+  if (!moi_mode_operations(request.moi_engine).policy.requires_entry_workgroup_capture ||
       consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }

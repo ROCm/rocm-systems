@@ -194,6 +194,6 @@ plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanning
 
 } // namespace rocjitsu::consan_moi_impl
 
-uint64_t rocjitsu::consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine engine) {
-  return consan_moi_impl::moi_mode_operations(engine).auto_report_buffer_ceiling_bytes;
+rocjitsu::ConSanMoiModePolicy rocjitsu::consan_moi_mode_policy(ConSanMoiEngine engine) {
+  return consan_moi_impl::moi_mode_operations(engine).policy;
 }
