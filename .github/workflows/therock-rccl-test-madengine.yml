@@ -64,10 +64,17 @@ jobs:
         shell: bash
     env:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
-      RESULTS_DIR: "/apps/rccl-ci/perf"
-      WORK_DIR: "/apps/rccl-ci/workdir/${{ github.run_id }}"
-      OUTPUT_ARTIFACTS_DIR: "/apps/cvs_tests/dist_new/dist/rocm"
-      AWS_SHARED_CREDENTIALS_FILE: "/apps/cvs_tests/awsconfig/credentials.ini"
+      # The runner user (z1_coco) owns none of the directories this job used to
+      # write to: /apps/rccl-ci/{perf,workdir} are arravikum:arravikum 0755 and
+      # /apps/cvs_tests/dist_new is 0774, so not even traversable. /apps/rccl-ci
+      # itself is world-writable, so keep the shared-NFS layout and put our own
+      # subtree under it.
+      RESULTS_DIR: "/apps/rccl-ci/madengine/perf"
+      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}"
+      # Workspace-local, as in the JAX and PyTorch test workflows: the fetched
+      # ROCm tree is only read on the head node, and /apps/cvs_tests/dist_new
+      # belongs to the CVS suite, which this job may neither traverse nor wipe.
+      OUTPUT_ARTIFACTS_DIR: "./build"
       CLUSTER: "ruby"
     steps:
       - name: Checkout TheRock repository
@@ -89,8 +96,19 @@ jobs:
             exit 1
           fi
 
+      # Ahead of the dependency install: the pool is not uniform, and on at least
+      # one machine /usr/bin/python3 has no pip module, which failed the job here.
+      # Everything downstream then runs from the venv, which the job needed anyway.
+      - name: Setup Python environment
+        run: |
+          mkdir -p "${WORK_DIR}"
+          python3 -m venv "${WORK_DIR}/venv"
+          echo "${WORK_DIR}/venv/bin" >> "$GITHUB_PATH"
+
       - name: Install TheRock dependencies
-        run: python3 -m pip install -r requirements.txt
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
 
       - name: Resolve TheRock artifact run
         if: ${{ inputs.artifact_run_id == '' }}
@@ -122,13 +140,6 @@ jobs:
             --artifact-group="${{ inputs.artifact_group }}" \
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
-
-      - name: Setup Python environment
-        run: |
-          mkdir -p "${WORK_DIR}"
-          python3 -m venv "${WORK_DIR}/venv"
-          source "${WORK_DIR}/venv/bin/activate"
-          pip install --upgrade pip
 
       - name: Run MADEngine workload
         timeout-minutes: 210
