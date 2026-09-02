@@ -17,5 +17,6 @@ void SetFactoryCreateFail(bool fail);
 void SetFactoryNullHandles(bool nullHandles);
 void SetLsaAddrFail(bool fail);
 void SetLsaSelfAddr(void* addr);
+void SetConnCheckVerifyMissing(bool missing);
 
 }  // namespace GinAnvilPluginStubs
