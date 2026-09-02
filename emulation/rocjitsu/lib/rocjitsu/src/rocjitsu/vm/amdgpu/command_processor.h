@@ -235,6 +235,7 @@ public:
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
+    cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
   }
 
   void startup() override;
@@ -541,7 +542,7 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
-  bool has_active_cus() const;
+  bool has_runnable_cus() const;
   FunctionalQuantumResult run_active_cus_once(simdojo::Tick now);
   void refresh_pooled_due_ticks(simdojo::Tick now);
   simdojo::Tick next_pooled_due_tick(simdojo::Tick now);
@@ -551,6 +552,9 @@ private:
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
   void on_cu_idle();
+
+  /// @brief Wake the CP-owned functional driver after a pooled CU becomes runnable.
+  void on_cu_pool_ready(ComputeUnitCore *cu);
 
   /// @brief Queue scheduling: select next queue with undispatched entries.
   HwQueueState *schedule_next_queue();

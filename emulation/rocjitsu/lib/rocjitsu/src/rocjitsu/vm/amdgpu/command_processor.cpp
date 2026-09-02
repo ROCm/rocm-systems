@@ -301,7 +301,7 @@ void CommandProcessor::set_shared_dispatch_pool(CpuDispatchPool *pool) {
 
 void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
-  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || plugin_group_->requires_serial_hot_hooks())
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
     threads = 1;
   if (dispatch_threads_ == threads)
     return;
@@ -326,7 +326,7 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
     for (auto *cu : cus_) {
       const simdojo::Tick serial_due = cu->suspend_scheduled_work();
       cu->set_pool_driven(true);
-      if (cu->has_active_wfs()) {
+      if (cu->has_runnable_wfs()) {
         simdojo::Tick tick = serial_due == simdojo::TICK_MAX ? now + 1 : serial_due;
         if (tick < now)
           tick = now + 1;
@@ -1919,6 +1919,16 @@ void CommandProcessor::on_cu_idle() {
   arm_grid_wait_recheck();
 }
 
+void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
+  if (dispatch_threads_ <= 1 || !engine() || !cu->has_runnable_wfs())
+    return;
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  const simdojo::Tick now = engine()->context(partition_id()).current_tick();
+  pooled_due_ticks_[cu] = now + 1;
+  arm_dispatch_continuation(now + 1);
+}
+
 bool CommandProcessor::step() {
   // Process dispatches across all queues.
   process_queues();
@@ -1954,9 +1964,9 @@ void CommandProcessor::process_queues() {
   }
 }
 
-bool CommandProcessor::has_active_cus() const {
+bool CommandProcessor::has_runnable_cus() const {
   for (auto *cu : cus_) {
-    if (cu->has_active_wfs())
+    if (cu->has_runnable_wfs())
       return true;
   }
   return false;
@@ -1964,13 +1974,13 @@ bool CommandProcessor::has_active_cus() const {
 
 void CommandProcessor::refresh_pooled_due_ticks(simdojo::Tick now) {
   for (auto it = pooled_due_ticks_.begin(); it != pooled_due_ticks_.end();) {
-    if (!it->first->has_active_wfs())
+    if (!it->first->has_runnable_wfs())
       it = pooled_due_ticks_.erase(it);
     else
       ++it;
   }
   for (auto *cu : cus_)
-    if (cu->has_active_wfs())
+    if (cu->has_runnable_wfs())
       pooled_due_ticks_.try_emplace(cu, now + 1);
 }
 
@@ -1990,13 +2000,13 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
       spi->append_active_cus(active_cu_scratch_);
   } else {
     for (auto *cu : cus_) {
-      if (cu->has_active_wfs())
+      if (cu->has_runnable_wfs())
         active_cu_scratch_.push_back(cu);
     }
   }
   std::erase_if(active_cu_scratch_, [&](ComputeUnitCore *cu) {
     auto due = pooled_due_ticks_.find(cu);
-    return due == pooled_due_ticks_.end() || due->second > now;
+    return !cu->has_runnable_wfs() || due == pooled_due_ticks_.end() || due->second > now;
   });
 
   if (active_cu_scratch_.empty())
@@ -2021,7 +2031,7 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
 
   for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
     auto *cu = active_cu_scratch_[i];
-    if (cu->has_active_wfs())
+    if (cu->has_runnable_wfs())
       pooled_due_ticks_[cu] = now + std::max<uint64_t>(1, quantum_result_scratch_[i].iterations);
     else
       pooled_due_ticks_.erase(cu);
@@ -2787,7 +2797,8 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   // records only. The shared structure lock keeps queue/CU storage stable; once
   // the batch rejoins, the CP thread applies every stateful retirement action.
   auto run_dispatch_workers = [&]() {
-    if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 || !has_active_cus())
+    if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 ||
+        !has_runnable_cus())
       return FunctionalQuantumResult{};
     lock.unlock();
     // One shared pool and thread budget covers the CP's complete active-CU
@@ -2901,6 +2912,16 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     drain_pending_wg_completions();
     if (completion_)
       completion_->drain_completions(new_queue_states_);
+
+    // A completed batch can free every resident slot while the same dispatch
+    // still owns undispatched workgroups. Refill those slots before yielding,
+    // but leave their execution to the next continuation event so one event
+    // still runs at most one functional quantum per CU.
+    if (yield_to_event_loop) {
+      process_queues();
+      if (completion_)
+        completion_->drain_completions(new_queue_states_);
+    }
 
     util::Logger::cp([&](auto &os) {
       size_t remaining = 0;

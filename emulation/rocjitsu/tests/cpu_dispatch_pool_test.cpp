@@ -145,6 +145,19 @@ TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
     EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
 }
 
+TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
+  constexpr uint64_t kBadProgramBase = kProgramBase + 0x2000;
+  DispatchPoolFixture fixture(/*cu_count=*/4);
+  amdgpu::CpuDispatchPool pool(/*threads=*/4);
+  fixture.memory.write32(kBadProgramBase, kSSetvskip);
+  fixture.wfs[0]->pc = kBadProgramBase;
+
+  EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/1),
+               std::exception);
+  for (size_t i = 1; i < fixture.wfs.size(); ++i)
+    EXPECT_EQ(fixture.wfs[i]->pc, kProgramBase + sizeof(uint32_t));
+}
+
 TEST(CpuDispatchPoolTest, DestroyJoinsParkedWorkers) {
   for (uint32_t i = 0; i < 100; ++i) {
     amdgpu::CpuDispatchPool pool(/*threads=*/8);

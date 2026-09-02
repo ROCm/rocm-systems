@@ -3631,16 +3631,16 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   EXPECT_EQ(kernel_symbol, "vmid_dispatch_kernel");
 }
 
-TEST(ExecutionPluginTest, PluginCapabilitiesSetCpuDispatchPolicy) {
+TEST(ExecutionPluginTest, HotHookSerializationDoesNotSetCpuDispatchPolicy) {
   {
     PluginFixture f;
-    f.cp()->set_dispatch_threads(8);
+    f.soc->set_dispatch_threads(8);
     auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     pg->add(std::make_unique<SerialHotHookPlugin>());
     f.soc->set_plugin_group(pg);
-    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 8u);
     f.cp()->set_dispatch_threads(8);
-    EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+    EXPECT_EQ(f.cp()->dispatch_threads(), 8u);
   }
   {
     PluginFixture f;

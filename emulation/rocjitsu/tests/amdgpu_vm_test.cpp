@@ -4482,6 +4482,22 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerQueueSatisfyPollingWave) {
   EXPECT_EQ(completion_signal_value(f.mem(), waiter_signal), 0);
 }
 
+TEST(AqlDispatchTest, CompletedPoolBatchRefillsIdleComputeUnits) {
+  VmFixture f("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t signal = 0xF0030000;
+  init_completion_signal(f.mem(), signal);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(make_dispatch_packet(kernel, signal, /*grid_size_x=*/192));
+
+  while (f.engine->step()) {
+  }
+
+  EXPECT_EQ(completion_signal_value(f.mem(), signal), 0);
+}
+
 TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna4"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
@@ -5665,17 +5681,55 @@ void step_until_first_quantum(VmFixture &fixture, amdgpu::ComputeUnitCore *cu) {
   ASSERT_TRUE(cu->has_active_wfs());
 }
 
-class LiveSerialDispatchPlugin final : public ExecutionPlugin {
+class LiveSerializedHotHookPlugin final : public ExecutionPlugin {
 public:
-  LiveSerialDispatchPlugin() : ExecutionPlugin("live_serial_dispatch") {}
+  LiveSerializedHotHookPlugin() : ExecutionPlugin("live_serial_hot_hook") {}
   bool requires_serial_hot_hooks() const override { return true; }
 };
 
-class LiveParallelDispatchPlugin final : public ExecutionPlugin {
+class LiveConcurrentHotHookPlugin final : public ExecutionPlugin {
 public:
-  LiveParallelDispatchPlugin() : ExecutionPlugin("live_parallel_dispatch") {}
+  LiveConcurrentHotHookPlugin() : ExecutionPlugin("live_concurrent_hot_hook") {}
   bool requires_serial_hot_hooks() const override { return false; }
 };
+
+TEST(AqlDispatchTest, DebugPausedPoolWaveDoesNotKeepSchedulingContinuations) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+  auto code = make_multi_quantum_nop_kernel();
+  const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  step_until_first_quantum(f, f.cu());
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  wave->set_debug_suspended(true);
+
+  ASSERT_TRUE(f.engine->step()); // Consume the already-armed continuation.
+  EXPECT_FALSE(f.engine->step()) << "a debug-paused wave kept the pool continuation chain alive";
+}
+
+TEST(AqlDispatchTest, DebugResumeWakesQuiescedPoolDriver) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+  auto code = make_multi_quantum_nop_kernel();
+  const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  step_until_first_quantum(f, f.cu());
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  wave->set_debug_suspended(true);
+  ASSERT_TRUE(f.engine->step()); // Consume the already-armed continuation.
+
+  wave->set_debug_suspended(false);
+  f.cu()->schedule_work_async();
+  f.engine->run();
+
+  EXPECT_TRUE(f.cu()->is_idle());
+}
 
 TEST(AqlDispatchTest, ActiveDispatchSurvivesSerialToPoolTransition) {
   VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
@@ -5708,13 +5762,13 @@ TEST(AqlDispatchTest, ActiveDispatchSurvivesPoolToSerialTransition) {
   EXPECT_TRUE(f.cu()->is_idle());
 }
 
-TEST(AqlDispatchTest, LivePluginReplacementRestoresPoolDuringActiveDispatch) {
+TEST(AqlDispatchTest, LivePluginReplacementPreservesPoolDuringActiveDispatch) {
   VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
   f.soc_ptr->set_dispatch_threads(2);
   auto serial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(serial_group->add(std::make_unique<LiveSerialDispatchPlugin>()));
+  ASSERT_TRUE(serial_group->add(std::make_unique<LiveSerializedHotHookPlugin>()));
   f.soc_ptr->set_plugin_group(serial_group);
-  ASSERT_EQ(f.cp()->dispatch_threads(), 1u);
+  ASSERT_EQ(f.cp()->dispatch_threads(), 2u);
 
   auto code = make_multi_quantum_nop_kernel();
   uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
@@ -5723,7 +5777,7 @@ TEST(AqlDispatchTest, LivePluginReplacementRestoresPoolDuringActiveDispatch) {
   step_until_first_quantum(f, f.cu());
 
   auto parallel_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(parallel_group->add(std::make_unique<LiveParallelDispatchPlugin>()));
+  ASSERT_TRUE(parallel_group->add(std::make_unique<LiveConcurrentHotHookPlugin>()));
   f.soc_ptr->set_plugin_group(parallel_group);
   EXPECT_EQ(f.soc_ptr->dispatch_threads(), 2u);
   EXPECT_EQ(f.cp()->dispatch_threads(), 2u);

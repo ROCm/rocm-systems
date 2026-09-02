@@ -77,15 +77,6 @@ public:
     uint32_t worker_goal =
         std::min<uint32_t>(threads > 1 ? threads - 1 : 0, static_cast<uint32_t>(workers_.size()));
 
-    if (worker_goal == 0) {
-      FunctionalQuantumResult result;
-      for (size_t i = 0; i < tasks.size(); ++i) {
-        results[i] = tasks[i]->run_quantum();
-        result.merge(results[i]);
-      }
-      return result;
-    }
-
     {
       std::lock_guard<std::mutex> lock(mutex_);
       tasks_.assign(tasks.begin(), tasks.end());

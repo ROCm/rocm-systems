@@ -94,8 +94,7 @@ void SoC::set_dispatch_threads(uint32_t threads) {
 
 void SoC::apply_dispatch_threads() {
   uint32_t effective_threads = requested_dispatch_threads_;
-  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL ||
-      (plugin_group_ && plugin_group_->requires_serial_hot_hooks()))
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
     effective_threads = 1;
 
   std::unique_ptr<amdgpu::CpuDispatchPool> new_pool;
