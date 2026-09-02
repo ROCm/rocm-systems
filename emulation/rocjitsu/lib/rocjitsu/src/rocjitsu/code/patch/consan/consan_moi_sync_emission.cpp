@@ -62,18 +62,19 @@ namespace consan_moi_impl {
 class InlineExecMaskEmission {
 public:
   InlineExecMaskEmission(std::vector<uint32_t> &words, uint16_t narrow_save, rj_code_arch_t arch)
-      : words_(words), narrow_save_(narrow_save), arch_(arch) {}
+      : sequence_(words), narrow_save_(narrow_save), arch_(arch) {}
 
   [[nodiscard]] bool restore(uint16_t source) {
-    return append(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
+    return sequence_.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
   }
 
   [[nodiscard]] bool save(uint16_t destination) {
-    return append(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
+    return sequence_.emit(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
   }
 
   [[nodiscard]] bool narrow_vcc() {
-    return append(instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
+    return sequence_.emit(
+        instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
   }
 
   [[nodiscard]] bool require_literal(uint16_t value, uint32_t literal, bool equal) {
@@ -81,18 +82,11 @@ public:
                                      scalar_positive_inline_u32(literal), value, arch_)
                                : instrumentation::build_v_cmp_ne_u32_vcc(
                                      scalar_positive_inline_u32(literal), value, arch_);
-    return append(compare) && narrow_vcc();
+    return sequence_.emit(compare) && narrow_vcc();
   }
 
 private:
-  [[nodiscard]] bool append(std::optional<uint32_t> instruction) {
-    if (!instruction)
-      return false;
-    words_.push_back(*instruction);
-    return true;
-  }
-
-  std::vector<uint32_t> &words_;
+  InstructionSequence sequence_;
   uint16_t narrow_save_ = 0;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
 };
@@ -645,31 +639,30 @@ append_inline_atomic_table_address(std::vector<uint32_t> &words, uint64_t table_
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return false;
-  const auto shifted = instrumentation::build_v_lshrrev_b32(
-      hash_vgpr, scalar_positive_inline_u32(2), atomic_address_vgpr, arch);
-  const auto mixed = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(static_cast<uint16_t>(atomic_address_vgpr + 1u)), hash_vgpr,
-      arch);
-  const auto folded = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
-  const auto mix_fold = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto folded_again = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(8), hash_vgpr, arch);
-  const auto mix_fold_again = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto folded_final = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(4), hash_vgpr, arch);
-  const auto mix_fold_final = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto multiply = instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
-                                                                    0x85ebca6bu, hash_vgpr, arch);
-  const auto masked =
-      instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr, arch);
   std::vector<uint32_t> emitted;
   InstructionSequence sequence(emitted);
-  if (!sequence.emit_all(shifted, mixed, folded, mix_fold, folded_again, mix_fold_again,
-                         folded_final, mix_fold_final, multiply, masked) ||
+  if (!sequence.emit_all(
+          instrumentation::build_v_lshrrev_b32(hash_vgpr, scalar_positive_inline_u32(2),
+                                               atomic_address_vgpr, arch),
+          instrumentation::build_v_xor_b32(
+              hash_vgpr, vector_source_vgpr(static_cast<uint16_t>(atomic_address_vgpr + 1u)),
+              hash_vgpr, arch),
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(8),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(4),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr, 0x85ebca6bu,
+                                                      hash_vgpr, arch),
+          instrumentation::build_v_and_b32_literal(hash_vgpr, table_capacity - 1u, hash_vgpr,
+                                                   arch)) ||
       !consan_detail::append_moi_indexed_address(emitted,
                                                  {
                                                      .table_address = table_base,
@@ -725,28 +718,23 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!registers.is_well_formed())
     return false;
   const uint16_t exec_base = *registers.exec_save_sgpr;
-  const auto save_original = instrumentation::build_s_mov_b64(
-      static_cast<uint16_t>(exec_base + original_exec_save_offset), kAmdGpuExecLo, arch);
-  if (!save_original)
+  InstructionSequence sequence(words);
+  if (!sequence.emit(instrumentation::build_s_mov_b64(
+          static_cast<uint16_t>(exec_base + original_exec_save_offset), kAmdGpuExecLo, arch)))
     return false;
-  words.push_back(*save_original);
 
   if (registers.cached_key_vgpr) {
     words.push_back(
         build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(*registers.cached_key_vgpr), arch));
-    const auto valid =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
-    InstructionSequence sequence(words);
-    return sequence.emit_all(valid, narrow);
+    return sequence.emit_all(
+        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
+        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch));
   }
   if (registers.cached_key_sgpr) {
     words.push_back(build_v_mov_b32_e32(key_vgpr, *registers.cached_key_sgpr, arch));
-    const auto valid =
-        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
-    const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch);
-    InstructionSequence sequence(words);
-    return sequence.emit_all(valid, narrow);
+    return sequence.emit_all(
+        instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch),
+        instrumentation::build_s_and_saveexec_b64(exec_base, kAmdGpuVccLo, arch));
   }
 
   const auto append_coordinate = [&](const ConSanMoiWorkgroupSource &source, uint32_t bits,
@@ -756,31 +744,26 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     if (source.scalar_src) {
       const uint32_t high_mask = ~((uint32_t{1} << bits) - 1u);
-      const auto high =
-          instrumentation::build_v_and_b32_literal(value_vgpr, high_mask, coordinate_vgpr, arch);
-      const auto fits =
-          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value_vgpr, arch);
-      const auto narrow = instrumentation::build_s_and_saveexec_b64(
-          static_cast<uint16_t>(exec_base + exec_save_offset), kAmdGpuVccLo, arch);
-      InstructionSequence sequence(words);
-      if (!sequence.emit_all(high, fits, narrow))
+      if (!sequence.emit_all(
+              instrumentation::build_v_and_b32_literal(value_vgpr, high_mask, coordinate_vgpr,
+                                                       arch),
+              instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value_vgpr,
+                                                      arch),
+              instrumentation::build_s_and_saveexec_b64(
+                  static_cast<uint16_t>(exec_base + exec_save_offset), kAmdGpuVccLo, arch)))
         return false;
     }
     if (shift != 0u) {
-      const auto shifted = instrumentation::build_v_lshlrev_b32(
-          coordinate_vgpr, scalar_positive_inline_u32(shift), coordinate_vgpr, arch);
-      InstructionSequence sequence(words);
-      if (!sequence.emit(shifted))
+      if (!sequence.emit(instrumentation::build_v_lshlrev_b32(
+              coordinate_vgpr, scalar_positive_inline_u32(shift), coordinate_vgpr, arch)))
         return false;
     }
     if (initialize) {
       words.push_back(build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(coordinate_vgpr), arch));
       return true;
     }
-    const auto add = instrumentation::build_v_add_u32(key_vgpr, vector_source_vgpr(coordinate_vgpr),
-                                                      key_vgpr, arch);
-    InstructionSequence sequence(words);
-    return sequence.emit(add);
+    return sequence.emit(instrumentation::build_v_add_u32(
+        key_vgpr, vector_source_vgpr(coordinate_vgpr), key_vgpr, arch));
   };
 
   const bool has_z = sources.z.scalar_src.has_value();
@@ -792,30 +775,26 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !append_coordinate(sources.z, 6u, x_bits + y_bits, 4u, /*initialize=*/false))
     return false;
 
-  const auto max_key = instrumentation::build_v_mov_b32_literal(
-      value_vgpr, consan_moi_exact_shadow::max_generation, arch);
-  const auto not_reserved =
-      instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(key_vgpr), value_vgpr, arch);
-  const auto narrow_reserved = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(exec_base + 6u), kAmdGpuVccLo, arch);
-  const auto add_one =
-      instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch);
   // The Y-coordinate predicate journal at +2 is dead after the packed key has
   // been formed. Reuse it here instead of +8, which the surrounding inline
   // transaction reserves for the guest VCC snapshot.
   const uint16_t valid_exec = static_cast<uint16_t>(exec_base + 2u);
-  const auto save_valid = instrumentation::build_s_mov_b64(valid_exec, kAmdGpuExecLo, arch);
-  const auto select_invalid = instrumentation::build_s_andn2_b64(
-      kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec,
-      arch);
-  const auto zero_invalid = instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch);
-  const auto restore_valid = instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_exec, arch);
-  InstructionSequence sequence(words);
   // Keep zero as the persistent invalid sentinel for lanes excluded by a
   // coordinate-width or reserved-key predicate. The caller still receives
   // EXEC narrowed to valid lanes, exactly as before.
-  return sequence.emit_all(max_key, not_reserved, narrow_reserved, add_one, save_valid,
-                           select_invalid, zero_invalid, restore_valid);
+  return sequence.emit_all(
+      instrumentation::build_v_mov_b32_literal(value_vgpr, consan_moi_exact_shadow::max_generation,
+                                               arch),
+      instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(key_vgpr), value_vgpr, arch),
+      instrumentation::build_s_and_saveexec_b64(static_cast<uint16_t>(exec_base + 6u), kAmdGpuVccLo,
+                                                arch),
+      instrumentation::build_v_add_u32(key_vgpr, scalar_positive_inline_u32(1), key_vgpr, arch),
+      instrumentation::build_s_mov_b64(valid_exec, kAmdGpuExecLo, arch),
+      instrumentation::build_s_andn2_b64(
+          kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), valid_exec,
+          arch),
+      instrumentation::build_v_mov_b32_literal(key_vgpr, 0u, arch),
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, valid_exec, arch));
 }
 
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
@@ -833,59 +812,56 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       table_base + (release_sequence ? static_cast<uint64_t>(namespace_capacity) *
                                            sizeof(ConSanMoiInlineAcquiredEpochTokenSlot)
                                      : 0u);
-  const auto mix_workgroup = instrumentation::build_v_mul_lo_u32_literal(
-      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenWorkgroupMultiplier, workgroup_key_vgpr,
-      arch);
-  const auto multiply_consumer = instrumentation::build_v_mul_lo_u32_literal(
-      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenConsumerMultiplier,
-      consumer_owner_vgpr, arch);
-  const auto mix_consumer = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto multiply_producer = instrumentation::build_v_mul_lo_u32_literal(
-      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenProducerMultiplier,
-      producer_owner_vgpr, arch);
-  const auto mix_producer = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto multiply_consumer_epoch = instrumentation::build_v_mul_lo_u32_literal(
-      temporary_vgpr, slot_address_vgpr, kConSanMoiInlineTokenConsumerEpochMultiplier,
-      consumer_epoch_vgpr, arch);
-  const auto mix_consumer_epoch = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto fold0 = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
-  const auto mix_fold0 = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto avalanche0 = instrumentation::build_v_mul_lo_u32_literal(
-      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenAvalancheMultiplier0, hash_vgpr, arch);
-  const auto fold1 = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(15), hash_vgpr, arch);
-  const auto mix_fold1 = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto avalanche1 = instrumentation::build_v_mul_lo_u32_literal(
-      hash_vgpr, temporary_vgpr, kConSanMoiInlineTokenAvalancheMultiplier1, hash_vgpr, arch);
-  const auto fold2 = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(16), hash_vgpr, arch);
-  const auto mix_fold2 = instrumentation::build_v_xor_b32(
-      hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-  const auto masked =
-      instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u, hash_vgpr, arch);
   std::vector<uint32_t> emitted;
   InstructionSequence sequence(emitted);
-  if (!sequence.emit_all(mix_workgroup, multiply_consumer, mix_consumer, multiply_producer,
-                         mix_producer, multiply_consumer_epoch, mix_consumer_epoch))
+  if (!sequence.emit_all(
+          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                      kConSanMoiInlineTokenWorkgroupMultiplier,
+                                                      workgroup_key_vgpr, arch),
+          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                      kConSanMoiInlineTokenConsumerMultiplier,
+                                                      consumer_owner_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                      kConSanMoiInlineTokenProducerMultiplier,
+                                                      producer_owner_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, slot_address_vgpr,
+                                                      kConSanMoiInlineTokenConsumerEpochMultiplier,
+                                                      consumer_epoch_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch)))
     return false;
   if (release_sequence) {
-    const auto salt = instrumentation::build_v_mov_b32_literal(
-        temporary_vgpr, kConSanMoiInlineTokenReleaseSequenceSalt, arch);
-    const auto mix_salt = instrumentation::build_v_xor_b32(
-        hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch);
-    if (!salt || !mix_salt)
+    if (!sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                               temporary_vgpr, kConSanMoiInlineTokenReleaseSequenceSalt, arch),
+                           instrumentation::build_v_xor_b32(
+                               hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr, arch)))
       return false;
-    emitted.insert(emitted.end(), salt->begin(), salt->end());
-    emitted.push_back(*mix_salt);
   }
-  if (!sequence.emit_all(fold0, mix_fold0, avalanche0, fold1, mix_fold1, avalanche1, fold2,
-                         mix_fold2, masked))
+  if (!sequence.emit_all(
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                      kConSanMoiInlineTokenAvalancheMultiplier0,
+                                                      hash_vgpr, arch),
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(15),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_mul_lo_u32_literal(hash_vgpr, temporary_vgpr,
+                                                      kConSanMoiInlineTokenAvalancheMultiplier1,
+                                                      hash_vgpr, arch),
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(16),
+                                               hash_vgpr, arch),
+          instrumentation::build_v_xor_b32(hash_vgpr, vector_source_vgpr(temporary_vgpr), hash_vgpr,
+                                           arch),
+          instrumentation::build_v_and_b32_literal(hash_vgpr, namespace_capacity - 1u, hash_vgpr,
+                                                   arch)))
     return false;
   if (!consan_detail::append_moi_indexed_address(
           emitted,
