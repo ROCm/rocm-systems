@@ -20,7 +20,7 @@ using MfmaLazyStorage = simdojo::detail::SoftwareLazyRegisterStorage<MfmaVgpr, 1
 TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mfma_f32_native_width_supported(32, width))
+  if (!amdgpu::mma_f32_native_width_supported(32, width))
     GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
 
   constexpr uint32_t regs_per_chunk = MfmaLazyStorage::registers_per_chunk();

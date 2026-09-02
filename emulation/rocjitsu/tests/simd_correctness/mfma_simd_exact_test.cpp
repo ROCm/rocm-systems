@@ -244,7 +244,7 @@ TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
 TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mfma_f32_native_width_supported(32, width))
+  if (!amdgpu::mma_f32_native_width_supported(32, width))
     GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
@@ -272,7 +272,7 @@ TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
 TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mfma_f32_native_width_supported(32, width))
+  if (!amdgpu::mma_f32_native_width_supported(32, width))
     GTEST_SKIP() << "bf16 MFMA shape is not divisible by the native SIMD width";
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
