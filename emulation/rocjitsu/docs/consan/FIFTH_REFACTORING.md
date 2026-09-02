@@ -7825,3 +7825,59 @@ than production size. The next work must return to the much larger lowering
 mutation surfaces and harvest superseded state, with material whole-refactoring
 shrinkage and the independent completion audit still open. The goal remains
 active.
+
+### 16.109 Convergence checkpoint 108: one selected prologue policy
+
+The lowering deep read found a mode-registry peephole inside the nominally
+common owner/epoch prologue builder. Object mode planning had already selected
+the effective semantics and publication conditions, but the builder used
+`options.moi_engine` to enter `moi_mode_operations` again and recover four
+mode-owned prologue decisions. That second selection made the common prologue
+depend on the engine registry and allowed the policy used for resource solving
+to drift from the policy used for final emission.
+
+`MoiObjectModePlan` now carries the selected `MoiPrologueModePolicy` beside its
+other object-local mode decisions. The single mode-planning dispatcher copies
+the registered policy into the plan at the same selection point as the mode's
+object planner. Both early atomic-only and ordinary late prologue application
+pass that selected policy forward. The prologue source no longer includes the
+engine contracts, names `moi_mode_operations`, or performs a mode lookup.
+Direct policy tests now inspect the published object plan rather than reaching
+around it into the registry.
+
+The same trace found a superseded public local-island overload that accepted a
+complete request and `ConSanMoiOperatingPoint` only to project two indirect-jump
+SGPRs. Record-event emission already had a typed-plan overload, and the shared
+mechanism already had an exact `ConSanMoiIndirectJumpSgprs` overload. The broad
+overload is deleted. Its three remaining Sampled and Inline callers now resolve
+the tuple at their mode-owned boundary and pass only that tuple to common island
+emission. Boundary checks reject both a renewed prologue registry dependency
+and a broad operating-point local-island contract.
+
+| Signal | Checkpoint 108 | Cumulative change | Slice change from checkpoint 107 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,907 | **-2,069** | **-10** |
+| Nonblank production lines | 96,564 | **-2,520** | **-8** |
+| Production implementation lines | 88,838 | **-2,612** | **-2** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | **-2 / 0** |
+| `ConSanMoiOperatingPoint` references / files | 325 / 61 | +35 / +10 | **-2 / 0** |
+| Prologue engine-registry lookups/includes | **0** | n/a | **-2** |
+| Broad local-island overloads | **0** | n/a | **-1** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+Validation includes a complete `-j16` rebuild, an initial prologue and boundary
+gate **50/50**, the expanded prologue/Sampled synchronization/Inline atomic
+gate **157/157**, and all **1,295/1,295** `ConSan.*` and `ConSanMoi.*`
+host/component tests. No test was removed, renamed, disabled, or replaced, and
+no physical gfx1201 test was run.
+
+This slice closes one mode-selection loop and harvests one broad compatibility
+API, strengthening Sections 14.3, 14.5, 14.6, and 14.7. Its two-line production
+reduction is deliberately not material Section 14.8 evidence. The larger
+placement, barrier, and prologue mutation bodies still carry broad operating
+point state; the next deep read must keep separating private transactional
+state from cross-component contracts and reap larger obsolete representations.
+The independent completion audit remains open, so the goal remains active.
