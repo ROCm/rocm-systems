@@ -71,30 +71,43 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
         // next one ran, and the refcount would never climb past the two that the
         // serial body already covers.
         std::atomic<int> bothHeld{0};
+        // Set by whichever worker fails before arriving, so the others stop waiting
+        // for a worker that is never coming and the reported cause stays the real
+        // one rather than "only K of N".
+        std::atomic<bool> registerFailed{false};
         static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
 
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 (void)threadIdx;
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
                 void* mh1 = nullptr;
                 void* mh2 = nullptr;
                 ThreadResult result = WorkerRegister(comm, shared.get(), sharedSz,
                                                      NCCL_PTR_HOST, &mh1);
-                if (!result.ok) return result;
+                if (!result.ok) {
+                    registerFailed.store(true, std::memory_order_release);
+                    return result;
+                }
                 result = WorkerRegister(comm, shared.get(), sharedSz, NCCL_PTR_HOST, &mh2);
                 if (!result.ok) {
+                    registerFailed.store(true, std::memory_order_release);
                     DeregisterMemory(comm, mh1);
                     return result;
                 }
-                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls)) {
+                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls, &registerFailed)) {
                     DeregisterMemory(comm, mh1);
                     DeregisterMemory(comm, mh2);
                     result.ok = false;
-                    result.msg = "only " + std::to_string(bothHeld.load()) + " of "
-                                 + std::to_string(nThreads)
-                                 + " workers reached the point where all hold two registrations";
+                    result.msg =
+                        registerFailed.load(std::memory_order_acquire)
+                            ? "another worker failed to register before all workers held two "
+                              "registrations; its own message is the cause"
+                            : "only " + std::to_string(bothHeld.load()) + " of "
+                                  + std::to_string(nThreads)
+                                  + " workers reached the point where all hold two registrations";
                     return result;
                 }
                 // Both, not short-circuited: if the first deregMr fails, || would
@@ -464,7 +477,8 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
         static constexpr int kThreadedRecvDelayUs = 50000; // 50ms
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads,
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t sz = kSmallBufferSize;
                 void* buffer = malloc(sz);
@@ -484,34 +498,45 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                 int nullCount = 0;
                 for (int i = 0; i < kThreadedMsgs; i++) {
                     void* request = nullptr;
+                    // Per-worker payload, verified by the receiver: backpressure is
+                    // what this test is about, but without a distinct pattern a
+                    // completion delivered to the wrong worker's communicator would
+                    // pass here just as it would anywhere else.
+                    const int seed = WorkerSeed(threadIdx, i);
                     if (rank == 0) {
                         if (i > 0) usleep(kThreadedRecvDelayUs);
+                        memset(buffer, 0, sz);
                         result = WorkerPostRecv(pair.recvComm, buffer, sz, i, mh, &request);
                     } else {
-                        fillHostBufferWithPattern<uint8_t>(buffer, sz, makeBytePattern(i));
-                        int attempts = 0;
-                        do {
-                            if (PostSend(pair.sendComm, buffer, sz, i, mh, &request)
-                                != ncclSuccess) {
-                                result.ok = false;
-                                result.msg = "isend failed";
-                                return result;
-                            }
-                            if (request) break;
-                            nullCount++;
-                            usleep(1000);
-                            if (++attempts > kMaxRetryAttempts) {
-                                result.ok = false;
-                                result.msg = "isend never got a FIFO slot";
-                                return result;
-                            }
-                        } while (!request);
+                        fillHostBufferWithPattern<uint8_t>(buffer, sz, makeBytePattern(seed));
+                        // The shared helper, with the retry count handed back: it
+                        // carries the same deadline semantics as every other post in
+                        // the suite, and the count is the backpressure evidence this
+                        // test asserts on below.
+                        result = WorkerPostSend(pair.sendComm, buffer, sz, i, mh, &request,
+                                                /*busyPoll=*/false, kStressTimeoutMs,
+                                                &nullCount);
                     }
                     if (!result.ok) return result;
 
                     int sizes[1] = {0};
                     result = WorkerWait(request, sizes, kStressTimeoutMs);
                     if (!result.ok) return result;
+
+                    if (rank != 0) continue;
+                    if (sizes[0] != static_cast<int>(sz)) {
+                        result.ok = false;
+                        result.msg = "message " + std::to_string(i) + " received "
+                                     + std::to_string(sizes[0]) + " of " + std::to_string(sz)
+                                     + " bytes";
+                        return result;
+                    }
+                    if (!verifyHostBufferData<uint8_t>(buffer, sz, makeBytePattern(seed))) {
+                        result.ok = false;
+                        result.msg = "message " + std::to_string(i)
+                                     + " is not this worker's pattern";
+                        return result;
+                    }
                 }
 
                 // The slow receiver guarantees the sender saw backpressure.
@@ -604,7 +629,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     if (nThreads > 1) {
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t sz = 256;
                 void* buffer = malloc(sz * kMaxReqsPerComm);
@@ -760,7 +785,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
         static constexpr size_t kThreadedBufSz = 4096;
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -1910,7 +1935,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
         static constexpr int kThreadedCycles = 3;
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t cycleSizes[kThreadedCycles] = {512 * 1024, 1024 * 1024,
                                                             2 * 1024 * 1024};
@@ -2063,7 +2088,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
         static constexpr int kThreadedBatch  = 32;
         const RdmaResourceCounts before = CaptureRdmaResources();
         RunMultiThreadedIndependent(
-            0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t sz = 256;
                 void* buffer = malloc(sz * kThreadedBatch);

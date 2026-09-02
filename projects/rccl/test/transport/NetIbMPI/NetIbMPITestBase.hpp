@@ -1123,9 +1123,14 @@ protected:
     // caller gets without saying anything is unchanged.
     static constexpr int kSlotWaitDefaultMs = kMaxRetryAttempts * kPollIntervalMs;
 
+    // nullRetries, when given, counts how many times isend came back without a
+    // request. That count is evidence for a test whose subject is backpressure --
+    // FifoPressureSenderFast asserts on it -- and without it such a test has to
+    // reimplement this loop to see it.
     ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
                                 void* mhandle, void** request, bool busyPoll = false,
-                                int timeoutMs = kSlotWaitDefaultMs) {
+                                int timeoutMs = kSlotWaitDefaultMs,
+                                int* nullRetries = nullptr) {
         ThreadResult result;
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -1136,6 +1141,7 @@ protected:
                 return result;
             }
             if (*request != nullptr) break;
+            if (nullRetries) (*nullRetries)++;
             if (std::chrono::steady_clock::now() >= deadline) {
                 result.ok = false;
                 result.msg = "isend kept returning a NULL request for "
@@ -1390,6 +1396,15 @@ protected:
     // the receive buffer is cleared to.
     static constexpr int kWorkerSeedBase   = 55;
     static constexpr int kWorkerSeedStride = 100001;
+    // An odd stride gives every worker a distinct pattern only while the worker
+    // index stays below 256; past that two workers share one modulo 256 and a
+    // payload delivered on the wrong connection would verify clean. Fail the build
+    // rather than the verification if the cap is ever raised that far.
+    static_assert(MPIEnvironment::kMaxThreads < 256,
+                  "WorkerSeed patterns alias once the worker cap reaches 256; widen the "
+                  "pattern before raising it");
+    static_assert(kWorkerSeedStride % 2 == 1,
+                  "WorkerSeed stride must be odd, or workers a power of two apart collide");
     static int WorkerSeed(int threadIdx, int seq) {
         return kWorkerSeedBase + threadIdx * kWorkerSeedStride + seq;
     }
@@ -1579,10 +1594,15 @@ protected:
     // them moves on, which the start gates cannot express: they only synchronize
     // entry into the body. Bounded so a worker that failed earlier cannot hang
     // its siblings; the caller reports the timeout as its own failure.
-    static bool WorkerRendezvous(std::atomic<int>& arrived, int expected, int pollIterations) {
+    // aborted, when given, releases the wait early: a worker that failed before
+    // arriving never increments the counter, so without it the siblings spin out the
+    // whole budget and report "only K of N", which hides the failure that caused it.
+    static bool WorkerRendezvous(std::atomic<int>& arrived, int expected, int pollIterations,
+                                 const std::atomic<bool>* aborted = nullptr) {
         arrived.fetch_add(1, std::memory_order_release);
         for (int poll = 0; poll < pollIterations; poll++) {
             if (arrived.load(std::memory_order_acquire) >= expected) return true;
+            if (aborted && aborted->load(std::memory_order_acquire)) return false;
             usleep(kPollIntervalUs);
         }
         return false;
