@@ -267,6 +267,9 @@ release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
         "Toggle kernel arg copy workaround")                                  \
 release(bool, DEBUG_HIP_DYNAMIC_QUEUES, false,                                \
         "Forces dynamic queue management")                                    \
+release(uint, DEBUG_CLR_ORDER_DOORBELL, 2,                                    \
+        "Order shared AQL ring doorbells by reservation "                     \
+        "(0=never, 1=Intel hosts only, 2=every host (default))")              \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
