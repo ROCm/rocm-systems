@@ -11521,3 +11521,55 @@ mode-locality candidate, but it must be traced through both transformation and
 runtime-hook link boundaries before deciding whether registry ownership would
 clarify the design or merely couple the public report contract to an internal
 lowering table.
+
+### 16.172 Convergence checkpoint 171: mode-owned report ceilings
+
+The live per-buffer ceiling trace spans pure report planning, runtime hook
+configuration, allocation enforcement, and telemetry.  All consumers need one
+public query, but the old inline query selected Record/Replay explicitly in the
+common report-type fragment and silently assigned every other enum value the
+ordinary 128 MiB tier.  That made a Record/Replay-specific representation cost
+part of the common ABI layer and left adding a mode disconnected from choosing
+its capacity policy.
+
+The existing `MoiModeOperations` registration now carries the selected
+per-buffer ceiling.  Record/Replay publishes its 512 MiB tier beside its other
+mode operations, with the full-identity hash-table rationale at that choice;
+Sampled and InlineShadow both select the one shared ordinary 128 MiB constant,
+so mode locality introduces no duplicated policy.  The public query delegates
+to that registry.  A default-constructed, incomplete auto-report plan now has a
+zero ceiling rather than accidentally inheriting one mode tier before planning.
+Both transformation objects and the standalone DBI hook library link the same
+registry implementation, and the full rebuild verifies that boundary.
+
+The hypothetical-mode extension exercise now publishes and observes its own
+capacity ceiling.  The structural gate requires every registered mode owner to
+make that selection and rejects restoration of the Record/Replay constant or
+an engine conditional in common report types.
+
+| Signal | Checkpoint 171 | Cumulative change | Slice change from checkpoint 170 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,582 | **-2,394** | +2 |
+| Nonblank production lines | 96,163 | **-2,921** | +1 |
+| Production implementation lines | 88,370 | **-3,080** | +2 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Common report-capacity branches naming a mode | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,427** | **+82** | 0 |
+
+The implementation is committed as `1fcc97878ba`.  Validation includes a
+successful full `-j16` build and **61/61** nonphysical mode-registration,
+auto-report-planning, ABI-layout, runtime-hook allocation, and
+architecture-boundary tests.  The new gate initially failed because its own
+header read followed the assertion; correcting that test ordering made the
+same gate pass.  All invocations used `-LE physical`; no test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+This locality slice spends two implementation lines after checkpoint 170
+deleted sixteen: the small net pair is the shared public-to-registry bridge.
+It removes the common mode decision and makes report-capacity selection an
+explicit part of adding a mode, while retaining one shared constant for the
+two modes whose policy is genuinely identical.
