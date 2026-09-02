@@ -14,15 +14,15 @@ from pathlib import Path
 
 SKIP_RETURN_CODE = 125
 
-_ROCM_ROOTS = (os.environ.get("ROCM_PATH", ""), "/opt/rocm")
+ROCM_ROOTS = (os.environ.get("ROCM_PATH", ""), "/opt/rocm")
 
 
-def _skip(reason: str) -> int:
+def skip_with_reason(reason: str) -> int:
     print(f"SKIP: {reason}")
     return SKIP_RETURN_CODE
 
 
-def _torch_lib_dirs() -> list[str]:
+def torch_lib_dirs() -> list[str]:
     """Torch link dirs plus the wheel lib dir, which some wheels omit."""
     import torch
     from torch.utils import cpp_extension
@@ -32,8 +32,8 @@ def _torch_lib_dirs() -> list[str]:
     return dirs
 
 
-def _first_dir_with(suffixes: tuple[str, ...], pattern: str) -> list[str]:
-    for root in _ROCM_ROOTS:
+def first_rocm_dir_matching(suffixes: tuple[str, ...], pattern: str) -> list[str]:
+    for root in ROCM_ROOTS:
         if not root:
             continue
         for suffix in suffixes:
@@ -50,17 +50,19 @@ def main(argv: list[str]) -> int:
 
     binary = Path(argv[1]).resolve()
     if not binary.is_file():
-        return _skip(f"{binary} not built")
+        return skip_with_reason(f"{binary} not built")
 
     try:
-        lib_dirs = _torch_lib_dirs()
+        lib_dirs = torch_lib_dirs()
     except ImportError as exc:
-        return _skip(f"torch not importable: {exc}")
+        return skip_with_reason(f"torch not importable: {exc}")
 
-    lib_dirs += _first_dir_with(
+    lib_dirs += first_rocm_dir_matching(
         ("lib/host-math/lib", "lib", "lib64"), "librocm-openblas.so*"
     )
-    lib_dirs += _first_dir_with(("lib", "lib64"), "librocprofiler-sdk-roctx.so*")
+    lib_dirs += first_rocm_dir_matching(
+        ("lib", "lib64"), "librocprofiler-sdk-roctx.so*"
+    )
 
     env = dict(os.environ)
     inherited = env.get("LD_LIBRARY_PATH", "")
