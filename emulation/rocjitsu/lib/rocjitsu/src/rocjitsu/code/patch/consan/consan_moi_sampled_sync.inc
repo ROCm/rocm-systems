@@ -1100,8 +1100,6 @@ void try_apply_sampled_barrier_sync_patch(
     info.trampoline_offset = cave_offset;
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-    info.covered_sync_event_count =
-        static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
     note_moi_probe_patch_info(info, planned);
     if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
                                          planned.candidate.barrier, info, "sampled barrier sync",
@@ -1449,8 +1447,6 @@ void try_apply_sampled_barrier_sync_patch(
         info.trampoline_offset = body.offset;
         info.original_size = site.size;
         info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
-        info.covered_sync_event_count =
-            static_cast<uint32_t>(planned.candidate.sequence->member_event_identities.size());
         note_moi_probe_patch_info(info, planned);
         if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
                                              planned.candidate.barrier, info,

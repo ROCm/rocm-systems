@@ -554,12 +554,10 @@ struct ConSanPatchRoutingProof {
   std::optional<uint64_t> dispatch_id_secondary_prologue_offset;
 };
 
-/// Evidence-mechanism placement facts emitted by a patch. These facts support
-/// lowering composition and independent validation, not runtime attribution.
-struct ConSanPatchEvidenceEffect {
-  /// Original synchronization events represented by one typed sequence body.
-  /// Zero means the ordinary one-anchor/one-site accounting rule.
-  uint32_t covered_sync_event_count = 0;
+/// Sampled-access placement facts emitted by a patch. These facts support
+/// Sampled synchronization composition and independent validation, not
+/// runtime attribution.
+struct ConSanPatchSampledAccessEffect {
   /// Sampled access patches reserve a contiguous immutable bank beginning at
   /// this slot. Synchronization patches use the same dispatch/workgroup hash
   /// to select the matching dynamic window.
@@ -734,7 +732,7 @@ struct ConSanPatchPlacementEffects : ConSanPatchRoutingProof, ConSanPatchAbiEffe
 /// mutation and fault identities are deliberately absent from this contract.
 struct ConSanPatchLoweringProduct : ConSanCommittedPatchGeometry,
                                     ConSanPatchPlacementEffects,
-                                    ConSanPatchEvidenceEffect {};
+                                    ConSanPatchSampledAccessEffect {};
 
 /// Pristine identities and decoded operands used only to validate fault
 /// mutations against the original code object.

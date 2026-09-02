@@ -678,6 +678,13 @@ foreach(_common_fence_consumer IN ITEMS
         "common fence composition must consume the engine probe vocabulary"
     )
 endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "covered_sync_event_count"
+        "patch telemetry must not duplicate intent-bound synchronization coverage"
+    )
+endforeach()
 
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from

@@ -969,11 +969,12 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             kBarrierCount);
-  EXPECT_EQ(std::ranges::count_if(result.patches,
-                                  [](const ConSanPatchInfo &patch) {
-                                    return patch.kind ==
-                                               ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
-                                           patch.covered_sync_event_count == 2u;
+  EXPECT_EQ(std::ranges::count_if(result.coverage_ledger.lowering_commits(),
+                                  [&](const ConSanCommittedLowering &commit) {
+                                    return consan_committed_lowering_has_intent_kind(
+                                               result, commit,
+                                               ConSanProbeIntentKind::SampledBarrierEpoch) &&
+                                           commit.original_semantic_sites.size() == 2u;
                                   }),
             kBarrierCount);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {

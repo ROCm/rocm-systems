@@ -6320,7 +6320,6 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
   const ConSanCommittedLowering *barrier_commit =
       consan_committed_lowering_for_intent_kind(result, ConSanProbeIntentKind::SampledBarrierEpoch);
   ASSERT_NE(barrier_commit, nullptr);
@@ -6429,7 +6428,9 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
@@ -6445,7 +6446,9 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
       farther.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(farther_patch, farther.patches.end()) << testing::PrintToString(farther.warnings);
   EXPECT_EQ(farther_patch->anchor_offset, kBeyondWait * sizeof(uint32_t));
-  EXPECT_EQ(farther_patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                farther, ConSanProbeIntentKind::SampledBarrierEpoch, farther_patch->anchor_offset),
+            2u);
 }
 
 TEST(ConSanMoi, SampledIncompleteAndDynamicBarriersCannotAdvanceEpoch) {
@@ -8236,7 +8239,9 @@ TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
            item.anchor_offset == 380u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -8366,7 +8371,9 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
            item.anchor_offset == 401u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -8512,7 +8519,9 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
            item.anchor_offset == 404u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
@@ -8663,7 +8672,9 @@ TEST(ConSanMoi, SampledConditionallyExecutedBarrierPublishesOnlyWhenExecuted) {
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
 }
 
 TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration) {
@@ -8693,7 +8704,9 @@ TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration)
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_EQ(patch->covered_sync_event_count, 2u);
+  EXPECT_EQ(consan_committed_semantic_site_count_at(
+                result, ConSanProbeIntentKind::SampledBarrierEpoch, patch->anchor_offset),
+            2u);
 }
 
 TEST(ConSanMoi, SampledWatchpointRoundTripsRangeFields) {
