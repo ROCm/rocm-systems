@@ -1430,6 +1430,16 @@ foreach(_prologue_owner IN ITEMS consan_moi_prologue.h consan_moi_prologue.cpp)
     )
 endforeach()
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_prologue.cpp"
+    "moi_mode_operations|consan_moi_engine_contracts[.]h"
+    "shared MOI prologue construction must consume the already-selected mode plan"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_prologue.h"
+    "emit_moi_local_indirect_entry_island[^;]*ConSanMoiOperatingPoint"
+    "shared local-island emission must consume projected routing state"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"
     "common placement must consume the normalized descriptor VGPR-allocation product"

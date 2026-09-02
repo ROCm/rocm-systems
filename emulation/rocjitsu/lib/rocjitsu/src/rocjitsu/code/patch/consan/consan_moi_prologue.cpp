@@ -10,7 +10,6 @@
 #include "rocjitsu/code/patch/consan/consan_descriptor.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
-#include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
@@ -559,19 +558,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                                    owner_descriptor_file_offsets.end());
   patches.push_back(std::move(island_info));
   return true;
-}
-
-[[nodiscard]] bool emit_moi_local_indirect_entry_island(
-    std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
-    uint64_t anchor_text_offset, const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
-    std::span<const uint64_t> owner_descriptor_file_offsets, rj_code_arch_t arch,
-    std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors,
-    std::string_view context) {
-  const auto jump_sgprs = moi_indirect_jump_sgprs(request, point);
-  return jump_sgprs &&
-         emit_moi_local_indirect_entry_island(
-             text, island_text_offset, cave_text_offset, anchor_text_offset, *jump_sgprs,
-             owner_descriptor_file_offsets, arch, patches, errors, context);
 }
 
 [[nodiscard]] bool
@@ -2319,8 +2305,8 @@ void try_apply_owner_epoch_prologue_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
-    const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
-    ConSanTransformArtifacts &result) {
+    const MoiObjectModeSemantics &mode_semantics, const MoiPrologueModePolicy &mode_policy,
+    rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!operating_point.moi_initialize_owner_epoch)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -2333,7 +2319,6 @@ void try_apply_owner_epoch_prologue_patch(
     result.errors.emplace_back("ConSan MOI owner/epoch prologue has no admitted target profile");
     return;
   }
-  const MoiPrologueModePolicy &mode_policy = moi_mode_operations(options.moi_engine).prologue;
   if (operating_point.automatic_moi_private_epoch) {
     try_apply_private_epoch_prologue_patch(options, operating_point, mode_semantics, arch, result);
     if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())

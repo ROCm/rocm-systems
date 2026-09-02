@@ -758,12 +758,15 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     anchor_words.front() = build_s_branch(*fwd, arch);
     std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
-    if (indirect_entry_island &&
-        !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, site.text_offset, options,
-            candidate_point, planned.resources.owner_descriptor_file_offsets, arch, patches,
-            result.errors, "ConSan MOI inline atomic patch")) {
-      return;
+    if (indirect_entry_island) {
+      const auto indirect_state = moi_indirect_jump_sgprs(options, candidate_point);
+      if (!indirect_state ||
+          !emit_moi_local_indirect_entry_island(
+              new_text, *indirect_entry_island, placement->body_offset, site.text_offset,
+              *indirect_state, planned.resources.owner_descriptor_file_offsets, arch, patches,
+              result.errors, "ConSan MOI inline atomic patch")) {
+        return;
+      }
     }
     append_words_bytes(new_text, *cave_words);
 

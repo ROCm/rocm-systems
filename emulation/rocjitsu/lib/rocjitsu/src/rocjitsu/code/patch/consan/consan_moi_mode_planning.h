@@ -33,6 +33,16 @@ struct MoiObjectFacts {
   bool has_report_buffer = false;
 };
 
+/// Mode semantics consumed by the one shared owner/epoch prologue builder.
+/// The builder owns descriptor inspection, resource preservation, placement,
+/// and emission; modes own only the meaning that changes those mechanics.
+struct MoiPrologueModePolicy {
+  bool skip_unobserved_barrier_only_initialization = false;
+  bool backup_compact_spill_for_runtime_sampling = false;
+  bool one_based_owner_ids = false;
+  bool persistent_state_requires_in_place_entry = false;
+};
+
 /// Effective mode demand consumed by common resource solving. This deliberately
 /// contains only the request/operating-point fields that an engine may refine
 /// after seeing one object's semantic inventory.
@@ -42,6 +52,7 @@ struct MoiObjectModePlan {
   bool track_barriers = false;
   bool initialize_owner_epoch = false;
   MoiObjectModeSemantics semantics;
+  MoiPrologueModePolicy prologue;
   bool inline_atomic_without_access = false;
   bool reserve_dynamic_stack_prologue_entry = false;
   bool prologue_requires_consumer = false;
@@ -192,16 +203,6 @@ struct MoiOperationalEvidenceKinds {
 /// editing a mode.
 struct MoiScalarTargetFacts {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
-};
-
-/// Mode semantics consumed by the one shared owner/epoch prologue builder.
-/// The builder owns descriptor inspection, resource preservation, placement,
-/// and emission; modes own only the meaning that changes those mechanics.
-struct MoiPrologueModePolicy {
-  bool skip_unobserved_barrier_only_initialization = false;
-  bool backup_compact_spill_for_runtime_sampling = false;
-  bool one_based_owner_ids = false;
-  bool persistent_state_requires_in_place_entry = false;
 };
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.

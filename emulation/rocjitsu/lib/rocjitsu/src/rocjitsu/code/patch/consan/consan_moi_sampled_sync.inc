@@ -1068,10 +1068,11 @@ void try_apply_sampled_barrier_sync_patch(
         fwd = local_island ? compute_sopp_branch_simm16(site.text_offset, *local_island)
                            : std::nullopt;
         if (local_island && fwd) {
-          if (!emit_moi_local_indirect_entry_island(
-                  new_text, *local_island, cave_offset, site.text_offset, options,
-                  probe_state->operating_point, planned.resources.owner_descriptor_file_offsets,
-                  arch, patches, result.errors, "ConSan MOI sampled barrier sync patch")) {
+          if (!indirect_state ||
+              !emit_moi_local_indirect_entry_island(
+                  new_text, *local_island, cave_offset, site.text_offset, *indirect_state,
+                  planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
+                  "ConSan MOI sampled barrier sync patch")) {
             return false;
           }
         }
@@ -2622,12 +2623,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     anchor.front() = build_s_branch(*fwd, arch);
     std::memcpy(new_text.data() + entry_anchor_offset, anchor.data(),
                 anchor.size() * sizeof(uint32_t));
-    if (indirect_entry_island &&
-        !emit_moi_local_indirect_entry_island(
-            new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset, options,
-            route_point, planned.resources.owner_descriptor_file_offsets, arch, patches,
-            result.errors, "ConSan MOI sampled atomic sync patch")) {
-      return;
+    if (indirect_entry_island) {
+      const auto indirect_state = moi_indirect_jump_sgprs(options, route_point);
+      if (!indirect_state ||
+          !emit_moi_local_indirect_entry_island(
+              new_text, *indirect_entry_island, placement->body_offset, entry_anchor_offset,
+              *indirect_state, planned.resources.owner_descriptor_file_offsets, arch, patches,
+              result.errors, "ConSan MOI sampled atomic sync patch")) {
+        return;
+      }
     }
     append_words_bytes(new_text, *cave_words);
 

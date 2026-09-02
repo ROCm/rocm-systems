@@ -49,8 +49,11 @@ MoiObjectModePlan
 plan_moi_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                      const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,
                      const MoiObjectFacts &facts, const ConSanObservationPlan &observation_plan) {
-  return moi_mode_operations(request.moi_engine)
-      .plan(request, resources, policy, point, facts, observation_plan);
+  const MoiModeOperations &operations = moi_mode_operations(request.moi_engine);
+  MoiObjectModePlan plan =
+      operations.plan(request, resources, policy, point, facts, observation_plan);
+  plan.prologue = operations.prologue;
+  return plan;
 }
 
 void apply_moi_mode_patches(std::span<const uint8_t> bytes, const ConSanOptions &options,

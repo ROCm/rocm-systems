@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 
@@ -32,13 +33,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context);
 
-[[nodiscard]] bool emit_moi_local_indirect_entry_island(
-    std::vector<uint8_t> &text, uint64_t island_text_offset, uint64_t cave_text_offset,
-    uint64_t anchor_text_offset, const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
-    std::span<const uint64_t> owner_descriptor_file_offsets, rj_code_arch_t arch,
-    std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors,
-    std::string_view context);
-
 [[nodiscard]] bool
 emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
                                      uint64_t cave_text_offset, uint64_t anchor_text_offset,
@@ -57,7 +51,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point,
     std::span<const ConSanMoiPrologueScratchVgprAssignment> prologue_scratch_assignments,
-    const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch,
-    ConSanTransformArtifacts &result);
+    const MoiObjectModeSemantics &mode_semantics, const MoiPrologueModePolicy &mode_policy,
+    rj_code_arch_t arch, ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

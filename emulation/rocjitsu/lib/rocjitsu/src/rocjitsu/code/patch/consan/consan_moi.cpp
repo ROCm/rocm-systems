@@ -289,8 +289,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     // original kernel entry can reach it without consuming a scarce local
     // branch island.
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, mode_plan.semantics, arch,
-                                         result);
+                                         prologue_scratch_assignments, mode_plan.semantics,
+                                         mode_plan.prologue, arch, result);
     owner_epoch_prologue_applied_early =
         std::ranges::any_of(result.patches, [](const ConSanPatchLoweringProduct &patch) {
           return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -303,8 +303,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!mode_plan.prologue_requires_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, effective_point,
-                                         prologue_scratch_assignments, mode_plan.semantics, arch,
-                                         result);
+                                         prologue_scratch_assignments, mode_plan.semantics,
+                                         mode_plan.prologue, arch, result);
   if (result.errors.empty())
     result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {

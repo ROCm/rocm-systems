@@ -551,7 +551,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   buffered_facts.has_report_buffer = true;
   EXPECT_FALSE(plan_moi_object_mode(request, resources, policy, point, buffered_facts, observation)
                    .prologue_requires_consumer);
-  const auto &record_policy = moi_mode_operations(request.moi_engine).prologue;
+  const auto &record_policy = plan.prologue;
   EXPECT_FALSE(record_policy.skip_unobserved_barrier_only_initialization);
   EXPECT_TRUE(record_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(record_policy.one_based_owner_ids);
@@ -561,7 +561,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
   EXPECT_TRUE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
-  const auto &sampled_policy = moi_mode_operations(request.moi_engine).prologue;
+  const auto &sampled_policy = plan.prologue;
   EXPECT_FALSE(sampled_policy.skip_unobserved_barrier_only_initialization);
   EXPECT_FALSE(sampled_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(sampled_policy.one_based_owner_ids);
@@ -571,7 +571,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
   EXPECT_FALSE(plan.reserve_dynamic_stack_prologue_entry);
   EXPECT_TRUE(plan.prologue_requires_consumer);
-  const auto &inline_policy = moi_mode_operations(request.moi_engine).prologue;
+  const auto &inline_policy = plan.prologue;
   EXPECT_TRUE(inline_policy.skip_unobserved_barrier_only_initialization);
   EXPECT_FALSE(inline_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_TRUE(inline_policy.one_based_owner_ids);
