@@ -8045,3 +8045,56 @@ the broad request, resources, operating point, and architecture even though
 its consumers already hold exact normalized facts. Narrowing that shared
 boundary is the next coherent step. Material whole-refactoring shrinkage and
 the independent completion audit remain open, so the goal remains active.
+
+### 16.113 Convergence checkpoint 112: exact shared gate-planning inputs
+
+With Record/Replay and Sampled emission consuming retained gate plans, the
+shared planner's own input became the remaining backwards boundary. It
+accepted a complete request, bound-runtime resources, operating point, and raw
+architecture solely to project the exec-save register, sampling pair,
+dispatch-identity sources, literal dispatch ID, and target direct-call form.
+It therefore depended on target-profile lookup despite owning no
+architecture-specific encoding.
+
+`MoiRuntimeWorkgroupGateInputs` now names only those normalized caller-owned
+facts. Record/Replay event planning, Record/Replay access planning, and Sampled
+access planning project them at their existing selection points. The shared
+planner validates that exact input against the exact workgroup tuple and adds
+only its shared cached-selection decision to the returned plan. Its public
+contract and implementation no longer mention `ConSanRequest`,
+`BoundRuntimeResources`, `ConSanMoiOperatingPoint`, or an architecture. The
+implementation no longer includes the capability contract or performs target
+lookup. Boundary checks enforce both properties.
+
+The initial implementation reused the output plan as the input aggregate. The
+warning-clean build correctly exposed that callers then had to initialize the
+planner-owned cached-selection field. That false ownership was removed before
+commit by introducing the separate exact input product; callers cannot now
+provide or override the shared selection result.
+
+| Signal | Checkpoint 112 | Cumulative change | Slice change from checkpoint 111 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,887 | **-2,089** | +32 |
+| Nonblank production lines | 96,544 | **-2,540** | +31 |
+| Production implementation lines | 88,816 | **-2,634** | +29 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 320 / 59 | +30 / +8 | **-2 / -2** |
+| Broad input types in the shared gate-planner contract | **0** | n/a | **-3** |
+| Raw architecture/target lookups in shared gate planning | **0** | n/a | **-2** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+Validation includes a complete `-j16` rebuild, the focused cross-mode runtime
+gate and architecture-boundary matrix **12/12**, and all **1,296/1,296**
+`ConSan.*` and `ConSanMoi.*` host/component tests. No test was removed,
+renamed, disabled, or replaced, and no physical gfx1201 test was run.
+
+This is a forward-only shared-component boundary and strengthens Sections
+14.1, 14.2, 14.3, 14.5, and 14.6. Its 29-line implementation cost is the exact
+input contract plus three explicit mode-owned projections, not code-size
+payback; it must enable later broad-input deletion rather than becoming a new
+facade. Larger placement and barrier transactions, material whole-refactoring
+shrinkage, and the independent completion audit remain open, so the goal
+remains active.
