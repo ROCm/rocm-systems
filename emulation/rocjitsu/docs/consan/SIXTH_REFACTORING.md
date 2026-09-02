@@ -395,7 +395,7 @@ production wrapper or alternate path remains. This is the deletion thesis's
 abort condition working as intended, and evidence against revisiting access
 orchestration without a materially different representation.
 
-### 10.2 Macro-slice 2 (active): transactional instruction construction
+### 10.2 Macro-slice 2 (complete): transactional instruction construction
 
 The next bounded comparison found a wider replacement opportunity inside MOI
 emission. The largest emitters still manually stage optional encoded
@@ -445,3 +445,58 @@ all five emulated targets. The cutover gate is the complete nonphysical
 ConSan/RocJitsu matrix. A behavioral discrepancy receives a regression test;
 mere representational convergence with identical covered behavior does not
 require duplicating existing exact-byte tests.
+
+The cutover converged every high-density consumer for which the repeated
+protocol was real. InlineShadow access, atomic, synchronization, and exact
+shadow emission; Record/Replay access and event emission; Sampled access,
+atomic, and synchronization emission; common prologue construction; runtime
+workgroup gates; and SuperCollider FLAT check/trap bodies now use the same
+transaction for optional builders and local control flow. `InstructionSequence`
+gained only the two missing typed EXEC branch kinds. Existing target builders,
+mode algorithms, resource plans, and externally placed text branches remain
+in their owners.
+
+The final whole-directory audit distinguishes the remaining branch arithmetic
+from the deleted local fixup protocol. The surviving offsets connect already
+placed text regions, returns, relay reservoirs, anchors, and externally shared
+entries; validation independently reconstructs and checks those encodings.
+Straight-line helpers in `consan_moi_support.cpp` append deliberately named
+semantic fragments but neither stage fallible optional builders redundantly nor
+patch local branches. Converting either class would hide placement semantics or
+add a wrapper without deleting implementation, so it is outside this
+replacement.
+
+The production accounting from the `362683743db` baseline is:
+
+| Signal | Baseline | Macro-slice 2 result | Change |
+| --- | ---: | ---: | ---: |
+| ConSan production files | 310 | 310 | 0 |
+| Physical ConSan production lines | 102,167 | 100,517 | **-1,650** |
+| Nonblank ConSan production lines | 95,753 | 94,112 | **-1,641** |
+| ConSan implementation lines | 88,015 | 86,379 | **-1,636** |
+
+The physical source diff contains 2,326 additions and 3,979 deletions in the
+declared ConSan scope. The generic `InstructionSequence` owner outside that
+scope adds 22 net implementation lines, so the conservative campaign result
+including its full enabling cost is **1,614 net production implementation
+lines deleted**. One 17-line direct unit-test extension pins the two new EXEC
+branch encodings. No production mini-language, alternate emitter, adapter, or
+old branch-fixup authority remains.
+
+Focused gates passed after each owner conversion, including 222 prologue and
+owner/epoch/dispatch tests, 192 InlineShadow/exact-shadow tests, 181 inline
+atomic tests, 149 SuperCollider FLAT/check-trap tests, and the corresponding
+Record/Replay, Sampled, synchronization, and instruction-sequence tests. At
+the final cutover, the complete `-j16 -LE physical` gate executed 9,573 tests
+with zero failures in 242.69 seconds; one registered test was disabled and the
+expected environment-dependent skips were unchanged. The gate includes all
+four modes and gfx942, gfx950, gfx1100, gfx1201, and gfx1250 emulation. No
+physical gfx1201 test was run at this intermediate milestone.
+
+No behavior defect was found during the replacement. Exact-byte and behavioral
+coverage already exercised the changed paths, so only the genuinely new common
+branch kinds needed new tests. This slice clears its 800-line target and makes
+substantial progress toward the campaign floor, but does not satisfy the
+3,000-line review floor or the fresh-audit completion criteria. Candidate
+selection therefore returns to the whole production codebase rather than
+continuing mechanically through low-density emission helpers.
