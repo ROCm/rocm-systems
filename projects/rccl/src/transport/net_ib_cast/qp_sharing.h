@@ -5,7 +5,9 @@
  * QP Sharing infrastructure for IB CAST transport layer.
  * Allows multiple RCCL communicator channels to share physical IB QPs,
  * reducing QP count and improving scalability.
- * Controlled via NCCL_IB_COMM_NGROUPS (0=disabled).
+ * Controlled via RCCL_IB_QP_SHARING_ENABLE (0=disabled, 1=enabled).
+ * When enabled, RCCL_IB_COMM_NGROUPS (default 4) and
+ * RCCL_IB_QP_DEPTH_MULTIPLIER (default 8) tune sharing behavior.
  ************************************************************************/
 
 #ifndef NET_IB_CAST_QP_SHARING_H_
@@ -16,10 +18,12 @@
 #include <mutex>
 
 // QP sharing configuration parameters
-// Accessible as RCCL_IB_COMM_NGROUPS / NCCL_IB_COMM_NGROUPS
-// 0 = disabled, >0 = enable QP sharing with N groups
+// Master switch: RCCL_IB_QP_SHARING_ENABLE
+// 0 = disabled (default), 1 = enabled with sensible defaults
+extern int64_t rcclParamIbCastQpSharingEnable();
+// Number of sharing groups (default 4, effective only when master switch is on)
 extern int64_t rcclParamIbCastCommNGroups();
-// CQ/WR depth scaling for primary QPs
+// CQ/WR depth scaling for primary QPs (default 8, effective only when master switch is on)
 extern int64_t rcclParamIbCastQpDepthMultiplier();
 
 // QP sharing role for a comm during connection setup.
@@ -31,9 +35,13 @@ enum IbCastQpSharingRole {
   QP_SHARING_SECONDARY,  // secondary — QPs already assigned, skip creation
 };
 
-// Returns true when QP sharing is enabled (NCCL_IB_COMM_NGROUPS > 0)
+// Global runtime enable flag — set from master switch param during init,
+// can be cleared if configuration is invalid (e.g. NGROUPS < 1).
+extern bool IbCastQpSharingGlobalEnable;
+
+// Returns true when QP sharing is enabled at runtime.
 static inline bool IbCastQpSharingEnabled(void) {
-  return rcclParamIbCastCommNGroups() > 0;
+  return IbCastQpSharingGlobalEnable;
 }
 
 // Returns true when this comm is actively sharing QPs (sharing enabled AND
@@ -69,7 +77,6 @@ static inline int IbCastQpSharingDepthMultiplier(void) {
 
 #define IBCAST_MAX_SHARED_QPS 1024
 #define IBCAST_MAX_COMMS      4096
-#define IBCAST_CTS_QP_SLOT_INVALID 0xFF
 #define IBCAST_FLUSH_QP_IDX  -1   // sentinel qpIdx for flush QPs in the shared pool
 
 // Pool key -- uniquely identifies a shared QP
@@ -95,7 +102,12 @@ struct IbCastSharedQp {
     int      refcount;                     // number of comms using this QP
     int      cqRefcount;                   // comms using this group's CQs (tracked on qpIdx==0 only)
     bool     used;                         // slot in use
-    int8_t   ctsQpSlot;                    // CTS signaling slot from primary
+    // Note: ctsQpSlot is NOT tracked in the shared pool.  CTS offload is
+    // mutually exclusive with QP sharing (disabled at init when sharing is on).
+    // In the sharing-enabled, non-offload path, CTS signaling uses
+    // (slot == ctsQp->devIndex) to decide when to set IBV_SEND_SIGNALED,
+    // which relies only on the per-QP devIndex already stored here — no
+    // additional per-pool ctsQpSlot is needed.
 };
 
 // Global comm table for completion routing (commId -> comm pointer)
@@ -159,6 +171,8 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry);
 
 // Validate that all shared QP pool entries and commIds are cleaned up.
 // Logs leaked entries and asserts on non-zero counts. Call at finalize time.
+// Gated by RCCL_IB_QP_SHARING_VALIDATE_POOL=1.
+extern int64_t rcclParamIbCastQpSharingValidatePool();
 void IbCastValidateSharedQpPool(void);
 
 // Encode commId into wr_id[63:48]. When commId==0 (sharing disabled or

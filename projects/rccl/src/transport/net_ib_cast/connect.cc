@@ -1077,10 +1077,11 @@ static ncclResult_t IbCastQpSharingSenderSetup(
         return ncclSuccess;
       }
 
-      // Copy QP info from shared pool to this comm
+      // Copy QP info from shared pool to this comm.
+      // ctsQpSlot is not stored in the pool: CTS offload is mutually exclusive
+      // with QP sharing; the non-offload signaling path uses devIndex instead.
       comm->base.qps[q].qp = slot->qp;
       comm->base.qps[q].devIndex = slot->devIndex;
-      comm->base.qps[q].ctsQpSlot = slot->ctsQpSlot;
       comm->base.activeQps[q] = &comm->base.qps[q];
 
       // Populate metadata with shared QP info
@@ -1153,7 +1154,6 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
     if (q == 0) {
       entry->cqRefcount = 1;
     }
-    entry->ctsQpSlot = comm->base.qps[q].ctsQpSlot;
   }
 
   return ncclSuccess;
@@ -1761,7 +1761,15 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.channelId = channelId;
       qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
       qpCreateAttrs.useIonic = IbCastAinicRoce;
-      IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
+      if (IbCastCommIsPrimary(&rComm->base)) {
+        // Flush QP is shared across comms in the group — enable WR depth
+        // scaling and group-based UDMA pinning so it matches the data QPs.
+        qpCreateAttrs.isQpSharingEnabled = true;
+        qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
+        qpCreateAttrs.cqDepthMultiplier = depthMult;
+      } else {
+        IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
+      }
 
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
@@ -1912,9 +1920,10 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
         return ncclSuccess;
       }
 
+      // ctsQpSlot is not stored in the pool: CTS offload is mutually exclusive
+      // with QP sharing; the non-offload signaling path uses devIndex instead.
       rComm->base.qps[q].qp = recvSlot->qp;
       rComm->base.qps[q].devIndex = recvSlot->devIndex;
-      rComm->base.qps[q].ctsQpSlot = recvSlot->ctsQpSlot;
       // remDevIdx is normally set by IbCastReceiverQpsCreateToRts, which is
       // skipped for secondary comms; set it here or CTS rkey selection is wrong.
       rComm->base.qps[q].remDevIdx = remMeta->qpInfo[q].devIndex;
@@ -2012,7 +2021,6 @@ static ncclResult_t IbCastQpSharingReceiverRegisterPrimary(
            "registering qpIdx=%d/%d", __func__, rComm->base.commId, rComm->base.sharedGroupIdx, q, nqps);
       return ncclInternalError;
     }
-    entry->ctsQpSlot = rComm->base.qps[q].ctsQpSlot;
     if (q == 0) {
       entry->cqRefcount = 1;
     }
