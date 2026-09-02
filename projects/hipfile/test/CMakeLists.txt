@@ -38,7 +38,7 @@ else()
     list(APPEND SYSTEM_TEST_SOURCE_FILES
         system/amd/io.cpp
         system/amd/io-data-modification.cpp
-        system/amd/verify-kernel.hip
+        system/amd/io-data-modification-kernel.hip
     )
     list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
     list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})

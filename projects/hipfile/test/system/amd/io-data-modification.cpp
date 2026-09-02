@@ -10,10 +10,10 @@
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
+#include "io-data-modification-kernel.h"
 #include "io-test.h"
 #include "test-common.h"
 #include "test-options.h"
-#include "verify-kernel.h"
 
 #include <algorithm>
 #include <array>
