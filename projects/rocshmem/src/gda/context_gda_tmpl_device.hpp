@@ -1442,14 +1442,7 @@ __device__ inline void GDAContext::tile_put_chunk_nbi(char *dst, const char *src
    * execution mask at the point the WQEs are written.
    */
   ActiveWFInfo wf_info(pe);
-  auto [dst_raddr, dst_rkey] = qps[qp_index].get_raddr_info(dst);
-  uint32_t src_lkey =
-      (static_cast<int32_t>(bytes) <=
-       static_cast<int32_t>(qps[qp_index].inline_threshold))
-          ? 0
-          : qps[qp_index].get_lkey(reinterpret_cast<uintptr_t>(src));
-  qps[qp_index].put_nbi(reinterpret_cast<void *>(dst_raddr), dst_rkey,
-                        src, src_lkey, bytes, wf_info, true);
+  qps[qp_index].put_nbi(dst, src, bytes, wf_info);
 }
 
 __device__ inline void GDAContext::tile_get_chunk_nbi(char *dst, const char *src,
