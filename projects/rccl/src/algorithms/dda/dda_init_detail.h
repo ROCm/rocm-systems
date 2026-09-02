@@ -91,22 +91,25 @@ inline int ddaMaxNBlocksForScratch() {
   return static_cast<int>(maxBlocks);
 }
 
-inline int ddaFabricMaxNBlocksForScratch() {
-  static int maxBlocks = -1;
-  if (maxBlocks < 0) {
-    int n = DDA_FABRIC_MAXBLOCKS;
-    const char* s = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
-    if (s != nullptr) {
-      n = atoi(s);
-    }
-    if (n < 1) {
-      n = 1;
-    }
-    if (n > 256) {
-      n = 256;
-    }
-    maxBlocks = n;
+inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue) {
+  int maxBlocks = cuCount;
+  if (maxBlocks < 1) {
+    maxBlocks = 1;
   }
+  if (maxBlocks > DDA_FABRIC_MAXBLOCKS) {
+    maxBlocks = DDA_FABRIC_MAXBLOCKS;
+  }
+
+  if (overrideValue != nullptr) {
+    int requested = atoi(overrideValue);
+    if (requested < 1) {
+      requested = 1;
+    }
+    if (requested < maxBlocks) {
+      maxBlocks = requested;
+    }
+  }
+
   return maxBlocks;
 }
 
