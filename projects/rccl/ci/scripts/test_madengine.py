@@ -724,6 +724,12 @@ def generate_manifest(
                 "build_status": "SKIPPED",
                 "build_duration": 0,
                 "gpu_vendor": "AMD",
+                # The overlay image is built on the head node, so a compute node
+                # will not find it locally and cannot pull it from anywhere.
+                # madengine falls back to building it there, which needs the
+                # Dockerfile path; the build context is its directory, WORK_DIR,
+                # which is on the shared filesystem with rccl_libs/ inside it.
+                "dockerfile": str(work_dir / "Dockerfile.rccl-overlay"),
             },
         },
         "built_models": {
