@@ -82,15 +82,14 @@ Ensure ROCm is installed and follow the steps:
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-.. _install-pytorch-with-rocm:
+.. _same-rocm-as-workload:
 
-3. To profile PyTorch from pip, install ROCm Compute Profiler
-   (``rocm[profiler]``) and torch from the same index in one command.
-   TheRock torch packages depend on ``rocm[libraries]`` and install the
-   matching ROCm. Do not install ROCm and then torch; that can downgrade
-   ROCm. Installing this tool from ``/opt/rocm`` and torch from pip places
-   two ROCm installations in one process. Replace ``device-gfx950`` with
-   your GPU target:
+3. The profiler and the workload must use the same ROCm. A pip package can
+   install a second ROCm. For example, to profile TheRock torch, install
+   ROCm Compute Profiler (``rocm[profiler]``) and torch from the same index
+   in one command. Those torch packages depend on ``rocm[libraries]`` and
+   install the matching ROCm. Do not install ROCm and then torch; that can
+   downgrade ROCm. Replace ``device-gfx950`` with your GPU target:
 
    .. code-block:: shell-session
 

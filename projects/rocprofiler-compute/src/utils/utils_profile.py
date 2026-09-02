@@ -47,10 +47,11 @@ _ROCPROFILER_REGISTER_LIBRARY_ALREADY_SET = (
 _DUPLICATE_ROCM_INSTALL_MESSAGE = (
     "The profiler output indicates two ROCm installations in one process. "
     "The profiler and the workload must use the same ROCm.\n"
-    "TheRock torch packages depend on rocm[libraries]. Do not install ROCm "
-    "and then torch; that can downgrade ROCm. Install ROCm Compute Profiler "
-    "(rocm[profiler]) and torch from the same index in one command. "
-    "Replace device-gfx950 with your GPU target:\n"
+    "For example, TheRock torch from pip depends on rocm[libraries] and can "
+    "install a second ROCm. Do not install ROCm and then torch; that can "
+    "downgrade ROCm. Install ROCm Compute Profiler (rocm[profiler]) and "
+    "torch from the same index in one command. Replace device-gfx950 with "
+    "your GPU target:\n"
     "  python -m pip install --index-url "
     "https://repo.amd.com/rocm/whl-multi-arch/ \\\n"
     '    "rocm[profiler,libraries,device-gfx950]" "torch[device-gfx950]"\n'
@@ -146,7 +147,7 @@ def _classify_output_line(line: str) -> None:
 
 
 def _duplicate_rocm_install_message(output: str) -> Optional[str]:
-    """Return install guidance if output contains a duplicate-ROCm abort."""
+    """Return the duplicate-ROCm message if output contains a known abort."""
     if (
         _OPTION_REGISTERED_MORE_THAN_ONCE in output
         or _ROCPROFILER_REGISTER_LIBRARY_ALREADY_SET in output
