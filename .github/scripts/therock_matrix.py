@@ -85,7 +85,11 @@ project_map = {
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
     "storage_libs": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_STORAGE_LIBS=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_STORAGE_LIBS=ON",
+            "-DTHEROCK_ENABLE_ROCPROFV3=ON",
+        ],
         "projects_to_test": "",  # hipfile testing to be enabled in a future PR
     },
     # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
