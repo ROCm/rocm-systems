@@ -1584,7 +1584,7 @@ NCCL_P2P_LL128_THRESHOLD
 ------------------------
 (since 2.28)
 
-The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942/gfx950 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1`` and LL128 enabled for the communicator). LL128's much lower per-line flag overhead keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``.
+The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942, gfx950, or gfx1250 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1`` and LL128 enabled for the communicator). LL128's much lower per-line flag overhead keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``. gfx1250 uses a 128-byte LL128 line (one flag word per 16, versus one per 8 on gfx9xx), so its wire overhead is lower still and the crossover to SIMPLE sits correspondingly higher.
 
 Values accepted
 ^^^^^^^^^^^^^^^

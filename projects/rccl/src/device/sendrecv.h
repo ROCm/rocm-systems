@@ -15,7 +15,8 @@
 //   UserRegMode == 0 -> latency-bound send/recv uses the legacy LL protocol. Built on every
 //                       arch; the default and the only variant when LL128 is off.
 //   UserRegMode == 1 -> latency-bound send/recv uses LL128. Only generated for gfx942/gfx950
-//                       and only launched when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+//                       (unrolls 1/2/4) and gfx1250 (unrolls 8/16/32), and only launched when
+//                       NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
 // The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
 // ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
 template <typename T, typename RedOp>

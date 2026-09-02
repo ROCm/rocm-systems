@@ -16,14 +16,12 @@
 
 namespace RcclUnitTesting
 {
-  // Return true if device 0's architecture is one for which the LL128 P2P send/recv kernel is
-  // generated and activated (gfx942/gfx950 only; see reg_values_of("SendRecv") and the enqueue
-  // gate). The arch is queried in a forked child so the parent test process does not initialize
-  // HIP (mirrors EnvVars' isolated arch detection).
-  static bool DeviceSupportsLL128SendRecv()
+  // Device 0's architecture name, queried in a forked child so the parent test process does not
+  // initialize HIP (mirrors EnvVars' isolated arch detection).
+  static std::string DeviceArchName()
   {
     int pipefd[2];
-    if (pipe(pipefd) != 0) return false;
+    if (pipe(pipefd) != 0) return "";
     pid_t pid = fork();
     if (pid == 0)
     {
@@ -43,9 +41,31 @@ namespace RcclUnitTesting
     (void)r;
     close(pipefd[0]);
     waitpid(pid, nullptr, 0);
-    std::string a(arch);
-    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos;
+    return std::string(arch);
   }
+
+  static bool DeviceArchIs(const char* prefix)
+  {
+    return DeviceArchName().find(prefix) != std::string::npos;
+  }
+
+  // True if the LL128 P2P send/recv kernel is generated and activated for this arch
+  // (see reg_values_of("SendRecv") in the device codegen and the enqueue gate).
+  static bool DeviceSupportsLL128SendRecv()
+  {
+    std::string const a = DeviceArchName();
+    return a.find("gfx942") != std::string::npos || a.find("gfx950") != std::string::npos ||
+           a.find("gfx1250") != std::string::npos;
+  }
+
+  // True if the legacy LL protocol is eligible for P2P send/recv on this arch. It is excluded on
+  // gfx12 (its per-word flag layout is a loss there), so those archs use SIMPLE for latency-bound
+  // send/recv whenever the LL128 path is not active. See the gate in addP2pToPlan().
+  static bool DeviceSupportsLegacyLLSendRecv() { return !DeviceArchIs("gfx12"); }
+
+  // True if comm->topo->ll128Enabled is forced on for this arch regardless of env, which makes the
+  // "ll128Enabled off" half of the selection matrix unreachable. See initTransportsRank().
+  static bool DeviceLL128EnabledByDefault() { return DeviceArchIs("gfx1250"); }
 
   // Scan the NCCL_DEBUG=INFO log files matching globPattern for the per-op protocol line emitted by
   // the P2P send/recv enqueue path ("RCCL P2P SendRecv protocol=<proto>"), returning true if any
@@ -214,10 +234,11 @@ namespace RcclUnitTesting
   //   - ExpectProto::LL128 (gfx942/gfx950, ll128Enabled=1, flag=1, NET path): below-threshold ->
   //       LL128, above -> SIMPLE; legacy LL must NOT appear. Skipped on archs without the LL128
   //       send/recv kernel.
-  //   - ExpectProto::LegacyLL (intranode path, flag=0, any arch): below-threshold -> legacy LL,
-  //       above -> SIMPLE; LL128 must NOT appear. Pins the default latency path (and its restored
-  //       LL wire<->data / proxy byte conversions), which correctness alone can't distinguish from a
-  //       silent fallback to SIMPLE.
+  //   - ExpectProto::LegacyLL (intranode path, flag=0): below-threshold -> legacy LL, above ->
+  //       SIMPLE; LL128 must NOT appear. Pins the default latency path (and its restored LL
+  //       wire<->data / proxy byte conversions), which correctness alone can't distinguish from a
+  //       silent fallback to SIMPLE. On archs where legacy LL is excluded (gfx12) the expectation
+  //       degrades to "SIMPLE only, no LL-family protocol" -- see DeviceSupportsLegacyLLSendRecv().
   //   - ExpectProto::NoLL128 (NET path, flag=0): the LL128 send/recv kernel must never be selected
   //       when the flag is off, and above-threshold sizes select SIMPLE. Below-threshold may be
   //       legacy LL or SIMPLE depending on whether the NET connection allocated an LL staging buffer
@@ -355,9 +376,17 @@ namespace RcclUnitTesting
       case ExpectProto::LegacyLL:
         // Default intranode path: below-threshold sizes must select the legacy LL protocol (a silent
         // fallback to SIMPLE would still pass correctness) and above-threshold must select SIMPLE.
-        EXPECT_TRUE(sawLL) << "Expected legacy LL to be selected for latency-bound (below-threshold) "
-                              "intranode send/recv, but no LL protocol log line was found (silent "
-                              "fallback to SIMPLE, or broken LL wire<->data conversion?).";
+        if (DeviceSupportsLegacyLLSendRecv()) {
+          EXPECT_TRUE(sawLL) << "Expected legacy LL to be selected for latency-bound (below-threshold) "
+                                "intranode send/recv, but no LL protocol log line was found (silent "
+                                "fallback to SIMPLE, or broken LL wire<->data conversion?).";
+        } else {
+          // gfx12: legacy LL is excluded, so every size must fall to SIMPLE. Asserting this (rather
+          // than skipping) pins the exclusion -- without it these archs would silently regress onto
+          // the legacy LL path.
+          EXPECT_FALSE(sawLL) << "Legacy LL must not be selected on gfx12, where it is excluded for "
+                                 "P2P send/recv.";
+        }
         EXPECT_FALSE(sawLL128) << "LL128 must not be selected when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.";
         EXPECT_TRUE(sawSimple) << "Expected the above-threshold size to select SIMPLE, but no SIMPLE "
                                   "protocol log line was found.";
@@ -381,7 +410,7 @@ namespace RcclUnitTesting
   //     useLL128SendRecv = defined(ENABLE_LL128)          // compile-time (HIP >= 6.1.33591)
   //                        && comm->topo->ll128Enabled    // comm LL128 gate (RCCL_LL128_FORCE_ENABLE)
   //                        && comm->allocP2pNetLLBuffers  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
-  //                        && (cudaArch == 940 || 950);   // gfx942 / gfx950 only
+  //                        && (cudaArch == 940 || 950 || 1250); // gfx942 / gfx950 / gfx1250
   //
   // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
   // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For
@@ -403,8 +432,13 @@ namespace RcclUnitTesting
   //   off         | any          | any        | below | legacy LL | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //   off         | any          | any        | above | SIMPLE    | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
   //
-  // Non-gfx942/950 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
-  // the LL128 cases are skipped there via DeviceSupportsLL128SendRecv().
+  // Archs without an LL128 send/recv kernel behave like the ENABLE_LL128=off rows
+  // (useLL128SendRecv is always false); the LL128 cases are skipped there via
+  // DeviceSupportsLL128SendRecv(). Two arch-dependent caveats:
+  //   - the "legacy LL" cells read as SIMPLE on gfx12, where legacy LL is excluded for send/recv
+  //     (DeviceSupportsLegacyLLSendRecv());
+  //   - the "ll128Enabled off" rows are unreachable on gfx1250, where ll128Enabled is forced on
+  //     (DeviceLL128EnabledByDefault()).
   // ---------------------------------------------------------------------------
 
   // Default intranode path (P2P/SHM left enabled), NCCL_ALLOC_P2P_NET_LL_BUFFERS=0: latency-bound
@@ -475,7 +509,8 @@ namespace RcclUnitTesting
   // GDR), enabling LL128 for latency-bound send/recv over the network. Verifies correctness of the
   // changed net allocation + LL128 dispatch, and that LL128 is selected for latency-bound send/recv.
   // RCCL_LL128_FORCE_ENABLE=1 is required because ll128Enabled defaults off on gfx942/gfx950 and the
-  // gate now requires it (see the matrix above). See RunLL128BoundarySweep.
+  // gate requires it (see the matrix above); it is a no-op on archs where ll128Enabled is already on
+  // by default (gfx1250). See RunLL128BoundarySweep.
   TEST(SendRecv, LL128NetBuffersEnabled)
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
@@ -521,6 +556,11 @@ namespace RcclUnitTesting
   // RunLL128BoundarySweep.
   TEST(SendRecv, Ll128DisabledDoesNotEnableP2pLL128)
   {
+    if (DeviceLL128EnabledByDefault()) {
+      // ll128Enabled is forced on for this arch with no env knob to clear it, so the scenario this
+      // test pins (opt-in flag on, ll128Enabled off) cannot be constructed here.
+      GTEST_SKIP() << "Skipping... ll128Enabled cannot be disabled on this arch.";
+    }
     // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold

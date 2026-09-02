@@ -354,7 +354,7 @@ struct RunWorkBatch;
 
 // Specialized for P2p in sendrecv.h. The add_unroll.sh hipify pass appends the trailing
 // USE_ACC/COLL_UNROLL/Pipeline/UserRegMode template parameters; UserRegMode selects the
-// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, gfx942/gfx950 only).
+// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, gfx942/gfx950/gfx1250 only).
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE>;
 

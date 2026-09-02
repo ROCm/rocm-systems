@@ -1136,7 +1136,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 // relatively early -- internode alltoall sweeps show it regressing past ~16-32 KiB/channel. Default
 // 4 KiB: the largest cutoff that avoids the legacy-LL mid-size regressions while keeping its win.
 NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
-// Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950 with
+// Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950/gfx1250 with
 // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled). Default 16 KiB: internode alltoall/
 // scatter/gather sweeps (1-16 nodes) show LL128 beats SIMPLE for every per-peer size <= 16 KiB at
 // all scales; LL128's low (~1/8 gfx950, ~1/16 gfx1250) flag overhead keeps it beneficial well past
@@ -1198,27 +1198,30 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
-  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device codegen),
-  //     and only activated when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
-  //     (which is also what makes the LL128 staging buffer available on network connections).
+  //   - LL128 kernel: only generated for gfx942/gfx950/gfx1250 (see reg_values_of() in the device
+  //     codegen), and only activated when this comm has LL128 enabled and
+  //     NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 (which is also what makes the LL128 staging buffer
+  //     available on network connections).
   //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
   // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
-  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
-  // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
   // LL128 send/recv requires ALL of:
   //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
   //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so
   //     selecting it would dispatch to a null/trap device slot.
-  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE).
-  //     If LL128 is not enabled for this comm, P2P must not use it even with the opt-in flag set, so
-  //     send/recv stays consistent with the collective protocol choice.
+  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE,
+  //     default-on for gfx1250). If LL128 is not enabled for this comm, P2P must not use it even
+  //     with the opt-in flag set, so send/recv stays consistent with the collective protocol choice.
   //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
   //     available on network connections.
-  //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
+  //   - an arch whose LL128 send/recv kernel is generated. cudaArch is 100*major + 10*minor:
+  //     940 = gfx942, 950 = gfx950, 1250 = gfx1250. gfx1250's 128-byte LL128 line makes this
+  //     path especially attractive there (1/16 flag overhead vs 1/8 on gfx9xx), but the kernel
+  //     is only built for the unroll factors that arch actually uses, so keep this list in sync
+  //     with get_arch_guard()/reg_values_of("SendRecv") in the device codegen.
 #if defined(ENABLE_LL128)
   bool useLL128SendRecv = comm->allocP2pNetLLBuffers &&
                           comm->topo->ll128Enabled &&
-                          (comm->cudaArch == 940 || comm->cudaArch == 950);
+                          (comm->cudaArch == 940 || comm->cudaArch == 950 || comm->cudaArch == 1250);
 #else
   bool useLL128SendRecv = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
 #endif
@@ -1244,6 +1247,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         // LL. Intranode always allocates the LL128 buffer, so this only affects mixed setups.
         int latencyProto = useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL;
         protoLatency[dir] &= conn->conn.buffs[latencyProto] != nullptr;
+        // Legacy LL stays excluded on gfx12: its per-word flag layout is a loss there, so those
+        // archs used SIMPLE for latency-bound send/recv before LL128 existed. LL128 is exempt --
+        // enabling it on gfx1250 is the whole point of the LL128 kernel variant.
+        if (!useLL128SendRecv)
+          protoLatency[dir] &= !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12");
         network[dir] |= conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         proxySameProcess[dir] &= conn->proxyConn.sameProcess;
       }
@@ -1286,8 +1294,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
 
     // Select protocol based on per-channel payload: at/below the latency threshold use the latency
-    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL), above
-    // it SIMPLE. LL128 and legacy LL use independent thresholds (P2P_LL128_THRESHOLD vs
+    // protocol (LL128 on gfx942/gfx950/gfx1250 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy
+    // LL), above it SIMPLE. LL128 and legacy LL use independent thresholds (P2P_LL128_THRESHOLD vs
     // P2P_LL_THRESHOLD) because LL128's lower wire overhead stays beneficial to larger sizes.
     ssize_t latencyThreshold = useLL128SendRecv ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
     if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;

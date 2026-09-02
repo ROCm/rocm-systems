@@ -55,7 +55,7 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 # ---------------------------------------------------------------------------
 EXPECTED = {
     "OFF": {
-        "total": 6123,
+        "total": 6126,
         "per_coll": {
             "AllGather": 48,
             "AllGatherV": 18,
@@ -64,12 +64,13 @@ EXPECTED = {
             "Broadcast": 24,
             "Reduce": 726,
             "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            # 6 legacy-LL (reg=0) + 6 LL128 (reg=1): unroll 1/2/4 for gfx942/950,
+            # unroll 8/16/32 for gfx1250.
+            "SendRecv": 12,
         },
     },
     "ON": {
-        "total": 6135,
+        "total": 6138,
         "per_coll": {
             "AllGather": 48,
             "AllGatherV": 18,
@@ -80,8 +81,9 @@ EXPECTED = {
             "Broadcast": 24,
             "Reduce": 726,
             "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            # 6 legacy-LL (reg=0) + 6 LL128 (reg=1): unroll 1/2/4 for gfx942/950,
+            # unroll 8/16/32 for gfx1250.
+            "SendRecv": 12,
         },
     },
 }
