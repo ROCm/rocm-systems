@@ -8390,3 +8390,80 @@ helpers. It therefore strengthens Sections 14.3, 14.5, 14.6, 14.7, 14.8, and
 the complete matrix, both extension exercises, material whole-refactoring
 shrinkage, and the independent completion audit remain open, so the goal
 remains active.
+
+### 16.119 Convergence checkpoint 118: one retained exact-subset barrier body plan
+
+The adjacent synchronization trace followed barrier decisions from mode-owned
+admission through owner assignment, candidate routing, direct emission,
+reused-relay emission, and dense-relay emission. Record/Replay already
+published a `MoiRecordEventEmissionPlan`, but InlineShadow barrier bodies still
+received the broad request, bound-resource transaction, and reconstructed
+operating points. Direct and appended paths consequently rediscovered the
+persistent epoch representation, private owner materialization, visible-
+evidence address, scratch and EXEC storage, special-state ABI, indirect jump,
+and patch ABI effects. Reused- and dense-relay paths additionally reapplied
+owner assignments after candidate admission.
+
+`MoiInlineBarrierEpochEmissionPlan` and
+`MoiInlinePrivateEpochBarrierEmissionPlan` now retain the exact native-body
+inputs selected by the authoritative candidate operating point.
+`MoiInlineBarrierCandidateRoutePlan` retains the admitted route, and the
+candidate retains its complete `ConSanPatchAbiEffects` instead of projecting
+parallel metadata fields. The direct, reused-relay, and dense-relay paths all
+consume those products. A dense route still assigns one operating point at
+the route-group boundary because its placement is genuinely group-local; both
+reused and newly allocated dense bodies consume that one result. Native body
+builders and the exact-subset dispatcher no longer accept or reconstruct the
+request, bound resources, operating point, or object-wide mode semantics.
+
+Return emission now has one shared `append_inline_barrier_return` mechanism.
+The generic Record/Replay barrier path also drops a redundant transient
+assignment whose owners were already exactly the resource-plan owners. Dense
+fallback eligibility consumes the retained indirect-jump capability directly
+rather than rebuilding separate EXEC-backed and spill-backed classifications.
+The final cleanup removes those parallel booleans, late special-state
+assignment, and a representation recheck already established by top-level
+admission and owner-local planning.
+
+The architecture gate requires the narrow body signatures, rejects broad state
+in the exact-subset dispatcher, and fixes the remaining assignment applications
+at four transient candidate/group sites and two persistent owner/candidate
+sites. The aggregate `ConSanMoiOperatingPoint` lexical count rises by six
+because exact candidate and dense-group planning now visibly name their local
+planning input. This is not a reopened body dependency: body emission has zero
+broad point inputs, and no assignment is reapplied after exact candidate/group
+planning.
+
+| Signal | Checkpoint 118 | Cumulative change | Slice change from checkpoint 117 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,850 | **-2,126** | +2 |
+| Nonblank production lines | 96,489 | **-2,595** | **-4** |
+| Production implementation lines | 88,733 | **-2,717** | **-5** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **274 / 51** | **-16 / 0** | +6 / 0 |
+| Broad request/resource/point/semantics types in InlineShadow barrier body emission | **0** | n/a | **-4** |
+| Transient/persistent assignment applications after exact candidate/group planning | **0 / 0** | n/a | **-6 / -2** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+The migration and harvest were committed separately so the new contract is
+reviewable independently from its deletion payoff. A warning-clean `-j16`
+rebuild and the final **295/295** nonphysical barrier/architecture gate pass
+across all five simulator targets. The broader nonphysical host/component gate
+also passes **1,296/1,296**. One simulator case completed its gtest body in
+406 ms but exceeded the old 60-second CTest budget during parallel teardown;
+it passed serially in 0.45 seconds, received the established 120-second
+contention budget, and passed in the repeated matrix. An early focused filter
+accidentally admitted 27 physical rows, which passed; every subsequent and
+final gate used `-LE physical`, and no full physical matrix was run.
+
+This is a completed, deletion-bearing migration, although its five-line net
+payoff is small. It strengthens Sections 14.5 through 14.8 by removing
+decision replay and parallel route/ABI state from one complete exact-subset
+body path. The checkpoint-17 extension exercises remain complete and enforced.
+Full architecture locality, reader-skippable mode ownership across the
+remaining transformation surface, confinement of broader placement and
+coordinator transactions, material additional deletion, and the independent
+Section 14 deep-read audit remain open, so the goal remains active.
