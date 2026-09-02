@@ -10,12 +10,13 @@ This script handles:
   6. Appending results to a JSONL datastore for trend analysis
 
 Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
-  python projects/rccl/ci/scripts/test_madengine.py \
-      --artifact-dir /apps/cvs_tests/dist_new/dist/rocm \
+  python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
+      --artifact-dir ./build \
       --workload llama-3.1-70b-training \
       --cluster ruby \
       --nodes 2 \
-      --results-dir /apps/rccl-ci/perf
+      --results-dir /apps/rccl-ci/madengine/perf \
+      --work-dir /apps/rccl-ci/madengine/workdir/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
 """
 from __future__ import annotations
 
@@ -58,10 +59,12 @@ REGRESSION_WINDOW = 5
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
+OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
+
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
-MADENGINE_REF = "ec4de0b58c49f05d89dd33e38cc3e81e0fb3d992"
+MADENGINE_REF = "98217cd7ba721f5a5f2a8fb4729120cce1d57eac"  # v2.2.0, 2026-09-08
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "63867e6a6e42355fd7b040fbcbd5bf043c9982fc"
+MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
@@ -133,7 +136,7 @@ CLUSTER_CONFIGS = {
             "NCCL_SOCKET_IFNAME": "fenic0",
             "NCCL_DEBUG": "WARN",
         },
-        "results_base": "/apps/rccl-ci/perf",
+        "results_base": "/apps/rccl-ci/madengine/perf",
     },
 }
 
@@ -254,89 +257,87 @@ def patch_madengine_for_cluster(
         else:
             log.info("SLURM template PATH patch already present or marker not found")
 
-    slurm_py = src / "deployment" / "slurm.py"
-    if slurm_py.exists():
-        content = slurm_py.read_text()
-        patched = content.replace(
-            '["madengine", "--version"],\n'
-            "                capture_output=True,\n"
-            "                text=True,\n"
-            "                timeout=5,",
-            '["madengine", "--version"],\n'
-            "                capture_output=True,\n"
-            "                text=True,\n"
-            "                timeout=120,",
-        )
-        if patched != content:
-            slurm_py.write_text(patched)
-            log.info("Patched slurm.py: increased CLI validation timeout to 120s")
-        else:
-            log.info("slurm.py already patched or timeout string not found")
-
     template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
     if template and template.exists():
         content = template.read_text()
-        # Patch the MULTI-NODE verification block (inside TASK_SCRIPT_EOF
-        # heredoc) to install madengine per-node when the head node's venv
-        # is incompatible (Python 3.10 vs 3.9). The single-node block
-        # runs on the head node where the venv works — leave it alone.
-        #
-        # Find the multi-node block by searching for the verification
-        # string AFTER the TASK_SCRIPT_EOF heredoc marker.
-        heredoc_marker = "TASK_SCRIPT_EOF"
-        heredoc_idx = content.find(heredoc_marker)
-        if heredoc_idx != -1:
-            verify_str = 'echo "Verifying madengine availability..."'
-            mn_verify_idx = content.find(verify_str, heredoc_idx)
-            if mn_verify_idx == -1:
-                mn_verify_idx = content.find(verify_str)
-            if mn_verify_idx != -1:
-                mn_end_str = "# Create local execution manifest"
-                mn_end_idx = content.find(mn_end_str, mn_verify_idx)
-                if mn_end_idx != -1:
-                    replacement = (
-                        'echo "Verifying madengine availability..."\n'
-                        'MAD_CLI_COMMAND=""\n'
-                        'if command -v madengine >/dev/null 2>&1 && '
-                        'madengine --help >/dev/null 2>&1; then\n'
-                        '    MAD_CLI_COMMAND="madengine"\n'
-                        '    echo "  ✓ madengine available: '
-                        '$(madengine --version 2>&1 | head -1)"\n'
-                        'fi\n'
-                        'if [ -z "$MAD_CLI_COMMAND" ]; then\n'
-                        '    echo "  ⚠ madengine not functional — '
-                        'installing for this node\'s Python ($(python3 --version))"\n'
-                        '    SUBMISSION_DIR={{ manifest_file | dirname }}\n'
-                        '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
-                        '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
-                        '        python3 -m venv "$WORKSPACE/node_venv"\n'
-                        '        source "$WORKSPACE/node_venv/bin/activate"\n'
-                        '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
-                        '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
-                        '        if madengine --version >/dev/null 2>&1; then\n'
-                        '            MAD_CLI_COMMAND="madengine"\n'
-                        '            echo "  ✓ madengine installed: '
-                        '$(madengine --version 2>&1 | head -1)"\n'
-                        '        else\n'
-                        '            echo "  ✗ madengine install failed"\n'
-                        '            exit 1\n'
-                        '        fi\n'
-                        '    else\n'
-                        '        echo "  ✗ madengine source not found at $MADENGINE_SRC"\n'
-                        '        exit 1\n'
-                        '    fi\n'
-                        'fi\n'
-                        'echo ""\n\n'
-                    )
-                    content = content[:mn_verify_idx] + replacement + content[mn_end_idx:]
-                    template.write_text(content)
-                    log.info("Patched SLURM template: added per-node madengine install (multi-node)")
-                else:
-                    log.warning("Could not find end of multi-node verification block")
-            else:
-                log.warning("Could not find multi-node verification block in template")
-        else:
-            log.warning("TASK_SCRIPT_EOF not found — template may not have multi-node support")
+        # The whole template is the sbatch script, so both verification blocks
+        # run on a compute node, and both inherit the submission environment
+        # whose PATH leads with the head node's venv. That interpreter belongs
+        # to another distro (3.10/3.12 there against 3.9 here), so madengine is
+        # not usable from it and both blocks need the node-local bootstrap.
+        verify_str = 'echo "Verifying madengine availability..."'
+        heredoc_idx = content.find("TASK_SCRIPT_EOF")
+        # The single-node block is bounded by the heredoc: the multi-node pass
+        # inserts text starting with verify_str, so an unbounded search could
+        # land inside what it just patched.
+        blocks = [
+            ("single-node", 0, heredoc_idx, "# Single-node: Create local execution manifest"),
+            ("multi-node", heredoc_idx, len(content), "# Create local execution manifest"),
+        ]
+        # Right to left, so patching one does not move the other's offsets.
+        for label, search_from, search_to, end_str in sorted(
+            blocks, key=lambda b: b[1], reverse=True
+        ):
+            if search_from < 0 or search_to < 0:
+                log.warning("Could not locate the %s verification block", label)
+                continue
+            verify_idx = content.find(verify_str, search_from, search_to)
+            end_idx = (
+                content.find(end_str, verify_idx, search_to) if verify_idx != -1 else -1
+            )
+            if verify_idx == -1 or end_idx == -1:
+                log.warning("Could not locate the %s verification block", label)
+                continue
+            replacement = (
+                'echo "Verifying madengine availability..."\n'
+                'MAD_CLI_COMMAND=""\n'
+                'if command -v madengine >/dev/null 2>&1 && '
+                'madengine --help >/dev/null 2>&1; then\n'
+                '    MAD_CLI_COMMAND="madengine"\n'
+                '    echo "  ✓ madengine available: '
+                '$(madengine --version 2>&1 | head -1)"\n'
+                'fi\n'
+                'if [ -z "$MAD_CLI_COMMAND" ]; then\n'
+                # PATH still leads with the head node's venv, whose
+                # interpreter belongs to another distro.
+                '    NODE_PYTHON=""\n'
+                '    for cand in /usr/bin/python3 /usr/local/bin/python3; do\n'
+                '        if [ -x "$cand" ] && "$cand" -c "import venv" >/dev/null 2>&1; then\n'
+                '            NODE_PYTHON="$cand"; break\n'
+                '        fi\n'
+                '    done\n'
+                '    if [ -z "$NODE_PYTHON" ]; then\n'
+                '        echo "  ✗ no usable python3 on $(hostname)"\n'
+                '        exit 1\n'
+                '    fi\n'
+                '    echo "  ⚠ madengine not functional — '
+                'installing for this node\'s Python '
+                '($("$NODE_PYTHON" --version 2>&1) at $NODE_PYTHON)"\n'
+                '    SUBMISSION_DIR={{ manifest_file | dirname }}\n'
+                '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
+                '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
+                '        "$NODE_PYTHON" -m venv "$WORKSPACE/node_venv"\n'
+                '        source "$WORKSPACE/node_venv/bin/activate"\n'
+                '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
+                '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
+                '        if madengine --version >/dev/null 2>&1; then\n'
+                '            MAD_CLI_COMMAND="madengine"\n'
+                '            echo "  ✓ madengine installed: '
+                '$(madengine --version 2>&1 | head -1)"\n'
+                '        else\n'
+                '            echo "  ✗ madengine install failed"\n'
+                '            exit 1\n'
+                '        fi\n'
+                '    else\n'
+                '        echo "  ✗ madengine source not found at $MADENGINE_SRC"\n'
+                '        exit 1\n'
+                '    fi\n'
+                'fi\n'
+                'echo ""\n\n'
+            )
+            content = content[:verify_idx] + replacement + content[end_idx:]
+            log.info("Patched SLURM template: per-node madengine install (%s)", label)
+        template.write_text(content)
 
     template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
     if template and template.exists():
@@ -446,6 +447,14 @@ def get_rccl_fingerprint(rccl_lib: Path) -> dict:
     return fp
 
 
+def _split_rccl_version(version: str) -> tuple[str, str]:
+    """Split `2.30.7`, `2.30.7-HEAD:e711c9e` or `2.30.7-develop:1b64803+`."""
+    m = re.match(r"(\d+\.\d+\.\d+)(?:-\S*?:([0-9a-fA-F]{6,}))?", version)
+    if not m:
+        return version, ""
+    return m.group(1), (m.group(2) or "").lower()
+
+
 def verify_rccl_replacement(
     work_dir: Path,
     expected: dict,
@@ -480,8 +489,18 @@ def verify_rccl_replacement(
                 f"RCCL may not have initialized on this node"
             )
 
+        # The container spells the build out further than the artifact does:
+        # `2.30.7-develop:1b64803+` against a bare `2.30.7`. The commit is what
+        # tells the CI build from the image's bundled copy, so it decides
+        # whenever the artifact carries one; against a bare fingerprint the two
+        # are indistinguishable and this degrades to a version check.
         runtime_version = rccl_versions[0].strip()
-        if runtime_version != expected["version"]:
+        exp_semver, exp_commit = _split_rccl_version(expected["version"])
+        run_semver, run_commit = _split_rccl_version(runtime_version)
+        same_commit = exp_commit and run_commit and (
+            run_commit.startswith(exp_commit) or exp_commit.startswith(run_commit)
+        )
+        if run_semver != exp_semver or (exp_commit and not same_commit):
             return False, (
                 f"{node_label}: RCCL version mismatch: "
                 f"expected '{expected['version']}' (from artifact), "
@@ -494,6 +513,45 @@ def verify_rccl_replacement(
         f"version={expected['version']}, "
         f"artifact_md5={expected.get('md5', 'N/A')}"
     )
+
+
+def _soname_bridge(dirs: str, sonames: str) -> str:
+    """Shell that links each missing soname in *dirs* onto the copy already there."""
+    if not sonames:
+        return ""
+    return (
+        f'    for d in {dirs}; do \\\n'
+        f'        for so in {sonames}; do \\\n'
+        '            [ -e "$d/$so" ] && continue; \\\n'
+        '            base=${so%%.so.*}.so; \\\n'
+        '            have=$(for f in "$d/$base".*; do \\\n'
+        '                [ -e "$f" ] && [ "$f" != "$d/$so" ] && echo "$f"; \\\n'
+        '            done | sort -V | tail -1); \\\n'
+        '            [ -n "$have" ] && ln -sfn "$(basename "$have")" "$d/$so"; \\\n'
+        '        done; \\\n'
+        '    done; \\\n'
+    )
+
+
+def _needed_sonames(lib: Path) -> list[str]:
+    """DT_NEEDED entries of *lib* that are safe to bridge across ROCm versions.
+
+    Only `libamd_smi`: RCCL touches a narrow part of it, and it is the one that
+    actually skews. Bridging a core runtime like `libamdhip64` would trade a
+    clear load failure for an unresolved symbol somewhere deeper.
+    """
+    try:
+        result = subprocess.run(
+            ["readelf", "-d", str(lib)], capture_output=True, text=True, timeout=10
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("readelf unusable (%s); not reconciling dependencies", exc)
+        return []
+    if result.returncode != 0:
+        log.warning("readelf failed on %s; not reconciling dependencies", lib)
+        return []
+    sonames = re.findall(r"\(NEEDED\).*\[([^\]]+)\]", result.stdout)
+    return [s for s in sonames if s.startswith("libamd_smi.")]
 
 
 def build_rccl_overlay_image(
@@ -512,47 +570,62 @@ def build_rccl_overlay_image(
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
 
-    result = subprocess.run(
+    image_exists = subprocess.run(
         ["docker", "image", "inspect", tag],
         capture_output=True,
-    )
-    if result.returncode == 0:
+    ).returncode == 0
+    if image_exists:
         log.info("Overlay image already exists on head node: %s", tag)
-    else:
-        dockerfile = work_dir / "Dockerfile.rccl-overlay"
-        rccl_lib_dir = rccl_lib.parent
-        uses_kpack = _rccl_uses_kpack(rccl_lib)
 
-        staging_dir = work_dir / "rccl_libs"
-        staging_dir.mkdir(exist_ok=True)
-        for so_file in rccl_lib_dir.glob("librccl*"):
-            dest = staging_dir / so_file.name
-            if not dest.exists():
-                subprocess.run(["cp", "-L", str(so_file), str(dest)], check=True)
+    # Staged even on a cache hit: the manifest points the compute nodes at this
+    # Dockerfile, and WORK_DIR is new on every attempt while the tag is not, so
+    # a hit would otherwise advertise a build context that was never written.
+    dockerfile = work_dir / OVERLAY_DOCKERFILE
+    rccl_lib_dir = rccl_lib.parent
+    uses_kpack = _rccl_uses_kpack(rccl_lib)
 
-        if uses_kpack:
-            kpack_files = list(rccl_lib_dir.rglob("*.kpack"))
-            if not kpack_files:
-                kpack_files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
-            has_kpack_files = len(kpack_files) > 0
-            if has_kpack_files:
-                kpack_staging = staging_dir / ".kpack"
-                kpack_staging.mkdir(exist_ok=True)
-                for kp in kpack_files:
-                    dest = kpack_staging / kp.name
-                    if not dest.exists():
-                        subprocess.run(["cp", "-L", str(kp), str(dest)], check=True)
-                log.info("Found %d kpack file(s): %s",
-                         len(kpack_files), [f.name for f in kpack_files])
-            else:
-                log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
-            log.info(
-                "CI-built librccl.so uses kpack (%.1f MB .so). "
-                "Building overlay with SDK venv layout for %s.",
-                rccl_lib.stat().st_size / 1e6,
-                base_image,
-            )
-            dockerfile.write_text(f"""\
+    staging_dir = work_dir / "rccl_libs"
+    staging_dir.mkdir(exist_ok=True)
+    for so_file in rccl_lib_dir.glob("librccl*"):
+        dest = staging_dir / so_file.name
+        if not dest.exists():
+            subprocess.run(["cp", "-L", str(so_file), str(dest)], check=True)
+
+    # The CI RCCL is built against a newer ROCm than the base image, so it can
+    # name a soname the image predates -- `libamd_smi.so.27` against its `.26` --
+    # and then fail to load at all. Reconciled in the image by symlink, the way
+    # reconcile_soname_versions() does it for the bind-mount path; copying the
+    # artifact's own copy instead would drag in the rocm_sysdeps that
+    # quarantine_rocm_sysdeps() exists to keep out of the loader path.
+    rccl_needed = " ".join(_needed_sonames(rccl_lib))
+    if rccl_needed:
+        log.info("RCCL needs: %s", rccl_needed)
+    bridge_sdk = _soname_bridge('"$SDK_LIB" "$SDK_DEV"', rccl_needed)
+    bridge_dep = _soname_bridge('"$DEP_DIR"', rccl_needed)
+
+    if uses_kpack:
+        kpack_files = list(rccl_lib_dir.rglob("*.kpack"))
+        if not kpack_files:
+            kpack_files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
+        has_kpack_files = len(kpack_files) > 0
+        if has_kpack_files:
+            kpack_staging = staging_dir / ".kpack"
+            kpack_staging.mkdir(exist_ok=True)
+            for kp in kpack_files:
+                dest = kpack_staging / kp.name
+                if not dest.exists():
+                    subprocess.run(["cp", "-L", str(kp), str(dest)], check=True)
+            log.info("Found %d kpack file(s): %s",
+                     len(kpack_files), [f.name for f in kpack_files])
+        else:
+            log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+        log.info(
+            "CI-built librccl.so uses kpack (%.1f MB .so). "
+            "Building overlay with SDK venv layout for %s.",
+            rccl_lib.stat().st_size / 1e6,
+            base_image,
+        )
+        dockerfile.write_text(f"""\
 FROM {base_image}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
@@ -567,25 +640,27 @@ RUN set -e; \\
         mkdir -p "$SDK_KPACK"; \\
         cp /tmp/rccl_ci/.kpack/*.kpack "$SDK_KPACK/"; \\
     fi; \\
-    rm -rf /tmp/rccl_ci
+{bridge_sdk}    rm -rf /tmp/rccl_ci
 ENV NCCL_DEBUG=WARN
 """)
-        else:
-            log.info(
-                "CI-built librccl.so has embedded GPU kernels (%.1f MB)",
-                rccl_lib.stat().st_size / 1e6,
-            )
-            dockerfile.write_text(f"""\
+    else:
+        log.info(
+            "CI-built librccl.so has embedded GPU kernels (%.1f MB)",
+            rccl_lib.stat().st_size / 1e6,
+        )
+        dockerfile.write_text(f"""\
 FROM {base_image}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     RCCL_REAL=$(readlink -f /opt/rocm/lib/librccl.so 2>/dev/null || \\
                 find /opt/rocm*/lib -name 'librccl.so.*.*' -not -type l 2>/dev/null | head -1); \\
     cp /tmp/rccl_ci/librccl.so "$RCCL_REAL"; \\
-    rm -rf /tmp/rccl_ci
+    DEP_DIR=$(dirname "$RCCL_REAL"); \\
+{bridge_dep}    rm -rf /tmp/rccl_ci
 ENV NCCL_DEBUG=WARN
 """)
 
+    if not image_exists:
         log.info("Building overlay image: %s", tag)
         subprocess.run(
             ["docker", "build", "-t", tag,
@@ -713,6 +788,8 @@ def generate_manifest(
         **({"nodelist": nodelist} if nodelist else {}),
     }
 
+    overlay_dockerfile = work_dir / OVERLAY_DOCKERFILE
+
     manifest = {
         "built_images": {
             image_key: {
@@ -724,6 +801,19 @@ def generate_manifest(
                 "build_status": "SKIPPED",
                 "build_duration": 0,
                 "gpu_vendor": "AMD",
+                # The overlay image is built on the head node, so a compute node
+                # will not find it locally and cannot pull it from anywhere.
+                # madengine falls back to building it there, which needs the
+                # Dockerfile path; the build context is its directory, WORK_DIR,
+                # which is on the shared filesystem with rccl_libs/ inside it.
+                # Only advertised when it is really there: --skip-overlay-build
+                # never writes one, and a path that does not exist would turn
+                # that fallback from a rescue into a guaranteed failure.
+                **(
+                    {"dockerfile": str(overlay_dockerfile)}
+                    if overlay_dockerfile.is_file()
+                    else {}
+                ),
             },
         },
         "built_models": {
@@ -805,9 +895,9 @@ def run_madengine(
     log.info("Timeout: %d minutes", timeout_minutes)
 
     # Pre-warm: madengine's SLURM deployment validates CLI availability by
-    # running `madengine --version` with a 5s timeout.  Cold import of
-    # madengine's heavy dependencies (kubernetes, aiohttp, paramiko) can
-    # exceed 5s.  Running it once beforehand populates the bytecode cache.
+    # running `madengine --version` itself.  A cold import of its heavy
+    # dependencies (kubernetes, aiohttp, paramiko) off NFS is slow, so run it
+    # once here to populate the bytecode cache.
     try:
         subprocess.run(["madengine", "--version"], capture_output=True, timeout=120)
     except subprocess.TimeoutExpired:

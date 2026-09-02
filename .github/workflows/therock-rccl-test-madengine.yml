@@ -64,10 +64,17 @@ jobs:
         shell: bash
     env:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
-      RESULTS_DIR: "/apps/rccl-ci/perf"
-      WORK_DIR: "/apps/rccl-ci/workdir/${{ github.run_id }}"
-      OUTPUT_ARTIFACTS_DIR: "/apps/cvs_tests/dist_new/dist/rocm"
-      AWS_SHARED_CREDENTIALS_FILE: "/apps/cvs_tests/awsconfig/credentials.ini"
+      # The runner user owns none of the directories this job used to write to;
+      # /apps/rccl-ci itself is world-writable, so keep our own subtree there.
+      RESULTS_DIR: "/apps/rccl-ci/madengine/perf"
+      # run_attempt too: run_id is stable across re-runs, and the cleanup step
+      # leaves the result files behind, so a re-run could parse a previous
+      # attempt's perf.csv.
+      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}"
+      # Workspace-local, as in the JAX and PyTorch test workflows: the fetched
+      # ROCm tree is only read on the head node, and /apps/cvs_tests/dist_new
+      # belongs to the CVS suite, which this job may neither traverse nor wipe.
+      OUTPUT_ARTIFACTS_DIR: "./build"
       CLUSTER: "ruby"
     steps:
       - name: Checkout TheRock repository
@@ -89,8 +96,36 @@ jobs:
             exit 1
           fi
 
+      # The pool is not uniform -- 3.10, 3.12, and one machine with no pip at
+      # all -- so pin the interpreter as rccl-coco-run.yml does.
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      # A venv on top of it: these runners are shared and long-lived, so anything
+      # installed straight into the interpreter would persist into the next job.
+      # This one lives under WORK_DIR and the cleanup step deletes it.
+      - name: Create Python virtual environment
+        run: |
+          mkdir -p "${WORK_DIR}"
+          python3 -m venv "${WORK_DIR}/venv"
+          echo "${WORK_DIR}/venv/bin" >> "$GITHUB_PATH"
+
+          # The datastore is only appended to at the very end of the workload, so
+          # an unwritable RESULTS_DIR would surface three hours in. A directory
+          # that exists but is not ours is the exact failure being fixed here, so
+          # test the write rather than trusting mkdir.
+          mkdir -p "${RESULTS_DIR}" || { echo "::error::cannot create ${RESULTS_DIR}"; exit 1; }
+          probe="${RESULTS_DIR}/.write-probe.$$"
+          touch "$probe" 2>/dev/null || {
+              echo "::error::${RESULTS_DIR} is not writable by $(id -un)"; exit 1; }
+          rm -f "$probe"
+
       - name: Install TheRock dependencies
-        run: python3 -m pip install -r requirements.txt
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
 
       - name: Resolve TheRock artifact run
         if: ${{ inputs.artifact_run_id == '' }}
@@ -123,13 +158,6 @@ jobs:
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 
-      - name: Setup Python environment
-        run: |
-          mkdir -p "${WORK_DIR}"
-          python3 -m venv "${WORK_DIR}/venv"
-          source "${WORK_DIR}/venv/bin/activate"
-          pip install --upgrade pip
-
       - name: Run MADEngine workload
         timeout-minutes: 210
         env:
@@ -161,6 +189,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: madengine-results-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
+          # slurm_output is here because without it a failure on the compute
+          # nodes can only be read by someone with cluster access: the job log
+          # shows that SLURM failed, not why.
           path: |
             ${{ env.WORK_DIR }}/perf.csv
             ${{ env.WORK_DIR }}/perf_entry_super.csv
@@ -168,9 +199,15 @@ jobs:
             ${{ env.WORK_DIR }}/perf_super.csv
             ${{ env.WORK_DIR }}/madengine_summary.txt
             ${{ env.WORK_DIR }}/manifest.json
+            ${{ env.WORK_DIR }}/slurm_output/*.out
+            ${{ env.WORK_DIR }}/slurm_output/*.err
           retention-days: 30
 
       - name: Cleanup work directory
         if: always()
         run: |
-          rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/venv" "${WORK_DIR}/rccl_libs"
+          # node_venv is the per-node bootstrap: on a single-node run the template
+          # puts WORKSPACE on the shared filesystem, so it lands here rather than
+          # in node-local storage and would otherwise outlive the run.
+          rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/venv" \
+                 "${WORK_DIR}/node_venv" "${WORK_DIR}/rccl_libs"
