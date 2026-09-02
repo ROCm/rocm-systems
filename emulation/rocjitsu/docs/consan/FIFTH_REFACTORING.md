@@ -11828,3 +11828,44 @@ mode-only decision leaves the common component, the shared header loses an API,
 and seven implementation lines disappear.  The exact-entry and raw descriptor
 mechanisms are still shared once each, so mode locality has not reintroduced
 code duplication.
+
+### 16.178 Convergence checkpoint 177: mode-free exact-entry storage resolution
+
+Tracing the now-visible `moi_exact_entry_workgroup_sources` boundary found the
+opposite layering problem.  This genuinely shared storage resolver still
+accepted a `ConSanMoiEngine` and reopened the mode registry solely to ask
+whether entry capture was required.  All four production call paths were
+already owned by Record/Replay or Sampled, the two modes whose registrations
+require the tuple.  The parameter therefore let a storage mechanism repeat a
+decision that had already been made at each mode boundary.
+
+The resolver now accepts only the operating point and optional site-private
+offsets.  It proves that exactly one complete SGPR, VGPR, or private
+representation exists and projects that representation into workgroup
+sources.  Record/Replay and Sampled callers decide to invoke it; the resolver
+has no engine, registry, or policy dependency.  The architecture gate extracts
+the implementation region and rejects any return of engine or
+`requires_entry_workgroup_capture` vocabulary to it.
+
+| Signal | Checkpoint 177 | Cumulative change | Slice change from checkpoint 176 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,168 | **-2,808** | **-4** |
+| Nonblank production lines | 95,760 | **-3,324** | **-4** |
+| Production implementation lines | 88,024 | **-3,426** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Shared exact-entry storage resolvers reopening mode policy | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `d5dd34b85c0`.  Validation includes a
+successful full `-j16` build and **828/828** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+This slice completes the bidirectional separation exposed by checkpoint 175:
+mode-local Sampled fallback stays with Sampled, while shared exact-entry
+storage knows nothing about modes.  It also deletes four implementation lines
+and one repeated registry lookup rather than introducing an adapter.
