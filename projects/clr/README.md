@@ -70,7 +70,7 @@ sudo apt-get install ocl-icd-opencl-dev
 
    > **Note:** Build both `OCL` and `HIP` together by passing `-DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=ON` to the configure command.
 
-   > **Note:** Linux builds are hardened by default: stack protection, `_FORTIFY_SOURCE`, full RELRO and a non-executable stack. Compile flags are probed for toolchain support before use, and the whole set is skipped for sanitizer builds. Pass `-DCLR_ENABLE_HARDENING=OFF` to opt out.
+   > **Note:** Linux builds link with full RELRO (`-Wl,-z,relro,-z,now`), which resolves the GOT at load time and maps it read-only. Pass `-DCLR_ENABLE_HARDENING=OFF` to opt out.
 
 For detailed instructions, please refer to [How to build HIP](https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html).
 
