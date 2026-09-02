@@ -324,9 +324,13 @@ do_coverage() {
   if command -v genhtml >/dev/null 2>&1; then
     local genhtml_args=(--branch-coverage)
     [ "${lcov_major:-0}" -ge 2 ] && genhtml_args+=(--ignore-errors "inconsistent,unsupported,corrupt,format")
-    genhtml "${genhtml_args[@]}" "$odir/combined.lcov" -o "$odir/html" \
-      >/dev/null 2>&1 || true
-    echo "    overall html report: $odir/html/index.html"
+    if genhtml "${genhtml_args[@]}" "$odir/combined.lcov" -o "$odir/html" \
+      >/dev/null 2>&1; then
+      echo "    overall html report: $odir/html/index.html"
+    else
+      echo "    warning: genhtml failed -- overall html report not generated" >&2
+      rc=1
+    fi
   fi
   echo "    overall tracefile:   $odir/combined.lcov"
   echo "    overall summary:     $odir/summary.txt"
