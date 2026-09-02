@@ -129,6 +129,7 @@ KfdLifecycleOps KfdDriver::ThunkOps() {
     return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                   : HSA_STATUS_ERROR;
   };
+  ops.get_pid = []() { return os::GetProcessId(); };
   return ops;
 }
 

@@ -62,6 +62,15 @@ struct KfdLifecycleOps {
   std::function<hsa_status_t()> disable_runtime;
   std::function<hsa_status_t()> release_snapshot;
   std::function<hsa_status_t()> close;
+
+  /// @brief Reports the calling process id.
+  ///
+  /// @details Injected rather than called directly so a test can drive the
+  /// fork path without forking, and so this header stays clear of the os
+  /// layer. KfdDriver wires it to rocr::os::GetProcessId(), which is getpid()
+  /// on Linux and _getpid() on Windows. An instance built without one records
+  /// no owning process and never takes the fork path.
+  std::function<int()> get_pid;
 };
 
 /// @brief Staged ownership of what a KFD driver has taken from the thunk.
@@ -82,7 +91,8 @@ struct KfdLifecycleOps {
 /// shutdown cannot both release the same reference.
 class KfdLifecycle {
  public:
-  explicit KfdLifecycle(KfdLifecycleOps ops) : ops_(std::move(ops)) {}
+  explicit KfdLifecycle(KfdLifecycleOps ops)
+      : ops_(std::move(ops)), owner_pid_(ops_.get_pid ? ops_.get_pid() : 0) {}
 
   KfdLifecycle(const KfdLifecycle&) = delete;
   KfdLifecycle& operator=(const KfdLifecycle&) = delete;
@@ -136,6 +146,9 @@ class KfdLifecycle {
   /// every stage of ShutDown(), the ownership is dropped before the call
   /// rather than after, so a failed close is not retried into a double close.
   ///
+  /// In a forked child the inherited open reference is the parent's, so this
+  /// drops the claim without closing. See InheritedAcrossFork().
+  ///
   /// @return What the thunk's close reported, or HSA_STATUS_SUCCESS if this
   /// owned no open reference.
   hsa_status_t Close();
@@ -148,12 +161,34 @@ class KfdLifecycle {
   /// ownership is dropped as it runs, so a failed release is not retried into
   /// a double release later. The last of those steps is Close().
   ///
+  /// In a forked child every inherited claim is the parent's, so this gives
+  /// back nothing at all and reports success. See InheritedAcrossFork().
+  ///
   /// @return The first error any step reported, or HSA_STATUS_SUCCESS. Owning
   /// nothing is success: there is nothing to fail.
   hsa_status_t ShutDown();
 
  private:
+  /// @brief Whether this instance's ownership was inherited across a fork.
+  ///
+  /// @details The flags below are plain bools, so fork() copies them into a
+  /// child that holds none of the references they describe. The thunk zeroes
+  /// its own counters and reallocates *dxg_runtime from hsaKmtOpenKFD()'s
+  /// is_forked_child() path, and nothing under core/ installs a
+  /// pthread_atfork handler, so a child's flags describe the parent's
+  /// session. Giving those back would release references the parent still
+  /// holds, and on WSL would tear the thunk down under another live consumer.
+  ///
+  /// Recording the owning pid mirrors what the thunk does with parent_pid,
+  /// and for the same reason it avoids atfork: a handler cannot be
+  /// uninstalled, and this class can have more than one instance.
+  bool InheritedAcrossFork() const;
+
   KfdLifecycleOps ops_;
+
+  /// @brief The process that took whatever the flags below claim.
+  int owner_pid_ = 0;
+
   bool owns_open_ = false;
   bool owns_runtime_enable_ = false;
   bool owns_snapshot_ = false;

@@ -70,7 +70,18 @@ hsa_status_t KfdLifecycle::AcquireSnapshot(const std::function<hsa_status_t()>& 
   return status;
 }
 
+bool KfdLifecycle::InheritedAcrossFork() const {
+  return ops_.get_pid && ops_.get_pid() != owner_pid_;
+}
+
 hsa_status_t KfdLifecycle::Close() {
+  // The open reference belongs to the process that took it, so a child drops
+  // the inherited claim instead of closing the parent's reference.
+  if (InheritedAcrossFork()) {
+    owns_open_ = false;
+    return HSA_STATUS_SUCCESS;
+  }
+
   if (!owns_open_) return HSA_STATUS_SUCCESS;
 
   owns_open_ = false;
@@ -78,6 +89,15 @@ hsa_status_t KfdLifecycle::Close() {
 }
 
 hsa_status_t KfdLifecycle::ShutDown() {
+  // Nothing a child inherited is the child's to give back. Dropping the
+  // claims and calling no op leaves the parent's references with the parent.
+  if (InheritedAcrossFork()) {
+    owns_runtime_enable_ = false;
+    owns_snapshot_ = false;
+    owns_open_ = false;
+    return HSA_STATUS_SUCCESS;
+  }
+
   hsa_status_t status = HSA_STATUS_SUCCESS;
   auto record = [&status](hsa_status_t err) {
     if (status == HSA_STATUS_SUCCESS) status = err;

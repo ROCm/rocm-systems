@@ -137,6 +137,55 @@ TEST_CASE(close_gives_back_only_the_open_reference) {
   CHECK_EQ(recorder.calls, (std::vector<std::string>{"close", "disable", "release"}));
 }
 
+TEST_CASE(a_forked_child_gives_back_nothing_it_inherited) {
+  /* The pid provider is mutable, so the instance records one process at
+   * construction and every later check reports another - what an inherited
+   * KfdLifecycle sees in a forked child, without needing to fork.
+   */
+  {
+    Recorder recorder;
+    int pid = 4242;
+    KfdLifecycleOps ops = recorder.Ops();
+    ops.get_pid = [&pid]() { return pid; };
+    KfdLifecycle lifecycle(std::move(ops));
+    AcquireAll(lifecycle);
+
+    pid = 4243;
+
+    CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+    CHECK(recorder.calls.empty());
+  }
+
+  /* Close() carries the same guard and has to be checked on its own, because
+   * ShutDown() returns above before it would reach it.
+   */
+  {
+    Recorder recorder;
+    int pid = 4242;
+    KfdLifecycleOps ops = recorder.Ops();
+    ops.get_pid = [&pid]() { return pid; };
+    KfdLifecycle lifecycle(std::move(ops));
+    AcquireAll(lifecycle);
+
+    pid = 4243;
+
+    CHECK_EQ(lifecycle.Close(), HSA_STATUS_SUCCESS);
+    CHECK(recorder.calls.empty());
+  }
+
+  /* Same process, so the ordinary unwind has to be exactly as it was. */
+  {
+    Recorder recorder;
+    KfdLifecycleOps ops = recorder.Ops();
+    ops.get_pid = []() { return 4242; };
+    KfdLifecycle lifecycle(std::move(ops));
+    AcquireAll(lifecycle);
+
+    CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+    CHECK_EQ(recorder.calls, (std::vector<std::string>{"disable", "release", "close"}));
+  }
+}
+
 TEST_CASE(open_and_snapshot_acquisition_are_each_idempotent) {
   Recorder recorder;
   KfdLifecycle lifecycle(recorder.Ops());
