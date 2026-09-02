@@ -11617,3 +11617,55 @@ explicit mode extension obligation and deletes six implementation lines.  It
 also leaves the hook's independently reconstructed RR/Sampled default matrix
 more conspicuous; that runtime-default path should be traced as its own
 configuration product rather than conflated with this lowering requirement.
+
+### 16.174 Convergence checkpoint 173: unified cross-runtime mode policy
+
+The runtime-default trace found that report capacity, runtime sampling,
+automatic owner initialization, owner-source relevance, and entry-workgroup
+capture were five stable facts of the selected MOI mode.  They nevertheless
+lived in three different places: one registry scalar, one prologue-policy
+field, and hook-private constants and engine conditionals.  Adding a mode could
+therefore satisfy lowering registration while silently inheriting unrelated
+runtime defaults.
+
+`ConSanMoiModePolicy` is now the single cross-runtime product published by each
+mode registration.  Record/Replay, Sampled, and InlineShadow each state their
+complete policy beside their mode-owned mechanics.  Common report planning,
+placement, record planning, hook configuration, allocation, and telemetry
+query that same product.  The old capacity adapter, hook-private stride
+constants, hook RR/Sampled default switch, hook InlineShadow owner-source
+special case, and duplicate placement of entry-capture policy are deleted.
+The policy deliberately contains stable mode facts only; object- and
+target-dependent mechanics remain callbacks or their existing typed planning
+products.
+
+The hypothetical-mode exercise now must provide and observe a complete policy
+without changing common consumers.  A new three-mode regression pins every
+field, and the structural gate requires complete declarations in all mode
+owners while rejecting restoration of the retired adapters and constants.
+
+| Signal | Checkpoint 173 | Cumulative change | Slice change from checkpoint 172 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,590 | **-2,386** | +14 |
+| Nonblank production lines | 96,168 | **-2,916** | +11 |
+| Production implementation lines | 88,381 | **-3,069** | +17 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Parallel hook/lowering mode-default authorities | **0 / 3** | n/a | **-3** |
+| Test inventory | **5,428** | **+83** | **+1** |
+
+The implementation is committed as `21f84fd81cc`.  Validation includes two
+successful full `-j16` builds, **1,021/1,021** nonphysical MOI host,
+runtime-hook, and architecture-boundary tests, and **50/50** mode-policy and
+auto-report-planning tests on the committed result.  All invocations used
+`-LE physical`; no test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+This slice spends seventeen implementation lines to replace fragmented facts
+with an explicit extension contract.  That is a deliberate convergence cost,
+but not an endpoint: subsequent slices should exploit the new authority to
+delete remaining common engine tests and avoid adding another broad policy
+record unless its consumers demonstrably share the same stability boundary.
