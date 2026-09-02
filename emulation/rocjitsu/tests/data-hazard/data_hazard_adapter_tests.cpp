@@ -2148,6 +2148,19 @@ TEST(DataHazardAdapterTest, PerCounterWaitsStateTheirCountAfterARegisterOperand)
   const dh::WaitInfo vmcnt = dh::make_wait_info(dh::WaitKind::WaitVmcnt, "1");
   EXPECT_EQ(vmcnt.count, 1u);
   EXPECT_EQ(vmcnt.paired_count, 0u);
+
+  // A store wait that keeps two operations outstanding has to reach the engine
+  // as written. Read from the register operand it would drain to zero, retiring
+  // stores the wait never named and hiding the hazards behind them.
+  const dh::WaitInfo vscnt = dh::make_wait_info(dh::WaitKind::WaitVscnt, "2");
+  EXPECT_EQ(vscnt.count, 2u);
+  const WaitAction action = dh::make_wait_action(vscnt);
+  ASSERT_NE(find_counter(action, WaitCntType::STORE), nullptr);
+  EXPECT_EQ(find_counter(action, WaitCntType::STORE)->keep_count, 2u);
+
+  // What the register operand reads as: the `null` compilers emit carries no
+  // count at all.
+  EXPECT_EQ(dh::make_wait_info(dh::WaitKind::WaitVscnt, "null").count, 0u);
 }
 
 // The false positive the missing mnemonics produce: a load whose wait the
