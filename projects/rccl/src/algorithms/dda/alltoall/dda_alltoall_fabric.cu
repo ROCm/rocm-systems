@@ -27,7 +27,7 @@ using nccl_dda_detail::DdaFabricBarrierState;
 // Single source of the launch geometry: grid/block for a byte payload. The
 // kernel is instantiated for int8_t, so `bytes` is the per-block element count.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t bytes) {
-  return meta::comms::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
+  return dda::common::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
 }
 
 template <typename T>

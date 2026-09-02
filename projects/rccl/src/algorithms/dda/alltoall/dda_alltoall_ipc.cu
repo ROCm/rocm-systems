@@ -32,7 +32,7 @@ using nccl_dda_detail::kDdaNranks;
 // kernel is instantiated for int8_t). The grid is sized from the per-rank-pair
 // chunk, not the whole message.
 static inline std::pair<dim3, dim3> ddaAllToAllIpcGeom(size_t bytes) {
-  return meta::comms::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
+  return dda::common::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
 }
 
 template <typename T>
