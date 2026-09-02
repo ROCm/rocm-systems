@@ -7695,3 +7695,65 @@ a parallel decoded representation or stop after adding implementation facades.
 The mixed renderer, broad lowering mutation surfaces, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.107 Convergence checkpoint 106: physically mode-owned report decoding
+
+The discriminated evidence contracts from checkpoint 105 exposed a remaining
+placement lie: the common 722-line decoder translation unit still implemented
+all three mode algorithms. Its apparent mode owners described products only.
+A reader could not skip InlineShadow snapshot and compact-token policy or
+Sampled causal-window and deferred-join policy, and the common decoder's one
+issue enum coupled all six detailed failure forms back together.
+
+Record/Replay now owns sparse publication compaction and its authoritative
+visible-record summary projection. InlineShadow owns exact snapshot, atomic
+release, acquired-token, deferred-diagnostic, and compact-token decoding.
+Sampled owns causal-window snapshot classification, static attribution,
+pending acquire/release joining, collision completeness, and bounded scan
+accounting. Each algorithm is compiled from its mode-named source, returns its
+one typed decoded product, and has no reference to either other mode. The
+generic issue enum and vector are deleted; InlineShadow and Sampled issues are
+physically carried by their owning alternatives and rendered exhaustively.
+
+The common decoder is now 108 lines. It validates the common header/layout,
+extracts the universal access/barrier/atomic/fence/diagnostic streams, projects
+their common loss counters, and invokes exactly one mode decoder in a single
+three-way composition switch. It contains no snapshot classifier, pending
+join, token filter, compact-token resolver, or sparse-publication algorithm.
+Boundary checks require all three mode sources in the build, reject cross-mode
+names from each source and contract, and reject those implementation mechanisms
+from the common decoder.
+
+| Signal | Checkpoint 106 | Cumulative change | Slice change from checkpoint 105 |
+| --- | ---: | ---: | ---: |
+| Production files | 288 | +59 | +3 mode sources |
+| Physical production lines | 102,800 | **-2,176** | +41 |
+| Nonblank production lines | 96,494 | **-2,590** | +15 |
+| Production implementation lines | 88,779 | **-2,671** | +18 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Common decoder physical lines | **108** | n/a | **-614** from the pre-split file |
+| Mode decoding algorithms in common decoder | **0** | n/a | **-3** |
+| Cross-mode runtime evidence issue alternatives | **0** | n/a | **-6** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild, all **35/35** focused decoder,
+analyzer, renderer, live-hook, replay, Sampled, InlineShadow, and architecture
+boundary tests, and all **1,295/1,295** `ConSan.*` and `ConSanMoi.*`
+host/component tests. The final removal of Record/Replay's temporary compaction
+product then passed its decoder, renderer, sparse-compaction, and boundary gate
+**5/5**. No test was added, removed, renamed, disabled, or replaced, and no
+physical gfx1201 test was run.
+
+This slice satisfies the runtime-decoder portion of Sections 14.1, 14.3, 14.5,
+14.6, and 14.7. The 18-line implementation increase is the physical-source and
+typed-boundary cost of making 614 lines of previously mixed policy skippable;
+it is not a code-size payoff. The renderer still interleaves all three modes in
+one large function, and the broad lowering mutation surfaces and material
+whole-refactoring shrinkage remain open. The next runtime slice must converge
+rendering through the same owned alternatives and harvest common fallback
+objects and mode-inapplicable formatting rather than merely adding renderer
+facades. The independent completion audit also remains open, so the goal stays
+active.
