@@ -10919,3 +10919,50 @@ would require replacing this callback design rather than preserving it as a
 permanent abstraction tax.  Full target/mode locality, remaining broad
 transaction and operating-point reduction, extension-proof revalidation, and
 the independent Section 14 audit remain open.
+
+### 16.159 Convergence checkpoint 158: derived private-barrier facts
+
+The first callback-payback slice removes three pieces of duplicated authority
+from `MoiPrivateBarrierPlanningContext`.  Its owner list was an alias of the
+selected resource plan, its private-state layout was an alias of the selected
+access patch, and its descriptor-requirement accumulator merely let both mode
+planners repeat the same accounting operation after constructing their common
+ABI-effects product.  Carrying all three made the context look more general
+than the transaction actually is and permitted those values to disagree.
+
+Each mode planner now derives owner scope and private layout from their owning
+products.  The common transaction accounts descriptor effects once, from the
+returned `ConSanPatchAbiEffects`, after either planner succeeds.  The boundary
+gate rejects reintroducing any of the three aliases into the context and
+requires returned owner and private-size effects to drive common accounting.
+This is a small deletion, but it is directional payback: fewer parameters,
+one descriptor-effects authority, and no new adapter or parallel path.
+
+| Signal | Checkpoint 158 | Cumulative change | Slice change from checkpoint 157 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,647 | **-2,329** | -3 |
+| Nonblank production lines | 96,229 | **-2,855** | -3 |
+| Production implementation lines | 88,440 | **-3,010** | -3 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **124 / 49** | **-152 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **261 / 52** | **-29 / +1** | 0 / 0 |
+| Duplicated facts in private planner context | **0** | n/a | **-3** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `326302795f0`.  Validation includes a
+successful full `-j16` build and **109/109** nonphysical architecture-boundary
+and barrier-named host tests.  The complete 1,150-case Record/Replay and
+InlineShadow simulator matrix had passed at checkpoint 157 immediately before
+this representational cleanup.  All test invocations used `-LE physical`; no
+test was removed, renamed, disabled, or replaced, and no physical GPU test was
+run.
+
+This recovers only three of the 55 implementation lines invested in the two
+planner seams.  The remaining callback surface still carries broad transform
+artifacts and operating-point state, so consolidation and deletion remain the
+immediate work rather than a new unrelated slice.  The callback design must
+continue to earn its cost through a narrower exact transaction and shared
+mode-owned helpers, or be replaced if that convergence cannot recover the
+remaining tax.
