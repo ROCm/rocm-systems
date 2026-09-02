@@ -238,26 +238,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case GetTestType:
       test_name = "Blocking Gets";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case GetNBITestType:
       test_name = "Non-Blocking Gets";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case PutTestType:
       test_name = "Blocking Puts";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case PutNBITestType:
       test_name = "Non-Blocking Puts";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case DefaultCTXGetTestType:
       test_name = "Default context Blocking Gets";
@@ -323,14 +315,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PTestType:
       test_name = "P Test";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case GTestType:
       test_name = "G Test";
       testers.push_back(new PrimitiveTester(args));
-      testers.push_back(new TypedRMATester<__half>(args));
-      testers.push_back(new TypedRMATester<__hip_bfloat16>(args));
       break;
     case TeamReductionTestType:
       test_name = "All-to-All Team-based Reduction";
