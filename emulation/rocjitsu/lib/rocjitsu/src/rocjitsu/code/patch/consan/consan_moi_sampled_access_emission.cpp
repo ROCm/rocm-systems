@@ -44,28 +44,22 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
                                                  uint16_t address_vgpr, rj_code_arch_t arch);
 
 [[nodiscard]] bool append_direct_sampled_immediate_check(
-    std::vector<uint32_t> &words, const ConSanRequest &request,
-    const BoundRuntimeResources &resources, uint16_t scratch_vgpr, rj_code_arch_t arch,
-    uint32_t prior_record_index, uint32_t window_bank_count, uint16_t bank_vgpr,
-    size_t sampled_watchpoints_offset, uint16_t current_low_vgpr, uint16_t current_high_vgpr,
-    std::vector<std::string> &errors) {
-  if (!request.moi_sampled_check)
+    std::vector<uint32_t> &words, const MoiSampledAccessEmissionPlan &plan,
+    uint32_t prior_record_index, uint16_t bank_vgpr, uint16_t current_low_vgpr,
+    uint16_t current_high_vgpr, rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!plan.sampled_check)
     return true;
-  if (!resources.moi_report_buffer_address) {
-    errors.emplace_back("ConSan MOI sampled checker is missing report or vector resources");
-    return false;
-  }
 
-  const uint16_t address_lo_vgpr = scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
-  const uint16_t prior_low_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
-  const uint16_t prior_high_vgpr = static_cast<uint16_t>(scratch_vgpr + 6u);
-  if (window_bank_count == 0) {
+  const uint16_t address_lo_vgpr = plan.scratch_vgpr;
+  const uint16_t address_hi_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 1u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
+  const uint16_t prior_low_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 5u);
+  const uint16_t prior_high_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 6u);
+  if (plan.window_bank_count == 0) {
     errors.emplace_back("ConSan MOI sampled checker has an invalid prior bank");
     return false;
   }
-  const uint64_t prior_address = *resources.moi_report_buffer_address + sampled_watchpoints_offset +
+  const uint64_t prior_address = plan.report_buffer_address + plan.sampled_watchpoints_offset +
                                  static_cast<uint64_t>(prior_record_index) * sizeof(uint64_t);
   InstructionSequence sequence(words);
   const auto done_label = sequence.make_label();
@@ -76,7 +70,7 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
       address_lo_vgpr, prior_low_vgpr, prior_low_vgpr,
       /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!zero_low || !zero_high || !atomic_snapshot ||
-      !append_sampled_banked_address(words, prior_address, sizeof(uint64_t), window_bank_count,
+      !append_sampled_banked_address(words, prior_address, sizeof(uint64_t), plan.window_bank_count,
                                      bank_vgpr, address_lo_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled checker could not atomically snapshot the prior slot");
     return false;
@@ -166,9 +160,9 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
   }
 
   const uint64_t immediate_conflict_count_address =
-      *resources.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
+      plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
   if (!append_atomic_fetch_add_one_u32(words, immediate_conflict_count_address, tmp_vgpr,
-                                       scratch_vgpr, arch)) {
+                                       plan.scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled checker could not increment the conflict counter");
     return false;
   }
@@ -263,14 +257,12 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   return true;
 }
 
-[[nodiscard]] bool append_sampled_workgroup_residue(
-    std::vector<uint32_t> &words, const ConSanRequest &request,
-    const ConSanMoiOperatingPoint &point, const BoundRuntimeResources &resources,
-    const ConSanMoiWorkgroupSources &workgroup_sources, uint16_t residue_vgpr,
-    uint16_t temporary_vgpr, uint16_t coordinate_vgpr, rj_code_arch_t arch) {
-  if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, resources}), residue_vgpr,
-          temporary_vgpr, arch)) {
+[[nodiscard]] bool append_sampled_workgroup_residue(std::vector<uint32_t> &words,
+                                                    const MoiSampledAccessEmissionPlan &plan,
+                                                    uint16_t residue_vgpr, uint16_t temporary_vgpr,
+                                                    uint16_t coordinate_vgpr, rj_code_arch_t arch) {
+  if (!append_moi_report_dispatch_id_pair(words, plan.dispatch_id, residue_vgpr, temporary_vgpr,
+                                          arch)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -284,10 +276,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   if (!mix(temporary_vgpr))
     return false;
   const std::array<std::pair<const ConSanMoiWorkgroupSource *, uint32_t>, 4> tuple_sources = {{
-      {&workgroup_sources.x, 0u},
-      {&workgroup_sources.y, 1u},
-      {&workgroup_sources.z, 2u},
-      {&workgroup_sources.cluster_workgroup_id, 3u},
+      {&plan.workgroup_sources.x, 0u},
+      {&plan.workgroup_sources.y, 1u},
+      {&plan.workgroup_sources.z, 2u},
+      {&plan.workgroup_sources.cluster_workgroup_id, 3u},
   }};
   for (const auto &[source, dimension_shift] : tuple_sources) {
     if (!source->has_value())
@@ -314,7 +306,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   const auto multiply = instrumentation::build_v_mul_lo_u32_literal(
       residue_vgpr, temporary_vgpr, 0x85ebca6bu, residue_vgpr, arch);
   const auto mask = instrumentation::build_v_and_b32_literal(
-      residue_vgpr, request.moi_runtime_sample_stride - 1u, residue_vgpr, arch);
+      residue_vgpr, plan.runtime_sample_stride - 1u, residue_vgpr, arch);
   if (!multiply || !mask)
     return false;
   words.insert(words.end(), multiply->begin(), multiply->end());
@@ -353,29 +345,20 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_range_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanAccessRange &access_range, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    const ConSanMoiWorkgroupSources &workgroup_sources,
-    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
+    const ConSanAccessRange &access_range, const MoiSampledAccessEmissionPlan &plan,
     rj_code_arch_t arch, uint32_t record_index, std::span<const uint32_t> prior_record_indices,
-    uint32_t window_bank_count, bool spill_overlaps_guest_operands, bool relocate_instruction,
-    uint32_t pending_acquire_owner_bank_count,
-    std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
-    std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
-    size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset = nullptr,
+    bool relocate_instruction, std::optional<uint16_t> preserved_lds_byte_offset_vgpr,
+    const VgprSpillSequence *spill, std::optional<uint16_t> spilled_lds_byte_offset_vgpr,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
     errors.emplace_back("ConSan MOI sampled probe has no target profile");
     return std::nullopt;
   }
-  const MoiAccessResourceFacts access_resource_facts =
-      resolve_moi_access_resource_facts(point, candidate, arch);
-  if (pending_acquire_owner_bank_count == 0u ||
-      !std::has_single_bit(pending_acquire_owner_bank_count) ||
-      pending_acquire_owner_bank_count > kConSanMoiSampledPendingAcquireOwnerBankCount) {
+  if (plan.pending_acquire_owner_bank_count == 0u ||
+      !std::has_single_bit(plan.pending_acquire_owner_bank_count) ||
+      plan.pending_acquire_owner_bank_count > kConSanMoiSampledPendingAcquireOwnerBankCount) {
     errors.emplace_back("ConSan MOI sampled probe has an invalid pending-acquire owner bank");
     return std::nullopt;
   }
@@ -384,13 +367,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   // needs its bank index to survive all ordinary temporaries in that cave.
   // Reserve the dedicated bank VGPR based on the emitted layout, not solely on
   // whether the inner vector sampler remains enabled.
-  const bool dedicated_bank_vgpr = request.moi_runtime_sample_stride > 1 || window_bank_count > 1;
-  const uint16_t base_scratch_count = static_cast<uint16_t>((request.moi_sampled_check ? 7u : 5u) +
-                                                            (dedicated_bank_vgpr ? 1u : 0u));
-  const uint16_t scratch_count = direct_sampled_scratch_count(request, access_resource_facts);
+  const bool dedicated_bank_vgpr = plan.runtime_sample_stride > 1 || plan.window_bank_count > 1;
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
-  if (static_cast<uint32_t>(scratch_vgpr) + scratch_count > kMaxVgprs) {
+  if (static_cast<uint32_t>(plan.scratch_vgpr) + plan.scratch_vgpr_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI sampled probe exceeds the VGPR file");
     return std::nullopt;
   }
@@ -403,24 +383,25 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   }
   if (preserved_lds_byte_offset_vgpr)
     lds_byte_offset_vgpr = preserved_lds_byte_offset_vgpr;
-  if (!spill_overlaps_guest_operands &&
-      reject_candidate_scratch_range_overlap(candidate, scratch_vgpr, scratch_count, errors))
+  if (!plan.spill_overlaps_guest_operands &&
+      reject_candidate_scratch_range_overlap(candidate, plan.scratch_vgpr, plan.scratch_vgpr_count,
+                                             errors))
     return std::nullopt;
-  if ((!point.automatic_moi_private_epoch && !point.moi_persistent_sgprs.complete() &&
-       reject_optional_scratch_range_overlap(owner_epoch_vgprs.owner, scratch_vgpr, scratch_count,
-                                             "MOI owner", errors)) ||
-      (!point.automatic_moi_private_epoch && !point.moi_persistent_sgprs.complete() &&
-       reject_optional_scratch_range_overlap(owner_epoch_vgprs.epoch, scratch_vgpr, scratch_count,
-                                             "MOI epoch", errors)))
+  if ((!plan.automatic_private_epoch && !plan.persistent_sgprs.complete() &&
+       reject_optional_scratch_range_overlap(plan.owner_epoch_vgprs.owner, plan.scratch_vgpr,
+                                             plan.scratch_vgpr_count, "MOI owner", errors)) ||
+      (!plan.automatic_private_epoch && !plan.persistent_sgprs.complete() &&
+       reject_optional_scratch_range_overlap(plan.owner_epoch_vgprs.epoch, plan.scratch_vgpr,
+                                             plan.scratch_vgpr_count, "MOI epoch", errors)))
     return std::nullopt;
   std::optional<uint16_t> derived_owner_vgpr;
   std::optional<uint32_t> derived_owner_word;
-  if (!owner_epoch_vgprs.owner && candidate.kernel_descriptor_file_offset) {
+  if (!plan.owner_epoch_vgprs.owner && candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
         moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
-    const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+    const uint16_t value_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
     const auto owner_init = instrumentation::build_v_lshrrev_b32(
         value_vgpr, scalar_positive_inline_u32(*owner_shift), kAmdGpuWorkitemIdX, arch);
     if (!owner_init) {
@@ -430,28 +411,27 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     derived_owner_vgpr = value_vgpr;
     derived_owner_word = *owner_init;
   }
-  const uint16_t low_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-  const uint16_t high_vgpr = static_cast<uint16_t>(scratch_vgpr + 3u);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
-  const uint16_t owner_vgpr = owner_epoch_vgprs.owner.value_or(derived_owner_vgpr.value_or(0));
-  const bool runtime_sampled = request.moi_runtime_sample_stride > 1;
+  const uint16_t low_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 2u);
+  const uint16_t high_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 3u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
+  const uint16_t owner_vgpr = plan.owner_epoch_vgprs.owner.value_or(derived_owner_vgpr.value_or(0));
+  const bool runtime_sampled = plan.runtime_sample_stride > 1;
   const uint16_t bank_vgpr =
       dedicated_bank_vgpr
-          ? static_cast<uint16_t>(scratch_vgpr + (request.moi_sampled_check ? 7u : 5u))
+          ? static_cast<uint16_t>(plan.scratch_vgpr + (plan.sampled_check ? 7u : 5u))
           : tmp_vgpr;
-  if (runtime_sampled && !owner_epoch_vgprs.owner && !derived_owner_vgpr) {
+  if (runtime_sampled && !plan.owner_epoch_vgprs.owner && !derived_owner_vgpr) {
     errors.emplace_back("ConSan MOI runtime sampled probe could not derive a wave owner");
     return std::nullopt;
   }
-  if (!point.moi_exec_save_sgpr || *point.moi_exec_save_sgpr > 98u ||
-      *point.moi_exec_save_sgpr % 2u != 0u) {
+  if (!plan.exec_save_sgpr || *plan.exec_save_sgpr > 98u || *plan.exec_save_sgpr % 2u != 0u) {
     errors.emplace_back(
         "ConSan MOI sampled probe needs seven aligned VCC/EXEC/SCC-save SGPRs in 0..104");
     return std::nullopt;
   }
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   const uint32_t generation =
-      bound_resources.moi_report_generation & consan_moi_sampled_watchpoint::max_generation;
+      plan.report_generation & consan_moi_sampled_watchpoint::max_generation;
   const uint64_t generation_field = static_cast<uint64_t>(generation)
                                     << consan_moi_sampled_watchpoint::generation_shift;
   const uint32_t low_literal = static_cast<uint32_t>(
@@ -461,17 +441,17 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   const uint32_t encoded_byte_count = encode_consan_moi_sampled_byte_count(access_range.byte_width)
                                       << (consan_moi_sampled_watchpoint::count_shift - 32u);
   const uint32_t encoded_generation_high = static_cast<uint32_t>(generation_field >> 32u);
-  const uint64_t sampled_entry_address = *bound_resources.moi_report_buffer_address +
-                                         sampled_watchpoints_offset +
+  const uint64_t sampled_entry_address = plan.report_buffer_address +
+                                         plan.sampled_watchpoints_offset +
                                          static_cast<uint64_t>(record_index) * sizeof(uint64_t);
   const uint64_t pending_acquire_address =
-      *bound_resources.moi_report_buffer_address + sampled_pending_acquires_offset +
-      static_cast<uint64_t>(record_index) * pending_acquire_owner_bank_count *
+      plan.report_buffer_address + plan.sampled_pending_acquires_offset +
+      static_cast<uint64_t>(record_index) * plan.pending_acquire_owner_bank_count *
           sizeof(ConSanMoiSampledPendingAcquireSlot);
 
   std::vector<uint32_t> words;
   words.reserve(candidate.size() / sizeof(uint32_t) + 40u + (derived_owner_word ? 1u : 0u) +
-                (owner_epoch_vgprs.epoch ? 2u : 0u) +
+                (plan.owner_epoch_vgprs.epoch ? 2u : 0u) +
                 (relocate_instruction && moi_load_clobbers_address(candidate) &&
                          !preserved_lds_byte_offset_vgpr
                      ? 1u
@@ -481,7 +461,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   const auto collision_label = sequence.make_label();
   const auto different_identity_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  ConSanMoiRecordEmitter record(words, scratch_vgpr, tmp_vgpr, arch);
+  ConSanMoiRecordEmitter record(words, plan.scratch_vgpr, tmp_vgpr, arch);
   const auto reload_spilled_lds_byte_offset = [&](uint16_t destination_vgpr) {
     if (!spilled_lds_byte_offset_vgpr)
       return true;
@@ -500,15 +480,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       (candidate.is_direct_to_lds() || moi_load_clobbers_address(candidate)) &&
       !preserved_lds_byte_offset_vgpr) {
     const uint16_t saved_lds_byte_offset_vgpr =
-        static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
+        static_cast<uint16_t>(plan.scratch_vgpr + plan.base_scratch_vgpr_count);
     if (candidate.is_direct_to_lds()) {
-      if (!point.moi_exec_save_sgpr) {
+      if (!plan.exec_save_sgpr) {
         errors.emplace_back(
             "ConSan MOI sampled direct-to-LDS probe requires an EXEC-save SGPR pair");
         return std::nullopt;
       }
       if (!append_materialize_direct_to_lds_address(words, candidate, saved_lds_byte_offset_vgpr,
-                                                    *point.moi_exec_save_sgpr, arch)) {
+                                                    *plan.exec_save_sgpr, arch)) {
         errors.emplace_back("ConSan MOI sampled probe could not materialize a direct-to-LDS "
                             "destination");
         return std::nullopt;
@@ -539,7 +519,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     if (!append_moi_relocated_guest_access(
             words, bytes, candidate, target, guest_address_vgpr,
             reserve_two_address_replay_scratch
-                ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
+                ? std::optional<uint16_t>(
+                      static_cast<uint16_t>(plan.scratch_vgpr + plan.scratch_vgpr_count - 1u))
                 : std::nullopt,
             errors, guest_instruction_word_count))
       return std::nullopt;
@@ -550,7 +531,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
           static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   }
 
-  const auto publication_state = moi_sampled_publication_state_sgprs(point.moi_exec_save_sgpr);
+  const auto publication_state = moi_sampled_publication_state_sgprs(plan.exec_save_sgpr);
   if (!publication_state) {
     errors.emplace_back("ConSan MOI sampled probe has no scalar publication-state layout");
     return std::nullopt;
@@ -589,16 +570,14 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     }
   }
   if (runtime_sampled) {
-    if (runtime_workgroup_gate_in_body) {
-      if (!append_sampled_workgroup_residue(words, request, point, bound_resources,
-                                            workgroup_sources, bank_vgpr, high_vgpr, low_vgpr,
-                                            arch)) {
+    if (plan.runtime_workgroup_gate_in_body) {
+      if (!append_sampled_workgroup_residue(words, plan, bank_vgpr, high_vgpr, low_vgpr, arch)) {
         errors.emplace_back(
             "ConSan MOI runtime sampled probe could not select a private-state workgroup");
         return std::nullopt;
       }
-      const auto selected_value = instrumentation::build_v_mov_b32_literal(
-          high_vgpr, request.moi_runtime_sample_offset, arch);
+      const auto selected_value =
+          instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch);
       const auto selected =
           instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), bank_vgpr, arch);
       const auto narrow_selected =
@@ -639,9 +618,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
         low_vgpr, scalar_positive_inline_u32(consan_moi_shadow_cell::granule_shift), low_vgpr,
         arch);
     const auto residue = instrumentation::build_v_and_b32_literal(
-        low_vgpr, request.moi_runtime_sample_stride - 1u, low_vgpr, arch);
-    const auto selected_value = instrumentation::build_v_mov_b32_literal(
-        high_vgpr, request.moi_runtime_sample_offset, arch);
+        low_vgpr, plan.runtime_sample_stride - 1u, low_vgpr, arch);
+    const auto selected_value =
+        instrumentation::build_v_mov_b32_literal(high_vgpr, plan.runtime_sample_offset, arch);
     const auto selected =
         instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(high_vgpr), low_vgpr, arch);
     const auto narrow_selected =
@@ -658,10 +637,10 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     words.push_back(*narrow_selected);
   }
-  if (runtime_sampled || window_bank_count > 1) {
-    if (!append_sampled_window_bank_index(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            workgroup_sources, window_bank_count, bank_vgpr, high_vgpr, owner_vgpr, arch)) {
+  if (runtime_sampled || plan.window_bank_count > 1) {
+    if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
+                                          plan.window_bank_count, bank_vgpr, high_vgpr, owner_vgpr,
+                                          arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not select a window bank");
       return std::nullopt;
     }
@@ -671,7 +650,11 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     words.insert(words.end(), zero_bank->begin(), zero_bank->end());
   }
-  if (!append_moi_delay_words(words, arch, request, errors, "ConSan MOI sampled probe"))
+  if (!append_moi_delay_words(words, arch,
+                              {.mode = plan.delay_mode,
+                               .count = plan.delay_count,
+                               .variable_source = plan.delay_variable_source},
+                              errors, "ConSan MOI sampled probe"))
     return std::nullopt;
 
   // A ready deferred acquire deterministically selects the wave which may
@@ -681,11 +664,11 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   // atomic and LDS evidence.
   if (kind == ConSanMoiShadowAccessKind::Read) {
     const auto pending_gate_done_label = sequence.make_label();
-    if (pending_acquire_owner_bank_count > 1u) {
+    if (plan.pending_acquire_owner_bank_count > 1u) {
       const auto scale_window = instrumentation::build_v_mul_lo_u32_literal(
-          low_vgpr, high_vgpr, pending_acquire_owner_bank_count, bank_vgpr, arch);
+          low_vgpr, high_vgpr, plan.pending_acquire_owner_bank_count, bank_vgpr, arch);
       const auto owner_bank = instrumentation::build_v_and_b32_literal(
-          high_vgpr, pending_acquire_owner_bank_count - 1u, owner_vgpr, arch);
+          high_vgpr, plan.pending_acquire_owner_bank_count - 1u, owner_vgpr, arch);
       const auto combine =
           instrumentation::build_v_add_u32(low_vgpr, vector_source_vgpr(low_vgpr), high_vgpr, arch);
       if (!scale_window || !owner_bank || !combine)
@@ -697,16 +680,16 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
               words,
               {.table_address = pending_acquire_address,
                .stride_bytes = sizeof(ConSanMoiSampledPendingAcquireSlot),
-               .address_vgpr = scratch_vgpr,
+               .address_vgpr = plan.scratch_vgpr,
                .index_vgpr = low_vgpr},
               *target))
         return std::nullopt;
-    } else if (!append_sampled_banked_address(words, pending_acquire_address,
-                                              sizeof(ConSanMoiSampledPendingAcquireSlot),
-                                              window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
+    } else if (!append_sampled_banked_address(
+                   words, pending_acquire_address, sizeof(ConSanMoiSampledPendingAcquireSlot),
+                   plan.window_bank_count, bank_vgpr, plan.scratch_vgpr, arch)) {
       return std::nullopt;
     }
-    if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
+    if (!append_load_u32_vgpr_at_offset(words, plan.scratch_vgpr,
                                         offsetof(ConSanMoiSampledPendingAcquireSlot, version),
                                         low_vgpr, arch))
       return std::nullopt;
@@ -728,7 +711,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     words.push_back(*ready);
     if (!sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero))
       return std::nullopt;
-    if (!append_load_u32_vgpr_at_offset(words, scratch_vgpr,
+    if (!append_load_u32_vgpr_at_offset(words, plan.scratch_vgpr,
                                         offsetof(ConSanMoiSampledPendingAcquireSlot, owner_id),
                                         high_vgpr, arch))
       return std::nullopt;
@@ -747,14 +730,14 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   }
 
   const uint64_t causal_window_address =
-      *bound_resources.moi_report_buffer_address + sampled_causal_windows_offset +
+      plan.report_buffer_address + plan.sampled_causal_windows_offset +
       static_cast<uint64_t>(record_index) * sizeof(ConSanMoiSampledCausalWindow);
   const auto claim_new = instrumentation::build_v_mov_b32_literal(
       low_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Publishing), arch);
   const auto claim_compare = instrumentation::build_v_mov_b32_literal(
       high_vgpr, static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Empty), arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
+      plan.scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   const auto claimed =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(static_cast<uint32_t>(
                                                   ConSanMoiSampledCausalPublicationState::Empty)),
@@ -764,7 +747,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   if (!claim_new || !claim_compare || !claim || !claimed || !narrow_winner ||
       !append_sampled_banked_address(
           words, causal_window_address + offsetof(ConSanMoiSampledCausalWindow, publication_state),
-          sizeof(ConSanMoiSampledCausalWindow), window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
+          sizeof(ConSanMoiSampledCausalWindow), plan.window_bank_count, bank_vgpr,
+          plan.scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not claim a causal window slot");
     return std::nullopt;
   }
@@ -779,11 +763,11 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   words.push_back(*narrow_winner);
 
   if (!append_sampled_banked_address(words, causal_window_address,
-                                     sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, arch))
+                                     sizeof(ConSanMoiSampledCausalWindow), plan.window_bank_count,
+                                     bank_vgpr, plan.scratch_vgpr, arch))
     return std::nullopt;
   const auto store_dynamic_record_index = [&]() {
-    if (window_bank_count == 1u) {
+    if (plan.window_bank_count == 1u) {
       return record.store_literal(offsetof(ConSanMoiSampledCausalWindow, first_entry),
                                   record_index);
     }
@@ -795,29 +779,28 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return record.store_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), high_vgpr);
   };
   if (!record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
-                            static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
+                            static_cast<uint32_t>(plan.report_generation)) ||
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
-                            static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
+                            static_cast<uint32_t>(plan.report_generation >> 32u)) ||
       !append_store_moi_report_dispatch_id_pair(
-          record, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-          offsetof(ConSanMoiSampledCausalWindow, dispatch_id)) ||
+          record, plan.dispatch_id, offsetof(ConSanMoiSampledCausalWindow, dispatch_id)) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
-                              workgroup_sources.x,
+                              plan.workgroup_sources.x,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),
-                              workgroup_sources.y,
+                              plan.workgroup_sources.y,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
-                              workgroup_sources.z,
+                              plan.workgroup_sources.z,
                               ConSanMoiRecordEmitter::MissingWorkgroupSource::StoreZero) ||
-      !(owner_epoch_vgprs.epoch
+      !(plan.owner_epoch_vgprs.epoch
             ? record.store_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch),
-                                *owner_epoch_vgprs.epoch)
+                                *plan.owner_epoch_vgprs.epoch)
             : record.store_literal(offsetof(ConSanMoiSampledCausalWindow, epoch), 0)) ||
       !store_dynamic_record_index() ||
       !record.store_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1) ||
       !record.store_workgroup(offsetof(ConSanMoiSampledCausalWindow, cluster_workgroup_id),
-                              workgroup_sources.cluster_workgroup_id)) {
+                              plan.workgroup_sources.cluster_workgroup_id)) {
     errors.emplace_back("ConSan MOI sampled probe could not publish causal window metadata");
     return std::nullopt;
   }
@@ -828,15 +811,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return std::nullopt;
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if ((owner_epoch_vgprs.owner || derived_owner_vgpr) &&
+  if ((plan.owner_epoch_vgprs.owner || derived_owner_vgpr) &&
       !append_add_shifted_vgpr_field(words, low_vgpr, owner_vgpr,
                                      consan_moi_sampled_watchpoint::owner_shift,
                                      consan_moi_sampled_watchpoint::max_owner, tmp_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not encode owner field");
     return std::nullopt;
   }
-  if (owner_epoch_vgprs.epoch &&
-      !append_add_shifted_vgpr_field(words, low_vgpr, *owner_epoch_vgprs.epoch,
+  if (plan.owner_epoch_vgprs.epoch &&
+      !append_add_shifted_vgpr_field(words, low_vgpr, *plan.owner_epoch_vgprs.epoch,
                                      consan_moi_sampled_watchpoint::epoch_shift,
                                      consan_moi_sampled_watchpoint::max_epoch, tmp_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not encode epoch field");
@@ -878,19 +861,18 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return std::nullopt;
   }
   for (uint32_t prior_record_index : prior_record_indices) {
-    if (!append_direct_sampled_immediate_check(
-            words, request, bound_resources, scratch_vgpr, arch, prior_record_index,
-            window_bank_count, bank_vgpr, sampled_watchpoints_offset, low_vgpr, high_vgpr, errors))
+    if (!append_direct_sampled_immediate_check(words, plan, prior_record_index, bank_vgpr, low_vgpr,
+                                               high_vgpr, arch, errors))
       return std::nullopt;
   }
   // A site is shared by all selected waves. Publish the complete packed entry
   // with one device-scope atomic exchange so concurrent writers cannot leave a
   // low word from one wave paired with a high word from another.
   const auto atomic_publish = instrumentation::build_flat_atomic_swap_b64(
-      scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
+      plan.scratch_vgpr, low_vgpr, low_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
   if (!atomic_publish ||
       !append_sampled_banked_address(words, sampled_entry_address, sizeof(uint64_t),
-                                     window_bank_count, bank_vgpr, scratch_vgpr, arch)) {
+                                     plan.window_bank_count, bank_vgpr, plan.scratch_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not atomically publish sampled entry");
     return std::nullopt;
   }
@@ -898,8 +880,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
   if (!append_sampled_banked_address(words, causal_window_address,
-                                     sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, arch))
+                                     sizeof(ConSanMoiSampledCausalWindow), plan.window_bank_count,
+                                     bank_vgpr, plan.scratch_vgpr, arch))
     return std::nullopt;
   if (!record.store_literal(offsetof(ConSanMoiSampledCausalWindow, publication_state),
                             static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready))) {
@@ -907,9 +889,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return std::nullopt;
   }
   const uint64_t selected_count_address =
-      *bound_resources.moi_report_buffer_address +
-      offsetof(ConSanMoiReportHeader, sampled_causal_window_count);
-  if (!append_atomic_fetch_add_one_u32(words, selected_count_address, tmp_vgpr, scratch_vgpr,
+      plan.report_buffer_address + offsetof(ConSanMoiReportHeader, sampled_causal_window_count);
+  if (!append_atomic_fetch_add_one_u32(words, selected_count_address, tmp_vgpr, plan.scratch_vgpr,
                                        arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not count the claimed causal window");
     return std::nullopt;
@@ -932,8 +913,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   // the static slot already retains their representative sample. Only a
   // different exact dynamic identity occupying the slot is capacity loss.
   if (!append_sampled_banked_address(words, causal_window_address,
-                                     sizeof(ConSanMoiSampledCausalWindow), window_bank_count,
-                                     bank_vgpr, scratch_vgpr, arch))
+                                     sizeof(ConSanMoiSampledCausalWindow), plan.window_bank_count,
+                                     bank_vgpr, plan.scratch_vgpr, arch))
     return std::nullopt;
   const auto reject_unless_equal_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
     if (!record.load(offset, low_vgpr))
@@ -954,9 +935,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   };
   const auto reject_unless_equal_dispatch_id = [&](uint32_t offset, bool high_word) -> bool {
     if (!record.load(offset, low_vgpr) ||
-        !append_compare_moi_report_dispatch_id_word(
-            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
-            low_vgpr, high_vgpr, high_word, arch)) {
+        !append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, low_vgpr, high_vgpr,
+                                                    high_word, arch)) {
       return false;
     }
     return sequence.emit_branch(different_identity_label, InstructionSequence::BranchKind::VccZero);
@@ -970,7 +950,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return reject_unless_equal_vgpr(offset, high_vgpr);
   };
   const auto reject_unless_equal_dynamic_record_index = [&]() {
-    if (window_bank_count == 1u) {
+    if (plan.window_bank_count == 1u) {
       return reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, first_entry),
                                          record_index);
     }
@@ -982,23 +962,22 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     return reject_unless_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), high_vgpr);
   };
   if (!reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
-                                   static_cast<uint32_t>(bound_resources.moi_report_generation)) ||
-      !reject_unless_equal_literal(
-          offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
-          static_cast<uint32_t>(bound_resources.moi_report_generation >> 32u)) ||
+                                   static_cast<uint32_t>(plan.report_generation)) ||
+      !reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation) + 4u,
+                                   static_cast<uint32_t>(plan.report_generation >> 32u)) ||
       !reject_unless_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id),
                                        /*high_word=*/false) ||
       !reject_unless_equal_dispatch_id(offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + 4u,
                                        /*high_word=*/true) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_x),
-                                     workgroup_sources.x) ||
+                                     plan.workgroup_sources.x) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_y),
-                                     workgroup_sources.y) ||
+                                     plan.workgroup_sources.y) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
-                                     workgroup_sources.z) ||
-      !(owner_epoch_vgprs.epoch
+                                     plan.workgroup_sources.z) ||
+      !(plan.owner_epoch_vgprs.epoch
             ? reject_unless_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch),
-                                       *owner_epoch_vgprs.epoch)
+                                       *plan.owner_epoch_vgprs.epoch)
             : reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, epoch), 0u)) ||
       !reject_unless_equal_dynamic_record_index() ||
       !reject_unless_equal_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1u) ||
@@ -1006,7 +985,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
           offsetof(ConSanMoiSampledCausalWindow, publication_state),
           static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready)) ||
       !reject_unless_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, cluster_workgroup_id),
-                                     workgroup_sources.cluster_workgroup_id)) {
+                                     plan.workgroup_sources.cluster_workgroup_id)) {
     errors.emplace_back("ConSan MOI sampled probe could not compare a repeated causal identity");
     return std::nullopt;
   }
@@ -1038,9 +1017,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
   words.push_back(*first_active_lane);
   words.push_back(*narrow_collision);
   const uint64_t saturated_count_address =
-      *bound_resources.moi_report_buffer_address +
-      offsetof(ConSanMoiReportHeader, sampled_saturated_window_count);
-  if (!append_atomic_fetch_add_one_u32(words, saturated_count_address, tmp_vgpr, scratch_vgpr,
+      plan.report_buffer_address + offsetof(ConSanMoiReportHeader, sampled_saturated_window_count);
+  if (!append_atomic_fetch_add_one_u32(words, saturated_count_address, tmp_vgpr, plan.scratch_vgpr,
                                        arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not count a saturated causal window claim");
     return std::nullopt;
@@ -1075,19 +1053,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
-    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
-    rj_code_arch_t arch, uint32_t first_record_index,
-    std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
-    uint32_t window_bank_count, size_t sampled_causal_windows_offset,
-    size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    uint32_t pending_acquire_owner_bank_count, bool spill_overlaps_guest_operands,
-    bool spill_backed_operand_recovery, const VgprSpillSequence *spill,
-    std::optional<uint32_t> private_epoch_offset,
-    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
-    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
-    uint32_t *guest_instruction_offset, uint32_t *guest_instruction_word_count) {
+    const MoiSampledAccessEmissionPlan &plan, const VgprSpillSequence *spill, rj_code_arch_t arch,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset,
+    uint32_t *guest_instruction_word_count) {
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
@@ -1098,19 +1066,17 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     errors.emplace_back("ConSan MOI sampled probe has no target profile");
     return std::nullopt;
   }
-  const MoiAccessResourceFacts access_resource_facts =
-      resolve_moi_access_resource_facts(point, candidate, arch);
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank =
       target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
       moi_access_requires_high_bank_address_capture(candidate, arch);
-  if (spill_backed_operand_recovery &&
-      (spill == nullptr || !access_resource_facts.supports_native_lds_spill_recovery)) {
+  if (plan.spill_backed_operand_recovery &&
+      (spill == nullptr || !plan.supports_native_lds_spill_recovery)) {
     errors.emplace_back("ConSan MOI sampled probe has an invalid spill-backed operand plan");
     return std::nullopt;
   }
-  if (spill_backed_operand_recovery && select_guest_vgpr_bank) {
+  if (plan.spill_backed_operand_recovery && select_guest_vgpr_bank) {
     errors.emplace_back(
         "ConSan MOI sampled spill-backed operand recovery cannot change the guest VGPR bank");
     return std::nullopt;
@@ -1123,16 +1089,13 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
         static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
   std::optional<uint16_t> spilled_lds_byte_offset_vgpr;
-  const uint16_t base_scratch_count = static_cast<uint16_t>(
-      (request.moi_sampled_check ? 7u : 5u) +
-      (request.moi_runtime_sample_stride > 1 || window_bank_count > 1 ? 1u : 0u));
-  const uint16_t scratch_count = direct_sampled_scratch_count(request, access_resource_facts);
   const bool reserve_two_address_replay_scratch =
       moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (capture_high_bank_address) {
-    preserved_lds_byte_offset_vgpr = static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
+    preserved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(plan.scratch_vgpr + plan.base_scratch_vgpr_count);
   }
-  if (spill_backed_operand_recovery) {
+  if (plan.spill_backed_operand_recovery) {
     const auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
     if (!lds_byte_offset_vgpr)
       return std::nullopt;
@@ -1149,7 +1112,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     if (spilled_address) {
       spilled_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
     } else if (moi_load_clobbers_address(candidate)) {
-      preserved_lds_byte_offset_vgpr = static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
+      preserved_lds_byte_offset_vgpr =
+          static_cast<uint16_t>(plan.scratch_vgpr + plan.base_scratch_vgpr_count);
     }
     if (moi_load_clobbers_address(candidate) && !spilled_address) {
       words.push_back(build_v_mov_b32_e32(*preserved_lds_byte_offset_vgpr,
@@ -1162,7 +1126,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     if (!append_moi_relocated_guest_access(
             words, bytes, candidate, target, replay_address_vgpr,
             reserve_two_address_replay_scratch
-                ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + scratch_count - 1u))
+                ? std::optional<uint16_t>(
+                      static_cast<uint16_t>(plan.scratch_vgpr + plan.scratch_vgpr_count - 1u))
                 : std::nullopt,
             errors, guest_instruction_word_count))
       return std::nullopt;
@@ -1171,13 +1136,13 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
       return std::nullopt;
     }
   }
-  if (private_epoch_offset) {
-    if (!point.automatic_moi_private_epoch || !owner_epoch_vgprs.epoch) {
+  if (plan.private_epoch_offset) {
+    if (!plan.automatic_private_epoch || !plan.owner_epoch_vgprs.epoch) {
       errors.emplace_back("ConSan MOI sampled probe has an invalid private epoch plan");
       return std::nullopt;
     }
-    const auto load = instrumentation::build_private_load_b32(*owner_epoch_vgprs.epoch,
-                                                              *private_epoch_offset, arch);
+    const auto load = instrumentation::build_private_load_b32(*plan.owner_epoch_vgprs.epoch,
+                                                              *plan.private_epoch_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_load0(arch);
     if (!load || !wait) {
       errors.emplace_back("ConSan MOI sampled probe could not load private epoch state");
@@ -1186,31 +1151,32 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
   }
-  if (owner_derivation) {
-    if (!point.automatic_moi_private_epoch || !owner_epoch_vgprs.owner ||
-        !owner_derivation->entry_workitem_x_private_offset) {
+  if (plan.owner_derivation) {
+    if (!plan.automatic_private_epoch || !plan.owner_epoch_vgprs.owner ||
+        !plan.owner_derivation->entry_workitem_x_private_offset) {
       errors.emplace_back("ConSan MOI sampled probe has an invalid private owner plan");
       return std::nullopt;
     }
     const auto owner = build_moi_workitem_owner_derivation(
-        *owner_derivation, *owner_epoch_vgprs.owner, arch, "sampled probe", errors);
+        *plan.owner_derivation, *plan.owner_epoch_vgprs.owner, arch, "sampled probe", errors);
     if (!owner)
       return std::nullopt;
     words.insert(words.end(), owner->words.begin(), owner->words.end());
   }
-  if (point.moi_persistent_sgprs.complete()) {
+  if (plan.persistent_sgprs.complete()) {
     if (!consan_detail::validate_scalar_state_temporaries(
-            point.moi_persistent_sgprs, owner_epoch_vgprs, "sampled probe", errors))
+            plan.persistent_sgprs, plan.owner_epoch_vgprs, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
-        build_v_mov_b32_e32(*owner_epoch_vgprs.owner, *point.moi_persistent_sgprs.owner(), arch));
+        build_v_mov_b32_e32(*plan.owner_epoch_vgprs.owner, *plan.persistent_sgprs.owner(), arch));
     words.push_back(
-        build_v_mov_b32_e32(*owner_epoch_vgprs.epoch, *point.moi_persistent_sgprs.epoch(), arch));
+        build_v_mov_b32_e32(*plan.owner_epoch_vgprs.epoch, *plan.persistent_sgprs.epoch(), arch));
   }
   const bool materialize_flat_address = candidate_requires_flat_address_materialization(candidate);
   if (!preserved_lds_byte_offset_vgpr &&
       (moi_load_clobbers_address(candidate) || materialize_flat_address)) {
-    preserved_lds_byte_offset_vgpr = static_cast<uint16_t>(scratch_vgpr + base_scratch_count);
+    preserved_lds_byte_offset_vgpr =
+        static_cast<uint16_t>(plan.scratch_vgpr + plan.base_scratch_vgpr_count);
     const auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
     if (!lds_byte_offset_vgpr)
       return std::nullopt;
@@ -1225,34 +1191,30 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words,
 
   for (uint32_t range_index = 0; range_index < access_ranges.size(); ++range_index) {
     std::vector<uint32_t> prior_record_indices;
-    if (prior_first_record_index) {
-      prior_record_indices.reserve(prior_access_range_count);
-      for (uint32_t prior_range_index = 0; prior_range_index < prior_access_range_count;
+    if (plan.prior_first_record_index) {
+      prior_record_indices.reserve(plan.prior_access_range_count);
+      for (uint32_t prior_range_index = 0; prior_range_index < plan.prior_access_range_count;
            ++prior_range_index) {
-        prior_record_indices.push_back(*prior_first_record_index +
-                                       prior_range_index * window_bank_count);
+        prior_record_indices.push_back(*plan.prior_first_record_index +
+                                       prior_range_index * plan.window_bank_count);
       }
     }
     uint32_t range_guest_instruction_offset = 0;
     uint32_t range_guest_instruction_word_count = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
-        bytes, candidate, access_ranges[range_index], request, bound_resources, point,
-        workgroup_sources, owner_epoch_vgprs, scratch_vgpr, arch,
-        first_record_index + range_index * window_bank_count, prior_record_indices,
-        window_bank_count, spill_overlaps_guest_operands,
-        range_index == 0u && !spill_backed_operand_recovery, pending_acquire_owner_bank_count,
-        preserved_lds_byte_offset_vgpr, spill, spilled_lds_byte_offset_vgpr,
-        sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,
-        runtime_workgroup_gate_in_body, errors,
+        bytes, candidate, access_ranges[range_index], plan, arch,
+        plan.first_record_index + range_index * plan.window_bank_count, prior_record_indices,
+        range_index == 0u && !plan.spill_backed_operand_recovery, preserved_lds_byte_offset_vgpr,
+        spill, spilled_lds_byte_offset_vgpr, errors,
         range_index == 0u ? &range_guest_instruction_offset : nullptr,
         range_index == 0u ? &range_guest_instruction_word_count : nullptr);
     if (!range_words)
       return std::nullopt;
-    if (!spill_backed_operand_recovery && range_index == 0u && guest_instruction_offset) {
+    if (!plan.spill_backed_operand_recovery && range_index == 0u && guest_instruction_offset) {
       *guest_instruction_offset =
           static_cast<uint32_t>(words.size() * sizeof(uint32_t)) + range_guest_instruction_offset;
     }
-    if (!spill_backed_operand_recovery && range_index == 0u && guest_instruction_word_count)
+    if (!plan.spill_backed_operand_recovery && range_index == 0u && guest_instruction_word_count)
       *guest_instruction_word_count = range_guest_instruction_word_count;
     words.insert(words.end(), range_words->begin(), range_words->end());
   }

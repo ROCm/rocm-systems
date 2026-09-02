@@ -37,8 +37,13 @@ namespace kd = rocr::llvm::amdhsa;
 [[nodiscard]] bool append_moi_flat_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch);
+struct MoiDelayPlan {
+  ConSanDelayMode mode = ConSanDelayMode::Nop;
+  uint32_t count = 0;
+  uint32_t variable_source = 0;
+};
 [[nodiscard]] bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                                          const ConSanRequest &request,
+                                          const MoiDelayPlan &plan,
                                           std::vector<std::string> &errors,
                                           std::string_view context);
 

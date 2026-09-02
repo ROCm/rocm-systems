@@ -34,36 +34,36 @@ bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
 }
 
 bool append_moi_delay_words(std::vector<uint32_t> &words, rj_code_arch_t arch,
-                            const ConSanRequest &request, std::vector<std::string> &errors,
+                            const MoiDelayPlan &plan, std::vector<std::string> &errors,
                             std::string_view context) {
-  if (request.delay_nops == 0)
+  if (plan.count == 0)
     return true;
 
-  switch (request.delay_mode) {
+  switch (plan.mode) {
   case ConSanDelayMode::Nop:
-    for (uint32_t i = 0; i < request.delay_nops; ++i)
+    for (uint32_t i = 0; i < plan.count; ++i)
       words.push_back(build_s_nop(0, arch));
     return true;
   case ConSanDelayMode::Sleep:
-    if (request.delay_nops > std::numeric_limits<uint16_t>::max()) {
+    if (plan.count > std::numeric_limits<uint16_t>::max()) {
       errors.emplace_back(std::string(context) +
                           " sleep delay immediate exceeds the 16-bit s_sleep field");
       return false;
     }
-    words.push_back(build_s_sleep(static_cast<uint16_t>(request.delay_nops), arch));
+    words.push_back(build_s_sleep(static_cast<uint16_t>(plan.count), arch));
     return true;
   case ConSanDelayMode::SleepVar:
-    if (request.delay_var_ssrc > std::numeric_limits<uint8_t>::max()) {
+    if (plan.variable_source > std::numeric_limits<uint8_t>::max()) {
       errors.emplace_back(std::string(context) +
                           " sleep_var source exceeds the 8-bit scalar source field");
       return false;
     }
-    words.push_back(build_s_sleep_var(request.delay_var_ssrc, arch));
+    words.push_back(build_s_sleep_var(plan.variable_source, arch));
     return true;
   }
 
   errors.emplace_back(std::string(context) + " has unknown delay mode '" +
-                      consan_delay_mode_name(request.delay_mode) + "'");
+                      consan_delay_mode_name(plan.mode) + "'");
   return false;
 }
 

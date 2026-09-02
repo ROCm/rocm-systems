@@ -1862,6 +1862,40 @@ if(_moi_sampled_access_emission_contract MATCHES
         "ConSan Sampled bank hashing must consume exact dispatch and workgroup sources"
     )
 endif()
+if(_moi_sampled_access_emission_contract MATCHES
+   "build_direct_sampled_watchpoint_words[^;]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint)")
+    message(
+        FATAL_ERROR
+        "ConSan Sampled access emission must consume its retained exact plan"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
+    "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|resolve_moi_access_resource_facts|direct_sampled_scratch_count|moi_bound_dispatch_id_sources"
+    "Sampled access emission may not rediscover retained mode, resource, or placement facts"
+)
+foreach(_sampled_assignment IN ITEMS
+    apply_moi_transient_sgpr_assignment
+    apply_moi_persistent_vgpr_assignment
+)
+    string(REGEX MATCHALL "${_sampled_assignment}[(]"
+           _sampled_assignment_calls "${_moi_sampled_access_owner}")
+    list(LENGTH _sampled_assignment_calls _sampled_assignment_call_count)
+    if(NOT _sampled_assignment_call_count EQUAL 2)
+        message(
+            FATAL_ERROR
+            "ConSan Sampled access lowering may apply ${_sampled_assignment} only during candidate and descriptor planning"
+        )
+    endif()
+endforeach()
+file(READ "${_consan_dir}/consan_moi_native_abi.h" _moi_native_abi_contract)
+if(_moi_native_abi_contract MATCHES
+   "append_moi_delay_words[^;]*ConSanRequest")
+    message(
+        FATAL_ERROR
+        "ConSan native delay emission must consume its exact delay plan"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_internal.h" _moi_internal_contract)
 if(_moi_internal_contract MATCHES
    "validate_scalar_state_temporaries[^;]*ConSanMoiOperatingPoint")
