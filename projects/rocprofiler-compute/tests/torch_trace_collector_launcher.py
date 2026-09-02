@@ -12,6 +12,16 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    import torch
+    from torch.utils import cpp_extension
+except ImportError as exc:
+    torch = None
+    cpp_extension = None
+    torch_import_error = exc
+else:
+    torch_import_error = None
+
 SKIP_RETURN_CODE = 125
 
 ROCM_ROOTS = (os.environ.get("ROCM_PATH", ""), "/opt/rocm")
@@ -24,9 +34,6 @@ def skip_with_reason(reason: str) -> int:
 
 def torch_lib_dirs() -> list[str]:
     """Torch link dirs plus the wheel lib dir, which some wheels omit."""
-    import torch
-    from torch.utils import cpp_extension
-
     dirs = list(cpp_extension.library_paths())
     dirs.append(str(Path(torch.__file__).parent / "lib"))
     return dirs
@@ -52,10 +59,10 @@ def main(argv: list[str]) -> int:
     if not binary.is_file():
         return skip_with_reason(f"{binary} not built")
 
-    try:
-        lib_dirs = torch_lib_dirs()
-    except ImportError as exc:
-        return skip_with_reason(f"torch not importable: {exc}")
+    if torch is None:
+        return skip_with_reason(f"torch not importable: {torch_import_error}")
+
+    lib_dirs = torch_lib_dirs()
 
     lib_dirs += first_rocm_dir_matching(
         ("lib/host-math/lib", "lib", "lib64"), "librocm-openblas.so*"
