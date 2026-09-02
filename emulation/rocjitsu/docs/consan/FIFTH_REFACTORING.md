@@ -11475,3 +11475,49 @@ slice after checkpoints 167 and 168 deleted 43 implementation lines.  The next
 mode-locality trace should seek a similar common after-the-fact mode decision
 whose owner product can also make duplicated validation or compatibility code
 disappear.
+
+### 16.171 Convergence checkpoint 170: deleted dormant report defaults
+
+A deep trace of the remaining common report-size switches separated two
+different concepts that had been colocated in the report ABI types.  The
+per-engine safety ceiling is live policy: report planning, hook configuration,
+allocation, and telemetry all consume it.  The three 64 KiB/512 KiB “default”
+buffer sizes and `consan_moi_default_auto_report_buffer_size`, however, had no
+production caller.  They were retained only by assertions in two unit tests.
+Runtime configuration had already stopped using these defaults and now gives
+automatic planning the applicable safety ceiling.
+
+The three constants and their common engine switch are deleted rather than
+moved into mode files or added to the mode registry.  Layout coverage formerly
+coupled to those names remains: the tests now exercise the same Record/Replay,
+Sampled, and Inline layout geometry with explicitly representative buffer
+sizes.  Only assertions whose subject was the dormant lookup itself were
+removed.  The structural gate rejects restoration of either the lookup or its
+three constants anywhere in production.
+
+| Signal | Checkpoint 170 | Cumulative change | Slice change from checkpoint 169 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,580 | **-2,396** | **-16** |
+| Nonblank production lines | 96,162 | **-2,922** | **-16** |
+| Production implementation lines | 88,368 | **-3,082** | **-16** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Dormant default report-size policies | **0 / 4** | n/a | **-4** |
+| Test inventory | **5,427** | **+82** | 0 |
+
+The implementation is committed as `fc60a0bba64`.  Validation includes a
+successful full `-j16` build and **34/34** nonphysical report-layout,
+auto-report-planning, and architecture-boundary tests.  The representative-size
+assertions retain the prior geometry coverage without treating obsolete policy
+as behavior.  All tests used `-LE physical`; no test was removed, renamed,
+disabled, or replaced, and no physical GPU test was run.
+
+This deletion avoids turning an abandoned compatibility surface into a new
+mode-registry obligation.  The live per-engine ceiling remains the next
+mode-locality candidate, but it must be traced through both transformation and
+runtime-hook link boundaries before deciding whether registry ownership would
+clarify the design or merely couple the public report contract to an internal
+lowering table.
