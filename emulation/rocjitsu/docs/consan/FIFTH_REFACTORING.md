@@ -11281,3 +11281,54 @@ removing two broad-bus occurrences.  That small interface cost is not a
 code-size payoff; the next broad-bus slice must use the exposed transaction
 facets to delete at least this growth while removing another cross-component
 transaction dependency.
+
+### 16.167 Convergence checkpoint 166: ledger-owned SuperCollider rejection state
+
+SuperCollider access placement had two parallel ways to recover pending
+observation identity.  A common helper rescanned the coverage ledger for
+pending access-intent identifiers, while admitted-site discovery separately
+reduced every observation intent to a bare original-text offset and joined
+that offset back to the program inventory.  Rejection publication then
+received the complete `ConSanTransformArtifacts` transaction solely to reach
+the coverage ledger and diagnostic sink.  This exposed unrelated mutation,
+inventory, patch, and failure state at a mode-local terminal boundary and made
+the offset-only reconstruction a second authority for admission.
+
+The coverage ledger now owns the exact pending-intent query, joining semantic
+kind, complete `PhysicalSiteId`, and current lowering state.  SuperCollider's
+flat and native-LDS planners use that operation both to bind planned patches
+and to discover admitted inventory sites.  The old mode-local intent scanner
+and its intermediate bare-offset set are deleted.  Rejection publication
+accepts only the ledger and diagnostic sink, including the final unplaced-site
+sweep.  The structural gate rejects both the broad transaction and the
+removed scanner at this boundary.  A direct ledger regression distinguishes
+intent kind and physical site, then proves that publishing one rejection
+immediately removes only that identifier from the pending query.
+
+| Signal | Checkpoint 166 | Cumulative change | Slice change from checkpoint 165 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,639 | **-2,337** | -2 |
+| Nonblank production lines | 96,220 | **-2,864** | -2 |
+| Production implementation lines | 88,427 | **-3,023** | -3 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **115 / 48** | **-161 / -9** | **-3 / -1** |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| SuperCollider-local pending-intent scanners | **0** | n/a | **-1** |
+| Test inventory | **5,426** | **+81** | **+1** |
+
+The implementation is committed as `8c6b62b519c`.  Validation includes a
+successful full `-j16` build; **18/18** focused ledger, SuperCollider,
+pipeline, and architecture-boundary host tests; and the complete **587/587**
+nonphysical SuperCollider-named simulator/device and host matrix across all
+five target architectures.  All invocations used `-LE physical`; no test was
+removed, renamed, disabled, or replaced, and no physical GPU test was run.
+
+This slice pays the two-line interface cost introduced at checkpoint 165 and
+goes one implementation line farther while removing another transaction
+dependency and a parallel identity reconstruction.  The next broad-bus trace
+should apply the same test to a different terminal or planning boundary: retain
+the transaction only where the operation genuinely coordinates several
+mutable facets, and otherwise project an existing authority in a way that
+also deletes caller-side reconstruction.
