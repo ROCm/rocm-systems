@@ -669,7 +669,8 @@ void try_apply_record_replay_barrier_patch(
   publish_record_warnings(true);
   const size_t barrier_count_before = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-  try_apply_shared_barrier_patch(bytes, options, operating_point, arch, resource_state,
+  try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::BarrierRecord,
+                                 operating_point, arch, resource_state,
                                  access_output.reserved_sync_islands, semantics, result);
   const size_t barrier_count_after = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);

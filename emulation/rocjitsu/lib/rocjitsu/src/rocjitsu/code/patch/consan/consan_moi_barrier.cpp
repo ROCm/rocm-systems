@@ -78,6 +78,8 @@ using consan_moi_detail::plan_prebuilt_appended_cave;
 
 namespace consan_moi_impl {
 
+#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier_planning.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay_barrier.inc"

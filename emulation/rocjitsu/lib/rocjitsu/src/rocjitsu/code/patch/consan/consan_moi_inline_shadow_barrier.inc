@@ -193,6 +193,7 @@ void try_apply_inline_shadow_barrier_patch(
   ConSanMoiOperatingPoint barrier_point = operating_point;
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
-  try_apply_shared_barrier_patch(bytes, options, barrier_point, arch, resource_state,
-                                 reserved_sync_islands, semantics, result);
+  try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch,
+                                 barrier_point, arch, resource_state, reserved_sync_islands,
+                                 semantics, result);
 }

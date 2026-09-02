@@ -829,11 +829,17 @@ _consan_assert_no_match(
     "shared dense-barrier lowering must consume the mode-owned barrier router plan"
 )
 file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_planning)
+file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier_planning.inc"
+     _inline_barrier_planning_owner)
 if(NOT _moi_barrier_planning MATCHES
        "using MoiBarrierBodyPlan[^;]*std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan," OR
    NOT _moi_barrier_planning MATCHES "MoiBarrierBodyPlan[ \t]+body" OR
-   NOT _moi_barrier_planning MATCHES
+   NOT _inline_barrier_planning_owner MATCHES
        "struct MoiInlineBarrierVisibleEvidencePlan[^}]*result_vgpr[^}]*address_vgpr" OR
+   NOT _inline_barrier_planning_owner MATCHES
+       "plan_inline_shadow_barrier_epoch_emission" OR
+   _moi_barrier_planning MATCHES
+       "struct MoiInlineBarrier(VisibleEvidencePlan|EpochEmissionPlan)|struct MoiInlinePrivateEpochBarrierEmissionPlan|plan_inline_shadow_barrier_epoch_emission[^;]*[{]" OR
    _moi_barrier_planning MATCHES
        "std::optional<(MoiRecordEventEmissionPlan|MoiInlineBarrierEpochEmissionPlan|MoiInlinePrivateEpochBarrierEmissionPlan)>[ \t]+(record_emission|inline_epoch_emission|private_epoch_emission)")
     message(FATAL_ERROR
@@ -868,6 +874,8 @@ file(READ "${_consan_dir}/consan_moi_record_replay.inc"
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h"
      _moi_placement_contract)
 if(NOT _moi_barrier_source MATCHES
+       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier_planning.inc\"" OR
+   NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc\"" OR
@@ -894,11 +902,20 @@ if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_record_patch" OR
    NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch" OR
-   NOT _record_replay_barrier_owner MATCHES "try_apply_shared_barrier_patch" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*ConSanProbeIntentKind::BarrierRecord" OR
    NOT _record_replay_barrier_owner MATCHES
        "prune_unused_record_replay_direct_reservoirs")
     message(FATAL_ERROR
         "the Record/Replay barrier owner must retain its complete mode transaction"
+    )
+endif()
+if(NOT _inline_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*ConSanProbeIntentKind::ExactBarrierEpoch" OR
+   _moi_barrier_planning MATCHES
+       "consan_engine_probe_vocabulary")
+    message(FATAL_ERROR
+        "mode owners must select the exact evidence operation consumed by shared barrier lowering"
     )
 endif()
 if(NOT _record_replay_barrier_owner MATCHES
