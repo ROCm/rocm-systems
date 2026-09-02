@@ -11332,3 +11332,48 @@ should apply the same test to a different terminal or planning boundary: retain
 the transaction only where the operation genuinely coordinates several
 mutable facets, and otherwise project an existing authority in a way that
 also deletes caller-side reconstruction.
+
+### 16.168 Convergence checkpoint 167: deleted the dormant resource-plan index
+
+The next placement trace found two resource-plan lookup mechanisms adjacent in
+the same implementation.  `resource_plan_for_site` is the live authority used
+by every synchronization lowerer and correctly resolves a plan through its
+optional semantic text offset.  A separate `MoiResourcePlanSiteIndex`, key,
+and hash had no constructor or lookup site anywhere in Rocjitsu.  It indexed
+only the physical plan offset, so reviving it would also have disagreed with
+the semantic-site association used by the surviving path.  Git history showed
+that it was an abandoned optimization, not a temporarily disconnected part of
+the current migration.
+
+The unused class and both supporting types are deleted in full.  No adapter or
+replacement was introduced: all production consumers already used the one
+surviving lookup.  The architecture gate now rejects restoring the dormant
+parallel index beside that authority.
+
+| Signal | Checkpoint 167 | Cumulative change | Slice change from checkpoint 166 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,602 | **-2,374** | **-37** |
+| Nonblank production lines | 96,183 | **-2,901** | **-37** |
+| Production implementation lines | 88,390 | **-3,060** | **-37** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **115 / 48** | **-161 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Dormant resource-plan index implementations | **0** | n/a | **-1** |
+| Test inventory | **5,426** | **+81** | 0 |
+
+The implementation is committed as `d61978a1ed6`.  Validation includes a
+successful full `-j16` build and **903/903** nonphysical MOI, resource-plan,
+placement, and architecture-boundary host tests.  The preceding checkpoint's
+587-case five-target SuperCollider matrix remains the latest simulator-device
+gate.  All invocations used `-LE physical`; no test was removed, renamed,
+disabled, or replaced, and no physical GPU test was run.
+
+This checkpoint harvests 37 implementation lines without reducing behavior or
+adding a facade.  It also demonstrates why the placement knot must be audited
+for abandoned representations as well as split by cleaner interfaces: code
+that no longer participates in either axis should disappear before another
+component is designed around it.  The broad MOI terminal-rejection boundary
+remains the next traced candidate, but it must likewise produce one authority
+and net deletion rather than parameter expansion alone.
