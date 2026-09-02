@@ -202,6 +202,12 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
+// Defer the hierarchical ncclCommSplit calls until the first AllGather that would actually select
+// the hierarchical algorithm, instead of doing them unconditionally at communicator init.
+// Motivation (ROCM-29579): the inter-node split is what exposes a workload to the tus1-p3 deep
+// collapse, and a DDP workload that only ever issues large AllReduces pays that exposure - plus
+// ~1s of init - for an algorithm it can never select.
+RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 0);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
@@ -2544,6 +2550,70 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
   return ncclSuccess;
 }
 
+// Create the hierarchical sub-communicators and the shared temp buffer.
+//
+// COLLECTIVE: ncclCommSplit is a collective call, so every rank of `comm` must reach this at the
+// same point. Called either from ncclCommInitRankFunc (eager, the default) or, with
+// RCCL_HIERARCHICAL_LAZY_INIT=1, from the first AllGather whose message size would select the
+// hierarchical algorithm - a point where all ranks are present with identical, size-derived arguments.
+static ncclResult_t rcclCreateHierarchicalComms(struct ncclComm* comm) {
+  if (comm->minLocalRanks != comm->maxLocalRanks) {
+    INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
+    return ncclSuccess;
+  }
+  // Hierarchical Shuffle kernel assumes compact rank ordering.
+  // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
+  const int lr = comm->maxLocalRanks;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
+      INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
+      return ncclSuccess;
+    }
+  }
+
+  const int node_id = comm->rankToNode[comm->rank];
+  const int local_rank = comm->rankToLocalRank[comm->rank];
+  NCCLCHECK(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL));
+  // honor user input if user explicitly disables PAT
+  const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+  bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+  comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
+  NCCLCHECK(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL));
+  comm->forcePatEnable = false;
+  // inherit PXN disable from parent comm
+  comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+  size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                                      rcclParamHierarchicalReduceScatter() == 1);
+  NCCLCHECK(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager));
+  comm->hierarchicalCommsInitialized = true;
+  INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+       comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+  return ncclSuccess;
+}
+
+// Lazy entry point, called from the AllGather host path before algorithm selection.
+// Does nothing unless RCCL_HIERARCHICAL_LAZY_INIT deferred the setup at init.
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm, cudaStream_t stream) {
+  if (comm == nullptr || comm->hierarchicalCommsInitialized || !comm->hierarchicalLazyEligible) {
+    return ncclSuccess;
+  }
+  // ncclCommSplit allocates and communicates; it must never run inside a graph capture.
+  // Fall back to the non-hierarchical path for captured work rather than failing.
+  if (stream != nullptr) {
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(stream, &status) == cudaSuccess && status != cudaStreamCaptureStatusNone) {
+      INFO(NCCL_INIT, "Hierarchical collectives: stream is capturing, skipping lazy init");
+      return ncclSuccess;
+    }
+  }
+  // Attempt once. Capture-skip above leaves the flag set so a later uncaptured call can retry;
+  // clearing it here prevents repeating the work after a successful or refused creation.
+  comm->hierarchicalLazyEligible = false;
+  NCCLCHECK(rcclCreateHierarchicalComms(comm));
+  INFO(NCCL_INIT, "Hierarchical collectives: lazily initialized on first qualifying AllGather");
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   struct ncclCommInitRankAsyncJob* job = (struct ncclCommInitRankAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -2770,43 +2840,23 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
   
-  // Initialize hierarchical sub-communicators and temp buffers
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
-      (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {
-    if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
+  // Initialize hierarchical sub-communicators and temp buffers.
+  // Lazy mode only applies to the plain HAG case: if hierarchical ReduceScatter is enabled the
+  // shared hierarchy may be needed by a path we do not gate, so keep the eager behaviour there.
+  const bool hierarchicalSetupCandidate =
+    !job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
+    (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1);
+  const bool lazyInit =
+    rcclParamHierarchicalLazyInit() == 1 && rcclParamHierarchicalReduceScatter() != 1;
+  if (hierarchicalSetupCandidate) {
+    if (lazyInit) {
+      comm->hierarchicalLazyEligible = true;
+      if (comm->rank == 0) {
+        INFO(NCCL_INIT,
+             "Hierarchical collectives: lazy init enabled, deferring setup until first AllGather that selects it");
+      }
     } else {
-      // Hierarchical Shuffle kernel assumes compact rank ordering.
-      // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
-      const int lr = comm->maxLocalRanks;
-      bool compactRanks = true;
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (comm->rankToNode[r] != r / lr || comm->rankToLocalRank[r] != r % lr) {
-          compactRanks = false;
-          break;
-        }
-      }
-      if (!compactRanks) {
-        INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
-      } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
-        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-        // honor user input if user explicitly disables PAT
-        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
-        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
-        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-        comm->forcePatEnable = false;
-        // inherit PXN disable from parent comm
-        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
-        comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
-      }
+      NCCLCHECKGOTO(rcclCreateHierarchicalComms(comm), res, fail);
     }
   }
 

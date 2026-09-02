@@ -697,6 +697,9 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  // Set at init when this communicator qualifies for hierarchical setup but creation was deferred
+  // (RCCL_HIERARCHICAL_LAZY_INIT). rcclEnsureHierarchicalComms() performs the splits on first use.
+  bool hierarchicalLazyEligible;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,
@@ -1095,5 +1098,9 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
+
+// Create the deferred hierarchical sub-communicators (RCCL_HIERARCHICAL_LAZY_INIT). Defined in
+// init.cc. COLLECTIVE: every rank must call it at the same point; no-op unless setup was deferred.
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm, cudaStream_t stream);
 
 #endif

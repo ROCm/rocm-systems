@@ -224,7 +224,19 @@ enum rcclAllGatherAlgo {
   RCCL_AG_HIERARCHICAL
 };
 
-static rcclAllGatherAlgo rcclSelectAllGatherAlgo(struct ncclComm* comm, size_t msgSize) {
+static rcclAllGatherAlgo rcclSelectAllGatherAlgo(struct ncclComm* comm, size_t msgSize, cudaStream_t stream) {
+  // With RCCL_HIERARCHICAL_LAZY_INIT the sub-communicators do not exist yet. Create them here, on
+  // the first AllGather whose size would actually select the hierarchical path: outside any group
+  // (ncclGroupDepth == 0), on a collective call every rank reaches, with a size-derived decision
+  // that is identical on every rank. A workload that never issues a qualifying AllGather - the
+  // rocDecode DDP case - therefore never pays for the splits at all.
+  const size_t hagThreshold =
+    rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
+  if (ncclGroupDepth == 0 && comm->hierarchicalLazyEligible && msgSize <= hagThreshold) {
+    if (rcclEnsureHierarchicalComms(comm, stream) != ncclSuccess) {
+      INFO(NCCL_COLL, "Hierarchical collectives: lazy init failed, falling back to ring AllGather");
+    }
+  }
   if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
     return RCCL_AG_HIERARCHICAL;
   }
@@ -369,7 +381,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       return ncclSuccess;
     }
   }
-  rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
+  rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize, stream);
   switch (algo) {
   case RCCL_AG_HIERARCHICAL:
     return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
