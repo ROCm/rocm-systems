@@ -3059,6 +3059,7 @@ set(
     consan_supercollider_gfx9_target_ops.cpp
     consan_supercollider_rdna3_target_ops.cpp
     consan_supercollider_rdna4_target_ops.cpp
+    consan_validation_gfx11_target_ops.cpp
     consan_validation_gfx12_target_ops.cpp
 )
 _consan_assert_no_match(

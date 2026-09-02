@@ -42,6 +42,7 @@ rj_add_object_library(
         consan_supercollider_rdna3_target_ops.cpp
         consan_supercollider_rdna4_target_ops.cpp
         consan_supercollider_target_ops.cpp
+        consan_validation_gfx11_target_ops.cpp
         consan_validation_gfx12_target_ops.cpp
         consan_validation_gfx9_cdna_target_ops.cpp
         consan_validation_target_ops.cpp

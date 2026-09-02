@@ -13,6 +13,8 @@
 
 namespace rocjitsu {
 
+class Instruction;
+
 enum class ConSanEncodedMutationValidation : uint8_t {
   Valid,
   UnexpectedInstructionSize,
@@ -25,6 +27,14 @@ enum class ConSanEncodedMutationKind : uint8_t {
   OrdinaryGlobalScope,
   AtomicAddress,
   AtomicScope,
+};
+
+/// Pipeline dependency that an emitted synchronization instruction must
+/// establish. The target proof owns the concrete mnemonic and operand
+/// encoding; common validation asks only for the required dataflow edge.
+enum class ConSanDependencyKind : uint8_t {
+  SaluToSalu,
+  ValuToSalu,
 };
 
 /// Target-neutral inputs needed to prove and normalize descriptor resource
@@ -55,5 +65,8 @@ validate_consan_encoded_mutation(rj_code_arch_t arch, ConSanEncodedMutationKind 
 [[nodiscard]] ConSanDescriptorResourceDeltaValidation
 validate_consan_descriptor_resource_delta(rj_code_arch_t arch,
                                           const ConSanDescriptorResourceDeltaInput &input);
+
+[[nodiscard]] bool validate_consan_dependency(rj_code_arch_t arch, ConSanDependencyKind kind,
+                                              const Instruction &instruction);
 
 } // namespace rocjitsu
