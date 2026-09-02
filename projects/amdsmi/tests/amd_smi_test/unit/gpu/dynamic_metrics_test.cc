@@ -203,8 +203,7 @@ TEST(GpuUnit, GPUMetricUnsupportedFormatRevisionReportsNotSupported) {
       .m_content_revision = 1,
   };
 
-  const auto flag =
-      amd::smi::translate_header_to_flag_version(header, is_partition_metrics, "");
+  const auto flag = amd::smi::translate_header_to_flag_version(header, is_partition_metrics, "");
   EXPECT_EQ(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone)
       << "gpu_metrics v2.1 is not in the version translation table and must be "
          "treated as unsupported, so setup_gpu_metrics_reading() reports "
