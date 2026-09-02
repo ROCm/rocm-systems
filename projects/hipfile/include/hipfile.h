@@ -698,6 +698,9 @@ typedef enum hipFileBatchMode {
  * @brief Input parameters for a batch IO request
  * @ingroup batch
  */
+// The field order is part of the public ABI and cannot be changed to
+// eliminate padding.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct hipFileIOParams {
     hipFileBatchMode_t mode; //!< Mode of the batch IO request
     union {

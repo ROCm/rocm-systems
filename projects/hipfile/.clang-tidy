@@ -1,0 +1,30 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Since LLVM 22, `clang-analyzer-*` has been removed from the default checks
+# in clang-tidy. The LLVM 22 release notes state:
+#
+#   "Removed `clang-analyzer-*` checks from default checks in clang-tidy.
+#    From now on, users should specify explicitly that they want CSA checks to
+#    run in clang-tidy via `clang-analyzer-*`."
+#
+# Since clang-analyzer-* was clang-tidy's entire default check set, an
+# unqualified clang-tidy on LLVM 22+ enables nothing and exits with
+# "Error: no checks enabled."
+#
+# If clang-tidy reports "Error: no checks enabled." with this config, the wrong
+# clang-tidy was selected -- a ROCm-built one, which has no clang-analyzer-*
+# checks compiled in. Set AIS_CLANG_TIDY_EXECUTABLE to an upstream clang-tidy
+# instead. Do NOT "fix" it with --allow-no-checks or by loosening the globs
+# below; that silently lints nothing.
+
+# `clang-diagnostic-*` is silently prepended to this list. It re-reports compiler
+# warnings that get flagged in the normal build process. `-*` suppresses these
+# warnings to only report warnings from the static analyzer.
+Checks: >-
+  -*,
+  clang-analyzer-*
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(include|src|examples|tools)/.*'
