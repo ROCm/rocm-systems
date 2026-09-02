@@ -9453,7 +9453,7 @@ MOI, and report-policy vocabulary.
 
 The implementation is committed as `2365921975b`. Validation includes three
 successful `-j16` rebuilds after shared-header changes, the architecture
-boundary and six owning dense/indirect-route tests, all **1,301/1,301**
+boundary and six owning dense/indirect-route tests, all **1,299/1,299**
 nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests, and all
 **542/542** SuperCollider simulator-device tests across gfx942, gfx950,
 gfx1100, gfx1201, and gfx1250. Removing two unused comparison operators after
@@ -9470,4 +9470,94 @@ indirect-body, branch-entry, and relay-reservoir schemas or another comparably
 complete authority migration; another growth-only wrapper would violate the
 anti-circling rule. Full target and mode locality, remaining broad transaction
 and operating-point surfaces, final extension-proof revalidation, and the
+independent Section 14 audit remain open, so the goal remains active.
+
+### 16.136 Convergence checkpoint 135: exact indirect-route effects
+
+This checkpoint traced the generic indirect-control patch schema through every
+remaining producer and consumer. Its seven independent optionals represented
+four different concepts: the scalar tuple of an MOI borrowed branch-only
+entry, an ordinary SuperCollider indirect body's entry and return, the two
+endpoint strategies of a SuperCollider relay reservoir, and pieces already
+owned by the dense-route effect. Correct interpretation therefore depended on
+patch kind, absent-field conventions, and several local replicas of the same
+selected registers.
+
+The converged representation starts with one mechanism-level
+`ConSanIndirectJumpSgprs`. It owns the PC pair, saved SCC, scalar high-water
+mark, overlap predicate, and structural validity independently of mode and
+target. The former MOI-named type is deleted; Record/Replay, Sampled,
+InlineShadow, and SuperCollider all use the shared primitive where they
+actually share the same SCC-preserving jump mechanism.
+
+Patch publication then retains exact semantic effects instead of flattening
+that primitive again:
+
+- `moi_borrowed_entry_jump` belongs only to a borrowed MOI access or barrier
+  entry;
+- `sc_indirect_body_route` owns one ordinary SuperCollider body's jump, VCC
+  save, and exact return location;
+- `sc_relay_reservoir_route` is a variant whose Wave32-VCC and ordinary-scalar
+  endpoint strategies cannot coexist; and
+- `sc_dense_route` embeds the same shared jump primitive while preserving its
+  already typed dispatcher, key, and body facets.
+
+SuperCollider candidate, normalized dense-group, planned-body, emitted relay,
+descriptor-growth, and final-validation state now carry those values rather
+than parallel scalar members. MOI borrowed-entry publication carries one
+tuple. The seven generic patch fields and their partial-schema reconstruction
+are deleted. Independent validation first rejects misplaced or multiply
+published route roles, then verifies the selected route's scalar structure,
+target-dependent VCC width, required total SGPR allocation, pairing, and exact
+entry/return bytes. Corruption tests cover malformed MOI tuples, ordinary
+SuperCollider bodies, both reservoir variants, and a route attached to the
+wrong patch role.
+
+The ABI-layout change surfaced a latent test bug in
+`Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner`: the test
+dereferenced a disengaged `private_state_layout` optional. A debugger check of
+the clean checkpoint-134 binary proved that the optional was already absent;
+the old assertion passed only because the undefined read happened to yield
+false. The corrected regression now asserts the stronger intended invariant:
+persistent owner, epoch, workgroup-key, and dispatch VGPRs publish no private
+identity layout.
+
+Structural enforcement requires the shared primitive and all three exact new
+effects, prohibits the seven flattened field declarations and the former
+MOI-named primitive throughout production, requires independent validation to
+consume the typed structural predicates, and keeps the shared and
+SuperCollider-local contracts free of target and cross-mode vocabulary.
+
+| Signal | Checkpoint 135 | Cumulative change | Slice change from checkpoint 134 |
+| --- | ---: | ---: | ---: |
+| Production files | 304 | +75 | +2 typed contracts |
+| Physical production lines | 102,729 | **-2,247** | +26 |
+| Nonblank production lines | 96,320 | **-2,764** | +7 |
+| Production implementation lines | 88,539 | **-2,911** | **-6** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | +1 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **269 / 51** | **-21 / 0** | 0 / 0 |
+| Flattened generic indirect-route patch fields | **0** | n/a | **-7** |
+| Former MOI-named shared jump types | **0** | n/a | **-1** |
+| Test inventory | **5,420** | **+75** | **+2** |
+
+The implementation is committed as `d9df6d373a8`. Validation includes a
+successful full `-j16` build after final formatting, the architecture-boundary
+gate, all **1,301/1,301** nonphysical `ConSan.*` and `ConSanMoi.*`
+host/component tests, and all **2,918/2,918** simulator-device tests across
+Record/Replay, Sampled, InlineShadow, SuperCollider, gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250. The clean checkpoint-134 binary independently passed its
+actual **1,299/1,299** host inventory and confirmed the empty optional behind
+the corrected regression. No test was removed, renamed, disabled, or replaced,
+and no physical test was run.
+
+This slice satisfies checkpoint 134's requirement that the next checkpoint be
+deletion-bearing: two durable contracts replace seven flattened fields plus
+their duplicated planner and validator state, for a net reduction of six
+implementation lines. It strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7,
+14.8, and 14.9, but the two-checkpoint route investment remains 22 lines larger
+than checkpoint 133 and is not material Section 14.8 evidence. Full target and
+mode locality, remaining broad transaction and operating-point surfaces,
+larger legacy harvesting, final extension-proof revalidation, and the
 independent Section 14 audit remain open, so the goal remains active.

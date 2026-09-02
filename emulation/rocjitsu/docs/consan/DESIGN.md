@@ -346,15 +346,23 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
+SCC-preserving indirect control flow uses one mechanism-level
+`ConSanIndirectJumpSgprs`: the jump-PC pair and saved-SCC scalar are selected,
+transported, and checked together. MOI borrowed branch-only entries retain that
+primitive as one exact effect. SuperCollider ordinary indirect bodies extend it
+with their VCC save and return location, while relay reservoirs retain one
+variant selecting either the Wave32-VCC or ordinary-scalar endpoint strategy.
+The seven former generic optional patch fields cannot represent partial or
+mixed routes anymore.
+
 SuperCollider dense placement retains one mode-local
 `ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry
-host, and served body. The value names its dispatcher, jump-PC pair, saved SCC,
-and either a call-return pair or an explicit scalar key. A body adds its VCC
-save register and exact indirect-return location as one typed facet. Dense
-patches do not also populate the generic indirect-control fields, and final
-validation independently rejects an incomplete, overlapping, mismatched, or
-dually represented route. Descriptor allocation consumes the patch's one total
-SGPR high-water mark; there is no second indirect-only count.
+host, and served body. The value names its dispatcher, shared indirect-jump
+primitive, and either a call-return pair or an explicit scalar key. A body adds
+its VCC save register and exact indirect-return location as one typed facet.
+Final validation independently rejects an incomplete, overlapping, mismatched,
+misplaced, or dually represented route. Descriptor allocation consumes each
+patch's one total SGPR high-water mark; there is no second indirect-only count.
 
 Inline Shadow's acquired-epoch token ABI also owns one canonical list of its
 32-bit payload-word offsets. Reservation, empty-slot recognition, token scans,

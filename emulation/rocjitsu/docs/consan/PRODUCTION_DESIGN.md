@@ -508,16 +508,21 @@ sticky mismatch marker. Placement includes inline substitutions, local caves,
 dense dispatchers, relay reservoirs, register selection, spill handling, and
 transactional ELF replacement.
 
-Dense SuperCollider routing is one exact mode-owned effect rather than a loose
-patch-field convention. Dispatcher and relocated-host patches retain the same
-dispatcher identity, jump-PC pair, SCC save, and exact key strategy. Each body
-retains that route plus one body facet containing its VCC save and return
-location. The three patch roles no longer duplicate those facts in generic
-indirect-control fields, and final validation joins them through the typed
-route while rejecting overlap, role mismatch, generic-field duplication, and
-insufficient total SGPR allocation. Ordinary indirect islands and relay
-reservoirs still use their pre-existing generic fields and remain a separate
-convergence opportunity.
+SCC-preserving indirect jumps have one mechanism-level scalar contract:
+`ConSanIndirectJumpSgprs` owns the jump-PC pair and saved-SCC register. An MOI
+borrowed branch-only entry retains that primitive as one exact effect.
+SuperCollider ordinary indirect bodies extend it with the VCC save and return
+location, while relay reservoirs retain one variant selecting the Wave32-VCC
+or ordinary-scalar endpoint strategy. These roles no longer encode a route in
+seven generic optionals whose partial combinations had to be interpreted from
+the patch kind.
+
+Dense SuperCollider routing is likewise one exact mode-owned effect.
+Dispatcher and relocated-host patches retain the same dispatcher identity,
+shared indirect-jump primitive, and exact key strategy. Each body retains that
+route plus one body facet containing its VCC save and return location. Final
+validation joins these typed routes while rejecting malformed scalar ranges,
+role mismatch, mixed alternatives, and insufficient total SGPR allocation.
 
 SuperCollider does not build a happens-before relation. Barrier and atomic
 semantics enter only through the separate perturbation/fault-validation path.
