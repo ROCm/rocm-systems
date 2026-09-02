@@ -11914,3 +11914,56 @@ one direction: mode owners decide whether and how to obtain the state, while
 the shared exact-storage component validates and projects it.  No common
 helper reopens mode selection, and no mode-only fallback is exposed as a
 shared API.
+
+### 16.180 Convergence checkpoint 179: delete Sampled descriptor fallback
+
+The Sampled fallback localized at checkpoint 176 became small enough to prove
+against the complete placement path.  Every admitted Sampled access, atomic,
+barrier, or fence contributes persistent-state demand.  Sampled converts that
+demand into `needs_entry_workgroup_tuple`; common placement then supplies
+exact entry coordinates in one of three forms: object-wide SGPRs, owner-local
+VGPRs, or entry-captured private offsets.  Access and synchronization planning
+apply the owner-local assignment before resolving sources.  If none of those
+forms can be placed, the instrumentation is rejected before emission.
+
+Consequently, the descriptor fallback described in checkpoint 176 was dead:
+an emitted Sampled probe could never legally reach it.  The private
+`sampled_workgroup_sources` wrapper is deleted.  Sampled access and sync
+planning now consume `moi_exact_entry_workgroup_sources` directly.  Removing
+the fallback also removes image bytes, descriptor offset, architecture, error
+sink, and cluster-ABI parameters from the retained Sampled synchronization
+emission planner.  Raw descriptor source resolution remains only in the
+earlier multi-owner compatibility analysis where it describes the kernel ABI,
+not a probe's post-guest-code coordinate source.
+
+The structural gate requires exact-entry resolution in both Sampled access
+and synchronization planning, rejects restoration of the fallback wrapper,
+and prohibits descriptor/architecture inputs in the exact synchronization
+plan region.
+
+| Signal | Checkpoint 179 | Cumulative change | Slice change from checkpoint 178 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,148 | **-2,828** | **-18** |
+| Nonblank production lines | 95,741 | **-3,343** | **-17** |
+| Production implementation lines | 88,007 | **-3,443** | **-15** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Reachable Sampled descriptor fallbacks | **0 / 1** | n/a | **-1** |
+| Sampled sync-plan parameters | **10** | n/a | **-6** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `00788ed907c`.  Validation includes a
+successful full `-j16` build, **883/883** nonphysical MOI host and
+architecture-boundary tests, and **778/778** nonphysical Sampled-named tests.
+The latter includes **586** simulated-device cases across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+This is the intended convergence pattern: first expose and localize a policy,
+then prove one arm unreachable from the actual mode pipeline, delete it, and
+narrow the surviving product.  The result makes exact entry identity a true
+Sampled emission invariant rather than a preference with an undocumented
+legacy escape hatch.
