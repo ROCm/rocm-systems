@@ -11377,3 +11377,52 @@ that no longer participates in either axis should disappear before another
 component is designed around it.  The broad MOI terminal-rejection boundary
 remains the next traced candidate, but it must likewise produce one authority
 and net deletion rather than parameter expansion alone.
+
+### 16.169 Convergence checkpoint 168: transaction-private MOI terminal closure
+
+`publish_pending_moi_lowering_rejections` was declared by the resource-planning
+component and implemented beside its forward solver, but a complete caller
+trace found only one consumer: the body of `try_patch_consan_moi`.  The
+operation does not plan resources.  It closes the coordinator's mutable
+transaction after emission by publishing resource or placement rejection for
+every still-pending semantic intent.  Moving its individual artifact fields
+into a wider public parameter list would have preserved the wrong component
+boundary and added plumbing without creating another reusable operation.
+
+Terminal closure is now a local operation captured inside the MOI transaction
+coordinator.  Its resource-plan association, ledger publication order,
+deduplication, diagnostics, and four terminal call sites are unchanged.  The
+public declaration and the complete resource-planning implementation entry
+are deleted.  Both resource-planning files are now free of
+`ConSanTransformArtifacts`, and the structural gate rejects restoring either
+the broad bus or terminal-publication operation there.  The broad transaction
+survives only where it is honestly owned: as private orchestration storage,
+not as an interface offered to the forward solver.
+
+| Signal | Checkpoint 168 | Cumulative change | Slice change from checkpoint 167 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,596 | **-2,380** | -6 |
+| Nonblank production lines | 96,178 | **-2,906** | -5 |
+| Production implementation lines | 88,384 | **-3,066** | -6 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | **-2 / -2** |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Resource-planning APIs for terminal transaction closure | **0** | n/a | **-1** |
+| Test inventory | **5,426** | **+81** | 0 |
+
+The implementation is committed as `489544fc5d0`.  Validation includes a
+successful full `-j16` build and **937/937** nonphysical MOI, pipeline,
+resource-plan, placement, and architecture-boundary host tests.  This follows
+the preceding checkpoint's 903-case placement-focused host gate and checkpoint
+166's 587-case five-target SuperCollider matrix.  All invocations used
+`-LE physical`; no test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+This is a confinement result rather than a field-by-field projection: the
+forward component loses the mutable bus entirely, an unearned public API
+disappears, and production shrinks.  The next audit should distinguish other
+true transaction operations from helpers merely located near them, then
+either keep the former private to orchestration or give the latter a narrow
+owner that has more than one real consumer.
