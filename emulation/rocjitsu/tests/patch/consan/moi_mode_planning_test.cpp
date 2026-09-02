@@ -134,13 +134,21 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsLegacyReportLayout) {
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   request.moi_track_barriers = true;
   request.moi_track_atomics = true;
-  EXPECT_EQ(plan_moi_object_mode(request, resources, policy, point, facts, observation)
-                .semantics.report_layout,
+  const auto record_replay =
+      plan_moi_object_mode(request, resources, policy, point, facts, observation);
+  EXPECT_FALSE(record_replay.semantics.automatic_banked_record_capture);
+  EXPECT_EQ(record_replay.semantics.report_layout,
             consan_moi_report_buffer_layout_for_bytes(resources.moi_report_buffer_size, true, true,
                                                       true));
+  BoundRuntimeResources banked_resources = resources;
+  banked_resources.moi_report_layout = record_replay.semantics.report_layout;
+  banked_resources.moi_report_layout->record_replay_dispatch_token_capacity = 1u;
+  EXPECT_TRUE(plan_moi_object_mode(request, banked_resources, policy, point, facts, observation)
+                  .semantics.automatic_banked_record_capture);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   const auto sampled = plan_moi_object_mode(request, resources, policy, point, facts, observation);
+  EXPECT_FALSE(sampled.semantics.automatic_banked_record_capture);
   EXPECT_EQ(
       sampled.semantics.report_layout,
       consan_moi_direct_sampled_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
@@ -148,9 +156,11 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsLegacyReportLayout) {
   EXPECT_EQ(sampled.semantics.reserved_atomic_island_count, 2u);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
+  const auto inline_shadow =
+      plan_moi_object_mode(request, resources, policy, point, facts, observation);
+  EXPECT_FALSE(inline_shadow.semantics.automatic_banked_record_capture);
   EXPECT_EQ(
-      plan_moi_object_mode(request, resources, policy, point, facts, observation)
-          .semantics.report_layout,
+      inline_shadow.semantics.report_layout,
       consan_moi_inline_shadow_report_buffer_layout_for_bytes(resources.moi_report_buffer_size));
 }
 

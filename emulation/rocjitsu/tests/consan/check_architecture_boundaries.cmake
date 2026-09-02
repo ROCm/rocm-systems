@@ -650,6 +650,27 @@ foreach(_exact_capture_mode IN ITEMS record_replay sampled)
         )
     endif()
 endforeach()
+foreach(_common_banked_capture_owner IN ITEMS
+    consan_moi_placement.cpp
+    consan_moi_placement.inc
+    consan_moi_support.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_common_banked_capture_owner}"
+        "record_replay_uses_automatic_banked_capture"
+        "common planning must consume selected banked-capture semantics"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled.cpp"
+    "automatic_banked_record_capture[ ]*="
+    "Sampled must not acquire Record/Replay banked-capture policy"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow.cpp"
+    "automatic_banked_record_capture[ ]*="
+    "InlineShadow must not acquire Record/Replay banked-capture policy"
+)
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"

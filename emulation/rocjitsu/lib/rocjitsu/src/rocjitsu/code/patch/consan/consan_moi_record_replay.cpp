@@ -78,6 +78,8 @@ plan_record_replay_object_mode(const ConSanRequest &request, const BoundRuntimeR
       facts.target_supports_dense_barrier_router &&
       (facts.admitted_barrier_count > kCompactBarrierMemberLimit ||
        facts.has_stranded_admitted_barrier);
+  plan.semantics.automatic_banked_record_capture =
+      record_replay_uses_automatic_banked_capture(request, resources);
   plan.semantics.report_layout =
       resolve_moi_report_layout(resources, ConSanMoiEngine::RecordReplay,
                                 consan_moi_report_buffer_layout_for_bytes(

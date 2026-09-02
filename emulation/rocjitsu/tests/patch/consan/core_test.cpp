@@ -325,6 +325,7 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
   const consan_moi_impl::MoiObjectModeSemantics mode_semantics{
       .dense_barrier_router = true,
       .inline_access_present = true,
+      .automatic_banked_record_capture = true,
       .report_layout = {},
       .reserved_barrier_island_count = 0u,
       .reserved_atomic_island_count = 0u,
@@ -344,8 +345,8 @@ TEST(ConSan, MoiExecSaveRequirementProjectsOnlyScalarAbiFacts) {
             }));
 
   request.moi_dynamic_access_records = true;
-  EXPECT_FALSE(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics)
-                   .automatic_banked_record_capture);
+  EXPECT_TRUE(resolve_moi_exec_save_requirement(request, resources, point, mode_semantics)
+                  .automatic_banked_record_capture);
 }
 
 TEST(ConSan, MoiOwnerEpochInitializationIsAnOperatingPointDecision) {

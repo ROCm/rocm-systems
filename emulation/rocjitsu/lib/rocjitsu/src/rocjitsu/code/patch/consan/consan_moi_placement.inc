@@ -4393,7 +4393,7 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
     // descriptor-grown VGPRs during the later owner-state placement pass.
     // Sampled instead records the stable reader identity literal when no
     // persistent hardware pair survives every owner.
-    if (record_replay_uses_automatic_banked_capture(request, resources))
+    if (problem.mode_semantics().automatic_banked_record_capture)
       return update;
     update.diagnostics.emplace_back(
         "ConSan MOI is using a literal report dispatch ID because no persistent hardware "

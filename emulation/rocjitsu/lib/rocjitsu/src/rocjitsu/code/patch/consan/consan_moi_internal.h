@@ -43,6 +43,7 @@ namespace rocjitsu::consan_moi_impl {
 struct MoiObjectModeSemantics {
   bool dense_barrier_router = false;
   bool inline_access_present = false;
+  bool automatic_banked_record_capture = false;
   ConSanMoiReportBufferLayout report_layout;
   uint64_t reserved_barrier_island_count = 0;
   uint32_t reserved_atomic_island_count = 0;
