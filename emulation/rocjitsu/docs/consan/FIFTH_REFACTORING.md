@@ -9692,3 +9692,72 @@ violate the anti-circling rule. Full target and mode locality, remaining broad
 transaction and operating-point surfaces, material additional shrinkage,
 final extension-proof revalidation, and the independent Section 14 audit remain
 open, so the goal remains active.
+
+### 16.139 Convergence checkpoint 138: one scalar-router allocation
+
+The next route trace followed the spill-backed MOI scalar router from
+owner-local placement through the accepted operating point, narrow mode
+projections, Record/Replay event planning, prologue scratch accounting,
+emission, and independent validation. The same indivisible mechanism had been
+represented as independently optional jump, dense-call, and Inline
+visible-evidence fields at each boundary. This admitted impossible states such
+as call state without an indirect jump, made whole-owner reassignment update
+the facets separately, and required every range consumer to reconstruct the
+same allocation.
+
+`ConSanMoiScalarRouterAllocation` now owns the mandatory
+`ConSanIndirectJumpSgprs`, optional dense-call key/return state, and optional
+Inline visible-evidence temporary. `ConSanMoiTransientSgprAssignment`,
+`ConSanMoiOperatingPoint`, `MoiScalarRoutingState`, and
+`MoiInlineShadowScalarState` retain that one aggregate. Applying an owner-local
+assignment replaces it atomically, and the aggregate enumerates its scalar
+ranges for overlap and prologue-scratch proofs. Record/Replay event emission
+also retains the aggregate instead of flattening its call and jump members.
+The redundant broad `scalar_spill` projection in the Inline scalar view is
+deleted; its only consumer needs the already-present exact Inline-layout fact.
+
+The consumer migration exposed a second parallel authority in Sampled atomic
+routing. Dense relay selection and ordinary atomic routing separately rebuilt
+the same reserved-state, scalar-limit, delay-variable, owner/anchor liveness,
+and physical-VCC proof. One mode-local `sampled_route_ranges_are_safe` now
+expresses that common mechanism while the two callers retain only their
+different tuple-alias policies. The common placement boundary prepares the
+complete owner liveness context once and proves both call-anchor safety and
+physical-VCC exclusion; the second public proof API and its duplicate context
+preparation are deleted.
+
+Structural enforcement rejects the retired flattened router fields throughout
+production, requires the aggregate in both owner-local and accepted-point
+state, requires Record/Replay event emission to retain it, and rejects a split
+anchor-liveness/physical-VCC admission API.
+
+| Signal | Checkpoint 138 | Cumulative change | Slice change from checkpoint 137 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,748 | **-2,228** | **-4** |
+| Nonblank production lines | 96,324 | **-2,760** | **-7** |
+| Production implementation lines | 88,541 | **-2,909** | **-11** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **260 / 51** | **-30 / 0** | **-9 / 0** |
+| Independently optional scalar-router fields in migrated state/products | **0** | n/a | **-13** |
+| Scalar-router owner-context proof APIs | **1** | n/a | **-1** |
+| Test inventory | **5,421** | **+76** | 0 |
+
+The implementation is committed as `c0454265fba`. Validation includes a
+successful full `-j16` build, the architecture-boundary gate, all
+**1,303/1,303** nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests,
+and the complete currently registered **2,888/2,888** simulator-device matrix
+across gfx942, gfx950, gfx1100, gfx1201, and gfx1250. This slice changes no test
+registration or device-test source. No physical GPU test was run, following
+the current policy to reserve that expensive gate for a later evidence point.
+
+This deletion-bearing slice repays 11 of the 35 implementation lines by which
+checkpoints 134 through 137 had grown over checkpoint 133, and it removes a
+duplicate owner proof rather than merely compressing syntax. The route series
+remains 24 lines larger than checkpoint 133, so the next convergence slice must
+continue harvesting that investment or delete a larger adjacent transaction
+surface. Full target and mode locality, remaining broad transaction and
+operating-point surfaces, final extension-proof revalidation, and the
+independent Section 14 audit remain open; the goal remains active.

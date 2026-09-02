@@ -358,6 +358,16 @@ ordinary indirect bodies separately extend the shared jump primitive with
 their VCC save and return location, while relay reservoirs retain one variant
 selecting either the Wave32-VCC or ordinary-scalar endpoint strategy.
 
+A spill-backed MOI scalar router retains that jump primitive in one
+`ConSanMoiScalarRouterAllocation`. Dense routing may add its dispatch key and
+call-return pair, and Inline Shadow may add its visible-evidence temporary, but
+neither optional facet can exist independently of the router's jump. Owner-local
+placement assignments, the accepted operating point, and narrow mode projections
+transport that aggregate intact. Record/Replay event planning likewise projects
+the complete allocation rather than flattening its members. Scalar-range
+enumeration and owner/anchor admission therefore inspect one allocation and one
+liveness/physical-VCC proof instead of parallel per-field authorities.
+
 SuperCollider dense placement retains one mode-local
 `ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry
 host, and served body. The value names its dispatcher, shared indirect-jump
