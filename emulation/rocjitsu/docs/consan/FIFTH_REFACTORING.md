@@ -10322,3 +10322,71 @@ checkpoint series is therefore representation- and size-converged rather than
 merely source-moved.  Full target/mode locality, further broad transaction and
 operating-point reduction, extension-proof revalidation, and the independent
 Section 14 audit remain open.
+
+### 16.149 Convergence checkpoint 148: Record/Replay owns direct barrier routing
+
+The next ownership trace separated two responsibilities that the common
+barrier fragment still presented as one.  Its exact-epoch/record body and dense
+placement mechanism is genuinely shared by InlineShadow and Record/Replay,
+but the complete direct Record/Replay transaction is not: record-capacity
+admission, record-event planning, branch-only relay batching, borrowed-entry
+routing, provisional access-reservoir cleanup, warning recovery, and selection
+of the shared dense fallback are all Record/Replay policy and lifecycle.
+
+That 688-line transaction now lives in the mode-named
+`consan_moi_record_replay_barrier.inc` owner.  The common fragment retains the
+shared body/placement mechanism and the reservation-layout resolver consumed
+by both that mechanism and the direct mode owner.  Its old
+`try_apply_inline_shadow_barrier_epoch_patch` name was misleading once
+Record/Replay began deliberately composing it; the seam is now the honestly
+named `try_apply_shared_barrier_patch`.  Record/Replay still calls the common
+mechanism for dense fallback rather than copying its placement or body logic.
+
+The move also completed two deletion steps.  Reordering the mode-owned
+implementation before its public wrapper removes the old same-translation-unit
+forward declaration, and direct Record/Replay patch publication now uses the
+common `note_relocated_barrier_instruction` mechanism instead of carrying a
+second reverse scan for the relocated guest barrier.  The provisional direct-
+reservoir cleanup moved with its only production consumer rather than
+remaining as mode-specific residue in the common owner.
+
+The architecture-boundary gate registers the new implementation fragment,
+requires its single textual owner, requires both Record/Replay entry points and
+the reservoir cleanup to remain there, and forbids those implementations or
+the obsolete InlineShadow-only shared name in the common fragment.  This is a
+physically enforced mode boundary inside the existing compiled barrier
+component.  It does not yet replace the broad transaction and operating-point
+arguments with a narrow compiled interface; the extra file counts for those
+types below make that remaining interface debt visible.
+
+| Signal | Checkpoint 148 | Cumulative change | Slice change from checkpoint 147 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | +1 mode owner |
+| Physical production lines | 102,716 | **-2,260** | **-7** |
+| Nonblank production lines | 96,293 | **-2,791** | **-7** |
+| Production implementation lines | 88,497 | **-2,953** | **-9** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | **-1 / +1** |
+| `ConSanPatchInfo` references / files | 211 / 32 | +11 / +4 | 0 / +1 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | **-1 / +1** |
+| Direct Record/Replay barrier-transaction lines in common owner | **0** | n/a | **-700 physical** |
+| Direct Record/Replay barrier relocation implementations | **1 shared mechanism** | n/a | **-1 duplicate** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `ec4ca0bdf92`.  Validation includes a
+current successful full `-j16` build; the architecture-boundary gate and all
+**109/109** barrier-named host tests; and the complete **614/614** Record/Replay
+simulator-device matrix across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.
+That matrix covers direct, indirect, dense, branch-only, borrowed-entry,
+forced-spill, synchronization, and report behavior in both correct and
+incorrect workloads.  Checkpoint 141 remains the immediately preceding
+complete all-mode **4,789/4,789** nonphysical gate.  No test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+This is meaningful mode-locality and deletion progress, but it is not the end
+of barrier convergence.  The common mechanism remains large, its shared
+reservation vocabulary is still historically Record/Replay-shaped, and the
+new mode owner still reaches the broad private transaction store because both
+fragments compile as one component.  Those facts, along with full target/mode
+locality, narrow component interfaces, extension-proof revalidation, and the
+independent Section 14 audit, remain open.
