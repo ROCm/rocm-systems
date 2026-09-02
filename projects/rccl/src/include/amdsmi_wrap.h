@@ -42,6 +42,16 @@
 #define AMDSMI_FABRIC_DIRECT 0
 #endif
 
+// CMake's AMDSMI_FABRIC_API probe can be cached from a machine whose amd_smi.h
+// had UALoE types, then reused against a ROCm tree that only has the pre-UALoE
+// header (host unit tests and hipify TUs still get -DAMDSMI_FABRIC_DIRECT).
+// UALoE headers define AMDSMI_FABRIC_MAX_LOCAL_GPUS; if that macro is absent
+// the CMake bit is a lie and the compat types below must be compiled.
+#if AMDSMI_DIRECT && !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+#undef AMDSMI_FABRIC_DIRECT
+#define AMDSMI_FABRIC_DIRECT 0
+#endif
+
 #if !AMDSMI_DIRECT
 /*************************************************************************
  * Pre-UALoE AMDSMI Definitions
@@ -483,6 +493,13 @@ constexpr size_t kAmdSmiFabricInfo16GpuSize = 320;
 constexpr size_t kAmdSmiFabricState8GpuOffset = 208;
 constexpr size_t kAmdSmiFabricState16GpuOffset = 240;
 
+// Compat types (AMDSMI_FABRIC_DIRECT=0) declare amdsmi_fabric_info_v1_t here.
+// Installed amd_smi.h can expose amdsmi_fabric_info_t without v1 (CMake still
+// sets FABRIC_DIRECT from the fabric_info_t probe). Naming v1_t in that
+// configuration is a hard compile error in every TU that includes comm.h, so
+// the layout assert only runs when the compat types are in play. The runtime
+// canary in amdSmiDetectFabricRuntimeLayout still covers shipped libraries.
+#if !AMDSMI_FABRIC_DIRECT
 constexpr bool amdSmiFabricLayoutIs8Gpu =
   sizeof(amdsmi_fabric_info_v1_t) == 212 && sizeof(amdsmi_fabric_info_t) == kAmdSmiFabricInfo8GpuSize &&
   offsetof(amdsmi_fabric_info_v1_t, addr_mode) == kAmdSmiFabricState8GpuOffset - sizeof(uint32_t) &&
@@ -496,6 +513,7 @@ constexpr bool amdSmiFabricLayoutIs16Gpu =
   offsetof(amdsmi_fabric_info_t, reserved) == 256;
 
 static_assert(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu, "unsupported amdsmi fabric layout");
+#endif
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
@@ -563,7 +581,7 @@ inline uint32_t amdSmiFabricInfoVersion(const FabricInfoT& info) {
 }
 
 template <typename FabricInfoT>
-inline const amdsmi_fabric_info_v1_t* amdSmiFabricInfoV1(const FabricInfoT& info) {
+inline auto amdSmiFabricInfoV1(const FabricInfoT& info) {
   if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
     return &info.fabric_info.v1;
   } else {

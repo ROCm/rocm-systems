@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
+#include "bootstrap.h"
 #include "collectives.h"
 #include "config/collconfig.h"
 #include "enqueue.h"
@@ -27,6 +28,8 @@
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
+
+#include <vector>
 
 using namespace rccl;
 
@@ -238,19 +241,37 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
-// Check if symmteric kernels is requested for this collective
+// Check if symmetric kernels are requested for this collective (local windows
+// only). Cross-rank agreement belongs in ncclMakeSymmetricTaskList at launch:
+// doing it here deadlocks ncclGroupStart because ranks enqueue one at a time.
+// Callers that report from a single rank must leave agreeAcrossRanks false
+// (the default) so they do not bootstrapAllGather alone.
 bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
-                                const void* sendbuff, void* recvbuff) {
-  if (comm == nullptr || !comm->symmetricSupport) return false;
-  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
-  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+                                const void* sendbuff, void* recvbuff, bool agreeAcrossRanks) {
+  if (comm == nullptr) return false;
 
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  bool local = false;
+  if (comm->symmetricSupport && ncclSymkInitOnce(comm) == ncclSuccess &&
+      ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) {
+    struct ncclDevrWindow* sendWin = nullptr;
+    struct ncclDevrWindow* recvWin = nullptr;
+    ncclDevrFindWindow(comm, sendbuff, &sendWin);
+    ncclDevrFindWindow(comm, recvbuff, &recvWin);
+    local = sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+            (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  }
+  if (!agreeAcrossRanks || comm->nRanks < 2 || comm->bootstrap == nullptr) return local;
+
+  // Every rank that opted into agreement must enter the allgather, including
+  // ranks with symmetricSupport off (local is already false). Returning here
+  // would leave peers blocked in bootstrapAllGather.
+  std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
+  flags[(size_t)comm->rank] = local ? 1 : 0;
+  if (bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)) != ncclSuccess) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (flags[(size_t)r] == 0) return false;
+  }
+  return true;
 }
 
 static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {

@@ -175,6 +175,9 @@ def _build_test_binary():
         HIPCC,
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
+        # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
+        # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
+        f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
@@ -253,6 +256,7 @@ def _build_gin_mpi_binary():
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
         f"-I{MPI_INC}",
+        f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
@@ -345,7 +349,7 @@ def run_gin_mpi_gtest(ir_gin_mpi_binary):
 
 @pytest.fixture(scope="session")
 def ir_test_binary():
-    """Build the bitcode if needed, then compile IR_test.cpp against it once.
+    """Update the bitcode, then compile IR_test.cpp against it once.
 
     Skips the entire suite if prerequisites are missing. Returns the path to
     the compiled GoogleTest executable.
@@ -354,15 +358,13 @@ def ir_test_binary():
     if reason:
         pytest.skip(f"IR device tests skipped: {reason}")
 
-    # Emit librccl_device.bc on demand (the EMIT_LLVM_IR step) when absent.
-    if os.path.isfile(BITCODE):
-        logger.info("librccl_device.bc PRESENT at %s — reusing it", BITCODE)
-    else:
-        logger.info(
-            "librccl_device.bc MISSING at %s — building it (EMIT_LLVM_IR step, "
-            "arch=%s)...", BITCODE, ARCH)
-        bc_log = _build_bitcode()
-        logger.info("librccl_device.bc BUILT at %s (log: %s)", BITCODE, bc_log)
+    # Always invoke make so dependency timestamps decide whether the artifact
+    # is current. Merely checking that BITCODE exists can reuse an artifact
+    # from before a wrapper/implementation edit when RCCL itself was rebuilt
+    # with EMIT_LLVM_IR=OFF.
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    bc_log = _build_bitcode()
+    logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)
 
     logger.info(
         "Compiling IR_test.cpp -> %s (hipcc -O0, arch=%s)...", TEST_EXE, ARCH)

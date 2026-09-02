@@ -2532,7 +2532,7 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       CUDACHECK(cudaEventCreateWithFlags(&comm->sharedRes->scratchEvent, cudaEventDisableTiming));
     }
 
-    if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
+    if (capturing || planner->numStreams != 1 || comm->config.launchOrderImplicit == 1) {
       CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
       // deviceStream waits on userStream[0]
       NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream,

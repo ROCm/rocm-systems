@@ -352,9 +352,14 @@ unset(AMDSMI_FABRIC_API CACHE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 check_cxx_source_compiles("
   #include <amd_smi/amdsmi.h>
+  #if !defined(AMDSMI_FABRIC_MAX_LOCAL_GPUS)
+  #error amdsmi.h has no UALoE fabric types
+  #endif
   int main() {
     amdsmi_fabric_info_t info{};
+    amdsmi_fabric_info_v1_t v1{};
     (void)info;
+    (void)v1;
     return 0;
   }
 " AMDSMI_FABRIC_API)

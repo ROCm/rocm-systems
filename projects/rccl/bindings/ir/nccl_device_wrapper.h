@@ -42,7 +42,7 @@
 #include "nccl_device/utility.h"
 #undef NCCL_DEVICE_INLINE
 #undef NCCL_HOST_DEVICE_INLINE
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 #if defined(__NCCL_DEVICE_LTOIR_LIB__)
 #define NCCL_DEVICE_INLINE __device__ __inline_hint__
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __inline_hint__
@@ -50,8 +50,17 @@
 #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
 #else
+// Consumer hipcc compile (IR_test.exe): hip_compat sets NCCL_DEVICE_COMPILE
+// for both host and device passes, so coop.h bodies are parsed on the host
+// pass. They must stay __device__ or HIP rejects __popcll/__syncthreads.
+// NVIDIA's empty define is fine on CUDA; HIP device builtins are host-invisble.
+#if defined(__HIPCC__)
+#define NCCL_DEVICE_INLINE __device__
+#define NCCL_HOST_DEVICE_INLINE __host__ __device__ inline __attribute__((always_inline))
+#else
 #define NCCL_DEVICE_INLINE
 #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#endif
 #endif
 #endif
 

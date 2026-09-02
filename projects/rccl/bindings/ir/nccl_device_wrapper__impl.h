@@ -18,7 +18,7 @@
 #include "nccl_device.h"
 #include <new>
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__) || defined(__HIPCC__)
 /* Session size getters */
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE size_t ncclLsaBarrierSession_C_size() { return sizeof(ncclLsaBarrierSession_C); }
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE size_t ncclGinBarrierSession_C_size() { return sizeof(ncclGinBarrierSession_C); }
@@ -47,11 +47,13 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitThread(ncclCoopAny* coop
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopWarp());
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitLanes(ncclCoopAny* coop, uint32_t lane_mask) {
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
     ::new (coop) ncclCoopAny(ncclCoopLanes(lane_mask));
 }
-NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id) {
-    ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id));
+NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitWarpSpan(
+    ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds) {
+    ::new (coop) ncclCoopAny(
+        ncclCoopWarpSpan(warp0, nWarps, id, static_cast<ncclCoopNamedBarrierSlot*>(barrierLds)));
 }
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclCoopAnyInitCta(ncclCoopAny* coop) {
     ::new (coop) ncclCoopAny(ncclCoopCta());
