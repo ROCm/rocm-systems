@@ -1,12 +1,19 @@
 /// Lifetime of the owner/epoch destinations initialized by an MOI entry
-/// prologue. Scalar-persistent kernels use the same vector destinations only
-/// as entry-local scratch; vector-persistent kernels retain them either as one
-/// code-object-wide ABI or as an owner-component-local ABI.
+/// prologue or consumed by a probe. Scalar- and private-persistent paths use
+/// transient vector scratch; vector-persistent kernels retain the pair either
+/// as one code-object-wide ABI or as an owner-component-local ABI.
 enum class ConSanMoiOwnerEpochVgprLifetime : uint8_t {
-  EntryLocal,
+  Transient,
   CodeObjectPersistent,
   OwnerLocalPersistent,
 };
+
+[[nodiscard]] constexpr ConSanMoiOwnerEpochVgprLifetime
+consan_moi_owner_epoch_vgpr_lifetime(bool transient, bool owner_local) {
+  return transient     ? ConSanMoiOwnerEpochVgprLifetime::Transient
+         : owner_local ? ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent
+                       : ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent;
+}
 
 /// Complete vector-register state effect initialized or consumed by one MOI
 /// patch. The owner/epoch pair is indivisible, while the lifetime distinguishes
@@ -15,16 +22,7 @@ struct ConSanMoiVgprStateEffect {
   ConSanMoiOwnerEpochRegisters owner_epoch;
   std::optional<uint16_t> workgroup_key;
   ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
-  ConSanMoiOwnerEpochVgprLifetime owner_epoch_lifetime =
-      ConSanMoiOwnerEpochVgprLifetime::EntryLocal;
-
-  [[nodiscard]] bool owner_epoch_is_abi() const {
-    return owner_epoch_lifetime != ConSanMoiOwnerEpochVgprLifetime::EntryLocal;
-  }
-
-  [[nodiscard]] bool owner_local() const {
-    return owner_epoch_lifetime == ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent;
-  }
+  ConSanMoiOwnerEpochVgprLifetime owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::Transient;
 
   template <typename Visitor> void for_each_range(Visitor &&visit) const {
     visit(owner_epoch.owner, 1u);
@@ -39,7 +37,7 @@ struct ConSanMoiVgprStateEffect {
 
   [[nodiscard]] bool is_well_formed() const {
     switch (owner_epoch_lifetime) {
-    case ConSanMoiOwnerEpochVgprLifetime::EntryLocal:
+    case ConSanMoiOwnerEpochVgprLifetime::Transient:
     case ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent:
     case ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent:
       break;
@@ -70,6 +68,4 @@ struct ConSanMoiVgprStateEffect {
     });
     return required;
   }
-
-  auto operator<=>(const ConSanMoiVgprStateEffect &) const = default;
 };

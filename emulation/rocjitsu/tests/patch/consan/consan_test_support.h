@@ -374,8 +374,8 @@ test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
 [[nodiscard]] const ConSanPatchInfo *
 test_moi_global_persistent_vgpr_patch(const ConSanTransformArtifacts &result) {
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
-    return candidate.moi_vgpr_state && candidate.moi_vgpr_state->owner_epoch_is_abi() &&
-           !candidate.moi_vgpr_state->owner_local();
+    return candidate.moi_vgpr_state && candidate.moi_vgpr_state->owner_epoch_lifetime ==
+                                           ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent;
   });
   return patch == result.patches.end() ? nullptr : &*patch;
 }

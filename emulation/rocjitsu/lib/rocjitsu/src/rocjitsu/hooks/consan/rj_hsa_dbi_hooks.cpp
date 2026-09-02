@@ -4789,10 +4789,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.persistent_epoch_private_offset
               ? std::to_string(*patch.persistent_epoch_private_offset)
               : "-";
+      const auto *scalar_vcc_spill =
+          patch.sc_scalar_vcc_spill ? &*patch.sc_scalar_vcc_spill : nullptr;
       const std::string scalar_vcc_spill_vgpr =
-          patch.scalar_vcc_spill_vgpr ? std::to_string(*patch.scalar_vcc_spill_vgpr) : "-";
+          scalar_vcc_spill ? std::to_string(scalar_vcc_spill->reservoir_vgpr) : "-";
       const std::string scalar_vcc_spill_sgpr =
-          patch.scalar_vcc_spill_sgpr ? std::to_string(*patch.scalar_vcc_spill_sgpr) : "-";
+          scalar_vcc_spill ? std::to_string(scalar_vcc_spill->vcc_save_sgpr) : "-";
       log_message(kLogDebug,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
                   "trampoline=0x%llx original_size=%u trampoline_size=%u scratch_vgpr=%s "
@@ -4805,7 +4807,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
                   patch.trampoline_size, scratch_vgpr.c_str(), scalar_vcc_spill_sgpr.c_str(),
-                  scalar_vcc_spill_vgpr.c_str(), patch.scalar_vcc_spill_vgpr_count,
+                  scalar_vcc_spill_vgpr.c_str(),
+                  scalar_vcc_spill ? scalar_vcc_spill->reservoir_vgpr_count() : 0u,
                   private_epoch_offset.c_str(), patch.spilled_vgpr_count,
                   patch.required_private_segment_size, patch.dynamic_private_segment_addend,
                   patch.workgroup_shadow_base, patch.workgroup_shadow_size,

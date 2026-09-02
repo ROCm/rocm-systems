@@ -65,9 +65,7 @@ struct ConSanPatchDiagnostic {
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
   std::optional<uint16_t> scratch_vgpr;
-  std::optional<uint16_t> scalar_vcc_spill_sgpr;
-  std::optional<uint16_t> scalar_vcc_spill_vgpr;
-  uint16_t scalar_vcc_spill_vgpr_count = 0;
+  std::optional<ConSanSuperColliderScalarVccSpill> sc_scalar_vcc_spill;
   std::optional<uint32_t> persistent_epoch_private_offset;
   uint16_t spilled_vgpr_count = 0;
   uint32_t required_private_segment_size = 0;

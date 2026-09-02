@@ -18,6 +18,42 @@ struct GrowthPolicyFixture {
   ConSanTransformArtifacts baseline;
 };
 
+[[nodiscard]] std::optional<uint16_t> test_sc_vcc_save_sgpr(const ConSanPatchInfo &patch) {
+  return patch.sc_scalar_vcc_spill
+             ? std::optional<uint16_t>{patch.sc_scalar_vcc_spill->vcc_save_sgpr}
+             : std::nullopt;
+}
+
+[[nodiscard]] std::optional<uint16_t> test_sc_vcc_reservoir_vgpr(const ConSanPatchInfo &patch) {
+  return patch.sc_scalar_vcc_spill
+             ? std::optional<uint16_t>{patch.sc_scalar_vcc_spill->reservoir_vgpr}
+             : std::nullopt;
+}
+
+[[nodiscard]] uint16_t test_sc_vcc_reservoir_count(const ConSanPatchInfo &patch) {
+  return patch.sc_scalar_vcc_spill ? patch.sc_scalar_vcc_spill->reservoir_vgpr_count() : 0u;
+}
+
+TEST(ConSan, SuperColliderScalarVccSpillOwnsReservoirStrategy) {
+  ConSanSuperColliderScalarVccSpill spill{
+      .vcc_save_sgpr = 10u,
+      .reservoir_vgpr = 20u,
+      .reservoir = ConSanSuperColliderScalarVccReservoir::PackedLanes,
+  };
+  EXPECT_TRUE(spill.is_well_formed());
+  EXPECT_EQ(spill.reservoir_vgpr_count(), 1u);
+  spill.reservoir = ConSanSuperColliderScalarVccReservoir::PrivateSpill;
+  EXPECT_TRUE(spill.is_well_formed());
+  EXPECT_EQ(spill.reservoir_vgpr_count(), 2u);
+  spill.reservoir = ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap;
+  EXPECT_TRUE(spill.is_well_formed());
+  EXPECT_EQ(spill.reservoir_vgpr_count(), 4u);
+  spill.reservoir_vgpr = 253u;
+  EXPECT_FALSE(spill.is_well_formed());
+  spill.reservoir = static_cast<ConSanSuperColliderScalarVccReservoir>(3u);
+  EXPECT_FALSE(spill.is_well_formed());
+}
+
 [[nodiscard]] std::vector<uint8_t>
 make_rdna4_two_kernel_code_object(std::span<const uint32_t> first_kernel_words,
                                   std::span<const uint32_t> second_kernel_words,
@@ -1671,9 +1707,9 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWav
     ASSERT_NE(patch, result.patches.end());
     ASSERT_TRUE(patch->scratch_vgpr);
     EXPECT_EQ(*patch->scratch_vgpr, 3u);
-    ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
-    EXPECT_EQ(*patch->scalar_vcc_spill_vgpr, 4u);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count, 1u);
+    ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
+    EXPECT_EQ(*test_sc_vcc_reservoir_vgpr(*patch), 4u);
+    EXPECT_EQ(test_sc_vcc_reservoir_count(*patch), 1u);
     ASSERT_GE(patch->required_sgpr_count, 2u);
     EXPECT_LE(patch->required_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
     const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
@@ -1805,9 +1841,9 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
         result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
     EXPECT_EQ(patch->scratch_vgpr, 3u);
-    EXPECT_EQ(patch->scalar_vcc_spill_sgpr, 2u);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr, 4u);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count, 2u);
+    EXPECT_EQ(test_sc_vcc_save_sgpr(*patch), 2u);
+    EXPECT_EQ(test_sc_vcc_reservoir_vgpr(*patch), 4u);
+    EXPECT_EQ(test_sc_vcc_reservoir_count(*patch), 2u);
     EXPECT_EQ(patch->spilled_vgpr_count, 3u);
     EXPECT_EQ(patch->required_private_segment_size, 12u);
     EXPECT_EQ(patch->trampoline_offset, original_text_size);
@@ -1877,21 +1913,21 @@ TEST(ConSan, Rdna4FullRegisterFlatDynamicStackSpillBorrowsAllocatedScalarState) 
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->scratch_vgpr);
-  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
-  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
-  EXPECT_EQ(*patch->scalar_vcc_spill_sgpr, 2u);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+  ASSERT_TRUE(test_sc_vcc_save_sgpr(*patch));
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
+  EXPECT_EQ(*test_sc_vcc_save_sgpr(*patch), 2u);
+  EXPECT_EQ(test_sc_vcc_reservoir_count(*patch),
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
   EXPECT_GT(patch->spilled_vgpr_count, 0u);
   EXPECT_GT(patch->dynamic_private_segment_addend, 0u);
-  EXPECT_LT(static_cast<uint32_t>(*patch->scalar_vcc_spill_sgpr) + 1u,
+  EXPECT_LT(static_cast<uint32_t>(*test_sc_vcc_save_sgpr(*patch)) + 1u,
             REGISTER_SET_ALLOCATABLE_SGPRS);
-  EXPECT_TRUE(static_cast<uint32_t>(*patch->scalar_vcc_spill_sgpr) + 1u < kDynamicStackTopSgpr ||
-              *patch->scalar_vcc_spill_sgpr > kDynamicStackTopSgpr + 1u);
+  EXPECT_TRUE(static_cast<uint32_t>(*test_sc_vcc_save_sgpr(*patch)) + 1u < kDynamicStackTopSgpr ||
+              *test_sc_vcc_save_sgpr(*patch) > kDynamicStackTopSgpr + 1u);
 
   const auto expected_spill = build_dynamic_stack_borrowed_sgpr_spill_sequence(
-      *patch->scratch_vgpr, patch->spilled_vgpr_count, *patch->scalar_vcc_spill_sgpr,
-      *patch->scalar_vcc_spill_vgpr, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
+      *patch->scratch_vgpr, patch->spilled_vgpr_count, *test_sc_vcc_save_sgpr(*patch),
+      *test_sc_vcc_reservoir_vgpr(*patch), /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(expected_spill);
   EXPECT_EQ(patch->required_private_segment_size, expected_spill->total_private_bytes);
   EXPECT_EQ(patch->dynamic_private_segment_addend, expected_spill->dynamic_frame_bytes);
@@ -1920,9 +1956,9 @@ TEST(ConSan, Rdna4FullVgprFlatDynamicStackSpillPreservesDeadScalarState) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->scratch_vgpr);
-  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
-  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+  ASSERT_TRUE(test_sc_vcc_save_sgpr(*patch));
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
+  EXPECT_EQ(test_sc_vcc_reservoir_count(*patch),
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
   EXPECT_GT(patch->spilled_vgpr_count, 0u);
   EXPECT_GT(patch->dynamic_private_segment_addend, 0u);
@@ -1963,9 +1999,9 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWave
         result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
     EXPECT_EQ(patch->scratch_vgpr, 3u);
-    EXPECT_EQ(patch->scalar_vcc_spill_sgpr, 2u);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr, 4u);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+    EXPECT_EQ(test_sc_vcc_save_sgpr(*patch), 2u);
+    EXPECT_EQ(test_sc_vcc_reservoir_vgpr(*patch), 4u);
+    EXPECT_EQ(test_sc_vcc_reservoir_count(*patch),
               DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
     EXPECT_EQ(patch->spilled_vgpr_count, 5u);
     EXPECT_EQ(patch->required_private_segment_size, 20u);
@@ -2112,9 +2148,9 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::LocalCaveFlatLoadCheckTrap, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
-    ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
-    EXPECT_EQ(*patch->scalar_vcc_spill_vgpr, load_case.scalar_spill_vgpr);
-    EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count, 1u);
+    ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
+    EXPECT_EQ(*test_sc_vcc_reservoir_vgpr(*patch), load_case.scalar_spill_vgpr);
+    EXPECT_EQ(test_sc_vcc_reservoir_count(*patch), 1u);
     const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
@@ -2275,7 +2311,7 @@ TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveFlatStoreCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
@@ -2337,7 +2373,7 @@ TEST(ConSan, Gfx1250SharedFlatDeadVccSaveSatisfiesEveryOwnerContinuation) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
-  EXPECT_FALSE(patch->scalar_vcc_spill_sgpr);
+  EXPECT_FALSE(test_sc_vcc_save_sgpr(*patch));
   EXPECT_EQ(patch->required_sgpr_count, 6u);
 }
 
@@ -2387,8 +2423,8 @@ TEST(ConSan, Gfx1250SharedFlatRegisterSpillUsesOneLayoutForEveryOwner) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->scratch_vgpr, 3u);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr, 4u);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count, 2u);
+  EXPECT_EQ(test_sc_vcc_reservoir_vgpr(*patch), 4u);
+  EXPECT_EQ(test_sc_vcc_reservoir_count(*patch), 2u);
   EXPECT_EQ(patch->spilled_vgpr_count, 3u);
   EXPECT_EQ(patch->required_private_segment_size, 44u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
@@ -2453,8 +2489,8 @@ TEST(ConSan, Gfx1250SharedDynamicStackFlatSpillUsesOneRuntimeFrameRecipe) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->scratch_vgpr, 3u);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr, 4u);
-  EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count,
+  EXPECT_EQ(test_sc_vcc_reservoir_vgpr(*patch), 4u);
+  EXPECT_EQ(test_sc_vcc_reservoir_count(*patch),
             DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount);
   EXPECT_EQ(patch->spilled_vgpr_count, 5u);
   EXPECT_EQ(patch->required_private_segment_size, 52u);
@@ -3387,7 +3423,7 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches) << "\n"
                                          << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
 
@@ -6206,18 +6242,20 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(patch.scratch_vgpr, 3u);
   EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
-  ASSERT_TRUE(patch.scalar_vcc_spill_sgpr);
-  ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
-  EXPECT_NE(*patch.scalar_vcc_spill_sgpr, options.delay_var_ssrc);
-  EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*patch.scalar_vcc_spill_sgpr + 1u));
+  ASSERT_TRUE(test_sc_vcc_save_sgpr(patch));
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(patch));
+  EXPECT_NE(*test_sc_vcc_save_sgpr(patch), options.delay_var_ssrc);
+  EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*test_sc_vcc_save_sgpr(patch) + 1u));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto scalar_save = instrumentation::build_v_writelane_b32(
-      *patch.scalar_vcc_spill_vgpr, *patch.scalar_vcc_spill_sgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5);
+      *test_sc_vcc_reservoir_vgpr(patch), *test_sc_vcc_save_sgpr(patch), 0u,
+      ROCJITSU_CODE_ARCH_CDNA5);
   const auto scalar_restore = instrumentation::build_v_readlane_b32(
-      *patch.scalar_vcc_spill_sgpr, *patch.scalar_vcc_spill_vgpr, 0u, ROCJITSU_CODE_ARCH_CDNA5);
+      *test_sc_vcc_save_sgpr(patch), *test_sc_vcc_reservoir_vgpr(patch), 0u,
+      ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(scalar_save);
   ASSERT_TRUE(scalar_restore);
   const auto text = patched.text_sections().front();
@@ -6225,6 +6263,16 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   std::memcpy(body.data(), text->data() + patch.trampoline_offset, patch.trampoline_size);
   EXPECT_TRUE(contains_subsequence(body, *scalar_save));
   EXPECT_TRUE(contains_subsequence(body, *scalar_restore));
+
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
+  ConSanTransformArtifacts corrupted = result;
+  ASSERT_TRUE(corrupted.patches.front().sc_scalar_vcc_spill);
+  corrupted.patches.front().sc_scalar_vcc_spill->reservoir =
+      static_cast<ConSanSuperColliderScalarVccReservoir>(3u);
+  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("invalid SuperCollider scalar-VCC spill effect") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
 }
 
 TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
@@ -6256,18 +6304,20 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(patch.scratch_vgpr, 3u);
   EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
-  ASSERT_TRUE(patch.scalar_vcc_spill_sgpr);
-  ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
-  EXPECT_NE(*patch.scalar_vcc_spill_sgpr, options.delay_var_ssrc);
-  EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*patch.scalar_vcc_spill_sgpr + 1u));
+  ASSERT_TRUE(test_sc_vcc_save_sgpr(patch));
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(patch));
+  EXPECT_NE(*test_sc_vcc_save_sgpr(patch), options.delay_var_ssrc);
+  EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*test_sc_vcc_save_sgpr(patch) + 1u));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto scalar_save = instrumentation::build_v_writelane_b32(
-      *patch.scalar_vcc_spill_vgpr, *patch.scalar_vcc_spill_sgpr, 0u, ROCJITSU_CODE_ARCH_RDNA4);
+      *test_sc_vcc_reservoir_vgpr(patch), *test_sc_vcc_save_sgpr(patch), 0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
   const auto scalar_restore = instrumentation::build_v_readlane_b32(
-      *patch.scalar_vcc_spill_sgpr, *patch.scalar_vcc_spill_vgpr, 0u, ROCJITSU_CODE_ARCH_RDNA4);
+      *test_sc_vcc_save_sgpr(patch), *test_sc_vcc_reservoir_vgpr(patch), 0u,
+      ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(scalar_save);
   ASSERT_TRUE(scalar_restore);
   const auto text = patched.text_sections().front();
@@ -6298,16 +6348,16 @@ TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
-  EXPECT_EQ(patch.scalar_vcc_spill_sgpr, 0u);
-  ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
+  EXPECT_EQ(test_sc_vcc_save_sgpr(patch), 0u);
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(patch));
   EXPECT_EQ(patch.required_sgpr_count, 1u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto scalar_save = instrumentation::build_v_writelane_b32(
-      *patch.scalar_vcc_spill_vgpr, 0u, /*lane=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
+      *test_sc_vcc_reservoir_vgpr(patch), 0u, /*lane=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto scalar_restore = instrumentation::build_v_readlane_b32(
-      0u, *patch.scalar_vcc_spill_vgpr, /*lane=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
+      0u, *test_sc_vcc_reservoir_vgpr(patch), /*lane=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(scalar_save && scalar_restore);
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
@@ -6364,9 +6414,9 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
            info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
   });
   ASSERT_NE(patch, result.patches.end());
-  ASSERT_TRUE(patch->scalar_vcc_spill_sgpr);
-  ASSERT_TRUE(patch->scalar_vcc_spill_vgpr);
-  EXPECT_NE(*patch->scalar_vcc_spill_sgpr, options.delay_var_ssrc);
+  ASSERT_TRUE(test_sc_vcc_save_sgpr(*patch));
+  ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(*patch));
+  EXPECT_NE(*test_sc_vcc_save_sgpr(*patch), options.delay_var_ssrc);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
@@ -6378,10 +6428,10 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto scalar_save = instrumentation::build_v_writelane_b32(
-      *patch->scalar_vcc_spill_vgpr, *patch->scalar_vcc_spill_sgpr, /*lane=*/0u,
+      *test_sc_vcc_reservoir_vgpr(*patch), *test_sc_vcc_save_sgpr(*patch), /*lane=*/0u,
       ROCJITSU_CODE_ARCH_CDNA5);
   const auto scalar_restore = instrumentation::build_v_readlane_b32(
-      *patch->scalar_vcc_spill_sgpr, *patch->scalar_vcc_spill_vgpr, /*lane=*/0u,
+      *test_sc_vcc_save_sgpr(*patch), *test_sc_vcc_reservoir_vgpr(*patch), /*lane=*/0u,
       ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(scalar_save && scalar_restore);
   const std::vector<uint32_t> body =
@@ -6447,7 +6497,7 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
            info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
   });
   ASSERT_NE(patch, result.patches.end());
-  EXPECT_FALSE(patch->scalar_vcc_spill_sgpr);
+  EXPECT_FALSE(test_sc_vcc_save_sgpr(*patch));
   EXPECT_GT(patch->required_sgpr_count, 8u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
 

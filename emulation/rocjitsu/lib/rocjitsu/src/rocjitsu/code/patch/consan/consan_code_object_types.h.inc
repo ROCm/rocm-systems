@@ -590,22 +590,12 @@ struct ConSanPatchMutationProof {
 /// byte geometry and validation identities.
 struct ConSanPatchAbiEffects {
   std::optional<uint16_t> scratch_vgpr;
-  /// Ordinary scalar borrowed by a spill-backed VCC save. The scalar is
-  /// preserved through scalar_vcc_spill_vgpr and is never a fresh allocation.
-  std::optional<uint16_t> scalar_vcc_spill_sgpr;
-  /// First VGPR used as a reservoir for a borrowed live scalar VCC-save pair.
-  /// A non-spill patch uses fixed lanes in one VGPR. A private-spill patch uses
-  /// two consecutive active-lane reservoirs so inactive lanes remain untouched.
-  /// A dynamic-stack bootstrap uses two additional reservoirs for the incoming
-  /// frame base and SCC.
-  std::optional<uint16_t> scalar_vcc_spill_vgpr;
-  /// Number of consecutive scalar-reservoir VGPRs beginning at
-  /// scalar_vcc_spill_vgpr: one fixed-lane reservoir, two private-spill
-  /// reservoirs, or four dynamic-stack bootstrap reservoirs. Zero means the
-  /// scalar-pressure fallback was unused.
-  uint16_t scalar_vcc_spill_vgpr_count = 0;
+  /// SuperCollider-only preservation of a borrowed live scalar VCC-save
+  /// range. One optional owns the scalar source, vector reservoir, and exact
+  /// preservation strategy; other engines leave it absent.
+  std::optional<ConSanSuperColliderScalarVccSpill> sc_scalar_vcc_spill;
   /// Complete vector-register state initialized or consumed by this patch.
-  /// The typed lifetime distinguishes persistent state from entry-only
+  /// The typed lifetime distinguishes persistent state from transient
   /// owner/epoch scratch and prevents an incomplete pair or contradictory
   /// owner-local/ABI flags.
   std::optional<ConSanMoiVgprStateEffect> moi_vgpr_state;

@@ -35,8 +35,4 @@ record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
 
 [[nodiscard]] bool moi_has_runtime_hardware_dispatch_id(const ConSanMoiOperatingPoint &point);
 
-void note_moi_persistent_vgpr_state(ConSanPatchAbiEffects &effects,
-                                    const ConSanMoiOperatingPoint &point,
-                                    const ConSanMoiOperatingPoint &allocation);
-
 } // namespace rocjitsu::consan_moi_detail

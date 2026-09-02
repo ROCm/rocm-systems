@@ -3790,6 +3790,10 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
     if (patch.moi_vgpr_state && !patch.moi_vgpr_state->is_well_formed()) {
       errors.emplace_back("ConSan final validation found an invalid MOI VGPR-state effect");
     }
+    if (patch.sc_scalar_vcc_spill && !patch.sc_scalar_vcc_spill->is_well_formed()) {
+      errors.emplace_back(
+          "ConSan final validation found an invalid SuperCollider scalar-VCC spill effect");
+    }
     if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue && !patch.moi_vgpr_state) {
       errors.emplace_back("ConSan final validation found an owner/epoch prologue without its "
                           "VGPR-state effect");

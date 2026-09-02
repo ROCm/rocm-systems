@@ -1254,6 +1254,47 @@ _consan_assert_no_match(
     "MOI VGPR-state effects must remain independent of target, mode, and report policy"
 )
 
+# SuperCollider scalar pressure has one mode-local preservation effect. The
+# borrowed scalar source, vector reservoir, and strategy must not return as
+# three independently mutable candidate, patch, or diagnostic fields.
+file(READ
+    "${_consan_dir}/consan_supercollider_scalar_vcc_spill.h.inc"
+    _sc_scalar_vcc_spill_contract
+)
+file(READ
+    "${_consan_dir}/consan_transform_diagnostics.h"
+    _transform_diagnostic_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_supercollider_scalar_vcc_spill[.]h[.]inc" OR
+   NOT _sc_scalar_vcc_spill_contract MATCHES
+       "struct ConSanSuperColliderScalarVccSpill" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanSuperColliderScalarVccSpill>[ \\t]+sc_scalar_vcc_spill" OR
+   NOT _transform_diagnostic_contract MATCHES
+       "std::optional<ConSanSuperColliderScalarVccSpill>[ \\t]+sc_scalar_vcc_spill")
+    message(FATAL_ERROR
+        "SuperCollider scalar pressure lost its typed spill effect"
+    )
+endif()
+foreach(_supercollider_scalar_spill_owner IN ITEMS
+    consan_code_object_types.h.inc
+    consan_transform_diagnostics.h
+    consan_supercollider_flat.inc
+    consan_supercollider_lds.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_supercollider_scalar_spill_owner}"
+        "scalar_vcc_spill_(sgpr|vgpr|vgpr_count)"
+        "SuperCollider scalar-VCC spill state must retain its typed effect"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_scalar_vcc_spill.h.inc"
+    "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|consan_moi_"
+    "SuperCollider scalar-VCC spill effects must remain target independent"
+)
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(

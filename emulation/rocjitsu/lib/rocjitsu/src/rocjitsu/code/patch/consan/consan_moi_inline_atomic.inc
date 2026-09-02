@@ -107,7 +107,14 @@
       .private_state = std::move(private_state),
       .patch_abi = {},
   };
-  note_moi_persistent_vgpr_state(plan.patch_abi, point, allocation);
+  plan.patch_abi.moi_vgpr_state = ConSanMoiVgprStateEffect{
+      .owner_epoch = *owner_epoch_vgprs.operator->(),
+      .workgroup_key = workgroup_key_registers.cached_key_vgpr,
+      .record_replay_workgroup = point.moi_record_replay_workgroup_vgprs,
+      .owner_epoch_lifetime = consan_moi_owner_epoch_vgpr_lifetime(
+          private_layout || point.moi_persistent_sgprs.complete(),
+          !allocation.owner_persistent_vgprs.empty()),
+  };
   plan.patch_abi.persistent_sgpr_state = point.moi_persistent_sgprs;
   return plan;
 }

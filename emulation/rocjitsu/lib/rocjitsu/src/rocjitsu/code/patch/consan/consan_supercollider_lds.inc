@@ -191,7 +191,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<size_t> dense_call_group_index;
     std::optional<uint16_t> dense_call_return_sgpr;
     std::optional<uint16_t> dense_explicit_key;
-    std::optional<uint16_t> scalar_vcc_spill_vgpr;
+    std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
     bool requires_branch_only_route = false;
     std::optional<BranchOnlyRelayRoute> branch_only_route = std::nullopt;
   };
@@ -920,13 +920,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                              min_preferred_vcc_save_sgpr, dead_vcc_selection_limit,
                                              target, options)
               : std::nullopt;
-      std::optional<uint16_t> scalar_vcc_spill_sgpr;
+      bool spill_vcc_save_to_vgpr = false;
       if (!vcc_save && target.encoding_family == ConSanEncodingFamily::Gfx12 &&
           allocated_sgpr_count) {
-        scalar_vcc_spill_sgpr = choose_sc_borrowed_scalar_sgpr(*allocated_sgpr_count, options);
-        vcc_save = scalar_vcc_spill_sgpr;
+        vcc_save = choose_sc_borrowed_scalar_sgpr(*allocated_sgpr_count, options);
+        spill_vcc_save_to_vgpr = vcc_save.has_value();
       }
-      const bool spill_vcc_save_to_vgpr = scalar_vcc_spill_sgpr.has_value();
       if (!vcc_save) {
         ++missing_vcc_save_site_count;
         continue;
@@ -1142,10 +1141,14 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       std::optional<uint16_t> descriptor_growth;
       if (max_auto_scratch_vgpr && *required_allocation > *max_auto_scratch_vgpr)
         descriptor_growth = *required_allocation;
-      const std::optional<uint16_t> scalar_vcc_spill_vgpr =
-          spill_vcc_save_to_vgpr
-              ? std::optional<uint16_t>(static_cast<uint16_t>(scratch_vgpr + probe_scratch_vgprs))
-              : std::nullopt;
+      std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
+      if (spill_vcc_save_to_vgpr) {
+        scalar_vcc_spill = ConSanSuperColliderScalarVccSpill{
+            .vcc_save_sgpr = *vcc_save,
+            .reservoir_vgpr = static_cast<uint16_t>(scratch_vgpr + probe_scratch_vgprs),
+            .reservoir = ConSanSuperColliderScalarVccReservoir::PackedLanes,
+        };
+      }
       ++scratchable_candidate_count;
       uint32_t observed_padding = count_nop_padding(
           original_bytes, site.file_offset + site.instruction_size, padding_words, arch);
@@ -1189,7 +1192,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             std::nullopt,
                                             std::nullopt,
                                             std::nullopt};
-            candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
+            candidate.scalar_vcc_spill = scalar_vcc_spill;
             appended_cave_candidates.push_back(candidate);
           }
         }
@@ -1218,7 +1221,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           std::nullopt,
                                           std::nullopt,
                                           std::nullopt};
-          candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
+          candidate.scalar_vcc_spill = scalar_vcc_spill;
           local_cave_candidates.push_back(candidate);
         }
         if (appended_cave_offset != 0 && !spill_vcc_save_to_vgpr) {
@@ -1275,7 +1278,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             std::nullopt,
                                             std::nullopt,
                                             std::nullopt,
-                                            scalar_vcc_spill_vgpr};
+                                            scalar_vcc_spill};
             candidate.requires_branch_only_route = true;
             branch_only_candidates.push_back(std::move(candidate));
           } else {
@@ -1359,7 +1362,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           std::nullopt,
                                           std::nullopt,
                                           std::nullopt,
-                                          scalar_vcc_spill_vgpr};
+                                          scalar_vcc_spill};
           candidate.requires_branch_only_route = true;
           branch_only_candidates.push_back(std::move(candidate));
         }
@@ -1388,7 +1391,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                       std::nullopt,
                                       std::nullopt,
                                       std::nullopt};
-      candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
+      candidate.scalar_vcc_spill = scalar_vcc_spill;
       inline_candidates.push_back(candidate);
     }
   }
@@ -3225,11 +3228,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto spill = selected_spills.sequences.find(&site);
     std::optional<std::array<uint32_t, 2>> scalar_vcc_save_words;
     std::optional<std::array<uint32_t, 2>> scalar_vcc_restore_words;
-    if (candidate.scalar_vcc_spill_vgpr) {
+    if (candidate.scalar_vcc_spill) {
       scalar_vcc_save_words = instrumentation::build_v_writelane_b32(
-          *candidate.scalar_vcc_spill_vgpr, candidate.vcc_save_sgpr, 0u, arch);
+          candidate.scalar_vcc_spill->reservoir_vgpr, candidate.scalar_vcc_spill->vcc_save_sgpr, 0u,
+          arch);
       scalar_vcc_restore_words = instrumentation::build_v_readlane_b32(
-          candidate.vcc_save_sgpr, *candidate.scalar_vcc_spill_vgpr, 0u, arch);
+          candidate.scalar_vcc_spill->vcc_save_sgpr, candidate.scalar_vcc_spill->reservoir_vgpr, 0u,
+          arch);
       if (!scalar_vcc_save_words || !scalar_vcc_restore_words) {
         result.errors.emplace_back(
             "ConSan LDS check/trap could not encode its scalar VCC-save spill");
@@ -3361,11 +3366,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.anchor_offset = site.physical_id.original_text_offset;
     planned.info.branch_relay_offsets = planned.trailing_relay_offsets;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
-    planned.info.scalar_vcc_spill_sgpr = candidate.scalar_vcc_spill_vgpr
-                                             ? std::optional<uint16_t>(candidate.vcc_save_sgpr)
-                                             : std::nullopt;
-    planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
-    planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr ? 1u : 0u;
+    planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.required_sgpr_count =
         static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(target));
     if (const auto plan = private_spill_plans.find(&site);

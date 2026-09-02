@@ -2471,11 +2471,9 @@ void try_apply_owner_epoch_prologue_patch(
                 .owner_epoch = {*owner_epoch_vgprs.owner, *owner_epoch_vgprs.epoch},
                 .workgroup_key = kernel_point.moi_workgroup_key_vgpr,
                 .record_replay_workgroup = kernel_point.moi_record_replay_workgroup_vgprs,
-                .owner_epoch_lifetime = kernel_point.moi_persistent_sgprs.complete()
-                                            ? ConSanMoiOwnerEpochVgprLifetime::EntryLocal
-                                        : result.moi_operating_point.owner_persistent_vgprs.empty()
-                                            ? ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent
-                                            : ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent,
+                .owner_epoch_lifetime = consan_moi_owner_epoch_vgpr_lifetime(
+                    kernel_point.moi_persistent_sgprs.complete(),
+                    !result.moi_operating_point.owner_persistent_vgprs.empty()),
             },
         .owner_shift_bits = owner_shift_bits,
         .owner_source = options.moi_owner_source,

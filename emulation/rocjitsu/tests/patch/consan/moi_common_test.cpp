@@ -722,22 +722,16 @@ TEST(ConSanMoi, VgprStateEffectOwnsPairLifetimeAndDistinctRanges) {
       .owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent,
   };
   EXPECT_TRUE(valid.is_well_formed());
-  EXPECT_TRUE(valid.owner_epoch_is_abi());
-  EXPECT_TRUE(valid.owner_local());
   EXPECT_EQ(valid.required_vgpr_count(), 24u);
 
   ConSanMoiVgprStateEffect code_object_persistent = valid;
   code_object_persistent.owner_epoch_lifetime =
       ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent;
   EXPECT_TRUE(code_object_persistent.is_well_formed());
-  EXPECT_TRUE(code_object_persistent.owner_epoch_is_abi());
-  EXPECT_FALSE(code_object_persistent.owner_local());
 
-  ConSanMoiVgprStateEffect entry_local = valid;
-  entry_local.owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::EntryLocal;
-  EXPECT_TRUE(entry_local.is_well_formed());
-  EXPECT_FALSE(entry_local.owner_epoch_is_abi());
-  EXPECT_FALSE(entry_local.owner_local());
+  ConSanMoiVgprStateEffect transient = valid;
+  transient.owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::Transient;
+  EXPECT_TRUE(transient.is_well_formed());
 
   ConSanMoiVgprStateEffect malformed = valid;
   malformed.workgroup_key = valid.owner_epoch.epoch;

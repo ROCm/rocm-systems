@@ -4329,6 +4329,12 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
   ASSERT_GE(acquire_plan->scratch_vgpr_count, 4u);
   const uint16_t materialized_epoch =
       static_cast<uint16_t>(*acquire_patch->scratch_vgpr + acquire_plan->scratch_vgpr_count - 3u);
+  ASSERT_TRUE(acquire_patch->moi_vgpr_state);
+  EXPECT_EQ(acquire_patch->moi_vgpr_state->owner_epoch.owner,
+            static_cast<uint16_t>(materialized_epoch - 1u));
+  EXPECT_EQ(acquire_patch->moi_vgpr_state->owner_epoch.epoch, materialized_epoch);
+  EXPECT_EQ(acquire_patch->moi_vgpr_state->owner_epoch_lifetime,
+            ConSanMoiOwnerEpochVgprLifetime::Transient);
   EXPECT_EQ(test_moi_persistent_sgpr_state(result).owner(), options.moi_persistent_sgprs.owner());
   EXPECT_EQ(test_moi_persistent_sgpr_state(result).epoch(), options.moi_persistent_sgprs.epoch());
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty())

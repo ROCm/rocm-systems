@@ -286,8 +286,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint32_t displaced_original_size = 0;
     std::vector<uint32_t> displaced_tail_words;
     uint16_t vcc_save_sgpr = 0;
-    std::optional<uint16_t> scalar_vcc_spill_vgpr = std::nullopt;
-    uint16_t scalar_vcc_spill_vgpr_count = 0;
+    std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
   };
@@ -424,7 +423,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                                        scratch_vgprs);
     std::optional<VgprSpillSequence> vgpr_spill;
     std::optional<DynamicStackBorrowedSgprSpillSequence> dynamic_stack_spill;
-    uint16_t scalar_vcc_spill_vgpr_count = spill_vcc_save_pair_to_vgprs ? 1u : 0u;
     if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
       if (owner_stack_kind == FlatOwnerStackKind::Mixed) {
         ++mixed_stack_owner_spill_rejection_count;
@@ -455,7 +453,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         if (vgpr_spill || dynamic_stack_spill) {
           if (dynamic_stack_spill)
             spill_vcc_save_pair_to_vgprs = true;
-          scalar_vcc_spill_vgpr_count = scalar_reservoir_count;
           if (dynamic_stack_spill) {
             requested_words += 1u + dynamic_stack_spill->save_words.size() +
                                dynamic_stack_spill->restore_words.size();
@@ -486,14 +483,20 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
     }
     const uint32_t padding_words = static_cast<uint32_t>(requested_words - 3u);
-    const std::optional<uint16_t> scalar_vcc_spill_vgpr =
-        spill_vcc_save_pair_to_vgprs ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                           *scratch + instrumentation_scratch_vgprs))
-                                     : std::nullopt;
+    const std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill =
+        spill_vcc_save_pair_to_vgprs
+            ? std::optional<ConSanSuperColliderScalarVccSpill>{ConSanSuperColliderScalarVccSpill{
+                  .vcc_save_sgpr = *vcc_save,
+                  .reservoir_vgpr = static_cast<uint16_t>(*scratch + instrumentation_scratch_vgprs),
+                  .reservoir = dynamic_stack_spill
+                                   ? ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap
+                               : vgpr_spill ? ConSanSuperColliderScalarVccReservoir::PrivateSpill
+                                            : ConSanSuperColliderScalarVccReservoir::PackedLanes,
+              }}
+            : std::nullopt;
     const auto finish_candidate = [&](FlatCheckTrapCandidate &candidate) {
       candidate.vcc_save_sgpr = *vcc_save;
-      candidate.scalar_vcc_spill_vgpr = scalar_vcc_spill_vgpr;
-      candidate.scalar_vcc_spill_vgpr_count = scalar_vcc_spill_vgpr_count;
+      candidate.scalar_vcc_spill = scalar_vcc_spill;
       candidate.vgpr_spill = vgpr_spill;
       candidate.dynamic_stack_spill = dynamic_stack_spill;
     };
@@ -540,7 +543,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                          owner_descriptor_file_offsets));
       finish_candidate(local_cave_candidates.back());
     }
-    if (!scalar_vcc_spill_vgpr && appended_cave_offset != 0 && result.replacement.empty() &&
+    if (!scalar_vcc_spill && appended_cave_offset != 0 && result.replacement.empty() &&
         !owner_descriptor_file_offsets.empty()) {
       auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
           site_inst, owner_liveness, min_fresh_sgpr, options);
@@ -1208,11 +1211,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.physical_id.original_text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
-    planned.info.scalar_vcc_spill_sgpr = candidate.scalar_vcc_spill_vgpr
-                                             ? std::optional<uint16_t>(candidate.vcc_save_sgpr)
-                                             : std::nullopt;
-    planned.info.scalar_vcc_spill_vgpr = candidate.scalar_vcc_spill_vgpr;
-    planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr_count;
+    planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
     planned.info.branch_only_continuation = candidate.branch_only_continuation;
     if (candidate.branch_only_route) {
@@ -1407,9 +1406,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (candidate.vgpr_spill || candidate.dynamic_stack_spill) {
       if (candidate.dynamic_stack_spill) {
-        if (!candidate.scalar_vcc_spill_vgpr ||
-            candidate.scalar_vcc_spill_vgpr_count !=
-                DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount) {
+        if (!candidate.scalar_vcc_spill ||
+            candidate.scalar_vcc_spill->reservoir !=
+                ConSanSuperColliderScalarVccReservoir::DynamicStackBootstrap) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof lost its dynamic scalar spill window");
           return;
@@ -1439,9 +1438,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                        candidate.dynamic_stack_spill->restore_words.end());
         planned.words = std::move(wrapped);
       } else {
-        const bool spills_scalar_pair = candidate.scalar_vcc_spill_vgpr.has_value();
-        if ((spills_scalar_pair && candidate.scalar_vcc_spill_vgpr_count != 2u) ||
-            (!spills_scalar_pair && candidate.scalar_vcc_spill_vgpr_count != 0u)) {
+        const bool spills_scalar_pair = candidate.scalar_vcc_spill.has_value();
+        if (spills_scalar_pair && candidate.scalar_vcc_spill->reservoir !=
+                                      ConSanSuperColliderScalarVccReservoir::PrivateSpill) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof has an invalid scalar spill window");
           return;
@@ -1450,12 +1449,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         std::array<uint32_t, 2> restore_scalar_pair{};
         if (spills_scalar_pair) {
           for (uint16_t i = 0; i < 2u; ++i) {
-            save_scalar_pair[i] =
-                build_v_mov_b32_e32(static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i),
-                                    static_cast<uint16_t>(candidate.vcc_save_sgpr + i), arch);
+            save_scalar_pair[i] = build_v_mov_b32_e32(
+                static_cast<uint16_t>(candidate.scalar_vcc_spill->reservoir_vgpr + i),
+                static_cast<uint16_t>(candidate.scalar_vcc_spill->vcc_save_sgpr + i), arch);
             const auto restore = instrumentation::build_v_readfirstlane_b32(
-                static_cast<uint16_t>(candidate.vcc_save_sgpr + i),
-                static_cast<uint16_t>(*candidate.scalar_vcc_spill_vgpr + i), arch);
+                static_cast<uint16_t>(candidate.scalar_vcc_spill->vcc_save_sgpr + i),
+                static_cast<uint16_t>(candidate.scalar_vcc_spill->reservoir_vgpr + i), arch);
             if (!restore) {
               result.errors.emplace_back(
                   "ConSan flat check/trap proof could not encode its active-lane scalar restore");
@@ -1495,8 +1494,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                        candidate.vgpr_spill->restore_words.end());
         planned.words = std::move(wrapped);
       }
-    } else if (candidate.scalar_vcc_spill_vgpr) {
-      if (candidate.scalar_vcc_spill_vgpr_count != 1u) {
+    } else if (candidate.scalar_vcc_spill) {
+      if (candidate.scalar_vcc_spill->reservoir !=
+          ConSanSuperColliderScalarVccReservoir::PackedLanes) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof has an invalid fixed-lane scalar spill window");
         return;
@@ -1505,11 +1505,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       std::array<uint32_t, 4> restore_scalar_pair{};
       for (uint16_t i = 0; i < 2u; ++i) {
         const auto save = instrumentation::build_v_writelane_b32(
-            *candidate.scalar_vcc_spill_vgpr, static_cast<uint16_t>(candidate.vcc_save_sgpr + i), i,
-            arch);
+            candidate.scalar_vcc_spill->reservoir_vgpr,
+            static_cast<uint16_t>(candidate.scalar_vcc_spill->vcc_save_sgpr + i), i, arch);
         const auto restore = instrumentation::build_v_readlane_b32(
-            static_cast<uint16_t>(candidate.vcc_save_sgpr + i), *candidate.scalar_vcc_spill_vgpr, i,
-            arch);
+            static_cast<uint16_t>(candidate.scalar_vcc_spill->vcc_save_sgpr + i),
+            candidate.scalar_vcc_spill->reservoir_vgpr, i, arch);
         if (!save || !restore) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode its scalar VCC-save spill");
