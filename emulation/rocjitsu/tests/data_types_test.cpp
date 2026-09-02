@@ -666,6 +666,33 @@ TEST(Bf16, RoundTrip) {
   EXPECT_TRUE(std::signbit(rt(-0.0f)));
 }
 
+TEST(Bf16, RoundModes) {
+  const auto convert = [](uint32_t bits, uint32_t round_mode) {
+    return util::f32_to_bf16_round(std::bit_cast<float>(bits), round_mode);
+  };
+
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    EXPECT_EQ(convert(0x3f800000u, mode), 0x3f80u); // Exact.
+    EXPECT_EQ(convert(0x7f800000u, mode), 0x7f80u); // Infinity.
+    EXPECT_EQ(convert(0x7f800001u, mode), 0x7f81u); // Preserve a low-payload NaN.
+  }
+
+  EXPECT_EQ(convert(0x3f808001u, 0), 0x3f81u);
+  EXPECT_EQ(convert(0x3f808001u, 1), 0x3f81u);
+  EXPECT_EQ(convert(0x3f808001u, 2), 0x3f80u);
+  EXPECT_EQ(convert(0x3f808001u, 3), 0x3f80u);
+
+  EXPECT_EQ(convert(0xbf808001u, 0), 0xbf81u);
+  EXPECT_EQ(convert(0xbf808001u, 1), 0xbf80u);
+  EXPECT_EQ(convert(0xbf808001u, 2), 0xbf81u);
+  EXPECT_EQ(convert(0xbf808001u, 3), 0xbf80u);
+
+  EXPECT_EQ(convert(0x7f7fffffu, 0), 0x7f80u);
+  EXPECT_EQ(convert(0x7f7fffffu, 1), 0x7f80u);
+  EXPECT_EQ(convert(0x7f7fffffu, 2), 0x7f7fu);
+  EXPECT_EQ(convert(0x7f7fffffu, 3), 0x7f7fu);
+}
+
 // ---- 6-bit pack/unpack ----
 
 TEST(Pack6Bit, RoundTrip) {
