@@ -159,7 +159,7 @@ function(rocprofiler_sdk_spm_disabled _VAR)
 endfunction()
 
 # Minimum amdgpu kernel module version for SPM (see source/docs/how-to/using-spm.rst).
-# Loaded from spm_runner_preflight.py so CMake and CI always share one constant.
+# Parsed from spm_runner_preflight.py so CMake and CI always share one constant.
 function(rocprofiler_sdk_get_spm_preflight_script OUT_VAR)
     set(_candidates "")
 
@@ -199,34 +199,17 @@ function(rocprofiler_sdk_load_spm_min_amdgpu_driver_version OUT_VAR)
             )
     endif()
 
-    find_package(Python3 QUIET COMPONENTS Interpreter)
-    if(NOT Python3_Interpreter_FOUND)
+    file(READ "${_preflight}" _preflight_py)
+    string(REGEX MATCH "SPM_MIN_AMDGPU_DRIVER_VERSION[ \t]*=[ \t]*\"([0-9.]+)\"" _match
+                 "${_preflight_py}")
+    if(NOT CMAKE_MATCH_1)
         message(
-            FATAL_ERROR
-                "Python3 interpreter required to load SPM min driver version from ${_preflight}"
-            )
-    endif()
-
-    get_filename_component(_preflight_dir "${_preflight}" DIRECTORY)
-    execute_process(
-        COMMAND
-            ${Python3_EXECUTABLE} -c
-            "import sys; sys.path.insert(0, sys.argv[1]); import spm_runner_preflight; print(spm_runner_preflight.SPM_MIN_AMDGPU_DRIVER_VERSION)"
-            "${_preflight_dir}"
-        OUTPUT_VARIABLE _version
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _ret
-        ERROR_VARIABLE _err)
-
-    if(NOT _ret EQUAL 0 OR _version STREQUAL "")
-        message(
-            FATAL_ERROR
-                "Failed to read SPM_MIN_AMDGPU_DRIVER_VERSION from ${_preflight}: ${_err}"
+            FATAL_ERROR "Failed to parse SPM_MIN_AMDGPU_DRIVER_VERSION from ${_preflight}"
             )
     endif()
 
     set(${OUT_VAR}
-        "${_version}"
+        "${CMAKE_MATCH_1}"
         PARENT_SCOPE)
 endfunction()
 

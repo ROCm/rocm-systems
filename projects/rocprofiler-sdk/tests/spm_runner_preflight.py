@@ -26,35 +26,36 @@
 # expected to satisfy these requirements; this script fails fast with a clear
 # message when it does not (see source/docs/how-to/using-spm.rst).
 
-from __future__ import annotations
-
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
-# Single source of truth for SPM CI driver gating. CMake reads this module at
-# configure time; TheRock CI runs this script from the installed tests tree.
+# Single source of truth for SPM CI driver gating. CMake parses this assignment;
+# TheRock CI runs this script from the installed tests tree.
 SPM_MIN_AMDGPU_DRIVER_VERSION = "6.19.14.31400000"
 
 AMDGPU_VERSION_PATH = Path("/sys/module/amdgpu/version")
 
 
-def parse_dot_version(version: str) -> tuple[int, ...]:
+def parse_dot_version(version):
+    # type: (str) -> Tuple[int, ...]
     return tuple(int(part) for part in version.strip().split("."))
 
 
-def read_amdgpu_driver_version() -> str | None:
+def read_amdgpu_driver_version():
+    # type: () -> Optional[str]
     if not AMDGPU_VERSION_PATH.exists():
         return None
     return AMDGPU_VERSION_PATH.read_text(encoding="utf-8").strip()
 
 
-def version_ge(version_a: str, version_b: str) -> bool:
+def version_ge(version_a, version_b):
+    # type: (str, str) -> bool
     return parse_dot_version(version_a) >= parse_dot_version(version_b)
 
 
-def check_spm_runner_requirements(
-    min_driver: str = SPM_MIN_AMDGPU_DRIVER_VERSION,
-) -> None:
+def check_spm_runner_requirements(min_driver=SPM_MIN_AMDGPU_DRIVER_VERSION):
+    # type: (str) -> None
     current = read_amdgpu_driver_version()
     if not current:
         raise SystemExit(
@@ -64,11 +65,12 @@ def check_spm_runner_requirements(
     if not version_ge(current, min_driver):
         raise SystemExit(
             "SPM runner preflight failed: "
-            f"amdgpu driver {current} < required {min_driver}."
+            "amdgpu driver {} < required {}.".format(current, min_driver)
         )
 
 
-def main() -> int:
+def main():
+    # type: () -> int
     check_spm_runner_requirements()
     return 0
 
