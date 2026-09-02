@@ -1267,132 +1267,102 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::optional<uint16_t> relative_cell_index_vgpr, uint32_t byte_count,
     uint32_t shadow_granule_bytes, uint16_t provenance_vgpr, uint16_t mask_vgpr, uint16_t high_vgpr,
     uint16_t temporary_vgpr) {
+  InstructionSequence sequence(words);
   if (byte_count == 0u ||
       (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes))
     return false;
 
   if (static_byte_offset != 0u) {
-    const auto effective_start = instrumentation::build_v_add_u32_literal(
-        mask_vgpr, provenance_vgpr, static_byte_offset & (shadow_granule_bytes - 1u),
-        base_offset_vgpr, arch);
-    if (!effective_start)
+    if (!sequence.emit(instrumentation::build_v_add_u32_literal(
+            mask_vgpr, provenance_vgpr, static_byte_offset & (shadow_granule_bytes - 1u),
+            base_offset_vgpr, arch)))
       return false;
-    words.insert(words.end(), effective_start->begin(), effective_start->end());
   } else {
     words.push_back(build_v_mov_b32_e32(mask_vgpr, vector_source_vgpr(base_offset_vgpr), arch));
   }
-  const auto start = instrumentation::build_v_and_b32_literal(mask_vgpr, shadow_granule_bytes - 1u,
-                                                              mask_vgpr, arch);
-  const auto access_end = instrumentation::build_v_add_u32_literal(high_vgpr, temporary_vgpr,
-                                                                   byte_count, mask_vgpr, arch);
-  if (!start || !access_end)
+  if (!sequence.emit_all(instrumentation::build_v_and_b32_literal(
+                             mask_vgpr, shadow_granule_bytes - 1u, mask_vgpr, arch),
+                         instrumentation::build_v_add_u32_literal(high_vgpr, temporary_vgpr,
+                                                                  byte_count, mask_vgpr, arch)))
     return false;
-  words.insert(words.end(), start->begin(), start->end());
-  words.insert(words.end(), access_end->begin(), access_end->end());
 
   if (relative_cell_index_vgpr) {
-    const auto cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
-        temporary_vgpr, provenance_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr, arch);
-    if (!cell_bytes)
+    if (!sequence.emit(instrumentation::build_v_mul_lo_u32_literal(
+            temporary_vgpr, provenance_vgpr, shadow_granule_bytes, *relative_cell_index_vgpr,
+            arch)))
       return false;
-    words.insert(words.end(), cell_bytes->begin(), cell_bytes->end());
     // The loop bound covers the worst runtime alignment. Clamp an iteration's
     // cell start to the access end before subtraction so favorable alignments
     // produce an empty mask instead of wrapping to a phantom full cell.
-    const auto clamped_cell_bytes = instrumentation::build_v_min_u32(
-        temporary_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
-    const auto negative_cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
-        temporary_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), temporary_vgpr,
-        arch);
-    if (!clamped_cell_bytes || !negative_cell_bytes)
+    if (!sequence.emit_all(instrumentation::build_v_min_u32(
+                               temporary_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch),
+                           instrumentation::build_v_mul_lo_u32_literal(
+                               temporary_vgpr, provenance_vgpr,
+                               std::numeric_limits<uint32_t>::max(), temporary_vgpr, arch)))
       return false;
-    words.push_back(*clamped_cell_bytes);
-    words.insert(words.end(), negative_cell_bytes->begin(), negative_cell_bytes->end());
-    const auto remaining = instrumentation::build_v_add_u32(
-        high_vgpr, vector_source_vgpr(temporary_vgpr), high_vgpr, arch);
-    const auto first_cell = instrumentation::build_v_min_u32_literal(
-        temporary_vgpr, 1u, *relative_cell_index_vgpr, arch);
-    const auto low_shift = instrumentation::build_v_lshlrev_b32(
-        temporary_vgpr, scalar_positive_inline_u32(1u), temporary_vgpr, arch);
-    if (!remaining || !first_cell || !low_shift)
+    if (!sequence.emit_all(
+            instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
+                                             high_vgpr, arch),
+            instrumentation::build_v_min_u32_literal(temporary_vgpr, 1u, *relative_cell_index_vgpr,
+                                                     arch),
+            instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(1u),
+                                                 temporary_vgpr, arch),
+            instrumentation::build_v_lshrrev_b32(temporary_vgpr, vector_source_vgpr(temporary_vgpr),
+                                                 mask_vgpr, arch)))
       return false;
-    words.insert(words.end(), remaining->begin(), remaining->end());
-    words.insert(words.end(), first_cell->begin(), first_cell->end());
-    words.push_back(*low_shift);
-    const auto low = instrumentation::build_v_lshrrev_b32(
-        temporary_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch);
-    if (!low)
-      return false;
-    words.push_back(*low);
   } else if (relative_cell_index != 0u) {
     if (relative_cell_index > std::numeric_limits<uint32_t>::max() / shadow_granule_bytes) {
       return false;
     }
-    const auto cell_bytes = instrumentation::build_v_mov_b32_literal(
-        temporary_vgpr, relative_cell_index * shadow_granule_bytes, arch);
-    const auto clamped_cell_bytes = instrumentation::build_v_min_u32(
-        temporary_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
-    const auto negative_cell_bytes = instrumentation::build_v_mul_lo_u32_literal(
-        temporary_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), temporary_vgpr,
-        arch);
-    const auto remaining = instrumentation::build_v_add_u32(
-        high_vgpr, vector_source_vgpr(temporary_vgpr), high_vgpr, arch);
-    if (!cell_bytes || !clamped_cell_bytes || !negative_cell_bytes || !remaining)
+    if (!sequence.emit_all(
+            instrumentation::build_v_mov_b32_literal(
+                temporary_vgpr, relative_cell_index * shadow_granule_bytes, arch),
+            instrumentation::build_v_min_u32(temporary_vgpr, vector_source_vgpr(high_vgpr),
+                                             temporary_vgpr, arch),
+            instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, provenance_vgpr,
+                                                        std::numeric_limits<uint32_t>::max(),
+                                                        temporary_vgpr, arch),
+            instrumentation::build_v_add_u32(high_vgpr, vector_source_vgpr(temporary_vgpr),
+                                             high_vgpr, arch),
+            build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch)))
       return false;
-    words.insert(words.end(), cell_bytes->begin(), cell_bytes->end());
-    words.push_back(*clamped_cell_bytes);
-    words.insert(words.end(), negative_cell_bytes->begin(), negative_cell_bytes->end());
-    words.insert(words.end(), remaining->begin(), remaining->end());
-    words.push_back(build_v_mov_b32_e32(temporary_vgpr, scalar_positive_inline_u32(0u), arch));
   } else {
     words.push_back(build_v_mov_b32_e32(temporary_vgpr, vector_source_vgpr(mask_vgpr), arch));
   }
 
-  const auto high =
-      instrumentation::build_v_min_u32_literal(high_vgpr, shadow_granule_bytes, high_vgpr, arch);
-  if (!high)
+  if (!sequence.emit_all(
+          instrumentation::build_v_min_u32_literal(high_vgpr, shadow_granule_bytes, high_vgpr,
+                                                   arch),
+          instrumentation::build_v_mov_b32_literal(provenance_vgpr, 1u, arch),
+          instrumentation::build_v_lshlrev_b32(provenance_vgpr, vector_source_vgpr(high_vgpr),
+                                               provenance_vgpr, arch),
+          instrumentation::build_v_add_u32_literal(provenance_vgpr, mask_vgpr,
+                                                   std::numeric_limits<uint32_t>::max(),
+                                                   provenance_vgpr, arch),
+          instrumentation::build_v_mov_b32_literal(mask_vgpr, (1u << shadow_granule_bytes) - 1u,
+                                                   arch),
+          instrumentation::build_v_lshlrev_b32(mask_vgpr, vector_source_vgpr(temporary_vgpr),
+                                               mask_vgpr, arch),
+          instrumentation::build_v_and_b32(mask_vgpr, vector_source_vgpr(provenance_vgpr),
+                                           mask_vgpr, arch)))
     return false;
-  words.insert(words.end(), high->begin(), high->end());
 
-  const auto one = instrumentation::build_v_mov_b32_literal(provenance_vgpr, 1u, arch);
-  const auto low_bits = instrumentation::build_v_lshlrev_b32(
-      provenance_vgpr, vector_source_vgpr(high_vgpr), provenance_vgpr, arch);
-  const auto low_bits_minus_one = instrumentation::build_v_add_u32_literal(
-      provenance_vgpr, mask_vgpr, std::numeric_limits<uint32_t>::max(), provenance_vgpr, arch);
-  const auto cell_bits =
-      instrumentation::build_v_mov_b32_literal(mask_vgpr, (1u << shadow_granule_bytes) - 1u, arch);
-  const auto high_bits = instrumentation::build_v_lshlrev_b32(
-      mask_vgpr, vector_source_vgpr(temporary_vgpr), mask_vgpr, arch);
-  const auto exact_mask = instrumentation::build_v_and_b32(
-      mask_vgpr, vector_source_vgpr(provenance_vgpr), mask_vgpr, arch);
-  if (!one || !low_bits || !low_bits_minus_one || !cell_bits || !high_bits || !exact_mask)
+  if (!sequence.emit_all(
+          instrumentation::build_v_add_u32_literal(
+              high_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), high_vgpr, arch),
+          instrumentation::build_v_lshlrev_b32(
+              high_vgpr,
+              scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_end_minus_one_shift),
+              high_vgpr, arch),
+          instrumentation::build_v_lshlrev_b32(
+              temporary_vgpr,
+              scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_offset_shift),
+              temporary_vgpr, arch),
+          instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(high_vgpr),
+                                           temporary_vgpr, arch),
+          instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(mask_vgpr),
+                                           provenance_vgpr, arch)))
     return false;
-  words.insert(words.end(), one->begin(), one->end());
-  words.push_back(*low_bits);
-  words.insert(words.end(), low_bits_minus_one->begin(), low_bits_minus_one->end());
-  words.insert(words.end(), cell_bits->begin(), cell_bits->end());
-  words.push_back(*high_bits);
-  words.push_back(*exact_mask);
-
-  const auto end_minus_one = instrumentation::build_v_add_u32_literal(
-      high_vgpr, provenance_vgpr, std::numeric_limits<uint32_t>::max(), high_vgpr, arch);
-  const auto pack_end = instrumentation::build_v_lshlrev_b32(
-      high_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_end_minus_one_shift),
-      high_vgpr, arch);
-  const auto pack_start = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::byte_offset_shift),
-      temporary_vgpr, arch);
-  const auto pack_range = instrumentation::build_v_add_u32(
-      provenance_vgpr, vector_source_vgpr(high_vgpr), temporary_vgpr, arch);
-  const auto pack_mask = instrumentation::build_v_add_u32(
-      provenance_vgpr, vector_source_vgpr(mask_vgpr), provenance_vgpr, arch);
-  if (!end_minus_one || !pack_end || !pack_start || !pack_range || !pack_mask)
-    return false;
-  words.insert(words.end(), end_minus_one->begin(), end_minus_one->end());
-  words.push_back(*pack_end);
-  words.push_back(*pack_start);
-  words.insert(words.end(), pack_range->begin(), pack_range->end());
-  words.insert(words.end(), pack_mask->begin(), pack_mask->end());
 
   // A byte-granular external slot represents only one byte of a potentially
   // wider access. Retain the original width and this slot's relative byte
@@ -1403,32 +1373,26 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         relative_cell_index > consan_moi_exact_byte_cell::maximum_relative_cell_index) {
       return false;
     }
-    const auto pack_access_count = instrumentation::build_v_add_u32_literal(
-        provenance_vgpr, temporary_vgpr,
-        (byte_count - 1u) << consan_moi_exact_byte_cell::access_byte_count_minus_one_shift,
-        provenance_vgpr, arch);
-    if (!pack_access_count)
+    if (!sequence.emit(instrumentation::build_v_add_u32_literal(
+            provenance_vgpr, temporary_vgpr,
+            (byte_count - 1u) << consan_moi_exact_byte_cell::access_byte_count_minus_one_shift,
+            provenance_vgpr, arch)))
       return false;
-    words.insert(words.end(), pack_access_count->begin(), pack_access_count->end());
     if (relative_cell_index_vgpr) {
-      const auto pack_relative_index = instrumentation::build_v_lshlrev_b32(
-          temporary_vgpr,
-          scalar_positive_inline_u32(consan_moi_exact_byte_cell::relative_cell_index_shift),
-          *relative_cell_index_vgpr, arch);
-      const auto add_relative_index = instrumentation::build_v_add_u32(
-          provenance_vgpr, vector_source_vgpr(temporary_vgpr), provenance_vgpr, arch);
-      if (!pack_relative_index || !add_relative_index)
+      if (!sequence.emit_all(
+              instrumentation::build_v_lshlrev_b32(
+                  temporary_vgpr,
+                  scalar_positive_inline_u32(consan_moi_exact_byte_cell::relative_cell_index_shift),
+                  *relative_cell_index_vgpr, arch),
+              instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(temporary_vgpr),
+                                               provenance_vgpr, arch)))
         return false;
-      words.push_back(*pack_relative_index);
-      words.insert(words.end(), add_relative_index->begin(), add_relative_index->end());
     } else if (relative_cell_index != 0u) {
-      const auto add_relative_index = instrumentation::build_v_add_u32_literal(
-          provenance_vgpr, temporary_vgpr,
-          relative_cell_index << consan_moi_exact_byte_cell::relative_cell_index_shift,
-          provenance_vgpr, arch);
-      if (!add_relative_index)
+      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
+              provenance_vgpr, temporary_vgpr,
+              relative_cell_index << consan_moi_exact_byte_cell::relative_cell_index_shift,
+              provenance_vgpr, arch)))
         return false;
-      words.insert(words.end(), add_relative_index->begin(), add_relative_index->end());
     }
   }
   return true;
@@ -1438,25 +1402,18 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                                          rj_code_arch_t arch,
                                                          uint16_t provenance_vgpr,
                                                          uint16_t lane_vgpr) {
-  const auto lane_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      lane_vgpr, kScalarInlineNegativeOneOperand, scalar_positive_inline_u32(0), arch);
-  const auto lane_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      lane_vgpr, kScalarInlineNegativeOneOperand, vector_source_vgpr(lane_vgpr), arch);
-  const auto lane_plus_one =
-      instrumentation::build_v_add_u32(lane_vgpr, scalar_positive_inline_u32(1u), lane_vgpr, arch);
-  const auto pack_lane = instrumentation::build_v_lshlrev_b32(
-      lane_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
-      lane_vgpr, arch);
-  const auto add_lane = instrumentation::build_v_add_u32(
-      provenance_vgpr, vector_source_vgpr(lane_vgpr), provenance_vgpr, arch);
-  if (!lane_lo || !lane_hi || !lane_plus_one || !pack_lane || !add_lane)
-    return false;
-  words.insert(words.end(), lane_lo->begin(), lane_lo->end());
-  words.insert(words.end(), lane_hi->begin(), lane_hi->end());
-  words.insert(words.end(), lane_plus_one->begin(), lane_plus_one->end());
-  words.push_back(*pack_lane);
-  words.insert(words.end(), add_lane->begin(), add_lane->end());
-  return true;
+  InstructionSequence sequence(words);
+  return sequence.emit_all(
+      instrumentation::build_v_mbcnt_lo_u32_b32(lane_vgpr, kScalarInlineNegativeOneOperand,
+                                                scalar_positive_inline_u32(0), arch),
+      instrumentation::build_v_mbcnt_hi_u32_b32(lane_vgpr, kScalarInlineNegativeOneOperand,
+                                                vector_source_vgpr(lane_vgpr), arch),
+      instrumentation::build_v_add_u32(lane_vgpr, scalar_positive_inline_u32(1u), lane_vgpr, arch),
+      instrumentation::build_v_lshlrev_b32(
+          lane_vgpr, scalar_positive_inline_u32(consan_moi_exact_byte_cell::lane_plus_one_shift),
+          lane_vgpr, arch),
+      instrumentation::build_v_add_u32(provenance_vgpr, vector_source_vgpr(lane_vgpr),
+                                       provenance_vgpr, arch));
 }
 
 // Partition the incoming wave by effective exact-shadow address. Each address
@@ -1475,6 +1432,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     uint32_t relative_cell_index, std::optional<uint16_t> relative_cell_index_vgpr,
     const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
     std::vector<std::string> &errors) {
+  InstructionSequence sequence(words);
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -1504,12 +1462,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t saved_current_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 5u);
 
   failure.stage = "partition setup";
-  const auto save_incoming_exec =
-      instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto initialize_pending =
-      instrumentation::build_s_mov_b64(pending_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto select_pending =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch);
   const uint32_t save_address_lo =
       build_v_mov_b32_e32(saved_address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), arch);
   const uint32_t save_address_hi = build_v_mov_b32_e32(
@@ -1526,50 +1478,27 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       build_v_mov_b32_e32(current_low_vgpr, vector_source_vgpr(saved_current_low_vgpr), arch);
   const uint32_t restore_current_high =
       build_v_mov_b32_e32(current_high_vgpr, vector_source_vgpr(saved_current_high_vgpr), arch);
-  const auto read_address =
-      instrumentation::build_v_readfirstlane_b32(address_key_sgpr, address_lo_vgpr, arch);
+  // Retain validation of the high-word read supported by this ABI even though
+  // the current partition key is the low word.
   const auto read_address_high = instrumentation::build_v_readfirstlane_b32(
       value_key_sgpr, static_cast<uint16_t>(address_lo_vgpr + 1u), arch);
-  const auto read_value =
-      instrumentation::build_v_readfirstlane_b32(value_key_sgpr, current_low_vgpr, arch);
-  const auto address_equal =
-      instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, address_lo_vgpr, arch);
-  const auto narrow_address =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  const auto save_group = instrumentation::build_s_mov_b64(group_exec_sgpr, kAmdGpuExecLo, arch);
-  const auto value_equal =
-      instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch);
-  const auto narrow_value =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  const auto read_mask =
-      instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch);
-  const auto mask_equal =
-      instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch);
-  const auto narrow_mask =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  if (!save_incoming_exec || !initialize_pending || !select_pending || !read_address ||
-      !read_address_high || !read_value || !address_equal || !narrow_address || !save_group ||
-      !value_equal || !narrow_value || !read_mask || !mask_equal || !narrow_mask)
+  if (!read_address_high ||
+      !sequence.emit_all(instrumentation::build_s_mov_b64(incoming_exec_sgpr, kAmdGpuExecLo, arch),
+                         instrumentation::build_s_mov_b64(pending_exec_sgpr, kAmdGpuExecLo, arch),
+                         save_address_lo, save_address_hi, save_current_low, save_current_high))
     return false;
 
-  words.push_back(*save_incoming_exec);
-  words.push_back(*initialize_pending);
-  words.push_back(save_address_lo);
-  words.push_back(save_address_hi);
-  words.push_back(save_current_low);
-  words.push_back(save_current_high);
   const size_t loop = words.size();
-  words.push_back(*select_pending);
-  words.push_back(restore_address_lo);
-  words.push_back(restore_address_hi);
-  words.push_back(restore_current_low);
-  words.push_back(restore_current_high);
-  words.push_back(*read_address);
-  words.push_back(*read_value);
-  words.push_back(*address_equal);
-  words.push_back(*narrow_address);
-  words.push_back(*value_equal);
-  words.push_back(*narrow_value);
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch),
+          restore_address_lo, restore_address_hi, restore_current_low, restore_current_high,
+          instrumentation::build_v_readfirstlane_b32(address_key_sgpr, address_lo_vgpr, arch),
+          instrumentation::build_v_readfirstlane_b32(value_key_sgpr, current_low_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(address_key_sgpr, address_lo_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, current_low_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch)))
+    return false;
   failure.stage = "composite-key provenance";
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
@@ -1579,46 +1508,35 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
         "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
     return false;
   }
-  words.push_back(*read_mask);
-  words.push_back(*mask_equal);
-  words.push_back(*narrow_mask);
+  if (!sequence.emit_all(
+          instrumentation::build_v_readfirstlane_b32(value_key_sgpr, lane_rank_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(value_key_sgpr, lane_rank_vgpr, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+          instrumentation::build_s_mov_b64(group_exec_sgpr, kAmdGpuExecLo, arch)))
+    return false;
   // Partition pending lanes by their complete publication key. Address and
   // packed access were selected above; exact-byte provenance contributes the
   // final mask component here. Saving that subgroup directly avoids emitting
   // a second copy of the complete versioned transaction for a nonuniform
   // fallback. Distinct metadata simply remains in pending EXEC and is visited
   // by the next bounded loop iteration.
-  words.push_back(*save_group);
-  const auto mask_nonzero =
-      instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr, arch);
-  const auto narrow_nonzero =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  if (!mask_nonzero || !narrow_nonzero)
-    return false;
-  words.push_back(*mask_nonzero);
-  words.push_back(*narrow_nonzero);
-
-  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      lane_rank_vgpr, group_exec_sgpr, scalar_positive_inline_u32(0), arch);
-  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      lane_rank_vgpr, static_cast<uint16_t>(group_exec_sgpr + 1u),
-      vector_source_vgpr(lane_rank_vgpr), arch);
-  const auto first_lane =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
-  const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  const auto save_publishers =
-      instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch);
   const auto use_group_diagnostic_mask =
       instrumentation::build_s_mov_b64(publisher_exec_sgpr, group_exec_sgpr, arch);
-  if (!mbcnt_lo || !mbcnt_hi || !first_lane || !narrow_first || !save_publishers ||
-      !use_group_diagnostic_mask)
+  if (!use_group_diagnostic_mask ||
+      !sequence.emit_all(
+          instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0u), lane_rank_vgpr,
+                                                  arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank_vgpr, group_exec_sgpr,
+                                                    scalar_positive_inline_u32(0), arch),
+          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank_vgpr,
+                                                    static_cast<uint16_t>(group_exec_sgpr + 1u),
+                                                    vector_source_vgpr(lane_rank_vgpr), arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr,
+                                                  arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+          instrumentation::build_s_mov_b64(publisher_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
-  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
-  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
-  words.push_back(*first_lane);
-  words.push_back(*narrow_first);
-  words.push_back(*save_publishers);
   if (!append_exact_byte_representative_lane(words, arch, current_low_vgpr, current_high_vgpr)) {
     return false;
   }
@@ -1630,7 +1548,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   }
   // The representative stands for the complete metadata-identical subgroup.
   // Retain that exact subgroup as the diagnostic lane mask.
-  words.push_back(*use_group_diagnostic_mask);
+  if (!sequence.emit(*use_group_diagnostic_mask))
+    return false;
 
   // Counter updates and version-address CAS operations use the working address
   // pair. Restore it from the loop invariants before diagnostics and the next
@@ -1681,15 +1600,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // that group. Keep this independent of the gfx12 AND-NOT operand convention;
   // live qualification is the authority for this generated control flow.
   failure.stage = "loop completion";
-  const auto remove_group =
-      instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr, group_exec_sgpr, arch);
-  const auto select_remaining =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch);
-  const auto restore_incoming_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch);
-  if (!remove_group || !select_remaining || !restore_incoming_exec)
+  if (!sequence.emit(instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr,
+                                                      group_exec_sgpr, arch)))
     return false;
-  words.push_back(*remove_group);
   // Install the remaining mask into EXEC and branch on it. Live gfx1201 debug
   // telemetry proved this traversal reaches the final divergent lane when
   // there is scalar distance after the pending-mask XOR. Keep that dependency
@@ -1697,10 +1610,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // compare observed only the first address group in acceptance runs.
   words.push_back(build_s_nop(0, arch));
   words.push_back(build_s_nop(0, arch));
-  words.push_back(*select_remaining);
+  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, pending_exec_sgpr, arch)))
+    return false;
   const size_t loop_branch = words.size();
   words.push_back(0);
-  words.push_back(*restore_incoming_exec);
+  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, incoming_exec_sgpr, arch)))
+    return false;
   // The diagnostic path uses current_high_vgpr as a field temporary. Restore
   // both packed words before returning so a following cell of the same wide
   // access starts from the original owner/epoch/workgroup metadata.
@@ -1754,129 +1669,74 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t temporary_exec_sgpr =
       static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 14u);
   const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 16u);
-
-  const auto state_word = instrumentation::build_v_lshrrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(4u), saved_cell_vgpr, arch);
-  const auto scale_state_word = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(2u), temporary_vgpr, arch);
-  const auto validity_address = instrumentation::build_v_add_u32_literal(
-      validity_address_vgpr, workgroup_shadow.validity_base, temporary_vgpr, arch);
-  const auto state_index =
-      instrumentation::build_v_and_b32_literal(initializing_mask_vgpr, 15u, saved_cell_vgpr, arch);
-  const auto scale_state_index = instrumentation::build_v_lshlrev_b32(
-      initializing_mask_vgpr, scalar_positive_inline_u32(1u), initializing_mask_vgpr, arch);
-  const auto initializing_mask = instrumentation::build_v_lshlrev_b32(
-      initializing_mask_vgpr, vector_source_vgpr(initializing_mask_vgpr), ready_mask_vgpr, arch);
-  const auto ready_mask = instrumentation::build_v_lshlrev_b32(
-      ready_mask_vgpr, scalar_positive_inline_u32(1u), initializing_mask_vgpr, arch);
-  const auto claim = instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
-                                                          initializing_mask_vgpr, 0u, arch);
-  const auto prior_claim = instrumentation::build_v_and_b32(
-      temporary_vgpr, vector_source_vgpr(initializing_mask_vgpr), state_vgpr, arch);
-  const auto won_claim =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), temporary_vgpr, arch);
-  const auto narrow_winners =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
-  const auto shadow_byte_offset = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(3u), saved_cell_vgpr, arch);
-  const auto shadow_address = instrumentation::build_v_add_u32_literal(
-      address_vgpr, workgroup_shadow.base, temporary_vgpr, arch);
-  const auto clear_slot = instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch);
-  const auto publish_ready = instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
-                                                                  ready_mask_vgpr, 0u, arch);
-  const auto restore_participants =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec_sgpr, arch);
-  const auto observe_ready =
-      instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch);
-  const auto observed_ready = instrumentation::build_v_and_b32(
-      temporary_vgpr, vector_source_vgpr(ready_mask_vgpr), state_vgpr, arch);
-  const auto is_ready = instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
-                                                                temporary_vgpr, arch);
-  const auto remove_ready =
-      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch);
-  const auto skip_initialization = instrumentation::build_s_cbranch_execz(0, arch);
-  const auto continue_poll = instrumentation::build_s_cbranch_execnz(0, arch);
-  const auto restore_bounded =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch);
-  if (!state_word || !scale_state_word || !validity_address || !state_index || !scale_state_index ||
-      !initializing_mask || !ready_mask || !claim || !prior_claim || !won_claim ||
-      !narrow_winners || !shadow_byte_offset || !shadow_address || !clear_slot || !publish_ready ||
-      !restore_participants || !observe_ready || !observed_ready || !is_ready || !remove_ready ||
-      !skip_initialization || !continue_poll || !restore_bounded) {
+  InstructionSequence sequence(words);
+  const auto poll = sequence.make_label();
+  const auto restore_bounded = sequence.make_label();
+  if (!sequence.emit_all(
+          instrumentation::build_v_lshrrev_b32(temporary_vgpr, scalar_positive_inline_u32(4u),
+                                               saved_cell_vgpr, arch),
+          instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(2u),
+                                               temporary_vgpr, arch),
+          instrumentation::build_v_add_u32_literal(
+              validity_address_vgpr, workgroup_shadow.validity_base, temporary_vgpr, arch),
+          build_v_mov_b32_e32(ready_mask_vgpr, scalar_positive_inline_u32(1u), arch),
+          instrumentation::build_v_and_b32_literal(initializing_mask_vgpr, 15u, saved_cell_vgpr,
+                                                   arch),
+          instrumentation::build_v_lshlrev_b32(
+              initializing_mask_vgpr, scalar_positive_inline_u32(1u), initializing_mask_vgpr, arch),
+          instrumentation::build_v_lshlrev_b32(initializing_mask_vgpr,
+                                               vector_source_vgpr(initializing_mask_vgpr),
+                                               ready_mask_vgpr, arch),
+          instrumentation::build_v_lshlrev_b32(ready_mask_vgpr, scalar_positive_inline_u32(1u),
+                                               initializing_mask_vgpr, arch),
+          instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch)) ||
+      !append_moi_lds_wait(words, arch) ||
+      !sequence.emit_all(
+          instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
+                                           state_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
+                                                  temporary_vgpr, arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)) ||
+      !sequence.emit_branch(restore_bounded, InstructionSequence::BranchKind::ExecZero) ||
+      !sequence.emit(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
+                                                          initializing_mask_vgpr, 0u, arch)) ||
+      !append_moi_lds_wait(words, arch) ||
+      !sequence.emit_all(
+          instrumentation::build_v_and_b32(
+              temporary_vgpr, vector_source_vgpr(initializing_mask_vgpr), state_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0u), temporary_vgpr,
+                                                  arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch),
+          build_v_mov_b32_e32(state_vgpr, scalar_positive_inline_u32(0u), arch),
+          build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0u), arch),
+          instrumentation::build_v_lshlrev_b32(temporary_vgpr, scalar_positive_inline_u32(3u),
+                                               saved_cell_vgpr, arch),
+          instrumentation::build_v_add_u32_literal(address_vgpr, workgroup_shadow.base,
+                                                   temporary_vgpr, arch),
+          instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch)) ||
+      !append_moi_lds_wait(words, arch) ||
+      !sequence.emit(instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
+                                                          ready_mask_vgpr, 0u, arch)) ||
+      !append_moi_lds_wait(words, arch) ||
+      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec_sgpr, arch)) ||
+      !sequence.bind(poll) ||
+      !sequence.emit(
+          instrumentation::build_ds_load_b32(state_vgpr, validity_address_vgpr, 0u, arch)) ||
+      !append_moi_lds_wait(words, arch) ||
+      !sequence.emit_all(
+          instrumentation::build_v_and_b32(temporary_vgpr, vector_source_vgpr(ready_mask_vgpr),
+                                           state_vgpr, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_mask_vgpr),
+                                                  temporary_vgpr, arch),
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, kAmdGpuExecLo, kAmdGpuVccLo, arch)) ||
+      !sequence.emit_branch(poll, InstructionSequence::BranchKind::ExecNonzero) ||
+      !sequence.bind(restore_bounded) ||
+      !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch)) ||
+      !sequence.resolve_branches(arch)) {
     errors.emplace_back(
         "ConSan MOI lazy local shadow could not encode packed gfx12 state transitions");
     return false;
   }
-
-  words.push_back(*state_word);
-  words.push_back(*scale_state_word);
-  words.insert(words.end(), validity_address->begin(), validity_address->end());
-  words.push_back(build_v_mov_b32_e32(ready_mask_vgpr, scalar_positive_inline_u32(1u), arch));
-  words.insert(words.end(), state_index->begin(), state_index->end());
-  words.push_back(*scale_state_index);
-  words.push_back(*initializing_mask);
-  words.push_back(*ready_mask);
-  // The steady-state path observes ready with an ordinary LDS load and
-  // bypasses every atomic state transition. Only not-yet-ready lanes claim.
-  words.insert(words.end(), observe_ready->begin(), observe_ready->end());
-  if (!append_moi_lds_wait(words, arch))
-    return false;
-  words.push_back(*observed_ready);
-  words.push_back(*is_ready);
-  words.push_back(*remove_ready);
-  const size_t skip_initialization_index = words.size();
-  words.push_back(*skip_initialization);
-  words.insert(words.end(), claim->begin(), claim->end());
-  if (!append_moi_lds_wait(words, arch))
-    return false;
-  words.push_back(*prior_claim);
-  words.push_back(*won_claim);
-  words.push_back(*narrow_winners);
-  words.push_back(build_v_mov_b32_e32(state_vgpr, scalar_positive_inline_u32(0u), arch));
-  words.push_back(build_v_mov_b32_e32(zero_vgpr, scalar_positive_inline_u32(0u), arch));
-  words.push_back(*shadow_byte_offset);
-  words.insert(words.end(), shadow_address->begin(), shadow_address->end());
-  words.insert(words.end(), clear_slot->begin(), clear_slot->end());
-  if (!append_moi_lds_wait(words, arch))
-    return false;
-  words.insert(words.end(), publish_ready->begin(), publish_ready->end());
-  if (!append_moi_lds_wait(words, arch))
-    return false;
-  words.push_back(*restore_participants);
-  const size_t poll_begin = words.size();
-  words.insert(words.end(), observe_ready->begin(), observe_ready->end());
-  if (!append_moi_lds_wait(words, arch))
-    return false;
-  words.push_back(*observed_ready);
-  words.push_back(*is_ready);
-  words.push_back(*remove_ready);
-  const size_t poll_branch = words.size();
-  const int64_t poll_delta =
-      static_cast<int64_t>(poll_begin) - static_cast<int64_t>(poll_branch + 1u);
-  if (poll_delta < std::numeric_limits<int16_t>::min() ||
-      poll_delta > std::numeric_limits<int16_t>::max()) {
-    errors.emplace_back("ConSan MOI lazy local shadow polling branch exceeds SOPP range");
-    return false;
-  }
-  const auto patched_poll =
-      instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(poll_delta), arch);
-  if (!patched_poll)
-    return false;
-  words.push_back(*patched_poll);
-  const size_t restore_bounded_index = words.size();
-  words.push_back(*restore_bounded);
-  const int64_t skip_delta = static_cast<int64_t>(restore_bounded_index) -
-                             static_cast<int64_t>(skip_initialization_index + 1u);
-  if (skip_delta < std::numeric_limits<int16_t>::min() ||
-      skip_delta > std::numeric_limits<int16_t>::max()) {
-    errors.emplace_back("ConSan MOI lazy local shadow fast-path branch exceeds SOPP range");
-    return false;
-  }
-  const auto patched_skip =
-      instrumentation::build_s_cbranch_execz(static_cast<int16_t>(skip_delta), arch);
-  if (!patched_skip)
-    return false;
-  words[skip_initialization_index] = *patched_skip;
   return true;
 }
 

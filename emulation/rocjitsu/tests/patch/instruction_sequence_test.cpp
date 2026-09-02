@@ -52,6 +52,23 @@ TEST(InstructionSequenceTest, ResolvesForwardAndBackwardBranches) {
   EXPECT_EQ(words[2], build_s_branch(-3, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
+TEST(InstructionSequenceTest, ResolvesExecBranches) {
+  std::vector<uint32_t> words;
+  InstructionSequence sequence(words);
+  const auto beginning = sequence.mark_label();
+  const auto end = sequence.make_label();
+
+  ASSERT_TRUE(sequence.emit_branch(end, InstructionSequence::BranchKind::ExecZero));
+  ASSERT_TRUE(sequence.emit(0x12345678u));
+  ASSERT_TRUE(sequence.bind(end));
+  ASSERT_TRUE(sequence.emit_branch(beginning, InstructionSequence::BranchKind::ExecNonzero));
+  ASSERT_TRUE(sequence.resolve_branches(ROCJITSU_CODE_ARCH_RDNA4));
+
+  EXPECT_EQ(words[0], *build_s_cbranch_execz(1, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(words[1], 0x12345678u);
+  EXPECT_EQ(words[2], *build_s_cbranch_execnz(-3, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 TEST(InstructionSequenceTest, UnboundOrOutOfRangeBranchFailsWithoutPatching) {
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);

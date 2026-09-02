@@ -25,7 +25,15 @@ class InstructionSequence {
 public:
   using Label = size_t;
 
-  enum class BranchKind : uint8_t { Unconditional, SccZero, SccNonzero, VccZero, VccNonzero };
+  enum class BranchKind : uint8_t {
+    Unconditional,
+    SccZero,
+    SccNonzero,
+    VccZero,
+    VccNonzero,
+    ExecZero,
+    ExecNonzero,
+  };
 
   explicit InstructionSequence(std::vector<uint32_t> &words) : words_(words) {}
 

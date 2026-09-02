@@ -79,6 +79,20 @@ bool InstructionSequence::resolve_branches(rj_code_arch_t arch) {
       word = *branch;
       break;
     }
+    case BranchKind::ExecZero: {
+      const auto branch = instrumentation::build_s_cbranch_execz(*displacement, arch);
+      if (!branch)
+        return false;
+      word = *branch;
+      break;
+    }
+    case BranchKind::ExecNonzero: {
+      const auto branch = instrumentation::build_s_cbranch_execnz(*displacement, arch);
+      if (!branch)
+        return false;
+      word = *branch;
+      break;
+    }
     }
     resolved.emplace_back(fixup.word_index, word);
   }
