@@ -83,7 +83,8 @@ WaitInfo parse_wait(const Instruction &inst) {
   if (kind == WaitKind::None || inst.num_src_operands() == 0)
     return WaitInfo{kind, 0, 0};
 
-  const auto *op = inst.src_operand(0);
+  const int index = wait_count_follows_register(kind) && inst.num_src_operands() > 1 ? 1 : 0;
+  const auto *op = inst.src_operand(index);
   const std::string text = op != nullptr ? op->name() : std::string{};
   return make_wait_info(kind, text);
 }

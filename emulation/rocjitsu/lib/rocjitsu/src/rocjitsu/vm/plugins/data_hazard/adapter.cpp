@@ -174,6 +174,14 @@ WaitAction make_wait_action(const WaitInfo &wait) {
   case WaitKind::WaitVscnt:
     add_counter(action, WaitCntType::STORE, wait.count);
     break;
+  case WaitKind::WaitVmcnt:
+    // The vmcnt half of s_waitcnt as an instruction of its own, draining loads
+    // alone: the targets that have it count stores on the separate vscnt.
+    add_counter(action, WaitCntType::VMEM, wait.count);
+    break;
+  case WaitKind::WaitLgkmcnt:
+    add_counter(action, WaitCntType::LGKM, wait.count);
+    break;
   case WaitKind::WaitKmcnt:
     add_counter(action, WaitCntType::SMEM, wait.count);
     break;
@@ -249,6 +257,10 @@ WaitKind make_wait_kind(std::string_view mnemonic) {
     return WaitKind::WaitIdle;
   if (mnemonic == "s_waitcnt_vscnt")
     return WaitKind::WaitVscnt;
+  if (mnemonic == "s_waitcnt_vmcnt")
+    return WaitKind::WaitVmcnt;
+  if (mnemonic == "s_waitcnt_lgkmcnt")
+    return WaitKind::WaitLgkmcnt;
   if (mnemonic == "s_wait_tensorcnt")
     return WaitKind::WaitTensorcnt;
   if (mnemonic == "s_barrier_wait")
@@ -256,6 +268,11 @@ WaitKind make_wait_kind(std::string_view mnemonic) {
   if (mnemonic == "s_wait_xcnt")
     return WaitKind::AddressTranslation;
   return WaitKind::None;
+}
+
+bool wait_count_follows_register(WaitKind kind) {
+  return kind == WaitKind::WaitVscnt || kind == WaitKind::WaitVmcnt ||
+         kind == WaitKind::WaitLgkmcnt;
 }
 
 RegisterKind make_register_kind(RegisterClass reg_class) {

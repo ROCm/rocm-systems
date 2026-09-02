@@ -43,7 +43,11 @@ enum class WaitKind {
   WaitLoadcntDscnt,
   WaitStorecntDscnt,
   WaitIdle,
+  // The per-counter waits gfx10 and gfx11 drain a single counter with, each
+  // naming the counter in its mnemonic rather than in a field of one immediate.
   WaitVscnt,
+  WaitVmcnt,
+  WaitLgkmcnt,
   WaitTensorcnt,
   BarrierWait,
   AddressTranslation,
@@ -163,6 +167,11 @@ WaitKind make_wait_kind(std::string_view mnemonic);
 /// the disassembler printed it — `vmcnt(1) expcnt(0) lgkmcnt(3)` for s_waitcnt,
 /// a bare count for the waits naming one counter.
 WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text);
+/// Whether a wait of @p kind names a register before its count. The gfx10
+/// per-counter waits are SOPK instructions — `s_waitcnt_vscnt null, 0` — so
+/// their count is the second operand, where every other wait carries it in the
+/// first; the register name read as a count would be the SGPR's own number.
+bool wait_count_follows_register(WaitKind kind);
 hazard_core::RegisterKind make_register_kind(RegisterClass reg_class);
 hazard_core::InstructionDescriptor make_instruction_descriptor(const InstructionView &instruction,
                                                                hazard_core::EntityId fallback_id);

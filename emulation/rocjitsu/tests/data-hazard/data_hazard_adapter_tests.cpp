@@ -2043,6 +2043,8 @@ TEST(DataHazardAdapterTest, MapsWaitMnemonicsToWaitKinds) {
   EXPECT_EQ(dh::make_wait_kind("s_wait_storecnt_dscnt"), dh::WaitKind::WaitStorecntDscnt);
   EXPECT_EQ(dh::make_wait_kind("s_wait_idle"), dh::WaitKind::WaitIdle);
   EXPECT_EQ(dh::make_wait_kind("s_waitcnt_vscnt"), dh::WaitKind::WaitVscnt);
+  EXPECT_EQ(dh::make_wait_kind("s_waitcnt_vmcnt"), dh::WaitKind::WaitVmcnt);
+  EXPECT_EQ(dh::make_wait_kind("s_waitcnt_lgkmcnt"), dh::WaitKind::WaitLgkmcnt);
   EXPECT_EQ(dh::make_wait_kind("s_wait_tensorcnt"), dh::WaitKind::WaitTensorcnt);
   EXPECT_EQ(dh::make_wait_kind("s_barrier_wait"), dh::WaitKind::BarrierWait);
   EXPECT_EQ(dh::make_wait_kind("s_wait_xcnt"), dh::WaitKind::AddressTranslation);
@@ -2104,6 +2106,126 @@ TEST(DataHazardAdapterTest, WaitCountsWiderThanTheCdnaFieldSurviveTheAdapter) {
   ASSERT_NE(find_counter(action, WaitCntType::LGKM), nullptr);
   EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 40u);
   EXPECT_EQ(find_counter(action, WaitCntType::LGKM)->keep_count, 20u);
+}
+
+// gfx10 and gfx11 drain each half of s_waitcnt with an instruction of its own.
+// A wave that synchronises with those forms is as ordered as one using
+// s_waitcnt, so a frontend that does not know them reports the accesses they
+// separate as hazards.
+TEST(DataHazardAdapterTest, PerCounterWaitsDrainTheCounterTheirMnemonicNames) {
+  dh::WaitInfo wait;
+  wait.kind = dh::WaitKind::WaitVmcnt;
+  wait.count = 2;
+
+  WaitAction action = dh::make_wait_action(wait);
+  ASSERT_TRUE(action.is_wait_instruction);
+  ASSERT_EQ(action.counters.size(), 1u);
+  ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
+  EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 2u);
+  // Stores are on the vscnt of their own, which this one does not name.
+  EXPECT_EQ(find_counter(action, WaitCntType::STORE), nullptr);
+
+  wait.kind = dh::WaitKind::WaitLgkmcnt;
+  wait.count = 3;
+  action = dh::make_wait_action(wait);
+  ASSERT_EQ(action.counters.size(), 1u);
+  ASSERT_NE(find_counter(action, WaitCntType::LGKM), nullptr);
+  EXPECT_EQ(find_counter(action, WaitCntType::LGKM)->keep_count, 3u);
+}
+
+// The per-counter waits are SOPK: `s_waitcnt_vmcnt null, 1` names a scalar
+// destination first, so a frontend reading the first operand as the count gets
+// the register instead — zero for the `null` compilers emit, and the register's
+// own number for anything else.
+TEST(DataHazardAdapterTest, PerCounterWaitsStateTheirCountAfterARegisterOperand) {
+  EXPECT_TRUE(dh::wait_count_follows_register(dh::WaitKind::WaitVmcnt));
+  EXPECT_TRUE(dh::wait_count_follows_register(dh::WaitKind::WaitLgkmcnt));
+  EXPECT_TRUE(dh::wait_count_follows_register(dh::WaitKind::WaitVscnt));
+  EXPECT_FALSE(dh::wait_count_follows_register(dh::WaitKind::Waitcnt));
+  EXPECT_FALSE(dh::wait_count_follows_register(dh::WaitKind::WaitLoadcnt));
+  EXPECT_FALSE(dh::wait_count_follows_register(dh::WaitKind::WaitDscnt));
+
+  const dh::WaitInfo vmcnt = dh::make_wait_info(dh::WaitKind::WaitVmcnt, "1");
+  EXPECT_EQ(vmcnt.count, 1u);
+  EXPECT_EQ(vmcnt.paired_count, 0u);
+}
+
+// The false positive the missing mnemonics produce: a load whose wait the
+// frontend does not recognise stays outstanding, and the read it was issued
+// for is reported as a RAW hazard.
+TEST(DataHazardAdapterTest, PerCounterVmcntWaitClearsTheVectorLoadItNames) {
+  AdapterHarness h;
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView global_load;
+  global_load.instruction = h.instruction(1, 0x100);
+  global_load.resource_kind = ResourceKind::GlobalMemory;
+  global_load.register_class = dh::RegisterClass::Vector;
+  global_load.register_base = 4;
+  global_load.size_bytes = 4;
+  global_load.is_load = true;
+  h.adapter.on_memory_route(global_load);
+
+  h.adapter.on_instruction(h.instruction(2, 0x104));
+
+  dh::MemoryRouteView scalar_load;
+  scalar_load.instruction = h.instruction(2, 0x104);
+  scalar_load.resource_kind = ResourceKind::ScalarRegister;
+  scalar_load.register_class = dh::RegisterClass::Scalar;
+  scalar_load.register_base = 12;
+  scalar_load.size_bytes = 4;
+  scalar_load.is_load = true;
+  h.adapter.on_memory_route(scalar_load);
+
+  dh::InstructionView wait = h.instruction(3, 0x108);
+  wait.wait.kind = dh::WaitKind::WaitVmcnt;
+  wait.wait.count = 0;
+  h.adapter.on_instruction(wait);
+
+  h.adapter.on_instruction(h.instruction(4, 0x10c));
+
+  dh::RegisterAccessView read_vgpr;
+  read_vgpr.instruction = h.instruction(4, 0x10c);
+  read_vgpr.register_class = dh::RegisterClass::Vector;
+  read_vgpr.physical_reg = 4;
+  read_vgpr.size_bytes = 4;
+  read_vgpr.is_read = true;
+  h.adapter.on_register_access(read_vgpr);
+
+  EXPECT_TRUE(h.engine.warning_snapshot().empty());
+
+  // The scalar load is on lgkmcnt, which the vector wait leaves outstanding.
+  dh::RegisterAccessView read_sgpr;
+  read_sgpr.instruction = h.instruction(4, 0x10c);
+  read_sgpr.register_class = dh::RegisterClass::Scalar;
+  read_sgpr.physical_reg = 12;
+  read_sgpr.size_bytes = 4;
+  read_sgpr.is_read = true;
+  h.adapter.on_register_access(read_sgpr);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::RAW);
+  EXPECT_EQ(warnings[0].finding.resource_kind, ResourceKind::ScalarRegister);
+
+  // s_waitcnt_lgkmcnt drains it, as the lgkmcnt field of s_waitcnt would.
+  dh::InstructionView lgkm_wait = h.instruction(5, 0x110);
+  lgkm_wait.wait.kind = dh::WaitKind::WaitLgkmcnt;
+  lgkm_wait.wait.count = 0;
+  h.adapter.on_instruction(lgkm_wait);
+
+  h.adapter.on_instruction(h.instruction(6, 0x114));
+
+  dh::RegisterAccessView read_sgpr_again;
+  read_sgpr_again.instruction = h.instruction(6, 0x114);
+  read_sgpr_again.register_class = dh::RegisterClass::Scalar;
+  read_sgpr_again.physical_reg = 12;
+  read_sgpr_again.size_bytes = 4;
+  read_sgpr_again.is_read = true;
+  h.adapter.on_register_access(read_sgpr_again);
+
+  EXPECT_EQ(h.engine.warning_snapshot().size(), 1u);
 }
 
 TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
