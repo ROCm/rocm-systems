@@ -31,8 +31,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Keep in sync with ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION in
-# cmake/Modules/rocprofiler-sdk-utilities.cmake.
+# Single source of truth for SPM CI driver gating. CMake reads this module at
+# configure time; TheRock CI runs this script from the installed tests tree.
 SPM_MIN_AMDGPU_DRIVER_VERSION = "6.19.14.31400000"
 
 AMDGPU_VERSION_PATH = Path("/sys/module/amdgpu/version")
