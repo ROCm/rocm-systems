@@ -12,6 +12,7 @@
 #include "transport.h"
 #include <cmath>
 #include <cfloat>
+#include <cstring>
 
 constexpr char const* kernelName[] = {
   // Must align with enum ncclSymkKernelId definition in src/include/sym_kernels.h
@@ -507,6 +508,13 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
   }
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// The block width tuning in this file is fitted to gfx950 and must not reach other architectures.
+static bool ncclSymkIsGfx950(struct ncclComm* comm) {
+  return comm->archName != nullptr && strncmp(comm->archName, "gfx950", 6) == 0;
+}
+#endif
+
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   // ncclTeamLsa() below calls this internally but drops the error code so we do it here.
   NCCLCHECK(ncclDevrInitOnce(comm));
@@ -520,9 +528,16 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     reqs.lsaMultimem = symk->hasLsaMultimem;
     reqs.lsaBarrierCount = ncclSymkMaxBlocks;
 
+    // Sized for the widest LL launch any collective will use, since the buffer is shared. AllGather
+    // keeps the narrow pitch and simply leaves the upper slots untouched.
+    int llThreads = ncclSymkMaxThreads;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    if (ncclSymkIsGfx950(comm)) llThreads = ncclSymkGfx950LLThreads;
+#endif
+
     struct ncclDevResourceRequirements lla2aReq;
     ncclLLA2ACreateRequirement(ncclSymkMaxBlocks,
-                               ncclLLA2ACalcSlots(ncclTeamLsa(comm).nRanks * ncclSymkMaxThreads, ncclSymkLLMaxEltSize),
+                               ncclLLA2ACalcSlots(ncclTeamLsa(comm).nRanks * llThreads, ncclSymkLLMaxEltSize),
                                &symk->kcomm.lsaLLA2A, &lla2aReq);
     lla2aReq.next = reqs.resourceRequirementsList;
     reqs.resourceRequirementsList = &lla2aReq;
@@ -679,6 +694,20 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
   return (ncclSymkMask(comm, coll, red, ty, nElts) != 0);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Thresholds bounding the block width of the gfx950 LD reduce kernels, measured on 8 ranks.
+// ReduceScatter's are bus bytes, AllReduce's are message bytes since nEltsTotal counts all ranks.
+static constexpr size_t ncclSymkRsWideBlockMinBusBytes = 1 << 20;
+static constexpr size_t ncclSymkRsNarrowBlockBusBytes = 16 << 20;
+static constexpr size_t ncclSymkArTailSaturatedBytes = 512 << 10;
+static constexpr size_t ncclSymkArDeepTierBytes = 2 << 20;
+static constexpr size_t ncclSymkArOccupancyBoundBytes = 1 << 30;
+// Block widths those thresholds select between. 1024 is the widest workgroup gfx950 will launch.
+static constexpr int ncclSymkGfx950NarrowThreads = 256;
+static constexpr int ncclSymkGfx950WideThreads = 512;
+static constexpr int ncclSymkGfx950WidestThreads = 1024;
+#endif
+
 ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                                 size_t nEltsTotal, size_t nEltsMax, int nWorks, ncclSymRegType_t winRegType,
                                 float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps, bool* forced) {
@@ -720,7 +749,34 @@ ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int /*nc
   *estTimeUs = kmask == 0 || kernelMask_user() == (1 << ncclSymkKernelId_Count) - 1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  *nWarps = ncclSymkMaxThreads / comm->WarpSize;
+  // Only the gfx950 reduce kernels are tuned, so AllGather keeps the upstream width throughout.
+  int nThreads = ncclSymkMaxThreads;
+  bool isLL = bestKernel != ncclSymkKernelId_Count && (kernelMask_LL >> (int)bestKernel & 1);
+  bool isReduceColl = coll == ncclFuncReduceScatter || coll == ncclFuncAllReduce;
+  if (ncclSymkIsGfx950(comm) && isReduceColl) {
+    if (isLL) {
+      // Must match ncclSymkReduceLLThreads, which the device code uses as its slot pitch.
+      nThreads = ncclSymkGfx950LLThreads;
+    } else if (coll == ncclFuncReduceScatter) {
+      // Small sizes are latency bound on per-peer loads and want every thread. Large ones are
+      // bandwidth bound, where a narrower block keeps iterations per globally strided warp high.
+      size_t busBytes = comm->nRanks * nBytes;
+      if (busBytes >= ncclSymkRsNarrowBlockBusBytes) {
+        nThreads = ncclSymkGfx950NarrowThreads;
+      } else if (busBytes >= ncclSymkRsWideBlockMinBusBytes) {
+        nThreads = ncclSymkGfx950WidestThreads;
+      } else {
+        nThreads = ncclSymkGfx950WideThreads;
+      }
+    } else {
+      // AllReduce folds rank into its thread index, so across the deep tiers a wider block halves
+      // iterations per warp rather than covering more GPU. Outside them the wider block wins.
+      bool narrowBlock = nBytes < ncclSymkArTailSaturatedBytes ||
+                         (ncclSymkArDeepTierBytes <= nBytes && nBytes < ncclSymkArOccupancyBoundBytes);
+      nThreads = narrowBlock ? ncclSymkGfx950NarrowThreads : ncclSymkGfx950WideThreads;
+    }
+  }
+  *nWarps = std::max(1, nThreads / comm->WarpSize);
 #else
   *nWarps = 16;
 #endif

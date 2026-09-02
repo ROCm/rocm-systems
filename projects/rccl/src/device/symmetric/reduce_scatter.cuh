@@ -303,9 +303,17 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
                               ncclLsaBarrierSession<ncclCoopCta>& bar, Red red, ncclSymPtr<T> input,
                               ncclSymPtr<T> output, size_t nElts) {
   int const& nRanks = handler.comm.nRanks;
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-element tail. The floor still keeps iterations per warp worth reduceDeep's prologue.
+  uint32_t const chunkFloor = uint32_t(nRanks * nBlocks);
+#else
   int const& nRanks_rcp32 = handler.nRanks_rcp32;
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
+  uint32_t const chunkFloor = 1;
+#endif
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   size_t nBytes = nElts * sizeof(T);
@@ -317,18 +325,26 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   constexpr int MinWarpPerBlock = 4;
 
   if (alignment % 16 == 0) {
+#if defined(__gfx950__)
+    // One pack instead of four quarters BytePerChunk, bringing this tier's floor within reach of
+    // 16 MB, which otherwise falls through to 4-byte packs, and doubling 32 MB's iterations.
+    constexpr int UnrollPacksPlain = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacksPlain = 4, UnrollPeers = 2;
+#endif
     constexpr int BytePerPack = 16,
                   UnrollPacks =
 #if __CUDA_ARCH__ >= 1000
                     EnableTma ? 8 :
 #endif
-                                4,
-                  UnrollPeers = 2;
+                                UnrollPacksPlain;
 
     constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<BytePerPack, UnrollPacks, UnrollPeers, T, EnableTma>(handler, tn, t, waitNeeded, bar, red,
                                                                       (ncclSymPtr<char>)input + cursor,
@@ -340,11 +356,19 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
     constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, T, false>(
         handler, tn, t, waitNeeded, bar, red, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor,
@@ -485,7 +509,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(ncclSymkArgsHa
   int const& nRanks = handler.comm.nRanks;
   int const& rank = handler.comm.rank;
   int t = threadIdx.x;
-  constexpr int tn = ncclSymkMaxThreads;
+  constexpr int tn = ncclSymkReduceLLThreads;
   ncclCoopCta cta;
 
   NVCC_PRAGMA_UNROLL_DISABLED
@@ -529,7 +553,7 @@ template <template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
-                                      blockIdx.x, ncclSymkMaxThreads);
+                                      blockIdx.x, ncclSymkReduceLLThreads);
   Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
   using Pack = BytePack<8>;
   constexpr int EltPerPack = 8 / sizeof(T);

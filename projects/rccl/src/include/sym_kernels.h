@@ -29,6 +29,18 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
+// LL width for the gfx950 reduce kernels, worth 5 to 10% below 256 KB since an epoch carries one
+// element per thread. The host sizes the shared slot buffer from this, so the two must agree.
+constexpr int ncclSymkGfx950LLThreads = 512;
+
+// Device-side LL width for those two kernels. AllGather stays on ncclSymkMaxThreads, as does every
+// other architecture, so their launch width and slot pitch match upstream.
+#if defined(__gfx950__)
+constexpr int ncclSymkReduceLLThreads = ncclSymkGfx950LLThreads;
+#else
+constexpr int ncclSymkReduceLLThreads = ncclSymkMaxThreads;
+#endif
+
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }

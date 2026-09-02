@@ -339,30 +339,47 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
                                  ncclLsaBarrierSession<ncclCoopCta>& bar, Red red, ncclSymPtr<T> input,
                                  ncclSymPtr<T> output, size_t nElts) {
   int const& nRanks = handler.comm.nRanks;
-  int const& nRanks_rcp32 = handler.nRanks_rcp32;
   size_t nBytes = nElts * sizeof(T);
+
+  constexpr int MinWarpPerBlock = 4;
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-element tail. A floor of one warp per block cost 8% at 512 KB, two gained 8% at 1 MB.
+  constexpr int MinEngagedWarpPerBlock = 2;
+  uint32_t const chunkFloor = uint32_t(MinEngagedWarpPerBlock * nRanks * nBlocks) / MinWarpPerBlock;
+#else
+  int const& nRanks_rcp32 = handler.nRanks_rcp32;
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
+  uint32_t const chunkFloor = 1;
+#endif
 
   uint32_t nPreBytes = (16u - input.offset) % 16u;
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
-  constexpr int MinWarpPerBlock = 4;
-
   if ((input.offset - output.offset) % 16 == 0) {
+#if defined(__gfx950__)
+    // One pack instead of four quarters BytePerChunk, which a 64-wide wavefront needs to keep
+    // iterations per warp in range at 8 MB. One pack per peer lets UnrollPeers batch every peer.
+    constexpr int UnrollPacksPlain = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacksPlain = 4, UnrollPeers = 2;
+#endif
     constexpr int BytePerPack = 16,
                   UnrollPacks =
 #if __CUDA_ARCH__ >= 1000
                     EnableTma ? 8 :
 #endif
-                                4,
-                  UnrollPeers = 2;
+                                UnrollPacksPlain;
 
     constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       allreduceDeep<BytePerPack, UnrollPacks, UnrollPeers, T, EnableTma>(handler, tn, t, waitNeeded, bar, red,
                                                                          (ncclSymPtr<char>)input + cursor,
@@ -374,11 +391,19 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && (input.offset - output.offset) % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
     constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       allreduceDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, T, /*EnableTma*/ false>(
         handler, tn, t, waitNeeded, bar, red, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor,
@@ -512,7 +537,7 @@ template <template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWorkArgs const* args, bool multimem) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
-                                      blockIdx.x, ncclSymkMaxThreads, multimem, handler.comm.lsaMultimem);
+                                      blockIdx.x, ncclSymkReduceLLThreads, multimem, handler.comm.lsaMultimem);
 
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
@@ -533,7 +558,7 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_AGxLL_R_impl(ncclSymkDevWo
 
     ncclCoopCta cta;
     int t = threadIdx.x;
-    int tn = ncclSymkMaxThreads;
+    int tn = ncclSymkReduceLLThreads;
 
     if (__builtin_expect(packAligned, true)) {
       NVCC_PRAGMA_UNROLL_DISABLED
