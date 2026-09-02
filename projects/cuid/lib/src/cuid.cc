@@ -3,6 +3,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -269,15 +270,65 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
     return std::make_shared<CuidNpu>(npu_info);
   }
 
-  int fd = open(dev_path, O_RDONLY);
-  if (fd < 0) {
-    // unable to open device path
+  // Two shapes of path arrive here and they need different treatment.
+  //
+  // A device node such as /dev/dri/renderD128 has to be turned into the sysfs
+  // directory that describes it, which is what real_dev_path_from_fd() does:
+  // it reads st_rdev and follows /sys/dev/char/<major>:<minor>.
+  //
+  // A sysfs path such as /sys/class/drm/renderD128/device is already that
+  // directory, and st_rdev is zero for a directory, so the same call looks for
+  // /sys/dev/char/0:0, fails, and returns the empty string -- reported to the
+  // caller as DEVICE_NOT_FOUND for a device that is present and working.
+  //
+  // Every sysfs caller was hitting that. bdf_to_device_path() returns sysfs, so
+  // amdcuid_get_handle_by_bdf() failed for every GPU on a cold library, and
+  // amd-smi resolves every GPU by BDF and calls nothing else first: on a node
+  // with two working W6800s, amdsmi_get_gpu_cuid_info() answered
+  // AMDSMI_STATUS_NOT_SUPPORTED for both, as root, with the kernel publishing
+  // cuid_secondary for each. amdcuid_get_handle_by_dev_path() has a list of
+  // sysfs prefixes it documents as supported and passed them straight into the
+  // same failure. The CPU and NPU branches above sidestep it by returning
+  // early, which is why those two types worked.
+  //
+  // discover_single() takes a sysfs path in every implementation -- enumeration
+  // hands it "/sys/class/drm/cardN/device" -- so the conversion is needed only
+  // for a real device node. Decide by what the path is, not by device type.
+  std::string real_dev_path;
+  struct stat path_stat = {};
+  if (stat(dev_path, &path_stat) != 0) {
     return nullptr;
   }
-
-  // find real device path in case of symlink
-  std::string real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-  close(fd);
+  if (S_ISCHR(path_stat.st_mode) || S_ISBLK(path_stat.st_mode)) {
+    int fd = open(dev_path, O_RDONLY);
+    if (fd < 0) {
+      // unable to open device path
+      return nullptr;
+    }
+    real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
+    close(fd);
+  } else {
+    // Left unresolved. discover_single() appends "/vendor", "/config" and the
+    // rest to it, and also reads the DRM node name back out of the string, so
+    // resolving /sys/class/drm/renderD128/device down to the PCI directory it
+    // points at loses information the caller needs. Enumeration passes the
+    // unresolved "/sys/class/drm/cardN/device" for the same reason.
+    //
+    // The one normalisation that is needed: a class directory such as
+    // /sys/class/drm/renderD128 or /sys/class/net/eno1 is one level above the
+    // PCI device directory, and discover_single() reads the PCI attributes
+    // directly off the path it is given. amdcuid_get_handle_by_dev_path()
+    // documents both of those forms as accepted and then handed them over
+    // unchanged, so a lookup by the very paths the library itself publishes
+    // through AMDCUID_QUERY_DEVICE_PATH returned DEVICE_NOT_FOUND.
+    real_dev_path = dev_path;
+    struct stat vendor_stat = {};
+    struct stat child_stat = {};
+    if (stat((real_dev_path + "/vendor").c_str(), &vendor_stat) != 0 &&
+        stat((real_dev_path + "/device/vendor").c_str(), &child_stat) == 0) {
+      real_dev_path += "/device";
+    }
+  }
   if (real_dev_path.empty()) {
     return nullptr;
   }
@@ -455,24 +506,12 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
   if (device_path.empty()) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
   }
-  std::string real_dev_path = device_path;
-  // if device is not a nic or npu, attempt to resolve real device path in case
-  // of symlink for more reliable matching. NPU paths from bdf_to_device_path
-  // may be PCI device directories (not char/block devices), so the fd-based
-  // real path resolution would fail.
-  if ((device_type != AMDCUID_DEVICE_TYPE_NIC || device_path.find("net") == std::string::npos) &&
-      device_type != AMDCUID_DEVICE_TYPE_NPU) {
-    int fd = open(device_path.c_str(), O_RDONLY);
-    if (fd < 0) {
-      return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-    real_dev_path = CuidUtilities::real_dev_path_from_fd(fd);
-    close(fd);
-  }
-
-  if (real_dev_path.empty()) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  }
+  // bdf_to_device_path() returns a sysfs path for every device type, never a
+  // device node, and discover_device_by_path() now decides how to resolve a
+  // path by inspecting it rather than by device type. The type-indexed
+  // conversion that used to sit here turned the GPU path into the empty string
+  // and reported a present device as DEVICE_NOT_FOUND.
+  const std::string& real_dev_path = device_path;
 
   if (geteuid() == 0) {
     device = discover_device_by_path(real_dev_path.c_str(), device_type);
