@@ -8467,3 +8467,71 @@ Full architecture locality, reader-skippable mode ownership across the
 remaining transformation surface, confinement of broader placement and
 coordinator transactions, material additional deletion, and the independent
 Section 14 deep-read audit remain open, so the goal remains active.
+
+### 16.120 Convergence checkpoint 119: mode-owned barrier scratch demand
+
+The barrier-resource trace found one remaining common mode-policy switch on
+the planning path. `operational_barrier_scratch_count` interpreted the
+selected evidence kind to choose Record/Replay's six-register record window,
+Sampled's seven- or nine-register epoch window, or InlineShadow's one- or
+three-register exact-evidence window. Common resource planning called that
+selector before and after owner-local assignment, and the exact-subset barrier
+lowerer called it again before emission. A future mode could register its
+evidence operation but still had to add its scratch policy to this unrelated
+common barrier file.
+
+`MoiModeOperations` now publishes `barrier_scratch_vgpr_count` beside the
+mode's evidence operation. Record/Replay, Sampled, and InlineShadow implement
+their policies in their existing mode-named owners. Common code projects only
+`MoiBarrierScratchFacts`: report-buffer presence, Inline access presence,
+private-epoch materialization, and completeness of persistent scalar state.
+The mode interprets those target-neutral facts; resource planning and the
+exact-subset lowerer consume the same registered callback and do not branch on
+an evidence kind. The exact-subset pass retains one selected mode operations
+product rather than repeating registry lookup for each candidate.
+
+The old selector, its public barrier-header contract, duplicate invalid-
+evidence checks, and optional-result plumbing are deleted. An invalid evidence
+enumerator no longer needs a scratch-sizing behavior: every registered mode
+must provide the operation, so the former null result is unrepresentable on
+the production path. The owner regression exercises all three policies,
+including Sampled's scalar and private epoch forms and InlineShadow's
+standalone visible-evidence form. The hypothetical fifth-mode extension now
+publishes and exercises a distinct scratch callback. Structural checks require
+all three production mode owners and the extension fixture to provide the
+operation and reject restoration of evidence-specific barrier sizing in the
+common resource planner.
+
+| Signal | Checkpoint 119 | Cumulative change | Slice change from checkpoint 118 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,847 | **-2,129** | **-3** |
+| Nonblank production lines | 96,483 | **-2,601** | **-6** |
+| Production implementation lines | 88,730 | **-2,720** | **-3** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | **-1 / 0** |
+| Evidence-specific barrier scratch branches in common resource planning | **0** | n/a | **-3** |
+| Test inventory | **5,412** | **+67** | 0 |
+
+Validation includes a warning-clean `-j16` rebuild, the mode-owner,
+hypothetical-extension, pipeline, and architecture-boundary gate **51/51**,
+the affected barrier matrix **343/343**, and all **1,296/1,296** nonphysical
+host/component tests. The affected matrix includes 100 end-to-end simulator
+tests spanning all four modes and gfx942, gfx950, gfx1100, gfx1201, and
+gfx1250. The complete 4,777-test nonphysical matrix passed immediately before
+this small policy migration at checkpoint 118 and was not repeated. No test
+was removed, renamed, or disabled, and no physical test was run.
+
+This is a small but complete deletion-bearing mode-locality slice. It
+strengthens Sections 14.3 through 14.8: scratch demand grows with the mode
+registry rather than a common mode switch, the target axis remains absent from
+the policy, and the superseded selector is gone. Atomic resource sizing still
+contains an analogous common evidence switch and is a concrete adjacent trace,
+but its InlineShadow demand depends on a target-normalized compare-swap
+alignment fact; that trace must preserve target/mode separation rather than
+simply moving its switch. Full architecture locality, remaining mode-local
+transformation ownership, wider coordinator confinement, material additional
+deletion, and the independent Section 14 audit remain open, so the goal
+remains active.
