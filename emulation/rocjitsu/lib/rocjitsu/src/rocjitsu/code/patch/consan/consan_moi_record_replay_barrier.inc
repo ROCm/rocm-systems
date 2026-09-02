@@ -630,6 +630,31 @@ void try_apply_record_replay_barrier_record_patch(
                                std::move(lowering_commits), std::move(patches));
 }
 
+[[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_record_replay_barrier_body(
+    const ConSanOptions &options, ConSanMoiOperatingPoint &point,
+    const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
+    std::span<const uint64_t> owners, rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+  if (!scratch_vgpr) {
+    result.warnings.emplace_back(
+        "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
+    return std::nullopt;
+  }
+  if (!apply_record_replay_entry_workgroup_assignment(options, point, result.moi_operating_point,
+                                                       owners)) {
+    result.warnings.emplace_back(
+        "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
+    return std::nullopt;
+  }
+  auto record = resolve_moi_record_event_emission_plan(options, options, point, scalar_abi,
+                                                       *scratch_vgpr, arch);
+  if (!record) {
+    result.warnings.emplace_back(
+        "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
+    return std::nullopt;
+  }
+  return MoiBarrierBodyPlan{std::move(*record)};
+}
+
 void try_apply_record_replay_barrier_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
@@ -669,9 +694,10 @@ void try_apply_record_replay_barrier_patch(
   publish_record_warnings(true);
   const size_t barrier_count_before = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-  try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::BarrierRecord,
-                                 operating_point, arch, resource_state,
-                                 access_output.reserved_sync_islands, semantics, result);
+  try_apply_shared_barrier_patch(
+      bytes, options, ConSanProbeIntentKind::BarrierRecord, plan_record_replay_barrier_body,
+      operating_point, arch, resource_state, access_output.reserved_sync_islands, semantics,
+      result);
   const size_t barrier_count_after = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   if (!result.errors.empty() || barrier_count_after - barrier_count_before < failed_entry_count) {

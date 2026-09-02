@@ -196,6 +196,11 @@ using MoiBarrierBodyPlan =
     std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan,
                  MoiInlinePrivateEpochBarrierEmissionPlan>;
 
+using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
+    const ConSanOptions &, ConSanMoiOperatingPoint &, const MoiScalarAbiPlan &,
+    std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t,
+    ConSanTransformArtifacts &);
+
 [[nodiscard]] std::optional<ConSanIndirectJumpSgprs>
 moi_barrier_body_indirect_jump(const MoiBarrierBodyPlan &body) {
   return std::visit([](const auto &plan) { return plan.indirect_jump; }, body);
@@ -278,7 +283,7 @@ validate_reserved_barrier_island_layout(
 
 void try_apply_shared_barrier_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
-    ConSanProbeIntentKind evidence_kind,
+    ConSanProbeIntentKind evidence_kind, MoiBarrierBodyPlanner plan_body,
     const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
     MoiResourcePlanningState &resource_state,
     const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
@@ -659,36 +664,13 @@ void try_apply_shared_barrier_patch(
       note_moi_sgpr_requirements(visible_evidence_sgpr_requirements, *resources, options, options,
                                  candidate_point, semantics, arch);
     }
-    if (emits_barrier_record) {
-      if (!scratch_vgpr) {
-        result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
-        continue;
-      }
-      if (!apply_record_replay_entry_workgroup_assignment(options, candidate_point,
-                                                          result.moi_operating_point, owners)) {
-        result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
-        continue;
-      }
-    }
     const MoiScalarAbiPlan scalar_abi =
         plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
-    if (emits_barrier_record) {
-      auto record = resolve_moi_record_event_emission_plan(options, options, candidate_point,
-                                                           scalar_abi, *scratch_vgpr, arch);
-      if (!record) {
-        result.warnings.emplace_back(
-            "ConSan MOI Record/Replay dense barrier fallback has an incomplete emission plan");
-        continue;
-      }
-      body = std::move(*record);
-    } else {
-      auto inline_epoch = plan_inline_shadow_barrier_epoch_emission(
-          options, candidate_point, scalar_abi, scratch_vgpr, arch, result.errors);
-      if (!inline_epoch)
+    body = plan_body(options, candidate_point, scalar_abi, scratch_vgpr, owners, arch, result);
+    if (!body) {
+      if (!result.errors.empty())
         return;
-      body = std::move(*inline_epoch);
+      continue;
     }
     ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);

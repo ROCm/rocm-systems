@@ -182,6 +182,17 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
   return words;
 }
 
+[[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_inline_shadow_barrier_body(
+    const ConSanOptions &options, ConSanMoiOperatingPoint &point,
+    const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
+    std::span<const uint64_t>, rj_code_arch_t arch, ConSanTransformArtifacts &result) {
+  auto plan = plan_inline_shadow_barrier_epoch_emission(options, point, scalar_abi, scratch_vgpr,
+                                                        arch, result.errors);
+  if (!plan)
+    return std::nullopt;
+  return MoiBarrierBodyPlan{std::move(*plan)};
+}
+
 void try_apply_inline_shadow_barrier_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
@@ -194,6 +205,6 @@ void try_apply_inline_shadow_barrier_patch(
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
   try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch,
-                                 barrier_point, arch, resource_state, reserved_sync_islands,
-                                 semantics, result);
+                                 plan_inline_shadow_barrier_body, barrier_point, arch,
+                                 resource_state, reserved_sync_islands, semantics, result);
 }

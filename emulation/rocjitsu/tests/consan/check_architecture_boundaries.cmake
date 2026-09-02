@@ -918,6 +918,22 @@ if(NOT _inline_barrier_owner MATCHES
         "mode owners must select the exact evidence operation consumed by shared barrier lowering"
     )
 endif()
+if(NOT _moi_barrier_planning MATCHES
+       "MoiBarrierBodyPlanner[ \t]+plan_body" OR
+   NOT _moi_barrier_planning MATCHES
+       "body[ \t]*=[ \t]*plan_body" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "plan_record_replay_barrier_body" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*plan_record_replay_barrier_body" OR
+   NOT _inline_barrier_owner MATCHES
+       "plan_inline_shadow_barrier_body" OR
+   NOT _inline_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*plan_inline_shadow_barrier_body")
+    message(FATAL_ERROR
+        "ordinary barrier bodies must be planned by the selected mode owner"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
