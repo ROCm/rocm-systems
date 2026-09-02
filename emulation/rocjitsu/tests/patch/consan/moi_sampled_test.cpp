@@ -7386,7 +7386,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
-  ASSERT_TRUE(access->branch_only_continuation);
+  ASSERT_TRUE(access->branch_only_route.has_value());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
@@ -7400,9 +7400,9 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   ASSERT_TRUE(guard);
   EXPECT_EQ(body.front(), *guard);
 
-  const uint64_t return_target = access->branch_only_return_relay_offsets.empty()
+  const uint64_t return_target = access->branch_only_route->return_relay_offsets.empty()
                                      ? access->anchor_offset + access->original_size
-                                     : access->branch_only_return_relay_offsets.front();
+                                     : access->branch_only_route->return_relay_offsets.front();
   const uint64_t return_source = access->trampoline_offset + continuation_word * sizeof(uint32_t);
   const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
   ASSERT_TRUE(return_delta);
@@ -7519,7 +7519,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
                 result.patches,
                 [](const ConSanPatchInfo &patch) {
                   return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore &&
-                         patch.branch_only_continuation;
+                         patch.branch_only_route.has_value();
                 }),
             2u)
       << testing::PrintToString(result.warnings);

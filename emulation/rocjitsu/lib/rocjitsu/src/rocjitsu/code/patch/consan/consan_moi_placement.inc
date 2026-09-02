@@ -5802,11 +5802,8 @@ void note_moi_access_patch_info(ConSanPatchPlacementEffects &effects,
   effects.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
   effects.private_state_layout = patch.private_state_layout;
   effects.required_private_segment_size = patch.required_private_bytes;
-  effects.branch_only_continuation = patch.branch_only_route.has_value();
-  if (patch.branch_only_route) {
-    effects.branch_only_entry_relay_offsets = patch.branch_only_route->entry_relay_offsets;
-    effects.branch_only_return_relay_offsets = patch.branch_only_route->return_relay_offsets;
-  }
+  if (patch.branch_only_route)
+    effects.branch_only_route = consan_branch_only_continuation(*patch.branch_only_route);
   if (patch.spill) {
     effects.spilled_vgpr_count = patch.spill->vgpr_count;
     note_dynamic_stack_private_requirement(effects, &*patch.spill);

@@ -1213,13 +1213,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
     planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
-    planned.info.branch_only_continuation = candidate.branch_only_continuation;
-    if (candidate.branch_only_route) {
-      planned.info.branch_only_entry_relay_offsets =
-          candidate.branch_only_route->entry_relay_offsets;
-      planned.info.branch_only_return_relay_offsets =
-          candidate.branch_only_route->return_relay_offsets;
-    }
+    if (candidate.branch_only_route)
+      planned.info.branch_only_route =
+          consan_branch_only_continuation(*candidate.branch_only_route);
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     if (candidate.vgpr_spill) {
       planned.info.spilled_vgpr_count = candidate.vgpr_spill->vgpr_count;

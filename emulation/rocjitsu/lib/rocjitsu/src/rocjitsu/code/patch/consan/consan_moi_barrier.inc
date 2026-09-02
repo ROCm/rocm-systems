@@ -604,10 +604,13 @@ prune_unused_record_replay_direct_reservoirs(std::vector<uint8_t> &text, rj_code
       }
     }
 
-    std::unordered_set<uint64_t> route_relays(reservoir.branch_only_entry_relay_offsets.begin(),
-                                              reservoir.branch_only_entry_relay_offsets.end());
-    route_relays.insert(reservoir.branch_only_return_relay_offsets.begin(),
-                        reservoir.branch_only_return_relay_offsets.end());
+    std::unordered_set<uint64_t> route_relays;
+    if (reservoir.branch_only_route) {
+      const auto &entry_relays = reservoir.branch_only_route->entry_relay_offsets();
+      const auto &return_relays = reservoir.branch_only_route->return_relay_offsets;
+      route_relays.insert(entry_relays.begin(), entry_relays.end());
+      route_relays.insert(return_relays.begin(), return_relays.end());
+    }
     for (uint64_t relay : route_relays) {
       if (!write_word_bytes(text, relay, nop)) {
         errors.emplace_back("ConSan MOI barrier pass could not restore a provisional relay");
@@ -2673,16 +2676,20 @@ void try_apply_record_replay_barrier_record_patch(
               sizeof(uint32_t);
     }
     note_moi_probe_patch_info(info, planned);
-    if (branch_only_route) {
-      info.branch_only_continuation = true;
-      info.branch_only_entry_relay_offsets = branch_only_route->entry_relay_offsets;
-      info.branch_only_return_relay_offsets = branch_only_route->return_relay_offsets;
-    }
+    if (branch_only_route)
+      info.branch_only_route = consan_branch_only_continuation(*branch_only_route);
     if (staged.borrowed_entry) {
+      if (!info.branch_only_route) {
+        result.errors.emplace_back(
+            "ConSan MOI barrier borrowed entry lost its branch-only return route");
+        return;
+      }
       const ConSanIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
-      info.branch_only_borrowed_indirect_entry = true;
-      info.moi_borrowed_entry_jump = jump_sgprs;
-      info.branch_only_borrowed_backup_vgpr = staged.borrowed_entry->backup_vgpr;
+      info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
+          .jump = jump_sgprs,
+          .backup_vgpr = staged.borrowed_entry->backup_vgpr,
+          .empty_exec_continuation_offset = std::nullopt,
+      };
     }
     // Descriptor mutations belong to emitted patches, not merely to
     // resource-admitted candidates.  Accumulating them here keeps a later

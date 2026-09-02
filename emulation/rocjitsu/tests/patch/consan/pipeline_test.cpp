@@ -48,7 +48,7 @@ concept HasCommittedPatchGeometry = requires(const T &patch) {
 
 template <typename T>
 concept HasPatchRoutingProof = requires(const T &patch) {
-  patch.branch_only_entry_relay_offsets;
+  patch.branch_only_route;
   patch.entry_prologue_chained_trampoline_offset;
 };
 

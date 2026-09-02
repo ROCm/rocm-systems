@@ -6369,7 +6369,7 @@ TEST(ConSanMoi, RecordReplayUsesBranchOnlySpillWithoutDeadRouterScalars) {
               9u);
     EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
       return patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore ||
-             patch.branch_only_continuation;
+             patch.branch_only_route.has_value();
     }));
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   };
@@ -9134,14 +9134,14 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessWithoutDeadTransientScalarRegist
     if (access.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
       continue;
     EXPECT_FALSE(compute_sopp_branch_simm16(access.anchor_offset, access.trampoline_offset));
-    EXPECT_TRUE(access.branch_only_continuation);
-    if (access.branch_only_borrowed_indirect_entry) {
+    ASSERT_TRUE(access.branch_only_route);
+    if (access.branch_only_route->borrowed_entry()) {
       ++borrowed_entry_count;
-      EXPECT_TRUE(access.branch_only_entry_relay_offsets.empty());
+      EXPECT_TRUE(access.branch_only_route->entry_relay_offsets().empty());
     } else {
-      EXPECT_FALSE(access.branch_only_entry_relay_offsets.empty());
+      EXPECT_FALSE(access.branch_only_route->entry_relay_offsets().empty());
     }
-    EXPECT_FALSE(access.branch_only_return_relay_offsets.empty());
+    EXPECT_FALSE(access.branch_only_route->return_relay_offsets.empty());
   }
   // The densely adjacent prefix cannot expand without consuming another
   // access. Its final site is followed by a relocatable scalar continuation
@@ -9213,13 +9213,13 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
       anchor_tail_offsets.insert((access_word + word) * sizeof(uint32_t));
   }
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-    if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
+    if (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore || !patch.branch_only_route)
       return false;
     const auto uses_anchor_tail = [&](uint64_t relay) {
       return anchor_tail_offsets.contains(relay);
     };
-    return std::ranges::any_of(patch.branch_only_entry_relay_offsets, uses_anchor_tail) ||
-           std::ranges::any_of(patch.branch_only_return_relay_offsets, uses_anchor_tail);
+    return std::ranges::any_of(patch.branch_only_route->entry_relay_offsets(), uses_anchor_tail) ||
+           std::ranges::any_of(patch.branch_only_route->return_relay_offsets, uses_anchor_tail);
   }));
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
@@ -9294,7 +9294,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRecursivelyRoutesInstructionReservoirs) {
   const auto routed_reservoir_count =
       std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
-               patch.original_size != 0u && patch.branch_only_continuation;
+               patch.original_size != 0u && patch.branch_only_route.has_value();
       });
   EXPECT_GE(routed_reservoir_count, 2u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -9384,9 +9384,9 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(barrier_patch->anchor_offset, barrier_offset);
-  EXPECT_TRUE(barrier_patch->branch_only_continuation);
-  EXPECT_FALSE(barrier_patch->branch_only_entry_relay_offsets.empty());
-  EXPECT_FALSE(barrier_patch->branch_only_return_relay_offsets.empty());
+  ASSERT_TRUE(barrier_patch->branch_only_route);
+  EXPECT_FALSE(barrier_patch->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_FALSE(barrier_patch->branch_only_route->return_relay_offsets.empty());
   const auto relay_uses_direct_reservoir = [&](uint64_t relay) {
     return std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
       return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
@@ -9394,9 +9394,9 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
              relay < patch.anchor_offset + patch.original_size;
     });
   };
-  EXPECT_TRUE(std::ranges::any_of(barrier_patch->branch_only_entry_relay_offsets,
+  EXPECT_TRUE(std::ranges::any_of(barrier_patch->branch_only_route->entry_relay_offsets(),
                                   relay_uses_direct_reservoir) ||
-              std::ranges::any_of(barrier_patch->branch_only_return_relay_offsets,
+              std::ranges::any_of(barrier_patch->branch_only_route->return_relay_offsets,
                                   relay_uses_direct_reservoir));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -9487,7 +9487,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierReturnRoutesThroughSelectedAccessAnchorT
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end())
       << access_tail_details << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(barrier_patch->branch_only_continuation);
   std::set<uint64_t> access_anchor_tails;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore)
@@ -9497,10 +9496,11 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierReturnRoutesThroughSelectedAccessAnchorT
   const auto is_access_anchor_tail = [&](uint64_t relay) {
     return access_anchor_tails.contains(relay);
   };
-  EXPECT_TRUE(barrier_patch->branch_only_borrowed_indirect_entry);
-  EXPECT_TRUE(barrier_patch->branch_only_entry_relay_offsets.empty());
-  EXPECT_TRUE(
-      std::ranges::any_of(barrier_patch->branch_only_return_relay_offsets, is_access_anchor_tail));
+  ASSERT_TRUE(barrier_patch->branch_only_route);
+  EXPECT_NE(barrier_patch->branch_only_route->borrowed_entry(), nullptr);
+  EXPECT_TRUE(barrier_patch->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_TRUE(std::ranges::any_of(barrier_patch->branch_only_route->return_relay_offsets,
+                                  is_access_anchor_tail));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -9586,9 +9586,9 @@ TEST(ConSanMoi, Cdna4RecordReplayRelaySpineCrossesBarrierPrefixBeyondSoppReach) 
   const auto routed_barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(routed_barrier, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(routed_barrier->branch_only_continuation);
-  EXPECT_FALSE(routed_barrier->branch_only_entry_relay_offsets.empty());
-  EXPECT_FALSE(routed_barrier->branch_only_return_relay_offsets.empty());
+  ASSERT_TRUE(routed_barrier->branch_only_route);
+  EXPECT_FALSE(routed_barrier->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_FALSE(routed_barrier->branch_only_route->return_relay_offsets.empty());
   const auto is_donor_tail = [&](uint64_t offset) {
     return std::ranges::any_of(kDonorWords, [&](size_t donor_word) {
       const uint64_t begin = donor_word * sizeof(uint32_t) + sizeof(uint32_t);
@@ -9596,8 +9596,10 @@ TEST(ConSanMoi, Cdna4RecordReplayRelaySpineCrossesBarrierPrefixBeyondSoppReach) 
       return offset >= begin && offset < end;
     });
   };
-  EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_entry_relay_offsets, is_donor_tail));
-  EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_return_relay_offsets, is_donor_tail));
+  EXPECT_TRUE(
+      std::ranges::any_of(routed_barrier->branch_only_route->entry_relay_offsets(), is_donor_tail));
+  EXPECT_TRUE(
+      std::ranges::any_of(routed_barrier->branch_only_route->return_relay_offsets, is_donor_tail));
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir ||
         patch.original_size != 0u || patch.trampoline_offset < original_text_size) {
@@ -9788,27 +9790,40 @@ TEST(ConSanMoi, Cdna4RecordReplayBorrowsEntryTupleToHalveFarRelayDemand) {
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->branch_only_route);
+  const ConSanBranchOnlyBorrowedEntry *borrowed = access->branch_only_route->borrowed_entry();
+  ASSERT_NE(borrowed, nullptr);
   EXPECT_GT(access->original_size, guest->size() * sizeof(uint32_t));
-  EXPECT_TRUE(access->branch_only_entry_relay_offsets.empty());
-  EXPECT_FALSE(access->branch_only_return_relay_offsets.empty());
-  EXPECT_TRUE(access->branch_only_borrowed_backup_vgpr);
-  ASSERT_TRUE(access->branch_only_borrowed_indirect_entry);
-  ASSERT_TRUE(access->moi_borrowed_entry_jump);
-  EXPECT_TRUE(access->moi_borrowed_entry_jump->is_well_formed());
+  EXPECT_TRUE(access->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_FALSE(access->branch_only_route->return_relay_offsets.empty());
+  EXPECT_NE(borrowed->backup_vgpr, 0u);
+  EXPECT_TRUE(borrowed->jump.is_well_formed());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
   ConSanTransformArtifacts corrupted = result;
   auto corrupted_access = std::ranges::find(
       corrupted.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(corrupted_access, corrupted.patches.end());
-  ASSERT_TRUE(corrupted_access->moi_borrowed_entry_jump);
-  corrupted_access->moi_borrowed_entry_jump->scc_save_sgpr =
-      corrupted_access->moi_borrowed_entry_jump->pc_sgpr;
+  ASSERT_TRUE(corrupted_access->branch_only_route);
+  ConSanBranchOnlyBorrowedEntry *corrupted_borrowed =
+      corrupted_access->branch_only_route->borrowed_entry();
+  ASSERT_NE(corrupted_borrowed, nullptr);
+  corrupted_borrowed->jump.scc_save_sgpr = corrupted_borrowed->jump.pc_sgpr;
   const std::vector<std::string> corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
     return error.find("branch-only continuation proof found a stale, shared, or corrupted route") !=
            std::string::npos;
   })) << testing::PrintToString(corrupted_errors);
+
+  ConSanTransformArtifacts misplaced = result;
+  auto misplaced_access = std::ranges::find(
+      misplaced.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(misplaced_access, misplaced.patches.end());
+  misplaced_access->kind = ConSanPatchKind::InlineMoiAccessRecordStore;
+  const std::vector<std::string> misplaced_errors = validate_consan_modified_elf(bytes, misplaced);
+  EXPECT_TRUE(std::ranges::any_of(misplaced_errors, [](const std::string &error) {
+    return error.find("misplaced indirect route effect") != std::string::npos;
+  })) << testing::PrintToString(misplaced_errors);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayDoesNotBorrowAcrossReconvergenceEntry) {
@@ -9864,9 +9879,9 @@ TEST(ConSanMoi, Cdna4RecordReplayDoesNotBorrowAcrossReconvergenceEntry) {
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(access->original_size, guest->size() * sizeof(uint32_t));
-  EXPECT_FALSE(access->branch_only_borrowed_indirect_entry);
-  EXPECT_FALSE(access->branch_only_borrowed_backup_vgpr);
-  EXPECT_FALSE(access->branch_only_entry_relay_offsets.empty());
+  ASSERT_TRUE(access->branch_only_route);
+  EXPECT_EQ(access->branch_only_route->borrowed_entry(), nullptr);
+  EXPECT_FALSE(access->branch_only_route->entry_relay_offsets().empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -9909,14 +9924,14 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierBorrowsEntryTupleBeforeScalarProbe) {
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(patch->branch_only_continuation);
-  EXPECT_TRUE(patch->branch_only_borrowed_indirect_entry);
+  ASSERT_TRUE(patch->branch_only_route);
+  const ConSanBranchOnlyBorrowedEntry *borrowed = patch->branch_only_route->borrowed_entry();
+  ASSERT_NE(borrowed, nullptr);
   EXPECT_GT(patch->original_size, sizeof(uint32_t));
-  EXPECT_TRUE(patch->branch_only_entry_relay_offsets.empty());
-  EXPECT_TRUE(patch->branch_only_borrowed_backup_vgpr);
-  ASSERT_TRUE(patch->moi_borrowed_entry_jump);
-  EXPECT_TRUE(patch->moi_borrowed_entry_jump->is_well_formed());
-  EXPECT_FALSE(patch->branch_only_borrowed_continuation_offset);
+  EXPECT_TRUE(patch->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_EQ(borrowed->backup_vgpr, 0u);
+  EXPECT_TRUE(borrowed->jump.is_well_formed());
+  EXPECT_FALSE(borrowed->empty_exec_continuation_offset);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -9963,7 +9978,8 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossFollowingFence) {
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(barrier_patch->original_size, sizeof(uint32_t));
-  EXPECT_FALSE(barrier_patch->branch_only_borrowed_indirect_entry);
+  EXPECT_FALSE(barrier_patch->branch_only_route &&
+               barrier_patch->branch_only_route->borrowed_entry());
   EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -10012,8 +10028,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossReconvergenceEntry) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->original_size, sizeof(uint32_t));
-  EXPECT_FALSE(patch->branch_only_borrowed_indirect_entry);
-  EXPECT_FALSE(patch->branch_only_borrowed_backup_vgpr);
+  EXPECT_FALSE(patch->branch_only_route && patch->branch_only_route->borrowed_entry());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -10074,9 +10089,9 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegister
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(barrier_patch->branch_only_continuation);
-  EXPECT_TRUE(barrier_patch->branch_only_borrowed_indirect_entry);
-  EXPECT_TRUE(barrier_patch->branch_only_entry_relay_offsets.empty());
+  ASSERT_TRUE(barrier_patch->branch_only_route);
+  EXPECT_NE(barrier_patch->branch_only_route->borrowed_entry(), nullptr);
+  EXPECT_TRUE(barrier_patch->branch_only_route->entry_relay_offsets().empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -11389,9 +11404,10 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
            "dispatch-preload value occupying its ABI slot";
     const auto uses_appended_relay = [&](const ConSanPatchInfo &patch) {
       return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
-             (std::ranges::any_of(patch.branch_only_entry_relay_offsets,
+             patch.branch_only_route &&
+             (std::ranges::any_of(patch.branch_only_route->entry_relay_offsets(),
                                   [&](uint64_t relay) { return relay >= original_text_size; }) ||
-              std::ranges::any_of(patch.branch_only_return_relay_offsets,
+              std::ranges::any_of(patch.branch_only_route->return_relay_offsets,
                                   [&](uint64_t relay) { return relay >= original_text_size; }));
     };
     EXPECT_EQ(std::ranges::any_of(result.patches, uses_appended_relay),
@@ -11477,10 +11493,10 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
       << testing::PrintToString(result.warnings);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
-           patch.branch_only_continuation &&
-           (std::ranges::any_of(patch.branch_only_entry_relay_offsets,
+           patch.branch_only_route.has_value() &&
+           (std::ranges::any_of(patch.branch_only_route->entry_relay_offsets(),
                                 [&](uint64_t relay) { return relay >= original_text_size; }) ||
-            std::ranges::any_of(patch.branch_only_return_relay_offsets,
+            std::ranges::any_of(patch.branch_only_route->return_relay_offsets,
                                 [&](uint64_t relay) { return relay >= original_text_size; }));
   }));
 }

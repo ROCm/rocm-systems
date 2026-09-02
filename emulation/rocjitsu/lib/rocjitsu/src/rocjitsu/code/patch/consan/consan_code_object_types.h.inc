@@ -519,30 +519,10 @@ struct ConSanPatchRoutingProof {
   /// replaced anchor or after its primary trampoline body. Relay-reservoir
   /// validation uses this exact provenance when proving routes.
   std::vector<uint64_t> branch_relay_offsets;
-  /// Exact forward and return relay chains for a trampoline body whose
-  /// continuation uses branch-only control flow. Ordinarily the forward chain
-  /// also terminates at the trampoline. A borrowed indirect entry instead
-  /// preserves its owner-local PC/SCC tuple in a liveness-proven dead VGPR and leaves
-  /// the entry chain empty; the return chain still terminates after the
-  /// displaced anchor.
-  bool branch_only_continuation = false;
-  bool branch_only_borrowed_indirect_entry = false;
-  /// A liveness-proven dead VGPR used only to carry the borrowed scalar tuple
-  /// from the expanded anchor into its appended body. This is intentionally
-  /// distinct from `scratch_vgpr`: spill-backed probe scratch may overlap live
-  /// guest values until the body saves them.
-  std::optional<uint16_t> branch_only_borrowed_backup_vgpr;
-  /// Target of the optional empty-EXEC bypass after a borrowed entry restores
-  /// its scalar tuple. Vector-memory probes use it to skip instrumentation and
-  /// resume at the relocated scalar continuation. Scalar barrier probes do not
-  /// need an EXEC bypass and leave it absent.
-  std::optional<uint64_t> branch_only_borrowed_continuation_offset;
-  std::vector<uint64_t> branch_only_entry_relay_offsets;
-  std::vector<uint64_t> branch_only_return_relay_offsets;
-  /// Entry prologue that supersedes this patch's original anchor-to-body
-  /// route. The prologue owns the hardware entry and chains directly into
-  /// this trampoline after initializing persistent state.
-  std::optional<uint64_t> branch_only_entry_prologue_offset;
+  /// Exact forward/return route for a trampoline body whose continuation uses
+  /// branch-only control flow. The entry variant prevents ordinary relays, a
+  /// borrowed scalar tuple, and a composed kernel prologue from coexisting.
+  std::optional<ConSanBranchOnlyContinuation> branch_only_route;
   /// Trampoline reached after this entry prologue completes. This is recorded
   /// on the prologue patch so final validation can prove composed entry
   /// ownership without treating the overwritten anchor branch as live.
@@ -610,9 +590,6 @@ struct ConSanPatchAbiEffects {
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
-  /// Exact scalar tuple borrowed by an MOI branch-only entry while its live
-  /// values are preserved in a vector-register reservoir.
-  std::optional<ConSanIndirectJumpSgprs> moi_borrowed_entry_jump;
   /// Exact route of an ordinary, non-dense SuperCollider indirect body.
   std::optional<ConSanSuperColliderIndirectBodyRoute> sc_indirect_body_route;
   /// Mutually exclusive wave32-VCC or ordinary-scalar route used by an

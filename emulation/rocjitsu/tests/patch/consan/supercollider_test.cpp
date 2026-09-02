@@ -233,16 +233,15 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto patch =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto patch = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
   EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
   EXPECT_FALSE(patch->sc_indirect_body_route.has_value());
-  ASSERT_FALSE(patch->branch_only_entry_relay_offsets.empty());
-  ASSERT_FALSE(patch->branch_only_return_relay_offsets.empty());
-  const size_t relay_count = patch->branch_only_entry_relay_offsets.size() +
-                             patch->branch_only_return_relay_offsets.size();
+  ASSERT_FALSE(patch->branch_only_route->entry_relay_offsets().empty());
+  ASSERT_FALSE(patch->branch_only_route->return_relay_offsets.empty());
+  const size_t relay_count = patch->branch_only_route->entry_relay_offsets().size() +
+                             patch->branch_only_route->return_relay_offsets.size();
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             relay_count);
@@ -275,8 +274,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto body =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto body = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(body, result.patches.end()) << testing::PrintToString(result.warnings);
   const auto reservoir = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
@@ -287,8 +285,9 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
     return reservoir->anchor_offset < relay &&
            relay < reservoir->anchor_offset + reservoir->original_size;
   };
-  EXPECT_TRUE(std::ranges::any_of(body->branch_only_entry_relay_offsets, inside_reservoir));
-  EXPECT_TRUE(std::ranges::any_of(body->branch_only_return_relay_offsets, inside_reservoir));
+  EXPECT_TRUE(
+      std::ranges::any_of(body->branch_only_route->entry_relay_offsets(), inside_reservoir));
+  EXPECT_TRUE(std::ranges::any_of(body->branch_only_route->return_relay_offsets, inside_reservoir));
 
   ConSanTransformArtifacts malformed = result;
   const auto malformed_reservoir =
@@ -388,8 +387,7 @@ TEST(ConSan, FlatDirectReservoirRetryRoutesBothCandidates) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
-            2u)
+  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 2u)
       << testing::PrintToString(result.warnings);
 }
 
@@ -431,20 +429,20 @@ TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
   std::ranges::sort(bodies, {}, &ConSanPatchInfo::anchor_offset);
   const ConSanPatchInfo &far = *bodies.front();
   const ConSanPatchInfo &direct = *bodies.back();
-  ASSERT_TRUE(far.branch_only_continuation);
-  EXPECT_FALSE(direct.branch_only_continuation);
-  ASSERT_EQ(far.branch_only_entry_relay_offsets.size(), 1u);
-  ASSERT_EQ(far.branch_only_return_relay_offsets.size(), 1u);
+  ASSERT_TRUE(far.branch_only_route.has_value());
+  EXPECT_FALSE(direct.branch_only_route.has_value());
+  ASSERT_EQ(far.branch_only_route->entry_relay_offsets().size(), 1u);
+  ASSERT_EQ(far.branch_only_route->return_relay_offsets.size(), 1u);
   const std::array<uint64_t, 2> direct_tail = {
       direct.anchor_offset + sizeof(uint32_t),
       direct.anchor_offset + 2u * sizeof(uint32_t),
   };
-  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_entry_relay_offsets.front()),
+  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_route->entry_relay_offsets().front()),
             direct_tail.end());
-  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_return_relay_offsets.front()),
+  EXPECT_NE(std::ranges::find(direct_tail, far.branch_only_route->return_relay_offsets.front()),
             direct_tail.end());
-  EXPECT_NE(far.branch_only_entry_relay_offsets.front(),
-            far.branch_only_return_relay_offsets.front());
+  EXPECT_NE(far.branch_only_route->entry_relay_offsets().front(),
+            far.branch_only_route->return_relay_offsets.front());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             0u);
@@ -7352,13 +7350,12 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
   EXPECT_FALSE(branch_only->sc_indirect_body_route.has_value());
-  ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
-  ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_route->entry_relay_offsets().empty());
+  ASSERT_FALSE(branch_only->branch_only_route->return_relay_offsets.empty());
 
   ConSanTransformArtifacts corrupted = result;
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -7367,7 +7364,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
   std::memcpy(corrupted.replacement.data() + text_file_offset +
-                  branch_only->branch_only_return_relay_offsets.front(),
+                  branch_only->branch_only_route->return_relay_offsets.front(),
               &nop, sizeof(nop));
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
@@ -7407,13 +7404,12 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
   EXPECT_FALSE(branch_only->sc_indirect_body_route.has_value());
-  ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
-  ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
+  ASSERT_FALSE(branch_only->branch_only_route->entry_relay_offsets().empty());
+  ASSERT_FALSE(branch_only->branch_only_route->return_relay_offsets.empty());
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
@@ -7439,12 +7435,11 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
-  EXPECT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
-  EXPECT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
+  EXPECT_FALSE(branch_only->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_FALSE(branch_only->branch_only_route->return_relay_offsets.empty());
   const auto reservoir = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
@@ -7479,8 +7474,7 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
-            1u);
+  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7917,7 +7911,7 @@ TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             kSiteCount);
-  EXPECT_NE(std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
+  EXPECT_NE(std::ranges::find(result.patches, true, test_has_branch_only_route),
             result.patches.end());
 }
 

@@ -3358,9 +3358,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
           return;
         }
         planned.cave_words.back() = build_s_branch(*ret, arch);
-        planned.info.branch_only_continuation = true;
-        planned.info.branch_only_entry_relay_offsets = route.entry_relay_offsets;
-        planned.info.branch_only_return_relay_offsets = route.return_relay_offsets;
+        planned.info.branch_only_route = consan_branch_only_continuation(route);
       } else if (candidate.entry_island != nullptr || candidate.dense_call_group_index) {
         if (!candidate.indirect_jump) {
           result.errors.emplace_back(

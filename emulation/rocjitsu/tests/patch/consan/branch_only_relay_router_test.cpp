@@ -79,6 +79,39 @@ public:
 constexpr uint32_t kRelayTestDonor = 0x1000u;
 constexpr uint32_t kRelayTestClauseTwo = 0x1041u;
 
+TEST(ConSanBranchOnlyRelayRouter, PublishesOneMutuallyExclusiveEntryEffect) {
+  BranchOnlyRelayRoute planned{
+      .entry_relay_offsets = {16u, 32u},
+      .return_relay_offsets = {48u},
+      .retired_relay_claims = {},
+      .claims = {},
+  };
+  ConSanBranchOnlyContinuation route = consan_branch_only_continuation(planned);
+  EXPECT_EQ(route.entry_relay_offsets(), planned.entry_relay_offsets);
+  EXPECT_EQ(route.return_relay_offsets, planned.return_relay_offsets);
+  EXPECT_EQ(route.borrowed_entry(), nullptr);
+  EXPECT_EQ(route.prologue_entry(), nullptr);
+
+  route.entry = ConSanBranchOnlyBorrowedEntry{
+      .jump = {.pc_sgpr = 8u, .scc_save_sgpr = 10u},
+      .backup_vgpr = 12u,
+      .empty_exec_continuation_offset = 64u,
+  };
+  EXPECT_TRUE(route.entry_relay_offsets().empty());
+  ASSERT_NE(route.borrowed_entry(), nullptr);
+  EXPECT_TRUE(route.borrowed_entry()->jump.is_well_formed());
+  EXPECT_EQ(route.borrowed_entry()->backup_vgpr, 12u);
+  EXPECT_EQ(route.borrowed_entry()->empty_exec_continuation_offset, 64u);
+  EXPECT_EQ(route.prologue_entry(), nullptr);
+
+  route.entry = ConSanBranchOnlyPrologueEntry{.prologue_offset = 80u};
+  EXPECT_TRUE(route.entry_relay_offsets().empty());
+  EXPECT_EQ(route.borrowed_entry(), nullptr);
+  ASSERT_NE(route.prologue_entry(), nullptr);
+  EXPECT_EQ(route.prologue_entry()->prologue_offset, 80u);
+  EXPECT_EQ(route.return_relay_offsets, planned.return_relay_offsets);
+}
+
 TEST(ConSanBranchOnlyRelayRouter, BoundsPeriodicRelayBankDensity) {
   constexpr uint64_t kBodyInterval = 64u * 1024u;
   constexpr size_t kMaximumBankWords = kBodyInterval / (8u * sizeof(uint32_t));

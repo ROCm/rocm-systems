@@ -73,6 +73,10 @@ struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   }
 };
 
+[[nodiscard]] inline bool test_has_branch_only_route(const ConSanPatchInfo &patch) {
+  return patch.branch_only_route.has_value();
+}
+
 /// Focused classifier/planner tests start from decoded sites so they can
 /// exercise rejection mapping as well as normalized address planning.
 /// Production lowering carries ConSanAtomicLoweringForm across that boundary.

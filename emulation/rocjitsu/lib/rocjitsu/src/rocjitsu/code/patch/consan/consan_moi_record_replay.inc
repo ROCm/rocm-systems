@@ -1165,12 +1165,19 @@ void try_apply_first_light_access_record_patch(
                       : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.anchor();
       note_moi_access_patch_info(info, planned_patch);
-      info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
+        if (!info.branch_only_route) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light borrowed entry lost its branch-only return route");
+          return;
+        }
         const ConSanIndirectJumpSgprs jump_sgprs =
             *moi_indirect_jump_sgprs(options, candidate_point);
-        info.moi_borrowed_entry_jump = jump_sgprs;
-        info.branch_only_borrowed_backup_vgpr = planned_patch.borrowed_entry->backup_vgpr;
+        info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
+            .jump = jump_sgprs,
+            .backup_vgpr = planned_patch.borrowed_entry->backup_vgpr,
+            .empty_exec_continuation_offset = std::nullopt,
+        };
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1338,7 +1345,7 @@ void try_apply_first_light_access_record_patch(
             return;
           }
           (*cave_words)[*borrowed_empty_exec_guard_word] = *guard;
-          info.branch_only_borrowed_continuation_offset =
+          info.branch_only_route->borrowed_entry()->empty_exec_continuation_offset =
               cave_text_offset + displaced_tail_begin * sizeof(uint32_t);
         }
         if (planned_patch.dense_call_anchor) {

@@ -2734,12 +2734,12 @@ void try_apply_owner_epoch_prologue_patch(
             ? std::optional<uint64_t>(composed_entry_patch->trampoline_offset)
             : std::nullopt;
     std::optional<uint64_t> composed_branch_only_trampoline_offset =
-        chains_existing_entry_trampoline && composed_entry_patch->branch_only_continuation
+        chains_existing_entry_trampoline && composed_entry_patch->branch_only_route
             ? std::optional<uint64_t>(composed_entry_patch->trampoline_offset)
             : std::nullopt;
     std::vector<uint64_t> composed_branch_only_entry_relays =
         composed_branch_only_trampoline_offset
-            ? composed_entry_patch->branch_only_entry_relay_offsets
+            ? composed_entry_patch->branch_only_route->entry_relay_offsets()
             : std::vector<uint64_t>{};
     if (instrument_entry_in_place) {
       if (chains_existing_entry_trampoline) {
@@ -2816,9 +2816,10 @@ void try_apply_owner_epoch_prologue_patch(
               composed_entry_original_size =
                   static_cast<uint32_t>(kDirectEntryRelayWords * sizeof(uint32_t));
               composed_entry_trampoline_offset = prefix_patch->trampoline_offset;
-              if (prefix_patch->branch_only_continuation) {
+              if (prefix_patch->branch_only_route) {
                 composed_branch_only_trampoline_offset = prefix_patch->trampoline_offset;
-                composed_branch_only_entry_relays = prefix_patch->branch_only_entry_relay_offsets;
+                composed_branch_only_entry_relays =
+                    prefix_patch->branch_only_route->entry_relay_offsets();
               }
               prologue_return_target = prefix_patch->trampoline_offset;
               break;
@@ -3022,8 +3023,8 @@ void try_apply_owner_epoch_prologue_patch(
           return;
         }
       }
-      composed_entry_patch->branch_only_entry_relay_offsets.clear();
-      composed_entry_patch->branch_only_entry_prologue_offset = prologue_text_offset;
+      composed_entry_patch->branch_only_route->entry =
+          ConSanBranchOnlyPrologueEntry{prologue_text_offset};
       // The erase below invalidates composed_entry_patch. Keep it last in this
       // composition block so later maintenance cannot accidentally reuse it.
       std::erase_if(result.patches, [&](const ConSanPatchLoweringProduct &patch) {

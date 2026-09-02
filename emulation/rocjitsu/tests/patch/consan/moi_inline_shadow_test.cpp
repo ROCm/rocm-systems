@@ -1269,7 +1269,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, full_access->trampoline_offset, full_access->trampoline_size);
-  ASSERT_FALSE(full_access->branch_only_continuation);
+  ASSERT_FALSE(full_access->branch_only_route.has_value());
   ASSERT_TRUE(full_access->relocated_guest_instruction_offset);
   ASSERT_GE(*full_access->relocated_guest_instruction_offset,
             full_access->trampoline_offset + sizeof(uint32_t));
@@ -3314,13 +3314,15 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   EXPECT_EQ(prologue->entry_scalar_backup->sgpr_count, kInitializedEntrySgprCount);
   ASSERT_EQ(prologue->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(prologue->owner_descriptor_file_offsets.front(), assignment.descriptor_file_offset);
-  const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, result.patches.end());
+  ASSERT_TRUE(branch_only->branch_only_route);
+  ASSERT_TRUE(branch_only->branch_only_route->prologue_entry());
   EXPECT_EQ(branch_only->anchor_offset, 0u);
-  EXPECT_EQ(branch_only->branch_only_entry_prologue_offset, prologue->trampoline_offset);
+  EXPECT_EQ(branch_only->branch_only_route->prologue_entry()->prologue_offset,
+            prologue->trampoline_offset);
   EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, branch_only->trampoline_offset);
-  EXPECT_TRUE(branch_only->branch_only_entry_relay_offsets.empty());
+  EXPECT_TRUE(branch_only->branch_only_route->entry_relay_offsets().empty());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             0u);
@@ -3442,10 +3444,12 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   ASSERT_TRUE(prologue->entry_scalar_backup);
   EXPECT_EQ(prologue->entry_scalar_backup->sgpr_base, assignment.exec_save_sgpr);
   EXPECT_EQ(prologue->entry_scalar_backup->sgpr_count, kInitializedEntrySgprCount);
-  const auto branch_only =
-      std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(result.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, result.patches.end());
-  EXPECT_EQ(branch_only->branch_only_entry_prologue_offset, prologue->trampoline_offset);
+  ASSERT_TRUE(branch_only->branch_only_route);
+  ASSERT_TRUE(branch_only->branch_only_route->prologue_entry());
+  EXPECT_EQ(branch_only->branch_only_route->prologue_entry()->prologue_offset,
+            prologue->trampoline_offset);
   EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, branch_only->trampoline_offset);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3544,8 +3548,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   EXPECT_TRUE(assignment.branch_only_spill);
   EXPECT_FALSE(assignment.router_jump);
   EXPECT_FALSE(assignment.router_call);
-  EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
-            8u);
+  EXPECT_EQ(std::ranges::count(result.patches, true, test_has_branch_only_route), 8u);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -3598,7 +3601,7 @@ TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
                                      return assignment.branch_only_spill.has_value();
                                    }))
       << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(std::ranges::any_of(result.patches, &ConSanPatchInfo::branch_only_continuation))
+  EXPECT_FALSE(std::ranges::any_of(result.patches, test_has_branch_only_route))
       << testing::PrintToString(result.warnings);
 }
 
@@ -3646,29 +3649,31 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
-    return candidate.branch_only_continuation && candidate.anchor_offset == access_offset;
+    return candidate.branch_only_route.has_value() && candidate.anchor_offset == access_offset;
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
-  ASSERT_EQ(patch->branch_only_entry_relay_offsets.size(), 1u);
-  ASSERT_EQ(patch->branch_only_return_relay_offsets.size(), 1u);
+  ASSERT_EQ(patch->branch_only_route->entry_relay_offsets().size(), 1u);
+  ASSERT_EQ(patch->branch_only_route->return_relay_offsets.size(), 1u);
   const std::array<uint64_t, 3> relay_candidates = {
       kEntryRelayWord * sizeof(uint32_t),
       kUnusedEntryRelayWord * sizeof(uint32_t),
       (kSegmentWords + kReturnRelayWord) * sizeof(uint32_t),
   };
-  EXPECT_NE(std::ranges::find(relay_candidates, patch->branch_only_entry_relay_offsets.front()),
-            relay_candidates.end());
-  EXPECT_NE(std::ranges::find(relay_candidates, patch->branch_only_return_relay_offsets.front()),
-            relay_candidates.end());
-  EXPECT_NE(patch->branch_only_entry_relay_offsets.front(),
-            patch->branch_only_return_relay_offsets.front());
+  EXPECT_NE(
+      std::ranges::find(relay_candidates, patch->branch_only_route->entry_relay_offsets().front()),
+      relay_candidates.end());
+  EXPECT_NE(
+      std::ranges::find(relay_candidates, patch->branch_only_route->return_relay_offsets.front()),
+      relay_candidates.end());
+  EXPECT_NE(patch->branch_only_route->entry_relay_offsets().front(),
+            patch->branch_only_route->return_relay_offsets.front());
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             2u);
 
   const auto unused_relay = std::ranges::find_if(relay_candidates, [&](uint64_t candidate) {
-    return candidate != patch->branch_only_entry_relay_offsets.front() &&
-           candidate != patch->branch_only_return_relay_offsets.front();
+    return candidate != patch->branch_only_route->entry_relay_offsets().front() &&
+           candidate != patch->branch_only_route->return_relay_offsets.front();
   });
   ASSERT_NE(unused_relay, relay_candidates.end());
   ConSanTransformArtifacts unused = result;
@@ -3715,8 +3720,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
   ASSERT_TRUE(consan_patch_succeeded(relocated)) << testing::PrintToString(relocated.errors);
   ASSERT_TRUE(relocated.modified()) << testing::PrintToString(relocated.warnings);
   ASSERT_EQ(relocated.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto branch_only =
-      std::ranges::find(relocated.patches, true, &ConSanPatchInfo::branch_only_continuation);
+  const auto branch_only = std::ranges::find(relocated.patches, true, test_has_branch_only_route);
   ASSERT_NE(branch_only, relocated.patches.end());
   const auto reservoir = std::ranges::find(
       relocated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
@@ -3727,8 +3731,10 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
     return relay > reservoir->anchor_offset &&
            relay < reservoir->anchor_offset + reservoir->original_size;
   };
-  EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_entry_relay_offsets, in_reservoir));
-  EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_return_relay_offsets, in_reservoir));
+  EXPECT_TRUE(
+      std::ranges::any_of(branch_only->branch_only_route->entry_relay_offsets(), in_reservoir));
+  EXPECT_TRUE(
+      std::ranges::any_of(branch_only->branch_only_route->return_relay_offsets, in_reservoir));
 }
 
 TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
@@ -3770,7 +3776,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
                                   [](const ConSanPatchInfo &patch) {
                                     return patch.kind ==
                                                ConSanPatchKind::TrampolineMoiExactShadowStore &&
-                                           patch.branch_only_continuation;
+                                           patch.branch_only_route.has_value();
                                   }),
             2u)
       << testing::PrintToString(result.warnings);
@@ -3783,7 +3789,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       "branch_only_without_admissible_reservoir");
   EXPECT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
-  EXPECT_EQ(std::ranges::find(rejected.patches, true, &ConSanPatchInfo::branch_only_continuation),
+  EXPECT_EQ(std::ranges::find(rejected.patches, true, test_has_branch_only_route),
             rejected.patches.end());
   EXPECT_TRUE(std::ranges::any_of(rejected.warnings, [](const std::string &warning) {
     return warning.find("could not route its branch-only scalar-spill body") != std::string::npos;
@@ -3827,7 +3833,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_patch_at = [&](size_t word) {
     return std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.branch_only_continuation && patch.anchor_offset == word * sizeof(uint32_t);
+      return patch.branch_only_route.has_value() && patch.anchor_offset == word * sizeof(uint32_t);
     });
   };
   const auto early = branch_patch_at(kEarlyAccessWord);
@@ -3836,15 +3842,15 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
   ASSERT_NE(early, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_NE(middle, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_NE(late, result.patches.end()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(early->branch_only_entry_relay_offsets.size(), 1u);
-  ASSERT_EQ(early->branch_only_return_relay_offsets.size(), 1u);
-  EXPECT_TRUE(middle->branch_only_entry_relay_offsets.empty());
-  EXPECT_TRUE(middle->branch_only_return_relay_offsets.empty());
-  EXPECT_TRUE(late->branch_only_entry_relay_offsets.empty());
-  EXPECT_TRUE(late->branch_only_return_relay_offsets.empty());
+  ASSERT_EQ(early->branch_only_route->entry_relay_offsets().size(), 1u);
+  ASSERT_EQ(early->branch_only_route->return_relay_offsets.size(), 1u);
+  EXPECT_TRUE(middle->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_TRUE(middle->branch_only_route->return_relay_offsets.empty());
+  EXPECT_TRUE(late->branch_only_route->entry_relay_offsets().empty());
+  EXPECT_TRUE(late->branch_only_route->return_relay_offsets.empty());
   std::array<uint64_t, 2> relays = {
-      early->branch_only_entry_relay_offsets.front(),
-      early->branch_only_return_relay_offsets.front(),
+      early->branch_only_route->entry_relay_offsets().front(),
+      early->branch_only_route->return_relay_offsets.front(),
   };
   std::ranges::sort(relays);
   const std::array<uint64_t, 2> expected = {
@@ -6991,7 +6997,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
   EXPECT_EQ(access_patch->anchor_offset, kAccessWord * sizeof(uint32_t));
-  EXPECT_FALSE(access_patch->branch_only_continuation);
+  EXPECT_FALSE(access_patch->branch_only_route.has_value());
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());

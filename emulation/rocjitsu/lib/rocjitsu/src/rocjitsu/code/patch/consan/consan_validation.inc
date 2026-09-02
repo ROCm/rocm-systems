@@ -105,8 +105,8 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
       insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
                    patch.anchor_offset + patch.original_size);
     }
-    if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore &&
-        patch.branch_only_continuation && patch.original_size > sizeof(uint32_t)) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore && patch.branch_only_route &&
+        patch.original_size > sizeof(uint32_t)) {
       insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
                    patch.anchor_offset + patch.original_size);
     }
@@ -149,20 +149,19 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
       inventory.nop_relays.push_back(&patch);
       inventory.continuation_slots.insert(patch.anchor_offset);
     }
-    if (patch.branch_only_continuation) {
-      for (size_t index = 0; index < patch.branch_only_entry_relay_offsets.size(); ++index) {
-        inventory.branch_only_targets.emplace(
-            patch.branch_only_entry_relay_offsets[index],
-            index + 1u < patch.branch_only_entry_relay_offsets.size()
-                ? patch.branch_only_entry_relay_offsets[index + 1u]
-                : patch.trampoline_offset);
+    if (patch.branch_only_route) {
+      const auto &entry_relays = patch.branch_only_route->entry_relay_offsets();
+      for (size_t index = 0; index < entry_relays.size(); ++index) {
+        inventory.branch_only_targets.emplace(entry_relays[index], index + 1u < entry_relays.size()
+                                                                       ? entry_relays[index + 1u]
+                                                                       : patch.trampoline_offset);
       }
-      for (size_t index = 0; index < patch.branch_only_return_relay_offsets.size(); ++index) {
-        inventory.branch_only_targets.emplace(
-            patch.branch_only_return_relay_offsets[index],
-            index + 1u < patch.branch_only_return_relay_offsets.size()
-                ? patch.branch_only_return_relay_offsets[index + 1u]
-                : patch.anchor_offset + patch.original_size);
+      const auto &return_relays = patch.branch_only_route->return_relay_offsets;
+      for (size_t index = 0; index < return_relays.size(); ++index) {
+        inventory.branch_only_targets.emplace(return_relays[index],
+                                              index + 1u < return_relays.size()
+                                                  ? return_relays[index + 1u]
+                                                  : patch.anchor_offset + patch.original_size);
       }
     }
   }
@@ -587,15 +586,16 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
 void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &result,
                                           std::vector<std::string> &errors) {
   for (const ConSanPatchInfo &patch : result.patches) {
-    const uint32_t route_count = static_cast<uint32_t>(patch.moi_borrowed_entry_jump.has_value()) +
+    const uint32_t route_count = static_cast<uint32_t>(patch.branch_only_route.has_value()) +
                                  static_cast<uint32_t>(patch.sc_indirect_body_route.has_value()) +
                                  static_cast<uint32_t>(patch.sc_relay_reservoir_route.has_value()) +
                                  static_cast<uint32_t>(patch.sc_dense_route.has_value());
-    const bool valid_moi_borrowed =
-        !patch.moi_borrowed_entry_jump ||
-        (patch.branch_only_continuation && patch.branch_only_borrowed_indirect_entry &&
-         (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
-          patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord));
+    const ConSanBranchOnlyBorrowedEntry *borrowed_entry =
+        patch.branch_only_route ? patch.branch_only_route->borrowed_entry() : nullptr;
+    const bool valid_borrowed_entry =
+        borrowed_entry == nullptr ||
+        patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+        patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
     const bool valid_sc_body = !patch.sc_indirect_body_route ||
                                (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
                                 patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
@@ -605,7 +605,7 @@ void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &resu
         !patch.sc_relay_reservoir_route ||
         (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
          patch.original_size != 0u);
-    if (route_count > 1u || !valid_moi_borrowed || !valid_sc_body || !valid_sc_reservoir) {
+    if (route_count > 1u || !valid_borrowed_entry || !valid_sc_body || !valid_sc_reservoir) {
       errors.emplace_back("ConSan final validation found a misplaced indirect route effect");
       return;
     }
@@ -668,8 +668,10 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
                                                  const ConSanFinalValidationInput &result,
                                                  const BranchRelayValidationInventory &inventory,
                                                  std::vector<std::string> &errors) {
-  const bool has_branch_only = std::ranges::any_of(
-      result.patches, [](const ConSanPatchInfo &patch) { return patch.branch_only_continuation; });
+  const bool has_branch_only =
+      std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.branch_only_route.has_value();
+      });
   if (!has_branch_only)
     return;
   if (!environment.original_text.available || !environment.replacement_text.available) {
@@ -701,18 +703,16 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     const auto word = environment.replacement_text.word(source);
     return delta && word && *word == build_s_branch(*delta, arch);
   };
-  const auto validate_borrowed_indirect_entry = [&](const ConSanPatchInfo &patch) {
-    if (!patch.branch_only_borrowed_indirect_entry ||
-        !patch.branch_only_entry_relay_offsets.empty() || !patch.branch_only_borrowed_backup_vgpr ||
-        !patch.moi_borrowed_entry_jump ||
-        (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore &&
+  const auto validate_borrowed_indirect_entry = [&](const ConSanPatchInfo &patch,
+                                                    const ConSanBranchOnlyBorrowedEntry &entry) {
+    if ((patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore &&
          patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord) ||
         patch.original_size == 0u || patch.original_size % sizeof(uint32_t) != 0u ||
-        !patch.moi_borrowed_entry_jump->is_well_formed()) {
+        !entry.jump.is_well_formed()) {
       return false;
     }
 
-    const ConSanIndirectJumpSgprs &jump = *patch.moi_borrowed_entry_jump;
+    const ConSanIndirectJumpSgprs &jump = entry.jump;
     const std::array<uint16_t, 3> borrowed = {
         jump.pc_sgpr,
         static_cast<uint16_t>(jump.pc_sgpr + 1u),
@@ -721,10 +721,10 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_restore;
     for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
-      const auto save = instrumentation::build_v_writelane_b32(
-          *patch.branch_only_borrowed_backup_vgpr, borrowed[lane], lane, arch);
-      const auto restore = instrumentation::build_v_readlane_b32(
-          borrowed[lane], *patch.branch_only_borrowed_backup_vgpr, lane, arch);
+      const auto save =
+          instrumentation::build_v_writelane_b32(entry.backup_vgpr, borrowed[lane], lane, arch);
+      const auto restore =
+          instrumentation::build_v_readlane_b32(borrowed[lane], entry.backup_vgpr, lane, arch);
       if (!save || !restore)
         return false;
       expected_entry.insert(expected_entry.end(), save->begin(), save->end());
@@ -765,12 +765,12 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
       return false;
     }
     if (patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord)
-      return !patch.branch_only_borrowed_continuation_offset;
-    if (!patch.branch_only_borrowed_continuation_offset)
+      return !entry.empty_exec_continuation_offset;
+    if (!entry.empty_exec_continuation_offset)
       return false;
     const uint64_t guard_offset =
         patch.trampoline_offset + expected_restore.size() * sizeof(uint32_t);
-    const uint64_t continuation_offset = *patch.branch_only_borrowed_continuation_offset;
+    const uint64_t continuation_offset = *entry.empty_exec_continuation_offset;
     const uint64_t return_source =
         patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
     const auto guard_delta = compute_sopp_branch_simm16(guard_offset, continuation_offset);
@@ -781,21 +781,9 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
   };
 
   for (const ConSanPatchInfo &patch : result.patches) {
-    const bool has_route_metadata = !patch.branch_only_entry_relay_offsets.empty() ||
-                                    !patch.branch_only_return_relay_offsets.empty() ||
-                                    patch.branch_only_entry_prologue_offset.has_value() ||
-                                    patch.branch_only_borrowed_indirect_entry ||
-                                    patch.branch_only_borrowed_backup_vgpr.has_value() ||
-                                    patch.branch_only_borrowed_continuation_offset.has_value() ||
-                                    patch.moi_borrowed_entry_jump.has_value();
-    if (!patch.branch_only_continuation) {
-      if (has_route_metadata) {
-        errors.emplace_back(
-            "ConSan branch-only continuation proof found route metadata on another patch");
-        return;
-      }
+    if (!patch.branch_only_route)
       continue;
-    }
+    const ConSanBranchOnlyContinuation &route = *patch.branch_only_route;
     const bool is_lds_body = (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
                               patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
                              patch.original_size == 2u * sizeof(uint32_t);
@@ -834,27 +822,23 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     const uint64_t return_source =
         patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
     bool valid_entry_route = false;
-    if (patch.branch_only_borrowed_indirect_entry) {
-      valid_entry_route =
-          !patch.branch_only_entry_prologue_offset && validate_borrowed_indirect_entry(patch);
-    } else if (patch.branch_only_entry_prologue_offset) {
+    if (const ConSanBranchOnlyBorrowedEntry *borrowed = route.borrowed_entry()) {
+      valid_entry_route = validate_borrowed_indirect_entry(patch, *borrowed);
+    } else if (const ConSanBranchOnlyPrologueEntry *entry = route.prologue_entry()) {
       const auto prologue =
           std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
             return candidate.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
                    candidate.anchor_offset <= patch.anchor_offset &&
                    patch.anchor_offset < candidate.anchor_offset + candidate.original_size &&
-                   candidate.trampoline_offset == *patch.branch_only_entry_prologue_offset &&
+                   candidate.trampoline_offset == entry->prologue_offset &&
                    candidate.entry_prologue_chained_trampoline_offset == patch.trampoline_offset;
           });
-      valid_entry_route = !patch.moi_borrowed_entry_jump &&
-                          patch.branch_only_entry_relay_offsets.empty() &&
-                          prologue != result.patches.end();
+      valid_entry_route = prologue != result.patches.end();
     } else {
-      valid_entry_route = !patch.moi_borrowed_entry_jump &&
-                          validate_route(patch.anchor_offset, patch.branch_only_entry_relay_offsets,
-                                         patch.trampoline_offset);
+      valid_entry_route =
+          validate_route(patch.anchor_offset, route.entry_relay_offsets(), patch.trampoline_offset);
     }
-    if (!valid_entry_route || !validate_route(return_source, patch.branch_only_return_relay_offsets,
+    if (!valid_entry_route || !validate_route(return_source, route.return_relay_offsets,
                                               patch.anchor_offset + patch.original_size)) {
       errors.emplace_back(
           "ConSan branch-only continuation proof found a stale, shared, or corrupted route");
@@ -888,7 +872,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
   const auto has_other_indirect_route = [](const ConSanPatchInfo &patch) {
-    return patch.moi_borrowed_entry_jump || patch.sc_indirect_body_route ||
+    return patch.branch_only_route || patch.sc_indirect_body_route ||
            patch.sc_relay_reservoir_route;
   };
 
@@ -1428,16 +1412,21 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
       return;
     }
     if (shape == BranchRelayReservoirShape::DirectInstruction) {
+      const std::span<const uint64_t> entry_relays =
+          patch->branch_only_route
+              ? std::span<const uint64_t>(patch->branch_only_route->entry_relay_offsets())
+              : std::span<const uint64_t>{};
       const uint64_t entry_target =
-          patch->branch_only_continuation && !patch->branch_only_entry_relay_offsets.empty()
-              ? patch->branch_only_entry_relay_offsets.front()
-              : patch->trampoline_offset;
+          !entry_relays.empty() ? entry_relays.front() : patch->trampoline_offset;
       const auto entry_delta = compute_sopp_branch_simm16(patch->anchor_offset, entry_target);
       const uint64_t return_source = patch->trampoline_offset + patch->original_size;
-      const uint64_t return_target =
-          patch->branch_only_continuation && !patch->branch_only_return_relay_offsets.empty()
-              ? patch->branch_only_return_relay_offsets.front()
-              : patch->anchor_offset + patch->original_size;
+      const std::span<const uint64_t> return_relays =
+          patch->branch_only_route
+              ? std::span<const uint64_t>(patch->branch_only_route->return_relay_offsets)
+              : std::span<const uint64_t>{};
+      const uint64_t return_target = !return_relays.empty()
+                                         ? return_relays.front()
+                                         : patch->anchor_offset + patch->original_size;
       const auto return_delta = compute_sopp_branch_simm16(return_source, return_target);
       if (!entry_delta || !return_delta ||
           environment.replacement_text.word(patch->anchor_offset) !=

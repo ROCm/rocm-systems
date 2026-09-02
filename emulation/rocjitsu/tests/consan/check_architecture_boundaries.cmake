@@ -1342,24 +1342,40 @@ file(READ
     "${_consan_dir}/consan_supercollider_indirect_route.h.inc"
     _sc_indirect_route_contract
 )
+file(READ
+    "${_consan_dir}/consan_branch_only_continuation.h.inc"
+    _branch_only_route_contract
+)
 if(NOT _shared_aggregate_contract MATCHES
        "consan_indirect_jump_sgprs[.]h[.]inc" OR
+   NOT _shared_aggregate_contract MATCHES
+       "consan_branch_only_continuation[.]h[.]inc" OR
    NOT _shared_aggregate_contract MATCHES
        "consan_supercollider_indirect_route[.]h[.]inc" OR
    NOT _indirect_jump_contract MATCHES
        "struct ConSanIndirectJumpSgprs" OR
+   NOT _branch_only_route_contract MATCHES
+       "struct ConSanBranchOnlyContinuation" OR
+   NOT _branch_only_route_contract MATCHES
+       "std::variant<ConSanBranchOnlyRelayEntry, ConSanBranchOnlyBorrowedEntry" OR
+   NOT _branch_only_route_contract MATCHES
+       "ConSanIndirectJumpSgprs[ \t]+jump" OR
    NOT _sc_indirect_route_contract MATCHES
        "struct ConSanSuperColliderIndirectBodyRoute" OR
    NOT _sc_indirect_route_contract MATCHES
        "struct ConSanSuperColliderRelayReservoirRoute" OR
    NOT _patch_proof_contract MATCHES
-       "std::optional<ConSanIndirectJumpSgprs>[ \t]+moi_borrowed_entry_jump" OR
+       "std::optional<ConSanBranchOnlyContinuation>[ \t]+branch_only_route" OR
    NOT _patch_proof_contract MATCHES
        "std::optional<ConSanSuperColliderIndirectBodyRoute>[ \t]+sc_indirect_body_route" OR
    NOT _patch_proof_contract MATCHES
        "std::optional<ConSanSuperColliderRelayReservoirRoute>[ \t]+sc_relay_reservoir_route" OR
    NOT _consan_validation MATCHES
        "validate_indirect_route_effect_roles" OR
+   NOT _consan_validation MATCHES
+       "[.]borrowed_entry[(]" OR
+   NOT _consan_validation MATCHES
+       "[.]prologue_entry[(]" OR
    NOT _consan_validation MATCHES
        "sc_indirect_body_route->is_well_formed" OR
    NOT _consan_validation MATCHES
@@ -1370,11 +1386,17 @@ if(NOT _shared_aggregate_contract MATCHES
 endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_code_object_types.h.inc"
+    "(bool[ \t]+branch_only_(continuation|borrowed_indirect_entry)|std::optional<uint(16|64)_t>[ \t]+branch_only_(borrowed_backup_vgpr|borrowed_continuation_offset|entry_prologue_offset)|std::vector<uint64_t>[ \t]+branch_only_(entry|return)_relay_offsets|std::optional<ConSanIndirectJumpSgprs>[ \t]+moi_borrowed_entry_jump)"
+    "branch-only routing must retain one mutually exclusive typed effect"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_code_object_types.h.inc"
     "indirect_(pc_sgpr|saved_scc_sgpr|saved_vcc_sgpr|return_offset|return_pc_sgpr|return_saved_scc_sgpr|return_saved_vcc_sgpr)"
     "patch effects must not regain the flattened generic indirect schema"
 )
 foreach(_indirect_contract IN ITEMS
     consan_indirect_jump_sgprs.h.inc
+    consan_branch_only_continuation.h.inc
     consan_supercollider_indirect_route.h.inc
 )
     _consan_assert_no_match(

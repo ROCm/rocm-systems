@@ -2528,11 +2528,8 @@ bool BranchOnlyRelayRouter::emit_direct_reservoir(std::vector<uint8_t> &text,
   info.trampoline_offset = reservoir.placement.body_offset;
   info.original_size = static_cast<uint32_t>(original_size);
   info.trampoline_size = static_cast<uint32_t>(appended_bytes);
-  info.branch_only_continuation = reservoir.route.has_value();
-  if (reservoir.route) {
-    info.branch_only_entry_relay_offsets = reservoir.route->entry_relay_offsets;
-    info.branch_only_return_relay_offsets = reservoir.route->return_relay_offsets;
-  }
+  if (reservoir.route)
+    info.branch_only_route = consan_branch_only_continuation(*reservoir.route);
   patches.push_back(std::move(info));
   if (reservoir.route &&
       !emit_and_record(text, *reservoir.route, reservoir.placement.body_offset,

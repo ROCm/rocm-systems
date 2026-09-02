@@ -111,6 +111,17 @@ struct BranchOnlyRelayRoute {
   std::vector<BranchOnlyRelayClaim> claims;
 };
 
+/// Project planning-private relay ownership into the exact route retained by
+/// an emitted patch. Claims and retired candidates do not cross the lowering
+/// boundary.
+[[nodiscard]] inline ConSanBranchOnlyContinuation
+consan_branch_only_continuation(const BranchOnlyRelayRoute &route) {
+  return {
+      .entry = ConSanBranchOnlyRelayEntry{route.entry_relay_offsets},
+      .return_relay_offsets = route.return_relay_offsets,
+  };
+}
+
 struct BranchOnlyRelayPairRequest {
   uint64_t entry_source = 0;
   uint64_t entry_target = 0;
