@@ -32,8 +32,13 @@ If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebu
 
 ## Units under test
 
-Units sharing a binary must be `#include`d from *different* test TUs and must not
-export colliding non-`static` symbols; otherwise a unit needs its own binary:
+A production `.cc` only needs its own dedicated binary when `#include`-ing it
+would actually collide with another unit's file-scope state (`static`
+globals, `std::once_flag`, a fake stubbing the same symbol name with a
+different, incompatible body) or its own build-time preprocessor arm. Where
+two units don't collide, they share a binary instead — checked per-symbol,
+not assumed. Units sharing a binary must be `#include`d from *different*
+test TUs and must not export colliding non-`static` symbols:
 
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
@@ -44,15 +49,30 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
     covered yet.
+  - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
+    `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Gets its own fail-loud stub
+    floor (`fakes/wrap_stubs.cc`) for symbols no other unit here references,
+    but shares `fakes/nccl_fakes.cc`'s logging globals rather than
+    duplicating them. Currently covers a first, low-dependency batch of
+    helpers (no `RCCL_PARAM`, no `getenv`, no DDA/CE/symmetric-kernel
+    machinery); see the header comment in `wrap-test.cc` for scope and
+    what's deferred to a future batch.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
-  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
-  `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
-  arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
-  TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
-  deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+  suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. Kept separate rather
+  than folded into `rccl-UnitTestsMicro`: `init.cc` calls
+  `commSetUnrollFactor`/`rcclCommSetP2pShiftSize` (both real functions defined
+  by `rccl_wrap.cc`) without exercising them, so its fakes
+  (`fakes/nccl_stubs.cc`) abort()-stub both — linking that together with
+  `rccl_wrap.cc`'s real definitions of the same two functions would be a
+  duplicate-symbol error. The `-uncached` variant adds
+  `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate
+  host-alloc arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/
+  `utils.cc` ("oracle" TUs) from the hipify tree rather than stubbing them;
+  `--gc-sections` drops the deep-path symbols the tests never reach. See
+  `test_categories_micro_init.yaml`.
 
-Everything below (seams, fakes, coverage) applies to both; the concrete examples
-use `p2p.cc`.
+Everything below (seams, fakes, coverage) applies to both; the concrete
+examples use `p2p.cc`.
 
 
 ## Why a separate test binary
@@ -110,12 +130,15 @@ The unit-under-test is the production `.cc` that the test TU `#include`s via a
 build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
-1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d (see
-   [Units under test](#units-under-test)), skip to step 3. Otherwise add a new path
-   macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
-   hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
-   are in scope. A new unit generally warrants its own binary (see
-   [Units under test](#units-under-test)) so its file-scope state stays isolated.
+1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
+   (currently `p2p.cc`, `rma/rma_proxy_progress.cc`, `devcomm/*.cc`,
+   `rccl_wrap.cc`, or `init.cc`), skip to step 3. Otherwise add a new path
+   macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at
+   the hipified copy, and `#include` it from the test TU *after* the
+   fakes/macro shims are in scope. Check whether it can share an existing
+   binary first (compare its required fakes against each candidate binary's,
+   symbol by symbol) — only give it a new, dedicated binary if that check
+   turns up a real collision (see [Units under test](#units-under-test)).
 2. **Register the source.** Add the test `.cc` to the target's source list in
    `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
    `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
