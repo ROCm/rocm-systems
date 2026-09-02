@@ -1664,6 +1664,11 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     amdsmi_gpu_metrics_t metric_info;
     auto r_status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
     if (r_status != AMDSMI_STATUS_SUCCESS) return r_status;
+    // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+    // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+    if (metric_info.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
     *temperature = metric_info.temperature_vrsoc;
     return r_status;
   }
@@ -3619,7 +3624,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
        << "\n | rsmi_dev_compute_partition_xcp_config_set(" << partition_type_str
        << ") Returning: " << smi_amdgpu_get_status_string(status, false)
        << "\n | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
-       << "\n | Data: " << "N/A";
+       << "\n | Data: "
+       << "N/A";
     // std::cout << ss.str() << std::endl;
     LOG_DEBUG(ss);
 
@@ -3770,7 +3776,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
       // std::cout << ss.str() << std::endl;
       LOG_DEBUG(ss);
     }  // END resources loop
-  }  // END profile loop
+  }    // END profile loop
 
   int res_ind = 0;
   for (uint32_t i = 0; i < profile_config->num_profiles; i++) {
@@ -4048,7 +4054,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
      << " | profile->profile_type: " << partition_type_str << "\n"
      << " | profile->profile_index: " << profile->profile_index << "\n"
      << " | profile->num_resources: " << profile->num_resources << "\n"
-     << " | profile->memory_caps: " << "\n"
+     << " | profile->memory_caps: "
+     << "\n"
      << " | nps1_cap: " << profile->memory_caps.nps_flags.nps1_cap << "\n"
      << " | nps2_cap: " << profile->memory_caps.nps_flags.nps2_cap << "\n"
      << " | nps4_cap: " << profile->memory_caps.nps_flags.nps4_cap << "\n"
@@ -5983,8 +5990,9 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
     return status;
   }
   std::ostringstream bdf_sstream;
-  bdf_sstream << __PRETTY_FUNCTION__
-              << " | [bdf] domain_number:" << "bus_number:" << "device_number."
+  bdf_sstream << __PRETTY_FUNCTION__ << " | [bdf] domain_number:"
+              << "bus_number:"
+              << "device_number."
               << "function_number = ";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << bdf.domain_number << ":";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << bdf.bus_number << ":";
@@ -6012,8 +6020,9 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
         return status;
       }
       amdsmi_bdf_t found_bdf = gpu_device->get_bdf();
-      bdf_sstream << __PRETTY_FUNCTION__
-                  << " | [found_bdf] domain_number:" << "bus_number:" << "device_number."
+      bdf_sstream << __PRETTY_FUNCTION__ << " | [found_bdf] domain_number:"
+                  << "bus_number:"
+                  << "device_number."
                   << "function_number = ";
       bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << found_bdf.domain_number
                   << ":";
