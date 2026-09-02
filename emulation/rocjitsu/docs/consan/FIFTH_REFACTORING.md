@@ -12056,3 +12056,49 @@ whether coordinates are missing; each mode decides which storage strategies
 it supports; placement realizes that typed demand; and emission accepts only
 the resolved exact-entry source.  Adding a mode no longer requires knowing a
 Record/Replay predicate to participate in the shared mechanism.
+
+### 16.183 Convergence checkpoint 182: retain banked-capture semantics
+
+Common placement and scalar-resource sizing still rediscovered one
+Record/Replay decision from the broad request and bound runtime resources:
+whether the selected Record/Replay plan uses automatic banked capture.  That
+made two nominally common consumers depend on a mode-owned predicate after
+mode selection, and allowed their answer to drift if the mutable request were
+changed later in the pipeline.
+
+Record/Replay mode planning now publishes the selected answer in the immutable
+`MoiObjectModeSemantics` product.  Common dispatch-identity placement and exec
+save sizing consume that fact without knowing how Record/Replay chooses it.
+Sampled and InlineShadow leave the default false and are structurally forbidden
+from assigning the Record/Replay field.  A second structural rule forbids the
+Record/Replay predicate from returning to common placement or support code.
+
+The focused contract tests cover both phases of automatic report planning:
+the unbound sizing pass does not claim banked capture, while a bound layout
+with a dispatch-token directory does.  The exec-save projection test mutates
+the original request after mode selection and proves that downstream sizing
+retains the selected semantic answer instead of reopening policy.
+
+| Signal | Checkpoint 182 | Cumulative change | Slice change from checkpoint 181 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,140 | **-2,836** | +1 |
+| Nonblank production lines | 95,733 | **-3,351** | +1 |
+| Production implementation lines | 87,999 | **-3,451** | +1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Common banked-capture policy calls | **0 / 3** | n/a | **-2** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `396d322141e`.  Validation includes a
+successful full `-j16` build and **884/884** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+This is a deliberately small one-line contract cost: it replaces repeated
+policy reconstruction with a single selected fact and closes another
+mode-to-common back edge.  The remaining predicate calls belong to
+Record/Replay planning and lowering; they no longer leak into common placement
+or common scalar-ABI sizing.
