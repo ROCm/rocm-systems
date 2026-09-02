@@ -34,6 +34,7 @@ public:
   void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
   int (*munmap)(void *, size_t) = nullptr;
   int (*mprotect)(void *, size_t, int) = nullptr;
+  void *(*mremap)(void *, size_t, size_t, int, ...) = nullptr;
   int (*madvise)(void *, size_t, int) = nullptr;
   int (*memfd_create)(const char *, unsigned int) = nullptr;
   int (*dup)(int) = nullptr;
