@@ -174,12 +174,9 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
       return std::nullopt;
     }
     // Exact-byte provenance uses the canonical full-width cell on every
-    // target. The former generation tag avoided relying on entry clearing, but
-    // it occupies the field now carrying local byte provenance. CDNA entry
-    // clearing completes before any instrumented access, so the full eager
-    // mirror establishes the same validity invariant without that tag. RDNA4
-    // can instead use its packed first-use bitmap. If either full layout does
-    // not fit, the caller uses the semantically equivalent external table.
+    // target. CDNA entry clearing completes before any instrumented access;
+    // RDNA4 can instead use its packed first-use bitmap. If either full layout
+    // does not fit, the caller uses the semantically equivalent external table.
     if (consan_uses_gfx12_encoding(arch)) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor->group_segment_fixed_size, max_workgroup_lds_bytes)) {
@@ -196,7 +193,6 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
                    common->validity_base != layout->validity_base ||
                    common->validity_size != layout->validity_size ||
                    common->lazy_initialization != layout->lazy_initialization ||
-                   common->compact != layout->compact ||
                    common->workitem_id_dimensions != layout->workitem_id_dimensions)) {
       warnings.emplace_back(
           "ConSan MOI shared access text has incompatible owning-kernel LDS layouts or IDs");

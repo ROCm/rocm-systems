@@ -785,7 +785,6 @@ TEST(ConSanEvidenceRequirements, InlineNativeAccessUsesImmutableDescriptorAndRan
   EXPECT_EQ(requirements.required_lds_aperture_bytes, 4096u);
   EXPECT_EQ(requirements.sizing_inventory.inline_lds_bytes, 4096u);
   EXPECT_EQ(requirements.sizing_inventory.access_range_count, 1u);
-  EXPECT_EQ(requirements.sizing_inventory.inline_compact_token_mapping_count, 1u);
   EXPECT_EQ(requirements.sizing_inventory.inline_atomic_release_count,
             kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
   EXPECT_EQ(fixture.inventory.access_sites().front().ranges.front().static_byte_offset, 17);
@@ -839,7 +838,6 @@ TEST(ConSanEvidenceRequirements, InlineIntentCountsAndExpertLimitRemainIndepende
                                           .maximum_workgroup_lds_bytes = std::nullopt});
   ASSERT_TRUE(requirements.complete());
   EXPECT_EQ(requirements.sizing_inventory.access_range_count, 1u);
-  EXPECT_EQ(requirements.sizing_inventory.inline_compact_token_mapping_count, 1u);
   EXPECT_EQ(requirements.sizing_inventory.atomic_event_count, 1u);
 }
 
@@ -912,8 +910,6 @@ TEST(ConSanEvidenceRequirements, InlineWellFormedChecksEverySchemaSpecificInvari
   expect_rejected([](auto &value) { ++value.sizing_inventory.inline_atomic_release_count; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.inline_causal_snapshot_count; });
   expect_rejected([](auto &value) { ++value.sizing_inventory.inline_acquired_epoch_token_count; });
-  expect_rejected(
-      [](auto &value) { value.sizing_inventory.inline_compact_token_mapping_count = 2; });
   expect_rejected(
       [](auto &value) { value.sizing_inventory.inline_diagnostic_count_adaptive = false; });
   expect_rejected([](auto &value) { value.abi_plan.layout.engine = ConSanMoiEngine::Sampled; });

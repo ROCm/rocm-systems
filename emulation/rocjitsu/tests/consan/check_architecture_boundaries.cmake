@@ -1532,7 +1532,7 @@ _consan_assert_no_match(
 
 # InlineShadow's committed workgroup-shadow effect is one typed layout. Patch
 # proof, prologue construction, descriptor growth, and validation must not
-# regain independent scalar copies of that layout or its compact-mode token.
+# regain independent scalar copies of that layout.
 file(READ "${_consan_dir}/consan.h" _shared_aggregate_contract)
 file(READ
     "${_consan_dir}/consan_moi_workgroup_shadow_layout.h.inc"
@@ -1560,12 +1560,12 @@ if(NOT _patch_proof_contract MATCHES
 endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_code_object_types.h.inc"
-    "(uint32_t|bool|std::optional<uint16_t>)[ \t]+(workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization|compact|compact_token)|required_group_segment_size)[ \t]*="
+    "(uint32_t|bool)[ \t]+(workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization)|required_group_segment_size)[ \t]*="
     "patch proof must not flatten the typed workgroup-shadow layout"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_prologue.cpp"
-    "patch[.]workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization|compact|compact_token)|patch[.]required_group_segment_size"
+    "patch[.]workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization)|patch[.]required_group_segment_size"
     "prologue construction must consume the typed workgroup-shadow layout"
 )
 
@@ -2638,13 +2638,12 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_access_apply.cpp"
-    "AccessRecord|SampledAccess|ExactShadowAccess|ConSanRuntimeStaticMapping::|sampled_(first_slot|access_range_count|window_bank_count)|workgroup_shadow_compact"
+    "AccessRecord|SampledAccess|ExactShadowAccess|ConSanRuntimeStaticMapping::|sampled_(first_slot|access_range_count|window_bank_count)"
     "shared access mechanics must not construct mode-owned runtime mappings"
 )
 foreach(_access_mapping_owner IN ITEMS
     consan_moi_record_replay.cpp
     consan_moi_sampled.cpp
-    consan_moi_inline_shadow.cpp
 )
     file(READ "${_consan_dir}/${_access_mapping_owner}" _access_mapping_text)
     if(NOT _access_mapping_text MATCHES "access_runtime_mapping")
@@ -3422,7 +3421,7 @@ _consan_assert_no_match(
 )
 file(READ "${_consan_dir}/consan_observation_plan.h.inc" _runtime_mapping_contract)
 if(NOT _runtime_mapping_contract MATCHES
-   "std::variant<std::monostate, RecordReplay, Sampled, InlineCompact>"
+   "std::variant<std::monostate, RecordReplay, Sampled>"
 )
     message(FATAL_ERROR "ConSan runtime static attribution lost its discriminated mode product")
 endif()
@@ -3658,6 +3657,19 @@ _consan_assert_no_match(
     "input[.](fence_record_capacity|direct_sampled|inline_shadow)"
     "runtime report decoding must derive mode and capacities from the layout"
 )
+foreach(_retired_inline_compact_owner IN ITEMS
+    "${_consan_dir}/consan_moi_core_types.h.inc"
+    "${_consan_dir}/consan_moi_workgroup_shadow_layout.h.inc"
+    "${_consan_dir}/consan_moi_report_layout.h.inc"
+    "${_consan_dir}/consan_observation_plan.h.inc"
+    "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.h"
+)
+    _consan_assert_no_match(
+        "${_retired_inline_compact_owner}"
+        "generation.?tagged|InlineCompact|inline_compact|compact.?token"
+        "retired InlineShadow compact/generation schema must not return"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_hook_moi_report.cpp"
     "entry[.](access_record_capacity|barrier_record_capacity|atomic_record_capacity|fence_record_capacity|diagnostic_capacity|exact_shadow_entry_capacity|inline_atomic_release_capacity|inline_acquired_epoch_token_capacity|inline_causal_snapshot_capacity|sampled_watchpoint_capacity|direct_sampled|inline_shadow)"

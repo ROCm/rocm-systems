@@ -58,8 +58,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     uint32_t static_byte_offset, uint32_t byte_count, uint32_t shadow_granule_bytes,
     bool special_state_already_saved = false,
     std::optional<uint16_t> diagnostic_lane_mask_sgpr = std::nullopt,
-    bool capture_first_diagnostic_only = false, bool compact_local_shadow = false,
-    bool workgroup_local_shadow = false, bool generation_tagged_local_shadow = false,
+    bool capture_first_diagnostic_only = false, bool workgroup_local_shadow = false,
     std::optional<uint16_t> prior_byte_provenance_vgpr = std::nullopt,
     std::optional<uint16_t> current_byte_provenance_vgpr = std::nullopt,
     std::optional<uint16_t> relative_cell_index_vgpr = std::nullopt,
@@ -138,7 +137,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // VCC/SCC preservation window at higher offsets as predicates are reordered.
   const uint16_t predicate_exec_save_sgpr =
       static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
-  if (!workgroup_local_shadow || generation_tagged_local_shadow) {
+  if (!workgroup_local_shadow) {
     if (!append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr, old_value_hi_vgpr,
                                                 address_lo_vgpr, arch) ||
         !append_extract_exact_shadow_generation(words, current_field_vgpr, current_value_vgpr,
@@ -587,7 +586,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool compact_local_diagnostic = workgroup_local_shadow && !plan.track_atomics;
   // The first-diagnostic claim uses SLOT as both the returned value and the
   // low half of the compare-swap data tuple. Keep it in the dead tail of the
   // ordinary transaction window on every target: exact-range construction
@@ -684,21 +682,13 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   // base+slot*stride for every field, replicating substantial address
   // arithmetic in every access probe even though all stores target one cold
   // diagnostic record.
-  const uint16_t diagnostic_address_vgpr =
-      compact_local_diagnostic && !consan_uses_gfx9_cdna_encoding(arch)
-          ? static_cast<uint16_t>(plan.scratch_vgpr + 11u)
-          : plan.scratch_vgpr;
+  const uint16_t diagnostic_address_vgpr = plan.scratch_vgpr;
   if (!append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
                                                 diagnostic_address_vgpr, arch)) {
     return false;
   }
 
   const auto store_literal = [&](size_t offset, uint32_t value) {
-    // A first-diagnostic claim owns a freshly zeroed slot, so explicit zero
-    // stores are unnecessary. Other paths may reuse a bounded slot index and
-    // must overwrite every ABI field.
-    if (compact_local_diagnostic && capture_first_diagnostic_only && value == 0u)
-      return true;
     const auto store = instrumentation::build_flat_store_b32(diagnostic_address_vgpr, tmp_vgpr,
                                                              arch, static_cast<uint32_t>(offset));
     if (!store)
@@ -786,27 +776,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   }
 
   const auto prior_inst_shift = instrumentation::build_v_lshrrev_b32(
-      tmp_vgpr,
-      scalar_positive_inline_u32(compact_local_shadow
-                                     ? consan_moi_exact_shadow::compact_token_shift
-                                     : consan_moi_exact_shadow::instruction_offset_shift - 32u),
-      compact_local_shadow ? old_value_vgpr : old_value_hi_vgpr, arch);
+      tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::instruction_offset_shift - 32u),
+      old_value_hi_vgpr, arch);
   const auto prior_kind = instrumentation::build_v_and_b32_literal(
       tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), old_value_vgpr,
       arch);
   if (!prior_inst_shift || !prior_kind)
     return false;
   words.push_back(*prior_inst_shift);
-  if (compact_local_shadow) {
-    // The compact record address has already been formed from SLOT. The slot
-    // index is dead on this path, so use it to materialize CDNA4's literal
-    // without clobbering the in-place token payload in TMP.
-    const auto tag_token = instrumentation::build_v_add_u32_literal(
-        tmp_vgpr, slot_vgpr, consan_moi_exact_shadow::compact_diagnostic_token_tag, tmp_vgpr, arch);
-    if (!tag_token)
-      return false;
-    words.insert(words.end(), tag_token->begin(), tag_token->end());
-  }
   if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset), tmp_vgpr)) {
     return false;
   }
@@ -1963,9 +1940,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr,
           /*capture_first_diagnostic_only=*/false,
-          /*compact_local_shadow=*/false,
           /*workgroup_local_shadow=*/false,
-          /*generation_tagged_local_shadow=*/false,
           /*prior_byte_provenance_vgpr=*/
           static_cast<uint16_t>(old_value_vgpr + 6u),
           /*current_byte_provenance_vgpr=*/
@@ -2033,8 +2008,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::vector<std::string> &errors) {
   if (!workgroup_shadow.lazy_initialization)
     return true;
-  if (consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))
-    return true;
   if ((!consan_uses_gfx12_encoding(arch)) || !plan.scalar_state.exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
     errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
@@ -2076,14 +2049,10 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const auto narrow_winners =
       instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
   const auto shadow_byte_offset = instrumentation::build_v_lshlrev_b32(
-      temporary_vgpr, scalar_positive_inline_u32(workgroup_shadow.compact ? 2u : 3u),
-      saved_cell_vgpr, arch);
+      temporary_vgpr, scalar_positive_inline_u32(3u), saved_cell_vgpr, arch);
   const auto shadow_address = instrumentation::build_v_add_u32_literal(
       address_vgpr, workgroup_shadow.base, temporary_vgpr, arch);
-  const auto clear_slot =
-      workgroup_shadow.compact
-          ? instrumentation::build_ds_store_b32(address_vgpr, state_vgpr, 0u, arch)
-          : instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch);
+  const auto clear_slot = instrumentation::build_ds_store_b64(address_vgpr, state_vgpr, 0u, arch);
   const auto publish_ready = instrumentation::build_ds_or_rtn_b32(state_vgpr, validity_address_vgpr,
                                                                   ready_mask_vgpr, 0u, arch);
   const auto restore_participants =
@@ -2199,11 +2168,6 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::vector<std::string> &errors) {
   if (!plan.scalar_state.exec_save_sgpr)
     return false;
-  if (workgroup_shadow.compact || consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
-    errors.emplace_back(
-        "ConSan MOI exact-byte local publish requires one full-width initialized cell");
-    return false;
-  }
 
   const uint16_t temporary_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
   const uint16_t saved_current_low_vgpr = static_cast<uint16_t>(old_value_vgpr + 4u);
@@ -2385,10 +2349,8 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/std::nullopt,
           /*capture_first_diagnostic_only=*/true,
-          /*compact_local_shadow=*/false,
-          /*workgroup_local_shadow=*/true,
-          /*generation_tagged_local_shadow=*/false, prior_byte_provenance_vgpr,
-          current_byte_provenance_vgpr, relative_cell_index_vgpr, cell_index)) {
+          /*workgroup_local_shadow=*/true, prior_byte_provenance_vgpr, current_byte_provenance_vgpr,
+          relative_cell_index_vgpr, cell_index)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode conflict diagnostics");
     return false;
@@ -2417,7 +2379,6 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   const auto &owner_derivation = plan.owner_derivation;
   const auto &private_workgroup_key_offset = plan.private_workgroup_key_offset;
   const auto &private_dispatch_id_offset = plan.private_dispatch_id_offset;
-  const uint16_t workgroup_shadow_compact_token = plan.workgroup_shadow_compact_token;
   const bool byte_granular_external_shadow = plan.byte_granular_external_shadow;
   const bool spill_overlaps_guest_operands = plan.spill_overlaps_guest_operands;
   const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
@@ -2539,23 +2500,10 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   }
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
-  if (workgroup_shadow && workgroup_shadow->compact &&
-      (workgroup_shadow_compact_token == 0u ||
-       workgroup_shadow_compact_token > consan_moi_exact_shadow::max_compact_token)) {
-    errors.emplace_back("ConSan MOI compact local shadow requires a nonzero bounded site token");
-    return std::nullopt;
-  }
-  const uint32_t low_literal =
-      static_cast<uint32_t>(kind) | (workgroup_shadow && workgroup_shadow->compact
-                                         ? static_cast<uint32_t>(workgroup_shadow_compact_token)
-                                               << consan_moi_exact_shadow::compact_token_shift
-                                         : 0u);
+  const uint32_t low_literal = static_cast<uint32_t>(kind);
   const uint32_t high_literal =
-      workgroup_shadow && workgroup_shadow->compact
-          ? 0u
-          : static_cast<uint32_t>(
-                (candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
-                << (consan_moi_exact_shadow::instruction_offset_shift - 32u));
+      static_cast<uint32_t>((candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
+                            << (consan_moi_exact_shadow::instruction_offset_shift - 32u));
   const uint64_t exact_shadow_base =
       plan.report_buffer_address + layout.exact_shadow_entries_offset;
   const uint32_t external_shadow_granule_bytes =
@@ -2662,14 +2610,10 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     return std::nullopt;
 
   const uint16_t workgroup_key_vgpr = old_value_vgpr;
-  const bool generation_tagged_local_shadow =
-      workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
   MoiWorkgroupKeyRegisterPlan key_registers = plan.workgroup_key_registers;
-  // Eagerly initialized and bitmap-backed workgroup-local mirrors are
-  // physically unreachable from every other live workgroup and omit the
-  // generation field. A generation-tagged local mirror deliberately retains
-  // that field so reused, uncleared LDS is distinguishable from current state.
+  // Workgroup-local mirrors are physically unreachable from every other live
+  // workgroup and omit the generation field.
   if (workgroup_shadow) {
     const auto save_original_exec = instrumentation::build_s_mov_b64(
         static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + original_exec_save_offset),
@@ -2681,7 +2625,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     }
     words.push_back(*save_original_exec);
   }
-  if (private_workgroup_key_offset && (!workgroup_shadow || generation_tagged_local_shadow)) {
+  if (private_workgroup_key_offset && !workgroup_shadow) {
     const auto load = instrumentation::build_private_load_b32(workgroup_key_vgpr,
                                                               *private_workgroup_key_offset, arch);
     const auto wait = instrumentation::build_s_wait_private_load0(arch);
@@ -2695,44 +2639,13 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     key_registers.cached_key_vgpr = workgroup_key_vgpr;
     key_registers.cached_key_sgpr = std::nullopt;
   }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr &&
+  if (!workgroup_shadow && plan.scalar_state.exec_save_sgpr &&
       !append_inline_workgroup_key(words, workgroup_sources, key_registers, workgroup_key_vgpr,
                                    tmp_vgpr, address_lo_vgpr, original_exec_save_offset, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
-  if (generation_tagged_local_shadow) {
-    if (!has_hardware_dispatch_id) {
-      errors.emplace_back("ConSan MOI generation-tagged local shadow requires dispatch identity");
-      return std::nullopt;
-    }
-    // Workgroup coordinates alone repeat across dispatches. Fold the native
-    // dispatch identity into the bounded generation and reserve zero for an
-    // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
-    const uint16_t dispatch_low_source =
-        plan.dispatch_id.sgpr ? *plan.dispatch_id.sgpr : vector_source_vgpr(*plan.dispatch_id.vgpr);
-    const uint16_t dispatch_high_source =
-        plan.dispatch_id.sgpr
-            ? static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u)
-            : vector_source_vgpr(static_cast<uint16_t>(*plan.dispatch_id.vgpr + 1u));
-    const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
-        workgroup_key_vgpr, dispatch_low_source, workgroup_key_vgpr, arch);
-    const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
-        workgroup_key_vgpr, dispatch_high_source, workgroup_key_vgpr, arch);
-    const auto bound_generation = instrumentation::build_v_and_b32_literal(
-        workgroup_key_vgpr, consan_moi_exact_shadow::max_generation - 1u, workgroup_key_vgpr, arch);
-    const auto make_nonzero_generation = instrumentation::build_v_add_u32(
-        workgroup_key_vgpr, scalar_positive_inline_u32(1u), workgroup_key_vgpr, arch);
-    if (!mix_dispatch_low || !mix_dispatch_high || !bound_generation || !make_nonzero_generation) {
-      errors.emplace_back("ConSan MOI local shadow could not derive dispatch-qualified generation");
-      return std::nullopt;
-    }
-    words.push_back(*mix_dispatch_low);
-    words.push_back(*mix_dispatch_high);
-    words.insert(words.end(), bound_generation->begin(), bound_generation->end());
-    words.insert(words.end(), make_nonzero_generation->begin(), make_nonzero_generation->end());
-  }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr) {
+  if (!workgroup_shadow && plan.scalar_state.exec_save_sgpr) {
     // The packed key is injective only inside its documented dimensional
     // bounds. Keep the guest running, but make every excluded lane-site
     // encounter observable in the Inline-only header flags/count field so a
@@ -2824,7 +2737,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
     return std::nullopt;
   }
   words.insert(words.end(), mov_high->begin(), mov_high->end());
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr &&
+  if (!workgroup_shadow && plan.scalar_state.exec_save_sgpr &&
       !append_add_exact_shadow_generation(words, low_vgpr, high_vgpr, workgroup_key_vgpr, tmp_vgpr,
                                           arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode workgroup identity");

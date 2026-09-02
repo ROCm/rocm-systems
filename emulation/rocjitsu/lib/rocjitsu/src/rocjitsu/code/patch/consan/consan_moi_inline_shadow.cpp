@@ -84,17 +84,6 @@ using consan_moi_detail::resolve_moi_report_layout;
 
 namespace consan_moi_impl {
 
-static std::optional<ConSanRuntimeStaticMapping>
-make_inline_shadow_access_runtime_mapping(ConSanStaticAccessAttribution access,
-                                          const MoiInlineShadowEmissionPlan &emission) {
-  if (!emission.workgroup_shadow || !emission.workgroup_shadow->compact)
-    return ConSanRuntimeStaticMapping{};
-  return ConSanRuntimeStaticMapping::inline_compact({
-      .access = std::move(access),
-      .token = emission.workgroup_shadow_compact_token,
-  });
-}
-
 MoiInlineShadowScalarState
 project_inline_shadow_scalar_state(const ConSanMoiOperatingPoint &point) {
   return {

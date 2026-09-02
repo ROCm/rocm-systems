@@ -3172,11 +3172,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           access == result.program_inventory.access_sites().end()
               ? 0u
               : consan_moi_maximum_cell_count_for_unaligned_bytes(access->decoded_width_bits / 8u);
-      const size_t decoded_local_exchange_cell_count =
-          workgroup_shadow.compact
-              ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
-              : decoded_local_exchange_b64_count;
-      const bool needs_compact_loop = minimum_cell_count > decoded_local_exchange_cell_count;
+      const size_t decoded_local_exchange_cell_count = decoded_local_exchange_b64_count;
+      const bool needs_publication_loop = minimum_cell_count > decoded_local_exchange_cell_count;
       // A bitmap-backed lazy mirror contributes one readiness-poll loop per
       // logical exchange cell. A wide access whose cells share one generated
       // exchange must additionally retain its outer publication loop; merely
@@ -3185,18 +3182,12 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           workgroup_shadow.lazy_initialization && workgroup_shadow.validity_size != 0u;
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
-          (needs_compact_loop ? 1u : 0u);
+          (needs_publication_loop ? 1u : 0u);
       const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
-      const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
-          static_cast<uint16_t>(scratch + old_value_offset), scratch,
-          static_cast<uint16_t>(scratch + 2u), 0u, arch);
       const auto expected_local_exchange_b64 = instrumentation::build_ds_storexchg_rtn_b64(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
           static_cast<uint16_t>(scratch + 2u), 0u, arch);
-      const std::array<uint32_t, 1> duplicate_compact_metadata = {
-          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
-                              vector_source_vgpr(static_cast<uint16_t>(scratch + 2u)), arch)};
       // Exact-byte publication reserves v14:v15 for the diagnostic
       // compare-swap tuple. Keep this independent of the emitter's scratch
       // arithmetic so final validation catches accidental tuple relocation.
@@ -3206,21 +3197,13 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           static_cast<uint16_t>(scratch + diagnostic_claim_offset),
           /*return_old_value=*/true,
           /*scope=*/2, arch);
-      if ((workgroup_shadow.compact && !expected_local_exchange_b32) ||
-          !expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
+      if (!expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
           decoded_cas_count != decoded_local_exchange_cell_count ||
           decoded_local_exchange_count == 0u ||
           access == result.program_inventory.access_sites().end() ||
           decoded_backward_local_loop_count < minimum_backward_loop_count ||
-          decoded_nonbackward_local_loop ||
-          (workgroup_shadow.compact
-               ? count_pattern(*expected_local_exchange_b32) != decoded_local_exchange_b32_count ||
-                     count_pattern(*expected_local_exchange_b64) !=
-                         decoded_local_exchange_b64_count ||
-                     count_pattern(duplicate_compact_metadata) < decoded_local_exchange_b64_count
-               : decoded_local_exchange_b32_count != 0u ||
-                     count_pattern(*expected_local_exchange_b64) !=
-                         decoded_local_exchange_b64_count) ||
+          decoded_nonbackward_local_loop || decoded_local_exchange_b32_count != 0u ||
+          count_pattern(*expected_local_exchange_b64) != decoded_local_exchange_b64_count ||
           count_pattern(*expected_first_diagnostic_claim) != decoded_cas_count) {
         errors.emplace_back(
             "ConSan final validation found invalid workgroup-local exact-shadow publication "
@@ -3232,10 +3215,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
             " backward_loops=" + std::to_string(decoded_backward_local_loop_count) +
             " minimum_backward_loops=" + std::to_string(minimum_backward_loop_count) +
             " nonbackward_loop=" + std::to_string(decoded_nonbackward_local_loop) +
-            " legacy_swap=" + std::to_string(decoded_legacy_swap) + " expected_exchange_b32=" +
-            std::to_string(expected_local_exchange_b32 ? count_pattern(*expected_local_exchange_b32)
-                                                       : 0u) +
-            " expected_exchange_b64=" +
+            " legacy_swap=" + std::to_string(decoded_legacy_swap) + " decoded_exchange_b32=" +
+            std::to_string(decoded_local_exchange_b32_count) + " expected_exchange_b64=" +
             std::to_string(expected_local_exchange_b64 ? count_pattern(*expected_local_exchange_b64)
                                                        : 0u) +
             " expected_claim=" +

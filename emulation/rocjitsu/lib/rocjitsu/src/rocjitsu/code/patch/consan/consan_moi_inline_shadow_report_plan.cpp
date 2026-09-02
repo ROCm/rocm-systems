@@ -48,10 +48,6 @@ bool plan_inline_shadow_report_layout(const ConSanMoiAutoReportInventory &invent
        moi_report_region<ConSanMoiInlineCausalSnapshot>(inventory.inline_causal_snapshot_count,
                                                         layout.inline_causal_snapshot_capacity,
                                                         layout.inline_causal_snapshots_offset),
-       moi_report_region<ConSanMoiCompactDiagnosticTokenMapping>(
-           inventory.inline_compact_token_mapping_count,
-           layout.inline_compact_token_mapping_capacity,
-           layout.inline_compact_token_mappings_offset),
        moi_report_region<ConSanMoiInlineAcquiredEpochTokenSlot>(
            inventory.inline_acquired_epoch_token_count, layout.inline_acquired_epoch_token_capacity,
            layout.inline_acquired_epoch_token_slots_offset)},
@@ -74,7 +70,6 @@ reconstruct_inline_shadow_report_inventory(const ConSanMoiReportBufferLayout &ca
                                candidate.inline_exact_dispatch_bank_count;
   inventory.inline_atomic_release_count = candidate.inline_atomic_release_capacity;
   inventory.inline_causal_snapshot_count = candidate.inline_causal_snapshot_capacity;
-  inventory.inline_compact_token_mapping_count = candidate.inline_compact_token_mapping_capacity;
   inventory.inline_acquired_epoch_token_count = candidate.inline_acquired_epoch_token_capacity;
   return inventory;
 }
@@ -142,8 +137,6 @@ bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
          sizing_inventory.inline_atomic_release_count == expected_ordering_capacity &&
          sizing_inventory.inline_causal_snapshot_count == expected_ordering_capacity &&
          sizing_inventory.inline_acquired_epoch_token_count == expected_acquired_epoch_capacity &&
-         sizing_inventory.inline_compact_token_mapping_count <=
-             sizing_inventory.access_range_count &&
          sizing_inventory.inline_diagnostic_count_adaptive &&
          common_well_formed(ConSanMoiEngine::InlineShadow);
 }
@@ -165,8 +158,6 @@ ConSanEvidenceRequirements consan_moi_impl::plan_inline_shadow_evidence_requirem
   uint64_t declared_lds_extent = 0;
   uint64_t native_static_extent = 0;
   for (const ConSanEvidenceIntent *intent : retained_accesses) {
-    inventory.inline_compact_token_mapping_count =
-        util::saturating_add(inventory.inline_compact_token_mapping_count, uint64_t{1});
     for (const SemanticSiteId &range_id : intent->semantic_sites) {
       const ConSanAccessInventorySite *site =
           find_inventory_access_range(context.program_inventory, range_id);

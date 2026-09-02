@@ -67,12 +67,8 @@ namespace rocjitsu {
       });
       break;
     case ConSanProbeIntentKind::ExactShadowAccess:
-      attribution.execution_owner_descriptor_file_offsets = {0u};
-      attribution.owner_provenance_complete = true;
-      runtime_mapping = ConSanRuntimeStaticMapping::inline_compact({
-          .access = std::move(attribution),
-          .token = 1u,
-      });
+      // InlineShadow diagnostics carry their complete attribution directly;
+      // unlike the other modes they need no host-side static mapping.
       break;
     default:
       break;

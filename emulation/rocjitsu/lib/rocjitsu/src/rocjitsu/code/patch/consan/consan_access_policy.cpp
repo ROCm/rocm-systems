@@ -485,15 +485,6 @@ bool runtime_static_mapping_matches_commit(const ConSanCommittedLowering &commit
       }
     }
   }
-  if (const auto *mappings = commit.runtime_mapping.inline_compact()) {
-    for (const ConSanInlineCompactStaticAccessMapping &mapping : *mappings) {
-      if (!valid_attribution(mapping.access, ConSanProbeIntentKind::ExactShadowAccess) ||
-          mapping.token == 0u || !mapping.access.owner_provenance_complete ||
-          mapping.access.execution_owner_descriptor_file_offsets.size() != 1u) {
-        return false;
-      }
-    }
-  }
   for (ConSanProbeIntentId id : commit.intent_ids) {
     const ConSanProbeIntent *intent = resolve_intent(id);
     if (intent == nullptr)

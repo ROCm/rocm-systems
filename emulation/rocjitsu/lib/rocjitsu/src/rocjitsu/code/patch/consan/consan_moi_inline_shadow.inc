@@ -214,7 +214,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   MoiSpillManagers spill_managers;
   std::vector<std::pair<uint64_t, uint64_t>> planned_anchor_ranges;
   bool warned_access_relay_sync_overlap = false;
-  std::unordered_map<uint64_t, uint16_t> next_compact_token_by_descriptor;
   std::unordered_set<uint64_t> selected_inline_anchor_relay_offsets;
   const auto publish_inline_anchor_relays = [&](const ConSanMoiCandidate &candidate,
                                                 uint32_t original_size) {
@@ -315,7 +314,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
-    uint16_t workgroup_shadow_compact_token = 0u;
     const bool has_unspilled_component_override = std::ranges::any_of(
         resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
           const auto *assignment =
@@ -330,13 +328,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     const bool spill_backed_scalar_state = candidate_point.has_inline_moi_scalar_spill();
     if (!requires_wave_partitioned_exact_shadow && !has_unspilled_component_override &&
         !spill_backed_scalar_state) {
-      uint16_t next_compact_token = 0u;
-      if (candidate.container.is_kernel() && candidate.kernel_descriptor_file_offset) {
-        uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
-        if (next == 0u)
-          next = 1u;
-        next_compact_token = next;
-      }
       const bool has_dynamic_lds_owner = std::ranges::any_of(
           resources->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
             return dynamic_lds_descriptors.contains(descriptor_offset);
@@ -362,8 +353,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       } else if (!workgroup_shadow) {
         result.warnings.emplace_back(
             "ConSan MOI inline-shadow access falls back to the external exact-shadow table");
-      } else if (workgroup_shadow->compact) {
-        workgroup_shadow_compact_token = next_compact_token;
       }
     }
 
@@ -525,7 +514,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             resolve_moi_exec_save_requirement(options, options, candidate_point, semantics), arch),
         .scratch_vgpr = resources->base,
         .scratch_count = resources->count,
-        .workgroup_shadow_compact_token = workgroup_shadow_compact_token,
         .scalar_state = project_inline_shadow_scalar_state(candidate_point),
         .scalar_abi =
             plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point)),
@@ -851,9 +839,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (use_indirect_appended && !use_dense_call)
       planned_anchor_ranges.emplace_back(candidate.anchor(),
                                          candidate.anchor() + placement->original_size);
-    if (workgroup_shadow && workgroup_shadow->compact && candidate.kernel_descriptor_file_offset) {
-      ++next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
-    }
     if (planned_patches.size() == options.max_patches)
       break;
   }
@@ -1276,9 +1261,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       }
       auto commit = make_moi_access_lowering_commit(
           result.observation_plan(), candidate, info, ConSanProbeIntentKind::ExactShadowAccess,
-          [&](ConSanStaticAccessAttribution access) {
-            return make_inline_shadow_access_runtime_mapping(std::move(access),
-                                                             planned_patch.emission);
+          [](ConSanStaticAccessAttribution) {
+            return std::optional{ConSanRuntimeStaticMapping{}};
           });
       if (!commit) {
         result.errors.emplace_back(
@@ -1356,10 +1340,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return info;
           },
           ConSanProbeIntentKind::ExactShadowAccess,
-          [](ConSanStaticAccessAttribution access, const PlannedInlineShadowPatch &planned_patch,
-             const auto &) {
-            return make_inline_shadow_access_runtime_mapping(std::move(access),
-                                                             planned_patch.emission);
+          [](ConSanStaticAccessAttribution, const PlannedInlineShadowPatch &, const auto &) {
+            return std::optional{ConSanRuntimeStaticMapping{}};
           },
           result))
     return;

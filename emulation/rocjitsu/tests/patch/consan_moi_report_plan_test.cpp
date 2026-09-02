@@ -353,7 +353,6 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
       .inline_atomic_release_count = 3,
       .inline_causal_snapshot_count = 5,
       .inline_acquired_epoch_token_count = 7,
-      .inline_compact_token_mapping_count = 6,
   };
   const auto plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
@@ -370,7 +369,6 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
   EXPECT_EQ(plan.layout.inline_atomic_release_capacity, 3u);
   EXPECT_EQ(plan.layout.inline_causal_snapshot_capacity, 5u);
   EXPECT_EQ(plan.layout.inline_acquired_epoch_token_capacity, 7u);
-  EXPECT_EQ(plan.layout.inline_compact_token_mapping_capacity, 6u);
   EXPECT_EQ(plan.layout.exact_shadow_entries_offset,
             sizeof(ConSanMoiReportHeader) + 4 * sizeof(ConSanMoiDiagnosticRecord));
   EXPECT_EQ(plan.layout.inline_atomic_release_slots_offset,
@@ -379,11 +377,8 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
   EXPECT_EQ(plan.layout.inline_causal_snapshots_offset,
             plan.layout.inline_atomic_release_slots_offset +
                 3 * sizeof(ConSanMoiInlineAtomicReleaseSlot));
-  EXPECT_EQ(plan.layout.inline_compact_token_mappings_offset,
-            plan.layout.inline_causal_snapshots_offset + 5 * sizeof(ConSanMoiInlineCausalSnapshot));
   EXPECT_EQ(plan.layout.inline_acquired_epoch_token_slots_offset,
-            plan.layout.inline_compact_token_mappings_offset +
-                6 * sizeof(ConSanMoiCompactDiagnosticTokenMapping));
+            plan.layout.inline_causal_snapshots_offset + 5 * sizeof(ConSanMoiInlineCausalSnapshot));
   EXPECT_EQ(plan.required_bytes, plan.layout.inline_acquired_epoch_token_slots_offset +
                                      7 * sizeof(ConSanMoiInlineAcquiredEpochTokenSlot));
 }
@@ -414,7 +409,6 @@ TEST(ConSanMoiAutoReportPlan, InlineCanonicalLayoutRoundTripsDispatchBankedLayou
       .inline_atomic_release_count = 3,
       .inline_causal_snapshot_count = 5,
       .inline_acquired_epoch_token_count = 7,
-      .inline_compact_token_mapping_count = 6,
   };
   const auto plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
@@ -428,9 +422,8 @@ TEST(ConSanMoiAutoReportPlan, InlineCanonicalLayoutRoundTripsDispatchBankedLayou
   EXPECT_EQ(restored.inline_exact_dispatch_bank_count,
             plan.layout.inline_exact_dispatch_bank_count);
   EXPECT_EQ(restored.diagnostic_capacity, plan.layout.diagnostic_capacity);
-  EXPECT_EQ(restored.inline_compact_token_mapping_capacity, 6u);
-  EXPECT_EQ(restored.inline_compact_token_mappings_offset,
-            plan.layout.inline_compact_token_mappings_offset);
+  EXPECT_EQ(restored.inline_acquired_epoch_token_slots_offset,
+            plan.layout.inline_acquired_epoch_token_slots_offset);
   EXPECT_EQ(restored.required_bytes, plan.required_bytes);
 
   auto corrupt = *candidate_layout;
@@ -444,7 +437,7 @@ TEST(ConSanMoiAutoReportPlan, InlineCanonicalLayoutRoundTripsDispatchBankedLayou
                                                    plan.required_bytes)
                    .valid);
   corrupt = *candidate_layout;
-  ++corrupt.inline_compact_token_mappings_offset;
+  ++corrupt.inline_acquired_epoch_token_slots_offset;
   EXPECT_FALSE(revalidate_consan_moi_report_layout(corrupt, ConSanMoiEngine::InlineShadow,
                                                    plan.required_bytes)
                    .valid);
@@ -598,7 +591,6 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
       .inline_atomic_release_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
       .inline_causal_snapshot_count = kConSanMoiInlineShadowAtomicReleaseSlotCapacity,
       .inline_acquired_epoch_token_count = kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
-      .inline_compact_token_mapping_count = kLogicalRanges,
       .inline_diagnostic_count_adaptive = true,
   };
   const auto rejected = plan_consan_moi_auto_report(requested);
@@ -608,7 +600,6 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveInlineDiagnosticsFitLargeTopKInventory) {
   const auto fitted = fit_consan_moi_inline_auto_report_inventory(requested);
   EXPECT_EQ(fitted.access_range_count, kLogicalRanges);
   EXPECT_EQ(fitted.inline_lds_bytes, requested.inline_lds_bytes);
-  EXPECT_EQ(fitted.inline_compact_token_mapping_count, kLogicalRanges);
   EXPECT_GE(fitted.diagnostic_count,
             static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
   EXPECT_LT(fitted.diagnostic_count, requested.diagnostic_count);

@@ -19,13 +19,6 @@ AutoMoiReportSummary summarize_auto_moi_report(const AutoMoiReportPipelineInput 
       sampled && sampled->malformed) {
     ++summary.sampled_static_mapping_malformed_count;
   }
-  if (const auto *inline_compact =
-          input.static_metadata
-              ? std::get_if<AutoMoiInlineCompactStaticMetadata>(input.static_metadata)
-              : nullptr;
-      inline_compact && inline_compact->malformed) {
-    ++summary.inline_malformed_count;
-  }
   const AutoMoiDecodedReport decoded = decode_auto_moi_report(input, snapshot, summary);
   summary = decoded.summary;
 

@@ -44,14 +44,8 @@ struct AutoMoiSampledStaticMetadata {
   bool malformed = false;
 };
 
-struct AutoMoiInlineCompactStaticMetadata {
-  uint32_t mapping_count = 0;
-  bool malformed = false;
-};
-
 using AutoMoiRuntimeStaticMetadata =
-    std::variant<std::monostate, AutoMoiRecordReplayStaticMetadata, AutoMoiSampledStaticMetadata,
-                 AutoMoiInlineCompactStaticMetadata>;
+    std::variant<std::monostate, AutoMoiRecordReplayStaticMetadata, AutoMoiSampledStaticMetadata>;
 
 /// Immutable runtime/static context paired with one captured report. It owns
 /// no HSA handles and borrows only registry metadata for the duration of the

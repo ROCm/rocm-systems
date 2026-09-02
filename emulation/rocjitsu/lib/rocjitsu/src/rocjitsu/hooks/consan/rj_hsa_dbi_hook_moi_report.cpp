@@ -68,8 +68,6 @@ public:
                               bool test_seed_inline_exact_odd, uint64_t *address,
                               uint64_t *registered_size, uint64_t *registered_generation) {
     record_allocation_attempt(required_size);
-    const bool direct_sampled = layout.engine == rocjitsu::ConSanMoiEngine::Sampled;
-    const bool inline_shadow = layout.engine == rocjitsu::ConSanMoiEngine::InlineShadow;
     const uint64_t engine_ceiling =
         rocjitsu::consan_moi_mode_policy(layout.engine).auto_report_buffer_ceiling_bytes;
     if (required_size > configured_cap || requested_size > configured_cap ||
@@ -107,9 +105,9 @@ public:
       record_allocation_failure(required_size, /*capacity_failure=*/true);
       log_message(kLogInfo,
                   "ConSan MOI auto report buffer is too small reader=%llu bytes=%zu "
-                  "direct_sampled=%s inline_shadow=%s track_barriers=%s track_atomics=%s",
+                  "engine=%s track_barriers=%s track_atomics=%s",
                   static_cast<unsigned long long>(reader), requested,
-                  direct_sampled ? "true" : "false", inline_shadow ? "true" : "false",
+                  rocjitsu::consan_moi_engine_name(layout.engine),
                   track_barriers ? "true" : "false", track_atomics ? "true" : "false");
       return false;
     }
@@ -356,38 +354,6 @@ public:
                     metadata.malformed ? "true" : "false");
       }
       entry->static_metadata = std::move(metadata);
-    } else if (const auto *static_accesses = static_mapping.inline_compact()) {
-      AutoMoiInlineCompactStaticMetadata metadata;
-      auto *mappings = reinterpret_cast<rocjitsu::ConSanMoiCompactDiagnosticTokenMapping *>(
-          static_cast<uint8_t *>(entry->ptr) + entry->layout.inline_compact_token_mappings_offset);
-      for (const rocjitsu::ConSanInlineCompactStaticAccessMapping &static_access :
-           *static_accesses) {
-        if (static_access.token == 0u ||
-            static_access.access.original_site.original_text_offset >
-                rocjitsu::consan_moi_exact_shadow::max_instruction_offset ||
-            !static_access.access.owner_provenance_complete ||
-            static_access.access.execution_owner_descriptor_file_offsets.size() != 1u ||
-            metadata.mapping_count >= entry->layout.inline_compact_token_mapping_capacity) {
-          metadata.malformed = true;
-          continue;
-        }
-        mappings[metadata.mapping_count++] = rocjitsu::ConSanMoiCompactDiagnosticTokenMapping{
-            .owner_descriptor_file_offset =
-                static_access.access.execution_owner_descriptor_file_offsets.front(),
-            .instruction_offset =
-                static_cast<uint32_t>(static_access.access.original_site.original_text_offset),
-            .token = static_access.token,
-        };
-      }
-      if (!static_accesses->empty()) {
-        log_message(kLogInfo,
-                    "ConSan MOI compact diagnostic map reader=%llu entries=%zu mappings=%u "
-                    "capacity=%u malformed=%s",
-                    static_cast<unsigned long long>(reader), static_accesses->size(),
-                    metadata.mapping_count, entry->layout.inline_compact_token_mapping_capacity,
-                    metadata.malformed ? "true" : "false");
-      }
-      entry->static_metadata = metadata;
     }
   }
 

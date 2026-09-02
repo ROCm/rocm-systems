@@ -128,7 +128,7 @@ void publish_moi_evidence_requirements(ConSanMoiEvidenceRequirements &requiremen
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] std::array<size_t *, 15> report_region_offsets(ConSanMoiReportBufferLayout &layout) {
+[[nodiscard]] std::array<size_t *, 14> report_region_offsets(ConSanMoiReportBufferLayout &layout) {
   return {&layout.record_replay_dispatch_tokens_offset,
           &layout.access_records_offset,
           &layout.barrier_records_offset,
@@ -139,7 +139,6 @@ namespace {
           &layout.inline_atomic_release_slots_offset,
           &layout.inline_acquired_epoch_token_slots_offset,
           &layout.inline_causal_snapshots_offset,
-          &layout.inline_compact_token_mappings_offset,
           &layout.sampled_watchpoints_offset,
           &layout.sampled_causal_windows_offset,
           &layout.sampled_sync_metadata_offset,

@@ -29,15 +29,6 @@ inline constexpr uint32_t max_epoch = (1u << epoch_bits) - 1u;
 inline constexpr uint32_t max_generation = (1u << generation_bits) - 1u;
 inline constexpr uint32_t max_instruction_offset = (1u << instruction_offset_bits) - 1u;
 
-// A workgroup-local shadow does not need the generation field used to
-// disambiguate process-global cells. gfx1250 compact local cells retain the
-// canonical kind/owner/epoch low 23 bits and use the remaining nine bits for
-// an object-unique site token. Token zero remains the all-zero empty state.
-inline constexpr uint32_t compact_token_shift = generation_shift;
-inline constexpr uint32_t compact_token_bits = 9;
-inline constexpr uint32_t max_compact_token = (1u << compact_token_bits) - 1u;
-inline constexpr uint32_t compact_diagnostic_token_tag = 0x80000000u;
-
 } // namespace consan_moi_exact_shadow
 
 namespace consan_moi_exact_byte_cell {

@@ -36,7 +36,6 @@ struct ConSanMoiReportBufferLayout {
   uint32_t inline_atomic_release_capacity = 0;
   uint32_t inline_acquired_epoch_token_capacity = 0;
   uint32_t inline_causal_snapshot_capacity = 0;
-  uint32_t inline_compact_token_mapping_capacity = 0;
   uint32_t sampled_watchpoint_capacity = 0;
   uint32_t sampled_causal_window_capacity = 0;
   uint32_t sampled_sync_metadata_capacity = 0;
@@ -51,7 +50,6 @@ struct ConSanMoiReportBufferLayout {
   size_t inline_atomic_release_slots_offset = sizeof(ConSanMoiReportHeader);
   size_t inline_acquired_epoch_token_slots_offset = sizeof(ConSanMoiReportHeader);
   size_t inline_causal_snapshots_offset = sizeof(ConSanMoiReportHeader);
-  size_t inline_compact_token_mappings_offset = sizeof(ConSanMoiReportHeader);
   size_t sampled_watchpoints_offset = sizeof(ConSanMoiReportHeader);
   size_t sampled_causal_windows_offset = sizeof(ConSanMoiReportHeader);
   size_t sampled_sync_metadata_offset = sizeof(ConSanMoiReportHeader);

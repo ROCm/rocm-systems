@@ -90,16 +90,6 @@ AutoMoiModeRendering render_auto_moi_inline_shadow_report(
                static_cast<unsigned long long>(issue.words[4]),
                static_cast<unsigned long long>(issue.words[5]))});
       break;
-    case AutoMoiInlineShadowEvidenceReason::CompactDiagnosticTokenUnresolved:
-      result.evidence.push_back(
-          {kEvidence,
-           format_auto_moi_report_text(
-               "ConSan MOI compact diagnostic token unresolved reader=%llu current=0x%x "
-               "tagged=0x%x well_formed=%s current_ambiguous=%s prior_ambiguous=%s",
-               static_cast<unsigned long long>(input.reader), issue.index,
-               static_cast<uint32_t>(issue.words[0]), issue.words[1] != 0 ? "true" : "false",
-               issue.words[2] != 0 ? "true" : "false", issue.words[3] != 0 ? "true" : "false")});
-      break;
     }
   }
 

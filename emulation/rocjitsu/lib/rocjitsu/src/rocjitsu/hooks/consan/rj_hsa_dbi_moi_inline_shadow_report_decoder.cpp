@@ -162,66 +162,6 @@ AutoMoiInlineShadowDecodeResult decode_auto_moi_inline_shadow_report(
   for (uint32_t index : deferred_filter.visible_indices)
     result.diagnostics.push_back(raw_diagnostics[index]);
 
-  const auto *inline_metadata =
-      input.static_metadata ? std::get_if<AutoMoiInlineCompactStaticMetadata>(input.static_metadata)
-                            : nullptr;
-  const uint32_t compact_token_mapping_count =
-      inline_metadata ? inline_metadata->mapping_count : 0u;
-  if (!result.diagnostics.empty() && compact_token_mapping_count != 0u) {
-    const auto *mappings = reinterpret_cast<const ConSanMoiCompactDiagnosticTokenMapping *>(
-        bytes + layout.inline_compact_token_mappings_offset);
-    for (ConSanMoiDiagnosticRecord &diagnostic : result.diagnostics) {
-      const uint32_t tagged = diagnostic.first_instruction_offset;
-      constexpr uint32_t kTokenPayloadMask = consan_moi_exact_shadow::max_compact_token;
-      constexpr uint32_t kAllowedBits =
-          consan_moi_exact_shadow::compact_diagnostic_token_tag | kTokenPayloadMask;
-      if ((tagged & consan_moi_exact_shadow::compact_diagnostic_token_tag) == 0u)
-        continue;
-      const uint16_t token = static_cast<uint16_t>(tagged & kTokenPayloadMask);
-      const bool well_formed = token != 0u && (tagged & ~kAllowedBits) == 0u;
-      const ConSanMoiCompactDiagnosticTokenMapping *current = nullptr;
-      const ConSanMoiCompactDiagnosticTokenMapping *resolved = nullptr;
-      bool current_ambiguous = false;
-      bool prior_ambiguous = false;
-      if (well_formed) {
-        for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
-          const auto &mapping = mappings[index];
-          if (mapping.instruction_offset != diagnostic.second_instruction_offset)
-            continue;
-          if (current != nullptr &&
-              current->owner_descriptor_file_offset != mapping.owner_descriptor_file_offset) {
-            current_ambiguous = true;
-            break;
-          }
-          current = &mapping;
-        }
-        if (current != nullptr && !current_ambiguous) {
-          for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
-            const auto &mapping = mappings[index];
-            if (mapping.owner_descriptor_file_offset != current->owner_descriptor_file_offset ||
-                mapping.token != token)
-              continue;
-            if (resolved != nullptr && resolved->instruction_offset != mapping.instruction_offset) {
-              prior_ambiguous = true;
-              break;
-            }
-            resolved = &mapping;
-          }
-        }
-      }
-      if (!well_formed || current == nullptr || current_ambiguous || resolved == nullptr ||
-          prior_ambiguous) {
-        ++summary.inline_malformed_count;
-        decoded.issues.push_back(
-            {.reason = AutoMoiInlineShadowEvidenceReason::CompactDiagnosticTokenUnresolved,
-             .index = diagnostic.second_instruction_offset,
-             .words = {tagged, well_formed, current_ambiguous, prior_ambiguous}});
-        continue;
-      }
-      diagnostic.first_instruction_offset = resolved->instruction_offset;
-    }
-  }
-
   summary.visible_inline_publication_count = header.event_counter;
   summary.visible_exact_shadow_entry_count = decoded.exact_shadow.size();
   summary.visible_inline_atomic_release_count = decoded.atomic_releases.size();

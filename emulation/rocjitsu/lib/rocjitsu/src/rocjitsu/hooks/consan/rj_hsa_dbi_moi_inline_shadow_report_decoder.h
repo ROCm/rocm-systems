@@ -34,7 +34,6 @@ struct AutoMoiInlineAcquiredTokenEvidence {
 enum class AutoMoiInlineShadowEvidenceReason : uint8_t {
   ExactMalformed,
   ReleasePublishing,
-  CompactDiagnosticTokenUnresolved,
 };
 
 struct AutoMoiInlineShadowEvidenceIssue {

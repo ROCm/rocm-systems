@@ -1453,7 +1453,7 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
             2);
 }
 
-TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
+TEST(ConSanMoi, WorkgroupLocalAtomicLookupUsesPersistentWorkgroupKey) {
   std::vector<uint8_t> bytes = make_rdna4_lds_and_ordered_flat_atomic_handoff_code_object();
   ASSERT_FALSE(bytes.empty());
   mutate_first_kernel_descriptor(

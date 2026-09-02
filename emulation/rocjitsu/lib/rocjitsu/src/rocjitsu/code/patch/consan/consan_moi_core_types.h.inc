@@ -5,27 +5,6 @@ enum class ConSanMoiDiagnosticKind : uint32_t {
   BarrierDivergence = 3,
 };
 
-// A lazy, full-width layout with no validity bitmap uses the canonical
-// generation field to distinguish stale LDS from the current workgroup. This
-// sentinel combination is impossible for the bitmap-backed layouts below, so
-// it survives patch-info serialization without another ABI field.
-[[nodiscard]] constexpr bool
-consan_moi_generation_tagged_workgroup_shadow(const ConSanMoiWorkgroupShadowLayout &layout) {
-  return layout.lazy_initialization && !layout.compact && layout.validity_size == 0u;
-}
-
-[[nodiscard]] constexpr bool
-consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
-                                                     bool compact_cells_available = true) {
-  // Prefer the bounded generation-tagged hot path for ordinary guest-LDS
-  // sizes. The compact representation saves LDS, but its two-bit first-use
-  // protocol adds an atomic claim and readiness poll to every newly touched
-  // cell. Reserve it for unusually large mirrors where reducing LDS footprint
-  // is worth that extra protocol.
-  constexpr uint32_t kGenerationTaggedGuestLdsLimit = 64u * 1024u;
-  return !compact_cells_available || guest_lds_bytes <= kGenerationTaggedGuestLdsLimit;
-}
-
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile ? profile->max_group_segment_bytes : 64u * 1024u;
@@ -93,71 +72,6 @@ plan_consan_moi_lazy_workgroup_shadow(uint32_t original_group_segment_size,
   layout->required_group_segment_size = static_cast<uint32_t>(required);
   layout->lazy_initialization = true;
   return layout;
-}
-
-/// Generic layout primitive retained for sizing and policy experiments. The
-/// exact-byte Inline engine does not select it because local byte provenance
-/// occupies the generation field; that engine uses an initialized full-width
-/// layout instead.
-///
-/// Keep one canonical eight-byte exact cell per guest-LDS granule and use its
-/// existing 20-bit generation field as the workgroup identity. Unlike an
-/// eagerly cleared mirror or a bitmap-backed lazy mirror, stale LDS is rejected
-/// by the normal exact-shadow comparison and every hot access needs only its
-/// exact exchange.
-[[nodiscard]] constexpr std::optional<ConSanMoiWorkgroupShadowLayout>
-plan_consan_moi_generation_tagged_workgroup_shadow(uint32_t original_group_segment_size,
-                                                   uint32_t max_workgroup_lds_bytes = 64u * 1024u) {
-  auto layout =
-      plan_consan_moi_workgroup_shadow(original_group_segment_size, max_workgroup_lds_bytes);
-  if (!layout)
-    return std::nullopt;
-  layout->lazy_initialization = true;
-  return layout;
-}
-
-/// Generic layout primitive retained for sizing and policy experiments. The
-/// exact-byte Inline engine does not select it because a four-byte cell cannot
-/// carry the complete packed access and byte provenance atomically.
-///
-/// Use one four-byte local cell per four-byte guest-LDS granule. The compact
-/// cell keeps exact kind, owner, and epoch fields; its nine remaining bits are
-/// an object-unique site token resolved to the full instruction offset by the
-/// report path. A packed two-bit first-use bitmap avoids clearing the full
-/// compact mirror in every workgroup.
-[[nodiscard]] constexpr std::optional<ConSanMoiWorkgroupShadowLayout>
-plan_consan_moi_compact_workgroup_shadow(uint32_t original_group_segment_size,
-                                         uint32_t max_workgroup_lds_bytes = 64u * 1024u) {
-  constexpr uint32_t kAlignment = 16u;
-  constexpr uint32_t kGuestGranuleBytes = 4u;
-  constexpr uint32_t kStatesPerWord = 16u;
-  if (original_group_segment_size == 0u)
-    return std::nullopt;
-  const uint64_t base = (static_cast<uint64_t>(original_group_segment_size) + kAlignment - 1u) &
-                        ~(static_cast<uint64_t>(kAlignment) - 1u);
-  const uint64_t slot_count =
-      (static_cast<uint64_t>(original_group_segment_size) + kGuestGranuleBytes - 1u) /
-      kGuestGranuleBytes;
-  const uint64_t raw_size = slot_count * sizeof(uint32_t);
-  const uint64_t size = (raw_size + kAlignment - 1u) & ~(static_cast<uint64_t>(kAlignment) - 1u);
-  const uint64_t validity_base = base + size;
-  const uint64_t state_word_count = (slot_count + kStatesPerWord - 1u) / kStatesPerWord;
-  const uint64_t raw_validity_size = state_word_count * sizeof(uint32_t);
-  const uint64_t validity_size =
-      (raw_validity_size + kAlignment - 1u) & ~(static_cast<uint64_t>(kAlignment) - 1u);
-  const uint64_t required = validity_base + validity_size;
-  if (required > max_workgroup_lds_bytes)
-    return std::nullopt;
-  return ConSanMoiWorkgroupShadowLayout{.base = static_cast<uint32_t>(base),
-                                        .size = static_cast<uint32_t>(size),
-                                        .validity_base = static_cast<uint32_t>(validity_base),
-                                        .validity_size = static_cast<uint32_t>(validity_size),
-                                        .required_group_segment_size =
-                                            static_cast<uint32_t>(required),
-                                        .workitem_id_dimensions = 1u,
-                                        .lazy_initialization = true,
-                                        .compact = true,
-                                        .visible_evidence_sgpr = std::nullopt};
 }
 
 enum class ConSanMoiInlineAtomicSupport : uint8_t {

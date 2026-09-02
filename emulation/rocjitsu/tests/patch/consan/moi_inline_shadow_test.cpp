@@ -2230,21 +2230,6 @@ TEST(ConSanMoi, WorkgroupShadowLayoutUsesOneEightByteSlotPerFourByteLdsCell) {
   EXPECT_FALSE(plan_consan_moi_workgroup_shadow(21848u));
 }
 
-TEST(ConSanMoi, Gfx1250WorkgroupShadowUsesConfiguredAperture) {
-  constexpr uint32_t kConfiguredLdsBytes =
-      consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
-  constexpr uint32_t kOriginalLdsBytes = kConfiguredLdsBytes / 4u;
-  const auto layout =
-      plan_consan_moi_compact_workgroup_shadow(kOriginalLdsBytes, kConfiguredLdsBytes);
-
-  ASSERT_TRUE(layout);
-  EXPECT_EQ(layout->base, kOriginalLdsBytes);
-  EXPECT_LE(layout->required_group_segment_size, kConfiguredLdsBytes);
-  EXPECT_TRUE(layout->compact);
-  EXPECT_TRUE(layout->lazy_initialization);
-  EXPECT_FALSE(plan_consan_moi_compact_workgroup_shadow(kConfiguredLdsBytes, kConfiguredLdsBytes));
-}
-
 TEST(ConSanMoi, Gfx1250WorkgroupLdsMatchesSimulatorConfig) {
   const auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
                                           rocjitsu::kEmbeddedSchema);
@@ -2312,46 +2297,6 @@ TEST(ConSanMoi, LazyWorkgroupShadowAddsTwoBitValidityState) {
   EXPECT_FALSE(plan_consan_moi_lazy_workgroup_shadow(21840u));
 }
 
-TEST(ConSanMoi, GenerationTaggedWorkgroupShadowNeedsNoInitializationState) {
-  const auto layout = plan_consan_moi_generation_tagged_workgroup_shadow(
-      21120u, consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
-  ASSERT_TRUE(layout);
-  EXPECT_EQ(layout->base, 21120u);
-  EXPECT_EQ(layout->size, 42240u);
-  EXPECT_EQ(layout->validity_base, 0u);
-  EXPECT_EQ(layout->validity_size, 0u);
-  EXPECT_EQ(layout->required_group_segment_size, 63360u);
-  EXPECT_TRUE(layout->lazy_initialization);
-  EXPECT_FALSE(layout->compact);
-  EXPECT_TRUE(consan_moi_generation_tagged_workgroup_shadow(*layout));
-}
-
-TEST(ConSanMoi, Gfx1250GenerationTaggedShadowUsesCompactCellsOnlyAsCapacityFallback) {
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(21120u));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(22u * 1024u));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(24576u));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(49152u));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(64u * 1024u));
-  EXPECT_FALSE(consan_moi_prefer_generation_tagged_workgroup_shadow(96u * 1024u));
-  EXPECT_FALSE(consan_moi_prefer_generation_tagged_workgroup_shadow(128u * 1024u));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(
-      24576u, /*compact_cells_available=*/false));
-  EXPECT_TRUE(consan_moi_prefer_generation_tagged_workgroup_shadow(
-      49152u, /*compact_cells_available=*/false));
-}
-
-TEST(ConSanMoi, CompactWorkgroupShadowUsesOneWordPerGuestCell) {
-  const auto layout = plan_consan_moi_compact_workgroup_shadow(21120u);
-  ASSERT_TRUE(layout);
-  EXPECT_EQ(layout->base, 21120u);
-  EXPECT_EQ(layout->size, 21120u);
-  EXPECT_EQ(layout->validity_base, 42240u);
-  EXPECT_EQ(layout->validity_size, 1328u);
-  EXPECT_EQ(layout->required_group_segment_size, 43568u);
-  EXPECT_TRUE(layout->lazy_initialization);
-  EXPECT_TRUE(layout->compact);
-}
-
 TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirror) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
@@ -2400,7 +2345,6 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
     EXPECT_EQ(patch->workgroup_shadow->validity_size, 272u);
     EXPECT_EQ(patch->required_group_segment_size(), 13328u);
     EXPECT_TRUE(patch->workgroup_shadow->lazy_initialization);
-    EXPECT_FALSE(patch->workgroup_shadow->compact);
   }
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -2623,7 +2567,6 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   EXPECT_EQ(access->workgroup_shadow->validity_size, 272u);
   EXPECT_EQ(access->required_group_segment_size(), 13328u);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
   EXPECT_TRUE(prologue->workgroup_shadow->lazy_initialization);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -2687,7 +2630,6 @@ TEST(ConSanMoi, Rdna4InlineShadowEagerlyClearsExactMirrorWhenValidityBitmapDoesN
     EXPECT_EQ(patch->workgroup_shadow->validity_size, 0u);
     EXPECT_EQ(patch->required_group_segment_size(), 65520u);
     EXPECT_FALSE(patch->workgroup_shadow->lazy_initialization);
-    EXPECT_FALSE(patch->workgroup_shadow->compact);
   }
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -2734,7 +2676,6 @@ TEST(ConSanMoi, Rdna4BarrierTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   EXPECT_EQ(access->workgroup_shadow->validity_size, 272u);
   EXPECT_EQ(access->required_group_segment_size(), 13328u);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -3944,7 +3885,6 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   EXPECT_EQ(access->workgroup_shadow->validity_base, 63360u);
   EXPECT_EQ(access->workgroup_shadow->validity_size, 1328u);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
   EXPECT_EQ(access->required_group_segment_size(), 64688u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3974,7 +3914,6 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(prologue->workgroup_shadow);
   EXPECT_TRUE(prologue->workgroup_shadow->lazy_initialization);
-  EXPECT_FALSE(prologue->workgroup_shadow->compact);
   EXPECT_EQ(prologue->workgroup_shadow->validity_base, 63360u);
   EXPECT_EQ(prologue->workgroup_shadow->validity_size, 1328u);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
@@ -4004,7 +3943,6 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   ASSERT_TRUE(access->workgroup_shadow);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
   EXPECT_EQ(access->workgroup_shadow->validity_size, 4352u);
 
@@ -4061,7 +3999,6 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   });
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->workgroup_shadow);
-  ASSERT_FALSE(access->workgroup_shadow->compact);
   ASSERT_TRUE(access->workgroup_shadow->lazy_initialization);
   ASSERT_EQ(access->workgroup_shadow->validity_size, 1328u);
   ASSERT_TRUE(access->scratch_vgpr);
@@ -4131,7 +4068,6 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
   });
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->workgroup_shadow);
-  ASSERT_FALSE(access->workgroup_shadow->compact);
   ASSERT_GT(access->workgroup_shadow->size, 0u);
   ASSERT_TRUE(access->scratch_vgpr);
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -4178,7 +4114,6 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   ASSERT_TRUE(access->workgroup_shadow);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
   EXPECT_EQ(access->workgroup_shadow->validity_size, 1328u);
 
@@ -5188,7 +5123,6 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
   EXPECT_EQ(access->workgroup_shadow->validity_size, 272u);
   EXPECT_EQ(access->required_group_segment_size(), 13328u);
   EXPECT_TRUE(access->workgroup_shadow->lazy_initialization);
-  EXPECT_FALSE(access->workgroup_shadow->compact);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());

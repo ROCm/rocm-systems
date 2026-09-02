@@ -3743,20 +3743,11 @@ TEST(HsaHooksUnitTest, AutoReportPipelineCarriesOneStaticMetadataModeAlternative
       std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
   EXPECT_FALSE(
       std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayStaticMetadata>(metadata));
-  EXPECT_FALSE(
-      std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata));
 
-  metadata = rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata{
-      .mapping_count = 3u,
-      .malformed = false,
-  };
+  metadata = std::monostate{};
+  EXPECT_TRUE(std::holds_alternative<std::monostate>(metadata));
   EXPECT_FALSE(
       std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledStaticMetadata>(metadata));
-  ASSERT_TRUE(
-      std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata));
-  EXPECT_EQ(
-      std::get<rocjitsu::consan_hook::AutoMoiInlineCompactStaticMetadata>(metadata).mapping_count,
-      3u);
 }
 
 TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDiagnostics) {

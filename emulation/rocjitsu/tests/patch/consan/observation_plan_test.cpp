@@ -405,7 +405,6 @@ TEST(ConSanObservationPlan, RuntimeStaticMappingIsOneDiscriminatedModeProduct) {
   ASSERT_NE(record_replay.record_replay(), nullptr);
   EXPECT_EQ(record_replay.record_replay()->size(), 2u);
   EXPECT_EQ(record_replay.sampled(), nullptr);
-  EXPECT_EQ(record_replay.inline_compact(), nullptr);
 }
 
 TEST(ConSanObservationPlan, CommittedLoweringBindsSeveralIntentsToOneLocation) {

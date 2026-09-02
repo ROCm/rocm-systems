@@ -865,8 +865,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     std::vector<uint32_t> &words, const ConSanMoiWorkgroupShadowLayout &layout,
     uint16_t address_vgpr, uint16_t zero_vgpr, bool has_quad_zero_tuple,
     std::optional<uint16_t> state_sgpr, rj_code_arch_t arch, std::vector<std::string> &errors) {
-  if (consan_moi_generation_tagged_workgroup_shadow(layout))
-    return true;
   if (layout.workitem_id_dimensions >= 1u && layout.workitem_id_dimensions <= 3u) {
     return append_moi_parallel_workgroup_shadow_initialization(
         words, layout, address_vgpr, zero_vgpr, has_quad_zero_tuple, state_sgpr, arch, errors);

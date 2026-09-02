@@ -26,7 +26,6 @@ struct MoiInlineShadowEmissionPlan {
   uint16_t required_exec_save_sgpr_count = 0;
   uint16_t scratch_vgpr = 0;
   uint16_t scratch_count = 0;
-  uint16_t workgroup_shadow_compact_token = 0;
   MoiInlineShadowScalarState scalar_state;
   MoiScalarAbiPlan scalar_abi;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id;

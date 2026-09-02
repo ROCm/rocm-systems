@@ -29,19 +29,6 @@ struct alignas(8) ConSanMoiDiagnosticRecord {
   uint32_t second_access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Empty);
 };
 
-/// Host-populated lookup record for the compact workgroup-local shadow.
-/// Compact cells retain a per-kernel token instead of a full instruction
-/// offset. Keeping one descriptor-qualified record per patched site in the
-/// report allocation lets teardown resolve that token without an unbounded
-/// process-heap side table.
-struct alignas(8) ConSanMoiCompactDiagnosticTokenMapping {
-  uint64_t owner_descriptor_file_offset = 0;
-  uint32_t instruction_offset = 0;
-  uint16_t token = 0;
-  uint16_t reserved = 0;
-};
-static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
-
 /// Creates a production header from the exact heterogeneous layout. Focused
 /// tests that deliberately construct partial headers own their convenience
 /// builder outside the production contract.
@@ -173,7 +160,6 @@ struct ConSanMoiAutoReportInventory {
   uint64_t inline_atomic_release_count = 0;
   uint64_t inline_causal_snapshot_count = 0;
   uint64_t inline_acquired_epoch_token_count = 0;
-  uint64_t inline_compact_token_mapping_count = 0;
   /// Automatic inventories request one wave of diagnostic headroom per
   /// logical range in every exact-shadow dispatch bank. Large objects may
   /// reduce only that headroom to the largest capacity fitting the frozen
@@ -196,7 +182,7 @@ using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory:
 /// Canonical projection of every numeric report-capacity dimension. Keep
 /// capacity comparisons expressed through this list so a dimension cannot
 /// acquire a separate, silently incomplete comparison path.
-inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 17>
+inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
     kConSanMoiAutoReportCapacityMembers = {
         &ConSanMoiAutoReportInventory::access_range_count,
         &ConSanMoiAutoReportInventory::barrier_event_count,
@@ -214,7 +200,6 @@ inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 17>
         &ConSanMoiAutoReportInventory::inline_atomic_release_count,
         &ConSanMoiAutoReportInventory::inline_causal_snapshot_count,
         &ConSanMoiAutoReportInventory::inline_acquired_epoch_token_count,
-        &ConSanMoiAutoReportInventory::inline_compact_token_mapping_count,
 };
 
 /// Return whether a report sized for @p capacity can represent every quantity
