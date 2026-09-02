@@ -105,6 +105,7 @@
 #include <iomanip>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -116,7 +117,10 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <linux/futex.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -203,6 +207,55 @@ is_handled_signal(int signum)
     for(auto itr : rocprofv3_handled_signals)
         if(itr == signum) return true;
     return false;
+}
+
+struct signal_worker_state
+{
+    int                   eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
+    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
+    int                   signo         = {0};               // signal handled (0 == normal exit)
+    std::thread           thread        = {};                // the finalization worker
+
+    ~signal_worker_state() { join(); }
+
+    // Join the finalization worker and close the eventfd. Idempotent and self-safe (a call from the
+    // worker itself skips the join). Called from finalize_rocprofv3 (atexit/main teardown) and from
+    // the destructor, so the worker is never left joinable at static destruction
+    void join()
+    {
+        if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
+        {
+            // Wake the worker's blocking read() so it can exit
+            // closing the fd while read() blocks is UB.
+            if(eventfd >= 0)
+            {
+                uint64_t val = 1;
+                if(write(eventfd, &val, sizeof(val)) < 0)
+                    ROCP_WARNING << "signal worker: eventfd wake before join failed: "
+                                 << strerror(errno);
+            }
+            thread.join();
+            if(eventfd >= 0)
+            {
+                if(close(eventfd) < 0)
+                    ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
+                eventfd = -1;
+            }
+        }
+    }
+};
+
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "rocprofv3 signal path requires lock-free finalize_done atomic support");
+
+auto&
+get_signal_worker()
+{
+    static auto*& _v = common::static_object<signal_worker_state>::construct();
+    auto&         sw = *CHECK_NOTNULL(_v);
+    return sw;
 }
 
 struct buffer_ids
@@ -2248,7 +2301,13 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
 
     struct sigaction sig_act = {};
     sigemptyset(&sig_act.sa_mask);
-    sig_act.sa_flags     = (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    // No SA_RESETHAND: a one-shot handler resets the disposition to SIG_DFL the instant it fires,
+    // so a *second* delivery of the same signal (e.g. a chained app handler like LLVM/comgr
+    // re-raising) would land on SIG_DFL and terminate the process mid-flush -> data loss. Keeping
+    // our handler installed routes every re-delivery back through the re-entry guard, which
+    // swallows until the flush completes (finalize_done) and only then escalates. Termination is
+    // guaranteed by the worker restoring the real disposition and re-raising once the flush done.
+    sig_act.sa_flags     = (SA_SIGINFO | SA_NOCLDSTOP);
     sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
     for(auto signal_v : rocprofv3_handled_signals)
     {
@@ -2349,6 +2408,13 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
 void
 finalize_rocprofv3(std::string_view context)
 {
+    auto& sw = get_signal_worker();
+    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
+        return;
+    }
+
     ROCP_INFO << "invoked: finalize_rocprofv3";
     if(client_finalizer && client_identifier)
     {
@@ -2357,10 +2423,9 @@ finalize_rocprofv3(std::string_view context)
         client_finalizer  = nullptr;
         client_identifier = nullptr;
     }
-    else
-    {
-        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
-    }
+
+    // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).
+    sw.join();
 }
 
 bool
@@ -4213,6 +4278,11 @@ get_sigaction_function()
 
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
+
+// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
+int signal_abort_flush_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -4368,43 +4438,95 @@ diagnose_status(pid_t _pid, int _status)
 }
 
 void
-rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
 {
-    // Only the first fatal signal in the process runs the body below. A later one, whether it
-    // is a re-entrant abort from finalization on this thread or a signal on another thread,
-    // must not wait on the std::call_once: the first is a recursive lock, the second blocks
-    // until the finalization it is waiting on completes, and either way the process can no
-    // longer be terminated. This runs before any logging so that a stuck logger or allocator
-    // cannot get in the way.
-    static auto _handling = std::atomic_flag{};
-    if(_handling.test_and_set())
-    {
-        constexpr auto _msg =
-            std::string_view{"[rocprofv3] fatal signal while already handling one... "
-                             "terminating\n"};
-        // write() rather than the logger: async-signal-safe and takes no locks
-        auto _written = ::write(STDERR_FILENO, _msg.data(), _msg.size());
-        (void) _written;
-
-        // rocprofv3 interposes signal()/sigaction() to keep this handler installed, so the
-        // default disposition has to be restored through the real symbol before re-raising.
-        auto _default_action       = sigaction_t{};
-        _default_action.sa_handler = SIG_DFL;
-        sigemptyset(&_default_action.sa_mask);
-        if(auto* _real_sigaction = get_sigaction_function();
-           _real_sigaction != nullptr && _real_sigaction(signo, &_default_action, nullptr) == 0)
+    auto get_children = [&this_pid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
+        auto ifs      = std::ifstream{fname};
+        auto children = std::vector<pid_t>{};
+        if(!ifs.is_open())
         {
-            // the handler was entered with signo blocked, so unblock it or the raise below
-            // only marks it pending and the process exits rather than dying from the signal
-            auto _blocked = sigset_t{};
-            sigemptyset(&_blocked);
-            sigaddset(&_blocked, signo);
-            ::pthread_sigmask(SIG_UNBLOCK, &_blocked, nullptr);
-            ::raise(signo);
+            ROCP_WARNING << "signal worker: failed to open " << fname << ": " << strerror(errno);
+            return children;
         }
+        while(ifs)
+        {
+            pid_t child_pid = 0;
+            ifs >> child_pid;
+            if(ifs && !ifs.eof() && child_pid > 0) children.emplace_back(child_pid);
+        }
+        return children;
+    };
 
-        // only reached if the signal is not fatal by default or could not be restored
-        ::_exit(128 + signo);
+    auto _children = get_children();
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        this_ppid,
+        this_pid,
+        this_tid,
+        context,
+        _children.size());
+
+    for(auto itr : _children)
+    {
+        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+        if(status) diagnose_status(itr, status.value());
+    }
+}
+
+// Reinstall the disposition we wrapped for `signo`: the saved chained handler if any, else
+// SIG_DFL. Uses the real sigaction (bypasses our interceptor).
+void
+restore_signal_disposition(int signo)
+{
+    if(auto& chained = get_chained_signals().at(signo); chained)
+    {
+        if(chained->action)
+        {
+            get_sigaction_function()(signo, &(*chained->action), nullptr);
+        }
+        else
+        {
+            struct sigaction sa = {};
+            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            get_sigaction_function()(signo, &sa, nullptr);
+        }
+    }
+    else
+    {
+        struct sigaction sa = {};
+        sa.sa_handler       = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        get_sigaction_function()(signo, &sa, nullptr);
+    }
+}
+
+void
+signal_finalization_worker()
+{
+    auto& sw = get_signal_worker();
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    for(auto sig : rocprofv3_handled_signals)
+        sigaddset(&mask, sig);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+
+    // Retry across EINTR: the worker blocks only the handled signals, so any other signal delivered
+    // here (SIGCHLD, SIGALRM, ...) would otherwise abort the read and kill the worker, after which
+    // nothing flushes and every repeat signal is swallowed forever.
+    uint64_t val   = 0;
+    ssize_t  nread = 0;
+    do
+    {
+        nread = read(sw.eventfd, &val, sizeof(val));
+    } while(nread < 0 && errno == EINTR);
+
+    if(nread < 0)
+    {
+        ROCP_WARNING << "signal worker: eventfd read failed: " << strerror(errno);
+        return;
     }
 
     auto this_pid  = getpid();
@@ -4412,132 +4534,159 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     auto this_tid  = common::get_tid();
     auto this_func = std::string_view{__FUNCTION__};
 
-    ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {}...",
-                                this_ppid,
-                                this_pid,
-                                this_tid,
-                                this_func,
-                                signo);
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func,
+        sw.signo);
 
-    static auto _once = std::once_flag{};
-    std::call_once(_once, [&]() {
-        auto get_children = [&this_pid]() {
-            auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
-            auto ifs      = std::ifstream{fname};
-            auto children = std::vector<pid_t>{};
-            while(ifs)
-            {
-                pid_t val = 0;
-                ifs >> val;
-                if(ifs && !ifs.eof() && val > 0) children.emplace_back(val);
-            }
-            return children;
-        };
+    finalize_rocprofv3(this_func);
 
-        auto _children = get_children();
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            _children.size());
+    if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
-        // wait for children
-        for(auto itr : _children)
+    // Signal completion (only the SIGABRT handler path waits on this).
+    sw.finalize_done.store(1u, std::memory_order_release);
+    syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
+
+    // Re-raise BEFORE reaping children. The app's own handler needs the signal to run its
+    // coordinated shutdown, and that shutdown is what makes the children exit. Reaping first
+    // deadlocks multi-process apps (e.g. tensor-parallel servers) whose worker processes only
+    // exit once the main tells them to. signo == 0 is normal-exit finalization; SIGABRT
+    // terminates itself once its (synchronously waiting) handler returns into abort().
+    if(sw.signo != 0 && sw.signo != SIGABRT)
+    {
+        const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
+        restore_signal_disposition(sw.signo);
+
+        // Re-raise process-directed (kill, not raise) so it lands on an app thread, not this
+        // worker (which blocks these signals): the chained handler runs, or SIG_DFL exits.
+        if(!have_chained)
         {
-            auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-            if(status) diagnose_status(itr, status.value());
+            // No chained handler: also unblock here so SIG_DFL is guaranteed to terminate.
+            sigset_t unblock{};
+            sigemptyset(&unblock);
+            sigaddset(&unblock, sw.signo);
+            pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
         }
+        kill(getpid(), sw.signo);
+    }
 
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            signo);
+    // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
+    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
+    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
+    wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
-        finalize_rocprofv3(this_func);
-        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func);
+}
 
-        ROCP_INFO << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            signo);
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+{
+    (void) info;
+    (void) ucontext;
 
-        if(get_chained_signals().at(signo))
+    auto& sw = get_signal_worker();
+
+    // Our handler being installed means the app doesn't coordinate shutdown.
+    // Well-behaved apps use --disable-signal-handlers (atexit handles everything).
+    //
+    // Re-entry: a second signal arrived while we're still handling the first
+    // (a chained handler re-raising, or a double Ctrl+C).
+    // While the flush is running, swallow it. Delivering it now would cut the
+    // flush short and truncate the profile.
+    // After the flush completes (finalize_done), force SIG_DFL and re-raise.
+    // The worker re-raises on its own once done, so the process still exits.
+    uint32_t expected = 0;
+    if(sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire) == false)
+    {
+        if(sw.finalize_done.load(std::memory_order_acquire) != 0)
         {
-            ROCP_INFO << fmt::format(
-                "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for {}",
-                this_ppid,
-                this_pid,
-                this_tid,
-                this_func,
-                signo);
+            struct sigaction _dfl = {};
+            _dfl.sa_handler       = SIG_DFL;
+            sigemptyset(&_dfl.sa_mask);
+            get_sigaction_function()(signo, &_dfl, nullptr);
 
-            if(auto& _chained = *get_chained_signals().at(signo); _chained.action)
-            {
-                ROCP_TRACE << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
-                                          "signal handler for {}... executing chained sigaction",
-                                          this_ppid,
-                                          this_pid,
-                                          this_tid,
-                                          this_func,
-                                          signo);
-                if((_chained.action->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
-                   _chained.action->sa_sigaction &&
-                   _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained sigaction (SIGINFO)",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.action->sa_sigaction(signo, info, ucontext);
-                }
-                else if((_chained.action->sa_flags & SA_SIGINFO) != SA_SIGINFO &&
-                        _chained.action->sa_handler &&
-                        _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained sigaction (HANDLER)",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.action->sa_handler(signo);
-                }
-            }
-            else
-            {
-                if(_chained.handler)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
-                        "{}... executing chained handler",
-                        this_ppid,
-                        this_pid,
-                        this_tid,
-                        this_func,
-                        signo);
-                    _chained.handler(signo);
-                }
-            }
+            sigset_t _unblock{};
+            sigemptyset(&_unblock);
+            sigaddset(&_unblock, signo);
+            pthread_sigmask(SIG_UNBLOCK, &_unblock, nullptr);
+            raise(signo);
         }
-    });
+        return;
+    }
 
-    // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
+    // For testing: allow quick_exit path
     if(signal_handler_exit) ::quick_exit(signo);
-    ::raise(signo);
+
+    // Hand the signal number to the worker (ordered by the eventfd write/read below).
+    sw.signo = signo;
+
+    // Wake the finalization worker: the flush is NOT async-signal-safe, so it runs there.
+    bool worker_notified = false;
+    if(sw.eventfd >= 0)
+    {
+        uint64_t val    = 1;
+        worker_notified = (write(sw.eventfd, &val, sizeof(val)) == sizeof(val));
+    }
+
+    // SIGABRT can't defer: returning lets abort() re-raise SIG_DFL before the worker flushes.
+    // So wait for the flush here, then return into abort(). Unlike the async signals, this can
+    // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
+    // paths, e.g. heap-corruption detection. Bound the wait with
+    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // beats a hung process. <= 0 waits forever.
+    if(signo == SIGABRT)
+    {
+        if(worker_notified)
+        {
+            // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
+            // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
+            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            auto       deadline = timespec{};
+            if(bounded)
+            {
+                clock_gettime(CLOCK_MONOTONIC, &deadline);
+                deadline.tv_sec += signal_abort_flush_timeout_sec;
+            }
+
+            while(sw.finalize_done.load(std::memory_order_acquire) == 0)
+            {
+                if(syscall(SYS_futex,
+                           &sw.finalize_done,
+                           FUTEX_WAIT_BITSET,
+                           0,
+                           bounded ? &deadline : nullptr,
+                           nullptr,
+                           FUTEX_BITSET_MATCH_ANY) == -1 &&
+                   errno == ETIMEDOUT)
+                {
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
+    // Async signals (SIGINT/SIGQUIT/SIGTERM): don't block or re-raise here. Returning lets this
+    // thread resume and release any lock it holds, so the worker's flush can't deadlock against
+    // it; the worker terminates via kill() once the flush is done.
+    if(!worker_notified)
+    {
+        // No worker to hand off to — best-effort terminate on this thread.
+        restore_signal_disposition(signo);
+        sigset_t unblock{};
+        sigemptyset(&unblock);
+        sigaddset(&unblock, signo);
+        pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        raise(signo);
+    }
 }
 
 int
@@ -4655,14 +4804,18 @@ rocprofv3_set_main(main_func_t main_func)
 sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler)
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once,
-                   []() { get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal"); });
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_signal_function()(signum, handler);
 
     if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
-    get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+    // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
+    // rationale in rocprofv3_sigaction.
+    if(!get_chained_signals().at(signum) && handler != SIG_DFL)
+        get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
 
     return get_signal_function()(
         signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
@@ -4673,21 +4826,41 @@ rocprofv3_sigaction(int signum,
                     const struct sigaction* __restrict__ act,
                     struct sigaction* __restrict__ oldact)
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
+    if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
-    });
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_sigaction_function()(signum, act, oldact);
 
     if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
 
-    // make sure rocprofv3_error_signal_handler doesn't call itself
-    if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
-       act->sa_sigaction != &rocprofv3_error_signal_handler)
-        get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+    // Save the app's disposition so we can restore it on signal delivery.
+    // Only save the first one registered per signal. Later installs (e.g., LLVM comgr) often
+    // don't chain properly — they clobber the disposition on re-raise. Preserving the app's
+    // disposition ensures the application sees its signal as-if the profiler wasn't there.
+    if(!get_chained_signals().at(signum))
+    {
+        if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO)
+        {
+            if(act->sa_sigaction != &rocprofv3_error_signal_handler)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+        else
+        {
+            // Save SIG_IGN too (matching signal()): an app that ignores the signal — e.g. a
+            // deliberately un-interruptible process — must still see it ignored after we flush.
+            // SIG_DFL is skipped because an empty entry already restores as SIG_DFL.
+            if(act->sa_handler != SIG_DFL)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+    }
 
     struct sigaction _upd_act = *act;
-    _upd_act.sa_flags |= (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    // See initialize_signal_handler: no SA_RESETHAND so re-deliveries route back through our
+    // re-entry guard instead of hitting SIG_DFL mid-flush.
+    _upd_act.sa_flags &= ~SA_RESETHAND;
+    _upd_act.sa_flags |= (SA_SIGINFO | SA_NOCLDSTOP);
     _upd_act.sa_sigaction = &rocprofv3_error_signal_handler;
 
     return get_sigaction_function()(signum, &_upd_act, oldact);
@@ -4717,6 +4890,42 @@ rocprofv3_main(int argc, char** argv, char** envp)
     initialize_logging();
 
     initialize_rocprofv3();
+
+    // Resolve dlsym'd function pointers at init time (before interceptors run).
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+    if(!get_sigaction_function())
+        get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+
+    // fork+exec and spawn children re-init through the normal init path. Plain fork children
+    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
+    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
+    // markers still flushes if reached (covered by a test).
+    {
+        auto& sw   = get_signal_worker();
+        sw.eventfd = eventfd(0, EFD_CLOEXEC);
+        if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
+
+        // Register atfork handler so fork() children get a fresh worker thread.
+        // Without this, fork children inherit the parent's stale eventfd/thread.
+        static bool atfork_registered = false;
+        if(!atfork_registered)
+        {
+            atfork_registered = true;
+            pthread_atfork(nullptr, nullptr, []() {
+                // Child handler: reset stale state and spawn a fresh worker.
+                auto& child_sw = get_signal_worker();
+                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
+                {
+                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
+                                 << strerror(errno);
+                }
+
+                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
+                child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
+                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
+            });
+        }
+    }
 
     initialize_signal_handler(get_sigaction_function());
 
