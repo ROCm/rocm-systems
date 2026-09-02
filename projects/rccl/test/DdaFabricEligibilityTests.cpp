@@ -25,6 +25,56 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// Fabric block cap
+// ---------------------------------------------------------------------------
+
+TEST(DdaFabricMaxBlocksTest, Uses96CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, nullptr), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses128CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(128, nullptr), 128);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses192CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, nullptr), 192);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses256CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, ClampsCuCountToHardLimit)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(512, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidCuCountUsesOneBlock)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(0, nullptr), 1);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(-1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCanLowerCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, "96"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCannotExceedCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "192"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ZeroOverrideUsesOneBlock)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0"), 1);
+}
+
+// ---------------------------------------------------------------------------
 // Scratch sizing
 // ---------------------------------------------------------------------------
 
