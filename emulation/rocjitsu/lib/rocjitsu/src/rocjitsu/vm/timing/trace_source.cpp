@@ -74,11 +74,9 @@ bool TimingTraceSource::submit(TraceEvent event) {
 
   event.sequence = next_sequence_;
   send_locked(std::move(event));
-  // Committed only once the message is actually on the wire. Everything above
-  // is a decision; nothing above writes. A send that threw therefore leaves no
-  // gap in the stream and no dispatch opened or closed by an event that never
-  // went out -- which is what lets submit() be called from a path with nothing
-  // to roll back with.
+  // Committed only once the message is on the wire: everything above is a
+  // decision, nothing above writes. A send that threw leaves no gap and no
+  // dispatch opened or closed by an event that never went out.
   ++next_sequence_;
   apply_ended_locked(kind, dispatch_id);
   return true;
@@ -103,10 +101,7 @@ void TimingTraceSource::mark_ended_locked(uint32_t dispatch_id) {
 
   const auto [oldest_id, oldest_epoch] = ended_order_.front();
   ended_order_.pop_front();
-  // Only if this entry is the finalisation still in force. A re-announcement
-  // drops an id from ended_ without reaching the deque, so the deque can hold a
-  // spent entry for an id that has since ended again; evicting the spent one
-  // must not take the live guard with it and reopen a dispatch that has ended.
+  // Only if this entry is the finalisation still in force; see ended_.
   const auto it = ended_.find(oldest_id);
   if (it != ended_.end() && it->second == oldest_epoch)
     ended_.erase(it);
@@ -148,12 +143,9 @@ void TimingTraceSource::replay(std::span<const TraceEvent> events) {
   ended_order_.clear();
   for (const TraceEvent &event : events) {
     send_locked(event);
-    // Advanced per event rather than once at the end, and through the same
-    // helper the live path uses. A send that threw part way then leaves the
-    // source describing exactly the prefix that reached the consumer, instead
-    // of a stream it claims never started; and the rule about what a BEGIN and
-    // an END mean is stated once, so a recording and a live run cannot come to
-    // disagree about it.
+    // Advanced per event rather than once at the end, so a send that threw
+    // part way leaves the source describing exactly the prefix that reached
+    // the consumer rather than a stream it claims never started.
     next_sequence_ = event.sequence + 1;
     apply_ended_locked(event.kind, event.identity.dispatch_id);
   }
