@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
   HIP_CHECK(hipStreamCreate(&sCopy));
   EventTimer timer;
 
-  std::printf("\n  %10s %8s %8s %11s %28s %28s %8s\n", "victim_ws", "passes", "copies",
+  std::printf("\n  %10s %8s %8s %11s %30s %30s %8s\n", "victim_ws", "passes", "copies",
               "alone_ms", "nt-store-128", "asm-plain-128 (control)", "res_lim");
   std::printf("  %s\n", std::string(112, '-').c_str());
 
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
     formatDelta(c1, sizeof(c1), nt, ntSig);
     formatDelta(c2, sizeof(c2), ctl, r.isSignificant(ctl));
 
-    std::printf("  %8llu M %8d %8d %11.3f %28s %28s %6.2fpp\n",
+    std::printf("  %8llu M %8d %8d %11.3f %30s %30s %6.2fpp\n",
                 static_cast<unsigned long long>(wsBytes / kMiB), passes, nCopies, aloneMs, c1, c2,
                 r.resolutionLimit());
     std::fflush(stdout);

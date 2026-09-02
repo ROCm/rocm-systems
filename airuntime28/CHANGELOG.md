@@ -42,7 +42,7 @@ noise, now against a stated 0.93 pp resolution limit rather than against nothing
 table that credited the variant with the gain.
 
 **Now:** reported only as the controlled comparison, `ntrt-store-128` against
-`asm-plain-128`: **+0.09% [-0.41, +0.20] (ns)**. The hint is worth nothing net of hand-writing
+`asm-plain-128`: **+0.09% [-0.41, +0.20] (noise)**. The hint is worth nothing net of hand-writing
 the store. The codegen effect itself, -1.26% [-1.44, -0.76], is the largest sub-1% effect in
 the isolated table and has nothing to do with temporal hints.
 
@@ -55,7 +55,7 @@ continuously re-touched 2 MiB working set is nearly untouchable — a streaming 
 displace ~94 MiB before it costs the victim anything. That was the wrong regime to measure in,
 and 2 MiB is the single working-set size at which the effect vanishes.
 
-**Now:** the working set is swept. +0.30% (ns) at 2 MiB, then significant at every size from 8
+**Now:** the working set is swept. +0.30% (noise) at 2 MiB, then significant at every size from 8
 to 128 MiB, peaking at **-4.77%** at 32 MiB and settling on a **-2.4% to -2.6%** shelf from
 48 MiB out past GL2 capacity.
 

@@ -5,6 +5,9 @@ faster on MI450?
 
 **Not by itself. It is worth having only for the concurrent case, and only if someone can
 name a workload that runs a cache-sensitive kernel alongside 100-300 MiB copies.**
+
+Take it default-off, gated to gfx12.
+
 ## Overview
 
 | | |
@@ -36,13 +39,19 @@ up — which matters, because width turns out to dominate everything else measur
 
 ## Results
 
-System: `heliosr-1b114-a07-4`, gfx1250 (MI450 A0 engineering sample, `REV_ID 0x00`), 256 CU,
-432 GiB HBM, SPX / NPS1. Negative is faster throughout.
+All numbers below come from one result set, `results/20260828_062133`, on
+`heliosr-1b114-a07-4`: gfx1250 (MI450 A0 engineering sample, `REV_ID 0x00`), 256 CU, 432 GiB
+HBM, SPX / NPS1, at a **1100 MHz clock ceiling**. Superseded numbers from earlier revisions are
+in [CHANGELOG.md](CHANGELOG.md), not here. Negative is faster throughout.
 
-Each run also measures one variant against an identical copy of itself, where the true answer
-is zero. Whatever gap it reports there is the rig's own jitter, and it is quoted next to every
-table as the **resolution limit**. `(ns)` marks a result smaller than that: no effect found,
-don't quote the number. [METHOD.md](METHOD.md) has the exact test.
+The machine has since been reconfigured to a 2400 MHz ceiling. A spot check there puts the
+1 GiB copy at 6193 GB/s against 4088 here, and the 64-bit width penalty at +62% against +77%,
+so re-measure before quoting any of these figures against current hardware. That set also
+predates the `(ns)` to `(noise)` rename, so its files still carry the old marker.
+
+`(noise)` marks a result too small to tell apart from the rig measuring the same kernel twice
+and getting two different answers; the size of that jitter is the **resolution limit** printed
+beside each table. [METHOD.md](METHOD.md) has the exact test.
 
 ### Isolated streaming copy, 1 GiB
 
@@ -51,12 +60,12 @@ respect, which is not always the production baseline.
 
 | question | effect [95% CI] |
 |---|---|
-| NT store hint, 128-bit (**the shipped change**) | -0.47% [-0.83, -0.11] (ns) |
-| also hinting the load, 128-bit | +0.58% [+0.16, +0.71] (ns) |
+| NT store hint, 128-bit (**the shipped change**) | -0.47% [-0.83, -0.11] (noise) |
+| also hinting the load, 128-bit | +0.58% [+0.16, +0.71] (noise) |
 | hand-written store carrying the *default* hint (codegen only) | **-1.26% [-1.71, -0.95]** |
-| `TH_STORE_NT_RT` hint, net of that codegen effect | -0.29% [-0.59, +0.05] (ns) |
-| NT store hint at 64-bit width | +0.23% [-0.04, +0.65] (ns) |
-| NT store hint at 32-bit width | -0.18% [-0.34, +1.30] (ns) |
+| `TH_STORE_NT_RT` hint, net of that codegen effect | -0.29% [-0.59, +0.05] (noise) |
+| NT store hint at 64-bit width | +0.23% [-0.04, +0.65] (noise) |
+| NT store hint at 32-bit width | -0.18% [-0.34, +1.30] (noise) |
 | 64-bit instead of 128-bit (width only) | **+77.26% [+76.75, +77.69]** |
 | 32-bit instead of 128-bit (width only) | **+220.10% [+218.77, +220.62]** |
 
@@ -72,13 +81,13 @@ worth nothing once compared against its own codegen control.
 
 | copy size | nt-store-128 vs plain-128 | resolution limit |
 |---|---|---|
-| 64 KiB - 4 MiB | between -1.3% and +0.8%, all (ns) | 6.8 - 15.0 pp |
-| 16 - 64 MiB | between -0.4% and +0.0%, all (ns) | 0.4 - 1.3 pp |
+| 64 KiB - 4 MiB | between -1.3% and +0.8%, all (noise) | 6.8 - 15.0 pp |
+| 16 - 64 MiB | between -0.4% and +0.0%, all (noise) | 0.4 - 1.3 pp |
 | **96 MiB** | **-4.43% [-6.17, -3.84]** | 3.7 pp |
 | **128 MiB** | **-3.07% [-4.18, -2.25]** | 2.4 pp |
 | **192 MiB** | **-3.20% [-4.32, -1.51]** | 3.1 pp |
-| 256 - 512 MiB | -1.5%, -1.4%, both (ns) | 2.5, 2.4 pp |
-| 1 GiB | -0.38% (ns) | 1.2 pp |
+| 256 - 512 MiB | -1.5%, -1.4%, both (noise) | 2.5, 2.4 pp |
+| 1 GiB | -0.38% (noise) | 1.2 pp |
 
 The band that pays is where the copy's footprint straddles GL2 capacity: at 96 MiB the copy
 touches 192 MiB against a ~96-128 MiB cache. Below 64 MiB there is no eviction pressure to
@@ -99,14 +108,14 @@ cover the victim's whole ~5 ms run, and the victim's working set is swept.
 
 | victim working set | victim time, nt-store-128 vs plain-128 | codegen control |
 |---|---|---|
-| 2 MiB | +0.14% (ns) | (ns) |
-| 8 MiB | **-2.56%** | (ns) |
-| 16 MiB | **-2.70%** | (ns) |
-| **32 MiB** | **-4.73%** | (ns) |
-| 48 MiB | **-2.88%** | (ns) |
-| 64 MiB | **-2.73%** | (ns) |
-| 96 MiB | **-2.40%** | (ns) |
-| 128 MiB | **-2.67%** | (ns) |
+| 2 MiB | +0.14% (noise) | (noise) |
+| 8 MiB | **-2.56%** | (noise) |
+| 16 MiB | **-2.70%** | (noise) |
+| **32 MiB** | **-4.73%** | (noise) |
+| 48 MiB | **-2.88%** | (noise) |
+| 64 MiB | **-2.73%** | (noise) |
+| 96 MiB | **-2.40%** | (noise) |
+| 128 MiB | **-2.67%** | (noise) |
 
 The control arm — the same copy with a hand-written store carrying the default hint — sits
 within noise at every size, so what is being measured is the temporal hint and not codegen.

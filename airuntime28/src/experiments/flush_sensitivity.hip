@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
               "%.1f ns/hop\n\n",
               warmRef);
 
-  std::printf("  %10s %8s %14s %10s %14s %28s\n", "flush", "xGL2", "cold_ns/hop", "vs warm",
+  std::printf("  %10s %8s %14s %10s %14s %30s\n", "flush", "xGL2", "cold_ns/hop", "vs warm",
               "plain-128_ms", "nt-store-128 [95% CI]");
   std::printf("  %s\n", std::string(92, '-').c_str());
 
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
     char cell[64];
     formatDelta(cell, sizeof(cell), nt, r.isSignificant(nt));
 
-    std::printf("  %8llu M %7.1fx %14.1f %9.2fx %14.4f %28s\n",
+    std::printf("  %8llu M %7.1fx %14.1f %9.2fx %14.4f %30s\n",
                 static_cast<unsigned long long>(flushBytes / kMiB),
                 static_cast<double>(flushBytes) / static_cast<double>(kGL2Bytes), cold,
                 cold / warmRef, r.medianMs(r.firstSlotOf(0)), cell);

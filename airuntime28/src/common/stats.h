@@ -82,12 +82,16 @@ inline bool separable(const Delta& effect, const std::vector<Delta>& noiseFloors
   return std::abs(effect.median) > widest;
 }
 
-// "+1.23% [+1.10,+1.40]" or the same with a trailing " (ns)", for "not separable":
-// the effect did not clear both bars in separable() above, so it is not evidence
-// of anything and its digits should not be quoted.
+// "+1.23% [+1.10,+1.40]", or the same with a trailing " (noise)" when the effect
+// did not clear both bars in separable() above.
+//
+// The marker spells the conclusion rather than abbreviating it. It used to read
+// "(ns)", which readers consistently could not decode without hunting for a
+// glossary - and a table cell that needs a glossary is a table cell that gets
+// misread.
 inline void formatDelta(char* out, size_t n, const Delta& d, bool isSignificant) {
   std::snprintf(out, n, "%+6.2f%% [%+.2f,%+.2f]%s", d.median, d.lo, d.hi,
-                isSignificant ? "" : " (ns)");
+                isSignificant ? "" : " (noise)");
 }
 
 }  // namespace bench

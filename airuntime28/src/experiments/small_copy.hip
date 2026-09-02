@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
   }
   std::printf("\n  a dispatch that copies nothing takes %.4f ms on this stream\n\n", emptyMs);
 
-  std::printf("  %10s %10s %8s %28s %28s %8s\n", "size", "plain_ms", "vs_empty",
+  std::printf("  %10s %10s %8s %30s %30s %8s\n", "size", "plain_ms", "vs_empty",
               "runtime-nt (hint only)", "template-nt (as shipped)", "res_lim");
   std::printf("  %s\n", std::string(100, '-').c_str());
 
@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     else
       std::snprintf(label, sizeof(label), "%lluKiB", static_cast<unsigned long long>(size / kKiB));
 
-    std::printf("  %10s %10.4f %7.1fx %28s %28s %6.2fpp\n", label, baseMs, baseMs / emptyMs, c1, c2,
+    std::printf("  %10s %10.4f %7.1fx %30s %30s %6.2fpp\n", label, baseMs, baseMs / emptyMs, c1, c2,
                 r.resolutionLimit());
     std::fflush(stdout);
 

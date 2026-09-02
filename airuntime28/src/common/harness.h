@@ -192,14 +192,14 @@ inline void printArmTable(const SlotResults& r, const std::vector<std::string>& 
     } else {
       formatDelta(cell, sizeof(cell), d, r.isSignificant(d));
     }
-    std::printf("  %-20s %11.4f   %-28s\n", armNames[a].c_str(), r.medianMs(slot), cell);
+    std::printf("  %-20s %11.4f   %-30s\n", armNames[a].c_str(), r.medianMs(slot), cell);
   }
   // Not written as +/- : this is the width of the interval on a same-arm-twice
   // comparison, and an effect must exceed it outright, not merely land outside a
   // band half that size.
   std::printf("  resolution limit: %.2f pp, the widest gap between two slots running the same\n",
               r.resolutionLimit());
-  std::printf("  arm. '(ns)' = not separable from that, so not evidence of an effect.\n");
+  std::printf("  arm. Anything smaller than that is jitter, and is marked '(noise)'.\n");
 }
 
 // Machine-readable rows so report tables can be regenerated instead of

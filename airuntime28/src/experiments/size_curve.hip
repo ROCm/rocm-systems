@@ -75,11 +75,11 @@ int main(int argc, char** argv) {
   EventTimer timer;
 
   std::printf("\n  Each cell is the paired median difference against plain-128 at that size,\n");
-  std::printf("  with a 95%% bootstrap interval. '(ns)' = not separable: the effect does not\n");
-  std::printf("  exceed res_lim, this rig's own error measured from duplicate slots in the\n");
-  std::printf("  same run, so no effect was found at that size.\n\n");
+  std::printf("  with a 95%% bootstrap interval. '(noise)' means the effect is smaller than\n");
+  std::printf("  res_lim, this rig's own jitter measured from duplicate slots in the same\n");
+  std::printf("  run, so no effect was found at that size.\n\n");
   std::printf("  %10s %11s %9s", "size", "plain_ms", "GB/s");
-  for (int a = 1; a < nArms; ++a) std::printf(" %26s", arms[a].c_str());
+  for (int a = 1; a < nArms; ++a) std::printf(" %30s", arms[a].c_str());
   std::printf("  %8s\n", "res_lim");
 
   double bestGain = 0.0;
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
       const bool sig = r.isSignificant(d);
       char cell[64];
       formatDelta(cell, sizeof(cell), d, sig);
-      std::printf(" %26s", cell);
+      std::printf(" %30s", cell);
       char extra[64];
       std::snprintf(extra, sizeof(extra), "size=%s sig=%d", label, static_cast<int>(sig));
       emitRow("size_curve", arms[a].c_str(), "delta_pct", d.median, "pct", extra);

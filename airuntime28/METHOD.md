@@ -60,10 +60,10 @@ same-arm-twice gap in that run. The second test is what distinguishes a real 1% 
 confidently-measured artefact — a tight interval says a measurement is repeatable, not that it
 is measuring the intended thing.
 
-Results failing either test are printed with **`(ns)`, for "not separable"**: not separable
-from the rig's own error, which is a stronger claim than "not statistically significant". They
-must not be quoted as effects. Note that the resolution limit is the *width* of the interval on
-a same-arm-twice comparison, so a limit of 0.74 pp means an effect must exceed 0.74 pp in
+Results failing either test are printed with **`(noise)`** and must not be quoted as effects.
+The marker spells the conclusion out; it used to read `(ns)`, which readers could not decode
+without a glossary. Note that the resolution limit is the *width* of the interval on a
+same-arm-twice comparison, so a limit of 0.74 pp means an effect must exceed 0.74 pp in
 magnitude — it is not a plus-or-minus band.
 
 Intervals come from a bootstrap on the median of the paired differences: 3000 resamples, fixed

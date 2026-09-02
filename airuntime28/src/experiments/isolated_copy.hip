@@ -113,19 +113,19 @@ int main(int argc, char** argv) {
   };
 
   std::printf("\n  Controlled comparisons: each against the arm differing in one respect only\n");
-  std::printf("  %-48s %-28s\n", "question", "effect [95% CI]");
+  std::printf("  %-48s %-30s\n", "question", "effect [95% CI]");
   std::printf("  %s\n", std::string(78, '-').c_str());
   for (const Comparison& c : comparisons) {
     const Delta d = r.effect(c.arm, c.against);
     char cell[80];
     formatDelta(cell, sizeof(cell), d, r.isSignificant(d));
-    std::printf("  %-48s %-28s\n", c.question, cell);
+    std::printf("  %-48s %-30s\n", c.question, cell);
     char extra[96];
     std::snprintf(extra, sizeof(extra), "vs=%s sig=%d", kVariants[c.against].name,
                   static_cast<int>(r.isSignificant(d)));
     emitRow("isolated_copy_controlled", kVariants[c.arm].name, "delta_pct", d.median, "pct", extra);
   }
-  std::printf("  negative is faster; '(ns)' = not separable from this run's %.2f pp\n"
+  std::printf("  negative is faster; '(noise)' means smaller than this run's %.2f pp\n"
               "  resolution limit, so no effect was found\n",
               r.resolutionLimit());
 

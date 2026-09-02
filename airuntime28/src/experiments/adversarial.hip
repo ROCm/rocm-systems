@@ -106,7 +106,7 @@ void runCase(const char* name, const char* mechanism, u64 footprint, int plainVa
 
   char cell[64];
   formatDelta(cell, sizeof(cell), eff, sig);
-  std::printf("  %-14s %-44s %9.3f %-28s %7.2fpp  %s\n", name, mechanism,
+  std::printf("  %-14s %-44s %9.3f %-30s %7.2fpp  %s\n", name, mechanism,
               r.medianMs(r.firstSlotOf(0)), cell, r.resolutionLimit(), verdict);
   std::fflush(stdout);
 
@@ -123,7 +123,7 @@ void runSuite(u64 fp) {
               static_cast<unsigned long long>(fp / kMiB),
               static_cast<unsigned long long>(2 * fp / kMiB),
               2.0 * static_cast<double>(fp) / static_cast<double>(kGL2Bytes));
-  std::printf("  %-14s %-44s %9s %-28s %9s  %s\n", "case", "mechanism that could hurt",
+  std::printf("  %-14s %-44s %9s %-30s %9s  %s\n", "case", "mechanism that could hurt",
               "plain_ms", "nt vs plain [95% CI]", "res_limit", "verdict");
   std::printf("  %s\n", std::string(130, '-').c_str());
 
