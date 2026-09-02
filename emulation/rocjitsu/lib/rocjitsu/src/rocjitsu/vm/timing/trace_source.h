@@ -17,7 +17,8 @@
 #include <mutex>
 #include <span>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
+#include <utility>
 
 namespace rocjitsu::timing {
 
@@ -47,6 +48,13 @@ namespace rocjitsu::timing {
 /// are serialised against one another. What the lock cannot do is serialise
 /// them against the timing engine being *advanced*: the owner must not run the
 /// timing engine while functional execution is still submitting into it.
+///
+/// The link on @ref output_port must be a clocked one. A link in
+/// simdojo::ExecMode::FUNCTIONAL runs the destination's handler synchronously
+/// inside the send, which here means running a modelled consumer inside this
+/// class's lock and inside the plugin group's callback lock -- so a consumer
+/// that read a counter back off this source, or submitted anything itself,
+/// would deadlock on a mutex it never knew it held.
 class TimingTraceSource final : public simdojo::Component {
 public:
   explicit TimingTraceSource(std::string name = "timing_trace_source");
@@ -94,7 +102,13 @@ public:
 
   /// @brief Events sent.
   uint64_t accepted() const;
-  /// @brief Events refused because their dispatch had already ended.
+  /// @brief Events refused, for either reason submit() refuses one: the
+  ///        dispatch had already ended, or the timing plane could not take it.
+  ///
+  /// @details One counter, two very different facts. A handful means late
+  /// events on closed dispatches; a count equal to the whole run means nothing
+  /// was ever wired to @ref output_port and the model saw none of it. A
+  /// consumer of this number has to know which it is looking at.
   uint64_t rejected() const;
   /// @brief Sequence number the next accepted event will carry.
   uint64_t next_sequence() const;
@@ -110,6 +124,14 @@ private:
   /// @brief Note that @p dispatch_id has ended. Caller holds the lock.
   void mark_ended_locked(uint32_t dispatch_id);
 
+  /// @brief Apply @p event's effect on the ended-dispatch window, having sent
+  ///        it. Caller holds the lock.
+  ///
+  /// @details One statement of the rule -- a BEGIN un-ends an id, an END ends
+  /// it -- so the live path and replay cannot drift apart on what a recorded
+  /// stream means.
+  void apply_ended_locked(TraceEventKind kind, uint32_t dispatch_id);
+
   /// @brief How many ended dispatches are remembered.
   ///
   /// @details A window, not a full history. Dispatch ids climb monotonically
@@ -117,7 +139,10 @@ private:
   /// every one that ended would grow for the life of the run. A late event
   /// arrives just after its dispatch ended, not a thousand dispatches later,
   /// so a window of this size refuses everything the guard exists for and
-  /// forgets only what cannot happen.
+  /// forgets only what cannot happen. The bound is on END events seen, not on
+  /// distinct ids: an id that ends, is reused, and ends again occupies two
+  /// slots, because only one of them stands for the finalisation still in
+  /// force.
   static constexpr std::size_t kEndedWindow = 1024;
 
   simdojo::Port *output_ = nullptr;
@@ -125,12 +150,23 @@ private:
   /// than one partition. It buys mutual exclusion, not reproducibility; see
   /// the class comment.
   mutable std::mutex mutex_;
-  /// @brief Dispatches whose END has been seen, most recent kEndedWindow of
-  /// them. An id announced again is removed, because that is a new dispatch
-  /// reusing the id rather than a continuation of the one that ended.
-  std::unordered_set<uint32_t> ended_;
-  /// @brief The order ids entered @ref ended_, so the oldest can be dropped.
-  std::deque<uint32_t> ended_order_;
+  /// @brief Dispatches whose END has been seen, each mapped to the epoch of
+  /// the END that put it here. An id announced again is removed, because that
+  /// is a new dispatch reusing the id rather than a continuation of the one
+  /// that ended.
+  ///
+  /// @details The epoch is what makes the window safe against id reuse. A
+  /// re-announcement drops the id from here but cannot reach into
+  /// @ref ended_order_, so that deque keeps entries for finalisations that are
+  /// no longer in force; evicting one of those must not take a *later*
+  /// finalisation of the same id with it. Comparing epochs on eviction is what
+  /// tells the two apart.
+  std::unordered_map<uint32_t, uint64_t> ended_;
+  /// @brief The order ends entered @ref ended_, each with its epoch, so the
+  /// oldest can be dropped and a spent entry told from a live one.
+  std::deque<std::pair<uint32_t, uint64_t>> ended_order_;
+  /// @brief Ends seen, ever. Names which END a window entry stands for.
+  uint64_t ended_epoch_ = 0;
   uint64_t next_sequence_ = 1;
   uint64_t accepted_ = 0;
   uint64_t rejected_ = 0;

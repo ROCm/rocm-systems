@@ -72,7 +72,15 @@ struct TraceIdentity {
   uint32_t queue_id = 0;   ///< Queue the dispatch was submitted to.
   uint32_t process_id = 0; ///< VMID of the issuing process.
   uint32_t workgroup_id = 0;
-  uint32_t wavefront_id = 0; ///< Wavefront index within its workgroup.
+  /// @brief Wavefront slot within the compute unit, as functional execution
+  ///        binds it.
+  ///
+  /// @details A slot, not a position in the workgroup: it is permanent for the
+  /// life of the wavefront object and is handed to whichever workgroup next
+  /// occupies it, so two waves of *different* workgroups on one compute unit
+  /// share it. (compute_unit_id, wavefront_id) names a wavefront for as long as
+  /// that wavefront is resident, and no longer.
+  uint32_t wavefront_id = 0;
 
   bool operator==(const TraceIdentity &) const = default;
 };
@@ -90,7 +98,7 @@ struct MemoryFacts {
   amdgpu::AtomicOp atomic_op = amdgpu::AtomicOp::NONE;
   amdgpu::Mtype mtype = amdgpu::Mtype::RW;
   amdgpu::WaitCounterType wait_counter = amdgpu::WaitCounterType::VMCNT;
-  uint32_t wavefront_size = 0;
+  uint32_t wavefront_size = 1; ///< Lanes in the issuing wavefront; 1 for scalar.
   uint32_t element_size_bytes = 0;
   uint32_t elements_per_lane = 0;
   uint64_t active_lane_mask = 0;
@@ -105,13 +113,22 @@ struct MemoryFacts {
   std::vector<uint64_t> element_lane_masks;
   std::vector<uint64_t> secondary_addresses;
 
+  /// @brief Bytes each participating lane moves, ignoring scratch swizzling.
+  uint64_t bytes_per_lane() const {
+    return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;
+  }
+
   /// @brief Every lane the wavefront has, whether it participated or not.
+  ///
+  /// @details Reads off @ref wavefront_size, so it is only as good as that
+  /// field: a route the memory system rejected leaves every field here at its
+  /// default, and the answer is then "one lane" rather than "unknown".
   uint64_t wavefront_lane_mask() const {
     return wavefront_size >= 64 ? ~uint64_t{0} : (uint64_t{1} << wavefront_size) - 1;
   }
   /// @brief Lanes EXEC masked off. Derived rather than stored, so it cannot
-  ///        contradict the masks it is derived from -- including in a
-  ///        recording that was edited or partially deserialised.
+  ///        contradict the masks it is derived from; see
+  ///        @ref wavefront_lane_mask for what it can still be quiet about.
   uint64_t inactive_lane_mask() const { return wavefront_lane_mask() & ~active_lane_mask; }
   /// @brief Lanes that issued but whose address the memory system will not use.
   uint64_t unknown_lane_mask() const { return active_lane_mask & ~valid_lane_mask; }

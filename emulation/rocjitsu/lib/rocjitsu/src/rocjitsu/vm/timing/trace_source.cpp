@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 namespace rocjitsu::timing {
@@ -58,38 +59,57 @@ bool TimingTraceSource::submit(TraceEvent event) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // A dispatch announcing itself again is a new dispatch reusing an id, not a
-  // continuation of the one that ended.
-  if (event.kind == TraceEventKind::DISPATCH_BEGIN)
-    ended_.erase(event.identity.dispatch_id);
-  else if (ended_.contains(event.identity.dispatch_id)) {
+  // continuation of the one that ended, so a BEGIN is never refused for it.
+  const TraceEventKind kind = event.kind;
+  const uint32_t dispatch_id = event.identity.dispatch_id;
+  if (kind != TraceEventKind::DISPATCH_BEGIN && ended_.contains(dispatch_id)) {
     ++rejected_;
     return false;
   }
 
-  // Checked before the event is sequenced, so a refusal leaves no gap.
   if (!can_send()) {
     ++rejected_;
     return false;
   }
 
-  if (event.kind == TraceEventKind::DISPATCH_END)
-    mark_ended_locked(event.identity.dispatch_id);
-
-  event.sequence = next_sequence_++;
+  event.sequence = next_sequence_;
   send_locked(std::move(event));
+  // Committed only once the message is actually on the wire. Everything above
+  // is a decision; nothing above writes. A send that threw therefore leaves no
+  // gap in the stream and no dispatch opened or closed by an event that never
+  // went out -- which is what lets submit() be called from a path with nothing
+  // to roll back with.
+  ++next_sequence_;
+  apply_ended_locked(kind, dispatch_id);
   return true;
 }
 
+void TimingTraceSource::apply_ended_locked(TraceEventKind kind, uint32_t dispatch_id) {
+  if (kind == TraceEventKind::DISPATCH_BEGIN)
+    ended_.erase(dispatch_id);
+  else if (kind == TraceEventKind::DISPATCH_END)
+    mark_ended_locked(dispatch_id);
+}
+
 void TimingTraceSource::mark_ended_locked(uint32_t dispatch_id) {
-  if (!ended_.insert(dispatch_id).second)
+  const uint64_t epoch = ++ended_epoch_;
+  // An id already in the window keeps the entry it has: a second END without an
+  // intervening BEGIN says nothing new.
+  if (!ended_.emplace(dispatch_id, epoch).second)
     return;
-  ended_order_.push_back(dispatch_id);
+  ended_order_.emplace_back(dispatch_id, epoch);
   if (ended_order_.size() <= kEndedWindow)
     return;
-  // The id may already have left the set, dropped by a re-announcement; the
-  // erase is then a no-op and this entry was only ever a placeholder.
-  ended_.erase(ended_order_.front());
+
+  const auto [oldest_id, oldest_epoch] = ended_order_.front();
   ended_order_.pop_front();
+  // Only if this entry is the finalisation still in force. A re-announcement
+  // drops an id from ended_ without reaching the deque, so the deque can hold a
+  // spent entry for an id that has since ended again; evicting the spent one
+  // must not take the live guard with it and reopen a dispatch that has ended.
+  const auto it = ended_.find(oldest_id);
+  if (it != ended_.end() && it->second == oldest_epoch)
+    ended_.erase(it);
 }
 
 void TimingTraceSource::replay(std::span<const TraceEvent> events) {
@@ -124,18 +144,19 @@ void TimingTraceSource::replay(std::span<const TraceEvent> events) {
       ended.insert(event.identity.dispatch_id);
   }
 
-  for (const TraceEvent &event : events)
-    send_locked(event);
-
   ended_.clear();
   ended_order_.clear();
   for (const TraceEvent &event : events) {
-    if (event.kind == TraceEventKind::DISPATCH_END)
-      mark_ended_locked(event.identity.dispatch_id);
-    else if (event.kind == TraceEventKind::DISPATCH_BEGIN)
-      ended_.erase(event.identity.dispatch_id);
+    send_locked(event);
+    // Advanced per event rather than once at the end, and through the same
+    // helper the live path uses. A send that threw part way then leaves the
+    // source describing exactly the prefix that reached the consumer, instead
+    // of a stream it claims never started; and the rule about what a BEGIN and
+    // an END mean is stated once, so a recording and a live run cannot come to
+    // disagree about it.
+    next_sequence_ = event.sequence + 1;
+    apply_ended_locked(event.kind, event.identity.dispatch_id);
   }
-  next_sequence_ = expected;
 }
 
 void TimingTraceSource::reset() {

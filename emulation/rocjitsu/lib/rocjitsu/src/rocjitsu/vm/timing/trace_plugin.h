@@ -12,7 +12,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <unordered_map>
+#include <utility>
 
 namespace rocjitsu::timing {
 
@@ -84,6 +86,12 @@ private:
   ///        Erased when the wavefront halts, so this follows occupancy rather
   ///        than the length of the run.
   std::unordered_map<uint64_t, uint64_t> ordinals_;
+  /// @brief A dispatch shape and when it arrived.
+  struct AnnouncedShape {
+    uint64_t arrival = 0;
+    KernelDispatchInfo info;
+  };
+
   /// @brief Dispatch shapes seen at packet-processed time, replayed into the
   ///        stream when the dispatch actually begins. The packet is parsed
   ///        ahead of execution, so the shape arrives before it is wanted.
@@ -91,7 +99,19 @@ private:
   /// @details Bounded: a packet whose dispatch never begins -- the run ended,
   /// or the packet was cancelled -- would otherwise leave its shape, and the
   /// two strings in it, here for good.
-  std::unordered_map<uint32_t, KernelDispatchInfo> announced_;
+  std::unordered_map<uint32_t, AnnouncedShape> announced_;
+  /// @brief The order shapes arrived, so the oldest can be dropped.
+  ///
+  /// @details By arrival rather than by id. Dispatch ids do not simply climb:
+  /// CommandProcessor::allocate_dispatch_id restarts at its XCD's base when the
+  /// counter wraps, so the smallest id in the map can be the newest shape in
+  /// it -- and evicting by id would then drop the shape of the dispatch about
+  /// to begin, reporting a kernel whose grid was in fact observed as one whose
+  /// packet was never seen. The arrival stamp also tells a spent entry, whose
+  /// shape a dispatch-begin already collected, from a live one.
+  std::deque<std::pair<uint32_t, uint64_t>> announced_order_;
+  /// @brief Shapes seen, ever. Names which arrival a window entry stands for.
+  uint64_t announced_arrival_ = 0;
   /// @brief Most announced-but-unstarted dispatches kept. Deep enough to cover
   /// however far ahead the command processor parses, which is a queue's worth,
   /// not a run's.

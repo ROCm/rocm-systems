@@ -36,7 +36,6 @@ target_link_libraries(
         rocjitsu_vm
         rocjitsu_vm_amdgpu
         rocjitsu_vm_timing
-        rocjitsu_vm_timing
         # Plugin loader: rj_vm_load_plugins() dlopen()s plugin modules in
         # daemon mode.
         rocjitsu_plugin_loader

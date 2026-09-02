@@ -6,7 +6,6 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include <algorithm>
 
 #include <memory>
 #include <utility>
@@ -46,16 +45,20 @@ void TimingTracePlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo
   // a dispatch's shape arrives before the dispatch is anywhere near starting;
   // emitting it here would put it in the stream ahead of the previous
   // dispatch's own end.
-  announced_[info.dispatch_id] = info;
-  if (announced_.size() > kMaxAnnounced) {
-    // A shape nothing ever came to collect. Ids climb, so the smallest is the
-    // oldest, and this only runs once the backlog is deeper than the command
-    // processor ever parses ahead.
-    announced_.erase(
-        std::min_element(announced_.begin(), announced_.end(), [](const auto &a, const auto &b) {
-          return a.first < b.first;
-        })->first);
-  }
+  const uint64_t arrival = ++announced_arrival_;
+  announced_[info.dispatch_id] = AnnouncedShape{arrival, info};
+  announced_order_.emplace_back(info.dispatch_id, arrival);
+  if (announced_order_.size() <= kMaxAnnounced)
+    return;
+
+  // A shape nothing ever came to collect, dropped oldest-arrival first. Only if
+  // this entry is still the one the map holds: a dispatch that began collected
+  // its shape already, and an id announced twice has a newer one.
+  const auto [oldest_id, oldest_arrival] = announced_order_.front();
+  announced_order_.pop_front();
+  const auto it = announced_.find(oldest_id);
+  if (it != announced_.end() && it->second.arrival == oldest_arrival)
+    announced_.erase(it);
 }
 
 void TimingTracePlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
@@ -63,7 +66,7 @@ void TimingTracePlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   event.kind = TraceEventKind::DISPATCH_BEGIN;
   event.identity.dispatch_id = dispatch_id;
   if (auto it = announced_.find(dispatch_id); it != announced_.end()) {
-    event.dispatch = std::make_shared<const KernelDispatchInfo>(std::move(it->second));
+    event.dispatch = std::make_shared<const KernelDispatchInfo>(std::move(it->second.info));
     announced_.erase(it);
   } else {
     // A dispatch that started without its packet being observed. The model can
@@ -89,6 +92,13 @@ void TimingTracePlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   event.identity = identity_of(wf);
   event.pc = wf.pc;
   event.active_lane_mask = wf.exec();
+  // The slot starts this wavefront at one. Cleared on placement rather than
+  // only on halt because a wavefront can leave a slot without halting: the
+  // clustered-dispatch rollback frees its committed peers through
+  // ComputeUnitCore::abort_workgroup(), which fires no completion hook. The
+  // erase on halt is then a bound on how much this map holds, not the thing
+  // that makes an ordinal mean what it says.
+  ordinals_.erase(ordinal_key(event.identity.compute_unit_id, event.identity.wavefront_id));
   submit(std::move(event));
 }
 
@@ -97,8 +107,7 @@ void TimingTracePlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   event.kind = TraceEventKind::WAVE_END;
   event.identity = identity_of(wf);
   event.pc = wf.pc;
-  const uint64_t slot =
-      (static_cast<uint64_t>(event.identity.compute_unit_id) << 32) | event.identity.wavefront_id;
+  const uint64_t slot = ordinal_key(event.identity.compute_unit_id, event.identity.wavefront_id);
   if (auto it = ordinals_.find(slot); it != ordinals_.end()) {
     event.instruction_ordinal = it->second;
     // The slot is about to be handed to another wavefront, whose ordinals

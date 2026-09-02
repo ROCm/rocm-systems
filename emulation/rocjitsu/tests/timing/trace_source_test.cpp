@@ -96,6 +96,10 @@ public:
   TraceSink *sink = nullptr;
 };
 
+/// @brief The source's ended-dispatch window, mirrored for the tests that have
+///        to roll past it. Kept in step with TimingTraceSource::kEndedWindow.
+constexpr uint32_t kEndedWindowForTest = 1024;
+
 /// @brief One event of @p kind for @p dispatch.
 TraceEvent make_event(TraceEventKind kind, uint32_t dispatch, uint32_t wavefront = 0) {
   TraceEvent event;
@@ -361,15 +365,21 @@ public:
     timing.run_until_idle();
   }
 
+  // Declaration order is teardown order reversed, and it is load-bearing here.
+  // The SoC holds its own reference to the plugin group, so the plugin -- which
+  // holds a reference to the trace source -- outlives this rig's `group` member
+  // and dies with `functional`. `functional` therefore has to be destroyed
+  // before `timing`, which owns the source; and `queue` before `functional`,
+  // whose command processor it points at.
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
-  std::unique_ptr<test::AqlQueue> queue;
-  std::unique_ptr<simdojo::SimulationEngine> functional;
   simdojo::SimulationEngine timing{{}};
   TimingTraceSource *source = nullptr;
   TraceSink *sink = nullptr;
   std::shared_ptr<ExecutionPluginGroup> group;
   TimingTracePlugin *plugin = nullptr;
+  std::unique_ptr<simdojo::SimulationEngine> functional;
+  std::unique_ptr<test::AqlQueue> queue;
 };
 
 /// @brief Events of one kind, in order.
@@ -568,6 +578,47 @@ TEST(TimingTraceSourceTest, TheEndedDispatchSetIsBounded) {
     ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_END, id)));
   EXPECT_TRUE(rig.source->submit(make_event(TraceEventKind::INSTRUCTION, /*dispatch=*/0)));
   EXPECT_FALSE(rig.source->submit(make_event(TraceEventKind::INSTRUCTION, /*dispatch=*/5 + 2047)));
+}
+
+TEST(TimingTraceSourceTest, AReusedDispatchIdKeepsItsLatestFinalisation) {
+  // The window is a deque of ends and a set of live finalisations, and a
+  // re-announcement can only reach the set. Evicting the deque entry a
+  // re-announcement orphaned must not take the *later* end of the same id with
+  // it, or a dispatch that has ended starts accepting events again.
+  TraceRig rig;
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_BEGIN, 5)));
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_END, 5)));
+  // Reused, and ended again. Two entries in the window now stand for one id,
+  // and only the second one is in force.
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_BEGIN, 5)));
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_END, 5)));
+
+  // Roll the window just far enough to evict the orphaned entry and no
+  // further: the two ends above plus this many is one past the window, which
+  // drops exactly the oldest.
+  for (uint32_t id = 100; id < 100 + kEndedWindowForTest - 1; ++id)
+    ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_END, id)));
+
+  EXPECT_FALSE(rig.source->submit(make_event(TraceEventKind::INSTRUCTION, 5)))
+      << "evicting a spent window entry reopened a dispatch that had ended";
+}
+
+TEST(TimingTraceSourceTest, ARefusedEventChangesNothing) {
+  // A refusal has to leave the source exactly as it found it. A DISPATCH_BEGIN
+  // refused because the timing plane was down must not un-end the dispatch that
+  // previously held its id: the events of that first dispatch would then be
+  // accepted into the stream as though they belonged to the second.
+  TraceRig rig;
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_BEGIN, 9)));
+  ASSERT_TRUE(rig.source->submit(make_event(TraceEventKind::DISPATCH_END, 9)));
+  rig.engine.run_until_idle();
+
+  rig.engine.shutdown();
+  EXPECT_FALSE(rig.source->submit(make_event(TraceEventKind::DISPATCH_BEGIN, 9)));
+  rig.engine.create();
+
+  EXPECT_FALSE(rig.source->submit(make_event(TraceEventKind::INSTRUCTION, 9)))
+      << "a refused dispatch-begin resurrected a dispatch that had ended";
 }
 
 TEST(TimingTracePluginTest, InstructionOrdinalsRestartInAReusedSlot) {
