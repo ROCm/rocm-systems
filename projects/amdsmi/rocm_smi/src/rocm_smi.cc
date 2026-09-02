@@ -3545,6 +3545,12 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
   // get_dev_mon_value() throws out of MakeMonitorPath() instead of reporting a
   // bad argument.
   if (mon_type == amd::smi::kMonInvalid) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind << " | Metric: " << metric
+       << " | Cause: unrecognized voltage metric"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
 
