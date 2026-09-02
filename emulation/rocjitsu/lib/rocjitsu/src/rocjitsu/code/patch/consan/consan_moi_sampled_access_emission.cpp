@@ -1078,15 +1078,15 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    uint16_t scratch_vgpr, rj_code_arch_t arch, uint32_t first_record_index,
+    const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
+    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, uint16_t scratch_vgpr,
+    rj_code_arch_t arch, uint32_t first_record_index,
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
     uint32_t pending_acquire_owner_bank_count, bool spill_overlaps_guest_operands,
     bool spill_backed_operand_recovery, const VgprSpillSequence *spill,
     std::optional<uint32_t> private_epoch_offset,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets,
     const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
     bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset, uint32_t *guest_instruction_word_count) {
@@ -1102,16 +1102,6 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
   }
   const MoiAccessResourceFacts access_resource_facts =
       resolve_moi_access_resource_facts(point, candidate, arch);
-  if (!candidate.kernel_descriptor_file_offset) {
-    errors.emplace_back("ConSan MOI sampled probe requires exact workgroup-id sources");
-    return std::nullopt;
-  }
-  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-      bytes, *candidate.kernel_descriptor_file_offset, request.moi_engine, point, arch, errors,
-      candidate.container.uses_cluster_workgroup_id, private_workgroup_offsets);
-  if (!workgroup_sources)
-    return std::nullopt;
-
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank =
       target->has_selectable_vgpr_bank && candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
@@ -1249,7 +1239,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     uint32_t range_guest_instruction_word_count = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, access_ranges[range_index], request, bound_resources, point,
-        *workgroup_sources, owner_epoch_vgprs, scratch_vgpr, arch,
+        workgroup_sources, owner_epoch_vgprs, scratch_vgpr, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
         window_bank_count, spill_overlaps_guest_operands,
         range_index == 0u && !spill_backed_operand_recovery, pending_acquire_owner_bank_count,

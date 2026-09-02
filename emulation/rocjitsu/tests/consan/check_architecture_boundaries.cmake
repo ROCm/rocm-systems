@@ -1811,6 +1811,35 @@ if(NOT _moi_record_replay_gate_planner_count EQUAL 1 OR
         "ConSan Record/Replay access lowering must retain one selected runtime gate plan"
     )
 endif()
+file(READ "${_consan_dir}/consan_moi_sampled_access.inc" _moi_sampled_access_owner)
+foreach(_selected_sampled_helper IN ITEMS
+    "plan_moi_runtime_workgroup_gate[(]"
+    "moi_persistent_or_descriptor_workgroup_sources[(]"
+)
+    string(
+        REGEX MATCHALL
+        "${_selected_sampled_helper}"
+        _moi_sampled_selected_helper_calls
+        "${_moi_sampled_access_owner}"
+    )
+    list(LENGTH _moi_sampled_selected_helper_calls _moi_sampled_selected_helper_call_count)
+    if(NOT _moi_sampled_selected_helper_call_count EQUAL 1)
+        message(
+            FATAL_ERROR
+            "ConSan Sampled access lowering must select ${_selected_sampled_helper} once"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_access.inc"
+    "planned(_patch)?[.]dense_runtime_fast_gate"
+    "ConSan Sampled access lowering must derive fast-gate placement from its retained plan"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
+    "moi_persistent_or_descriptor_workgroup_sources"
+    "Sampled access emission must consume its retained workgroup-source product"
+)
 foreach(_file IN LISTS _consan_sources)
     file(STRINGS "${_file}" _generated_includes REGEX "isa/arch/amdgpu/generated/")
     if(NOT _generated_includes)

@@ -76,8 +76,8 @@ void try_apply_direct_sampled_watchpoint_patch(
     std::optional<uint32_t> prior_first_record_index;
     uint32_t prior_access_range_count = 0;
     uint64_t workgroup_descriptor_file_offset = 0;
-    bool runtime_fast_gate = false;
-    bool dense_runtime_fast_gate = false;
+    ConSanMoiWorkgroupSources workgroup_sources;
+    std::optional<MoiRuntimeWorkgroupGatePlan> runtime_fast_gate;
     bool runtime_workgroup_gate_in_body = false;
     std::optional<uint16_t> transient_exec_save_sgpr;
     bool spill_backed_operand_recovery = false;
@@ -379,13 +379,24 @@ void try_apply_direct_sampled_watchpoint_patch(
           !private_layout || private_layout->owner_offset.has_value());
     const bool has_private_workgroup_sources =
         private_layout && private_layout->record_replay_workgroup_offsets.complete();
-    const bool runtime_fast_gate = !candidate_point.has_compact_moi_scalar_spill() &&
-                                   use_indirect_appended && !use_dense_call &&
-                                   !uses_local_entry_island && !has_private_workgroup_sources &&
-                                   options.moi_runtime_sample_stride > 1u;
-    const bool dense_runtime_fast_gate = !candidate_point.has_compact_moi_scalar_spill() &&
-                                         use_dense_call && !has_private_workgroup_sources &&
-                                         options.moi_runtime_sample_stride > 1u;
+    const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
+        bytes, *workgroup_descriptor, options.moi_engine, candidate_point, arch, candidate_errors,
+        candidate.container.uses_cluster_workgroup_id,
+        private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+    if (!workgroup_sources) {
+      result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
+                             candidate_errors.end());
+      continue;
+    }
+    const std::optional<MoiRuntimeWorkgroupGatePlan> eligible_runtime_fast_gate =
+        !candidate_point.has_compact_moi_scalar_spill() && !has_private_workgroup_sources
+            ? plan_moi_runtime_workgroup_gate(options, options, candidate_point, *workgroup_sources,
+                                              MoiRuntimeWorkgroupGatePlan::Flavor::Sampled, arch)
+            : std::nullopt;
+    const bool runtime_fast_gate = eligible_runtime_fast_gate && use_indirect_appended &&
+                                   !use_dense_call && !uses_local_entry_island &&
+                                   !branch_only_scalar_spill;
+    const bool dense_runtime_fast_gate = eligible_runtime_fast_gate && use_dense_call;
     const bool runtime_workgroup_gate_in_body =
         options.moi_runtime_sample_stride > 1u && !runtime_fast_gate && !dense_runtime_fast_gate;
     ConSanMoiCandidate lowered_candidate = candidate;
@@ -403,15 +414,14 @@ void try_apply_direct_sampled_watchpoint_patch(
     uint32_t probe_guest_instruction_offset = 0;
     uint32_t guest_instruction_word_count = 0;
     auto words = build_direct_sampled_watchpoint_words(
-        bytes, lowered_candidate, options, options, candidate_point, owner_epoch_vgprs,
-        resources->base, arch, next_record_index, prior_first_record_index,
+        bytes, lowered_candidate, options, options, candidate_point, *workgroup_sources,
+        owner_epoch_vgprs, resources->base, arch, next_record_index, prior_first_record_index,
         prior_access_range_count, window_bank_count, layout.sampled_causal_windows_offset,
         layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
         consan_moi_sampled_pending_acquire_owner_bank_count(layout.sampled_pending_acquire_capacity,
                                                             layout.sampled_causal_window_capacity),
         spill_overlaps_guest_operands, spill_backed_operand_recovery, spill ? &*spill : nullptr,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr,
         owner_derivation, runtime_workgroup_gate_in_body, candidate_errors,
         &probe_guest_instruction_offset, &guest_instruction_word_count);
     if (!words) {
@@ -558,12 +568,13 @@ void try_apply_direct_sampled_watchpoint_patch(
     planned.branch_only_scalar_spill = branch_only_scalar_spill;
     planned.branch_only_route = std::move(branch_only_route);
     planned.workgroup_descriptor_file_offset = *workgroup_descriptor;
+    planned.workgroup_sources = *workgroup_sources;
     planned.resources = std::move(probe->resources);
     planned.spill = std::move(probe->spill);
     planned.scalar_spill = std::move(probe->scalar_spill);
     planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
-    planned.runtime_fast_gate = runtime_fast_gate;
-    planned.dense_runtime_fast_gate = dense_runtime_fast_gate;
+    if (runtime_fast_gate || dense_runtime_fast_gate)
+      planned.runtime_fast_gate = eligible_runtime_fast_gate;
     planned.runtime_workgroup_gate_in_body = runtime_workgroup_gate_in_body;
     if (runtime_workgroup_gate_in_body) {
       add_unique_warning(
@@ -689,17 +700,18 @@ void try_apply_direct_sampled_watchpoint_patch(
       lowered_candidate.kernel_descriptor_file_offset =
           planned_patch.workgroup_descriptor_file_offset;
       auto words = build_direct_sampled_watchpoint_words(
-          bytes, lowered_candidate, options, options, candidate_point, owner_epoch_vgprs,
-          planned_patch.resources.base, arch, planned_patch.first_record_index,
-          planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
-          window_bank_count, layout.sampled_causal_windows_offset,
-          layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
+          bytes, lowered_candidate, options, options, candidate_point,
+          planned_patch.workgroup_sources, owner_epoch_vgprs, planned_patch.resources.base, arch,
+          planned_patch.first_record_index, planned_patch.prior_first_record_index,
+          planned_patch.prior_access_range_count, window_bank_count,
+          layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
+          layout.sampled_pending_acquires_offset,
           consan_moi_sampled_pending_acquire_owner_bank_count(
               layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
           planned_patch.spill_overlaps_guest_operands, planned_patch.spill_backed_operand_recovery,
           planned_patch.spill ? &*planned_patch.spill : nullptr, planned_patch.private_epoch_offset,
-          &planned_patch.private_workgroup_offsets, planned_patch.owner_derivation,
-          planned_patch.runtime_workgroup_gate_in_body, result.errors);
+          planned_patch.owner_derivation, planned_patch.runtime_workgroup_gate_in_body,
+          result.errors);
       if (!words)
         return;
       const uint64_t spill_bytes =
@@ -731,7 +743,9 @@ void try_apply_direct_sampled_watchpoint_patch(
               sizeof(uint32_t) +
           high_bank_capture_bytes;
       const uint64_t dense_gate_bytes =
-          planned_patch.dense_runtime_fast_gate ? access_island_word_count * sizeof(uint32_t) : 0u;
+          planned_patch.dense_call_anchor && planned_patch.runtime_fast_gate
+              ? access_island_word_count * sizeof(uint32_t)
+              : 0u;
       const uint64_t scalar_spill_guard_bytes = planned_patch.scalar_spill ? sizeof(uint32_t) : 0u;
       if (spill_bytes + scalar_spill_bytes + scalar_spill_guard_bytes + displaced_tail_bytes +
               dense_gate_bytes + vgpr_msb_bytes >
@@ -792,27 +806,13 @@ void try_apply_direct_sampled_watchpoint_patch(
               *moi_special_state_sgprs(options, candidate_point);
           std::vector<uint32_t> island_words;
           if (planned_patch.runtime_fast_gate) {
-            std::vector<std::string> workgroup_errors;
-            const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-                bytes, planned_patch.workgroup_descriptor_file_offset, options.moi_engine,
-                candidate_point, arch, workgroup_errors);
-            if (workgroup_sources) {
-              const auto gate_plan = plan_moi_runtime_workgroup_gate(
-                  options, options, candidate_point, *workgroup_sources,
-                  MoiRuntimeWorkgroupGatePlan::Flavor::Sampled, arch);
-              if (gate_plan) {
-                auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
-                    bytes, candidate, *gate_plan, *workgroup_sources,
-                    *planned_patch.entry_island_offset, cave_text_offset,
-                    planned_patch.placement.return_target, planned_patch.entry_island_word_count,
-                    arch);
-                if (fast_gate)
-                  island_words = std::move(*fast_gate);
-              }
-            }
+            auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
+                bytes, candidate, *planned_patch.runtime_fast_gate, planned_patch.workgroup_sources,
+                *planned_patch.entry_island_offset, cave_text_offset,
+                planned_patch.placement.return_target, planned_patch.entry_island_word_count, arch);
+            if (fast_gate)
+              island_words = std::move(*fast_gate);
             if (island_words.empty()) {
-              result.errors.insert(result.errors.end(), workgroup_errors.begin(),
-                                   workgroup_errors.end());
               result.errors.emplace_back(
                   "ConSan MOI sampled probe could not encode its runtime workgroup gate");
               return;
@@ -839,30 +839,14 @@ void try_apply_direct_sampled_watchpoint_patch(
         std::vector<uint32_t> entry_prefix_words;
         if (planned_patch.scalar_spill)
           entry_prefix_words.push_back(build_s_nop(0, arch));
-        if (planned_patch.dense_runtime_fast_gate) {
-          std::vector<std::string> workgroup_errors;
-          const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
-              bytes, planned_patch.workgroup_descriptor_file_offset, options.moi_engine,
-              candidate_point, arch, workgroup_errors);
-          if (workgroup_sources) {
-            const auto gate_plan = plan_moi_runtime_workgroup_gate(
-                options, options, candidate_point, *workgroup_sources,
-                MoiRuntimeWorkgroupGatePlan::Flavor::Sampled, arch);
-            if (!gate_plan) {
-              result.errors.emplace_back(
-                  "ConSan MOI sampled probe lost its dense runtime workgroup gate plan");
-              return;
-            }
-            auto gate = build_moi_runtime_workgroup_gate_call_words(
-                bytes.subspan(candidate.file_offset, candidate.size()), *gate_plan,
-                *workgroup_sources, cave_text_offset, planned_patch.placement.return_target,
-                access_island_word_count, arch);
-            if (gate)
-              entry_prefix_words.insert(entry_prefix_words.end(), gate->begin(), gate->end());
-          }
+        if (planned_patch.dense_call_anchor && planned_patch.runtime_fast_gate) {
+          auto gate = build_moi_runtime_workgroup_gate_call_words(
+              bytes.subspan(candidate.file_offset, candidate.size()),
+              *planned_patch.runtime_fast_gate, planned_patch.workgroup_sources, cave_text_offset,
+              planned_patch.placement.return_target, access_island_word_count, arch);
+          if (gate)
+            entry_prefix_words.insert(entry_prefix_words.end(), gate->begin(), gate->end());
           if (entry_prefix_words.size() == (planned_patch.scalar_spill ? 1u : 0u)) {
-            result.errors.insert(result.errors.end(), workgroup_errors.begin(),
-                                 workgroup_errors.end());
             result.errors.emplace_back(
                 "ConSan MOI sampled probe could not encode its dense runtime workgroup gate");
             return;
@@ -1062,19 +1046,19 @@ void try_apply_direct_sampled_watchpoint_patch(
             lowered_candidate.kernel_descriptor_file_offset =
                 planned_patch.workgroup_descriptor_file_offset;
             auto words = build_direct_sampled_watchpoint_words(
-                bytes, lowered_candidate, options, options, candidate_point, owner_epoch_vgprs,
-                planned_patch.resources.base, arch, planned_patch.first_record_index,
-                planned_patch.prior_first_record_index, planned_patch.prior_access_range_count,
-                window_bank_count, layout.sampled_causal_windows_offset,
-                layout.sampled_watchpoints_offset, layout.sampled_pending_acquires_offset,
+                bytes, lowered_candidate, options, options, candidate_point,
+                planned_patch.workgroup_sources, owner_epoch_vgprs, planned_patch.resources.base,
+                arch, planned_patch.first_record_index, planned_patch.prior_first_record_index,
+                planned_patch.prior_access_range_count, window_bank_count,
+                layout.sampled_causal_windows_offset, layout.sampled_watchpoints_offset,
+                layout.sampled_pending_acquires_offset,
                 consan_moi_sampled_pending_acquire_owner_bank_count(
                     layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity),
                 planned_patch.spill_overlaps_guest_operands,
                 planned_patch.spill_backed_operand_recovery,
                 planned_patch.spill ? &*planned_patch.spill : nullptr,
-                planned_patch.private_epoch_offset, &planned_patch.private_workgroup_offsets,
-                planned_patch.owner_derivation, planned_patch.runtime_workgroup_gate_in_body,
-                result.errors);
+                planned_patch.private_epoch_offset, planned_patch.owner_derivation,
+                planned_patch.runtime_workgroup_gate_in_body, result.errors);
             if (words) {
               const size_t planned_words =
                   static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));

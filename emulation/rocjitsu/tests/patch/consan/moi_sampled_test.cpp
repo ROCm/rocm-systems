@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "consan_sampled_model_test_support.h"
 #include "consan_report_test_support.h"
+#include "consan_sampled_model_test_support.h"
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
@@ -7383,6 +7383,62 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
   EXPECT_EQ(body[continuation_word], build_s_branch(*return_delta, kArch));
   EXPECT_EQ(continuation_word + 1u, body.size())
       << "the empty-wave continuation must be the direct return, after every per-lane save";
+}
+
+TEST(ConSanMoi, Cdna4SampledBranchOnlyRuntimeSelectionUsesBodyGate) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto guest =
+      build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
+  ASSERT_TRUE(guest);
+
+  // Exhaust ordinary scalar routing state while leaving enough VGPR capacity
+  // for persistent workgroup coordinates. A branch-only entry has no external
+  // island in which to emit the register-backed fast gate, so runtime
+  // selection must remain in the spill-safe access body.
+  std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 1u);
+  size_t cursor = 1u + guest->size();
+  for (uint16_t sgpr = 0u; sgpr < 102u; ++sgpr)
+    text_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  text_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_branch_only_runtime_body_gate", /*vgpr_granulated=*/1u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+
+  MoiOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(1u);
+  options.moi_report_dispatch_id = 0x1122334455667788ull;
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
+  EXPECT_TRUE(assignment.branch_only_spill);
+  EXPECT_FALSE(assignment.router_jump);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
+  EXPECT_FALSE(access->persistent_record_replay_workgroup_private_offsets.complete());
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
+  EXPECT_TRUE(prologue->persistent_record_replay_workgroup_vgprs.complete());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning ==
+           "ConSan MOI sampled runtime workgroup selection uses the spill-safe body gate";
+  })) << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
