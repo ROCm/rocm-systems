@@ -287,7 +287,17 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     assert "TCC_HIT" in merged_counters
 
 
-def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_subprocess(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options
+):
     """
     Test run_prof when subprocess execution fails.
 
@@ -302,7 +312,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (False, "error output"),
@@ -320,7 +330,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
     assert (
         utils_profile._DUPLICATE_ROCM_INSTALL_MESSAGE,
@@ -328,7 +338,17 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     ) not in errors
 
 
-def test_run_prof_failure_prints_duplicate_rocm_install_message(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "rocprof_cmd, profiler_options",
+    [
+        ("rocprofv3", ["--arg"]),
+        ("rocprofiler-sdk", {"APP_CMD": ["./test_app"]}),
+    ],
+    ids=["rocprofv3", "rocprofiler-sdk"],
+)
+def test_run_prof_failure_prints_duplicate_rocm_install_message(
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options
+):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
@@ -340,7 +360,7 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(tmp_path, monkey
         "workload stderr",
     ])
 
-    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", rocprof_cmd)
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (False, captured_output),
@@ -358,7 +378,7 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(tmp_path, monkey
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
+        utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
     assert (abort_line, False) in errors
     assert (
