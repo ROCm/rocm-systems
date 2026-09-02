@@ -204,15 +204,21 @@ Ordinary SGPRs, VGPRs, and AccVGPRs via `RegisterSet`. `InstDefUse` records expl
 
 #### What it does NOT track
 
-- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are not in the backward-liveness dataflow set (`RegisterSet` is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved.
+- EXEC, VCC, SCC, M0, FLAT_SCRATCH, TTMP — special architectural state. The `RegClass` enum names these, but they are not in the backward-liveness dataflow set (`RegisterSet` is SGPR/VGPR/AccVGPR only). See the special-state note below for how they are still preserved, and for what a probe that *reads* them gets.
 - Cross-kernel CFG. Edges that leave the kernel scope are silently dropped.
 - Memory dependencies. Liveness is purely register-based.
 
-#### Special state (EXEC / VCC / M0)
+#### Special state (EXEC / VCC / SCC / M0)
 
 EXEC, VCC, and M0 *writes* are surfaced by the decoder as special-state operands (e.g. `v_cmp` → VCC, `v_cmpx` → EXEC), so a probe's `ProbeClobberSummary.touches_{exec,vcc,m0}` are set and drive preservation. They are **not** part of the backward-liveness `RegisterSet` dataflow, so preservation is *save-when-clobbered*, not save-when-live. Because implicit-def detection is not proven comprehensive (a truly operand-less implicit def could be missed), EXEC and VCC are preserved **unconditionally** as a safety net; M0 is preserved only when a write is detected. This is why the trampoline can reserve EXEC/VCC/M0 temps even though liveness never reports them.
 
-The same `RegisterSet` limit bounds the probe live-in gate in the other direction: a probe that *reads* special state before writing it is not detected, because there are no bits to report it with. On GFX9/CDNA a `ds_*` instruction implicitly reads M0, which a kernel prologue initializes, so an LDS-using probe carries an input `analyze_probe_live_ins` is blind to.
+The same `RegisterSet` limit bounds the probe live-in gate in the other direction: a probe that *reads* special state before writing it is not detected, because there are no bits to report it with. Such a probe is accepted with an empty live-in set and runs against whatever the envelope leaves in that register. This is a deliberate boundary — special state is the trampoline's to preserve, and the live-in gate covers ordinary registers only (`code/patch/probe_live_in.h`) — but it is worth knowing per register what "whatever the envelope leaves" means:
+
+- **SCC** — the probe never sees the anchor's SCC. The envelope's SCC save/restore (`s_cselect_b32` / `s_cmp_lg_u32`, see [Instrumentation Flow (probe-call)](#instrumentation-flow-probe-call)) brackets the whole sequence and so protects the **host kernel's** SCC across instrumentation; it does not deliver it to the probe. The `s_getpc_b64` + 64-bit add chain that materializes the call target runs *after* the save and writes SCC, so the probe is entered with that carry-out. A probe branching on SCC before writing it therefore branches on envelope arithmetic, deterministically wrong rather than merely stale.
+- **M0** — carries the anchor's value. On GFX9/CDNA a `ds_*` instruction implicitly reads M0, which a kernel prologue initializes, so an LDS-using probe works only while no instruction upstream of the anchor rewrote M0 (`s_movrel*`, GWS, `s_sendmsg`, a strided DS op). Nothing verifies that.
+- **EXEC / VCC** — carry the anchor's value; the envelope restores the anchor mask before the call precisely so the probe runs under it. EXEC is forced to `-1` only around the spill store/load, never across the call.
+
+Covering the read side needs a special-state analysis that does not exist; `RegisterSet` has no bits for these (`isa/register_set.h`).
 
 ### Probe Live-Ins
 
@@ -226,7 +232,7 @@ CFG liveness rather than a linear scan of the body words: a def under a forward 
 
 The analysis sets `LivenessAnalysisOptions::exec_masked_defs_kill`, so a masked vector write counts as writing the whole register. Without it no masked def is ever a kill and every VGPR the probe reads — including ones it defines itself — is reported as an input. The probe owns its own EXEC; the option's doc states what that obliges.
 
-Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5, whose vector operands resolve only from a block where `MODE.VGPR_MSB` is known zero, which an anchor does not guarantee; relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
+Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5, whose vector operands resolve only from a block where `MODE.VGPR_MSB` is known zero, which an anchor does not guarantee; relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
 ### SpillManager
 
