@@ -13,7 +13,6 @@
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
-
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +27,7 @@ struct State {
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
+  bool connCheckVerifyMissing = false;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
 };
 
@@ -50,6 +50,7 @@ void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetConnCheckVerifyMissing(bool missing) { g.connCheckVerifyMissing = missing; }
 
 }  // namespace GinAnvilPluginStubs
 
@@ -71,10 +72,30 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
   if (size == static_cast<int>(sizeof(int))) {
     int* devs = static_cast<int*>(allData);
+    int known = -1;
+    int maxv = 0;
     for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
+      if (devs[i] >= 0) known = devs[i];
+      if (devs[i] > maxv) maxv = devs[i];
+    }
+    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
+      if (devs[i] < 0 && known >= 0) devs[i] = known;
       if (devs[i] < 0) devs[i] = 0;
     }
+    // Conn-check allgather: replicate the max missing count (single-process sim).
+    if (maxv > 0) {
+      for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) devs[i] = maxv;
+    }
   }
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  (void)commState;
+  (void)rank;
+  (void)nranks;
+  (void)tag;
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
   return ncclSuccess;
 }
 
@@ -162,4 +183,32 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+// [GIN-CONN-CHECK] Host stubs for gin_plugin_anvil_sdma.cc when this TU is linked
+// into rccl-UnitTestsGinAnvilPlugin without gin_anvil_conn_check_device.cc (compiled
+// as plain C++). Production librccl resolves these from the HIP device TU instead.
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
+                                 unsigned long long stamp, hipStream_t stream) {
+  (void)remoteAddrsDev;
+  (void)nRanks;
+  (void)selfRank;
+  (void)stamp;
+  (void)stream;
+  return 0;
+}
+
+extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp,
+                                 int* missingDev, hipStream_t stream) {
+  (void)localSignals;
+  (void)stamp;
+  (void)stream;
+  if (missingDev && nRanks > 0) {
+    const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK");
+    const bool simulateMissing =
+        GinAnvilPluginStubs::g.connCheckVerifyMissing || (injEnv && atoi(injEnv) >= 0);
+    const int fill = simulateMissing ? 1 : 0;
+    if (hipMemset(missingDev, fill, sizeof(int) * static_cast<size_t>(nRanks)) != hipSuccess) return -1;
+  }
+  return 0;
 }

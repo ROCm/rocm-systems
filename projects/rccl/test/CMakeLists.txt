@@ -427,16 +427,28 @@ if(BUILD_TESTS)
     )
 
     target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+      ${CMAKE_SOURCE_DIR}/src/include/gin
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
       ${CMAKE_CURRENT_SOURCE_DIR}/gin
     )
+    if(ROCSHMEM_INCLUDE_DIR)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+    elseif(ROCSHMEM_INSTALL_DIR)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        "${ROCSHMEM_INSTALL_DIR}/include")
+    endif()
     if(ROCSHMEM_SOURCE_DIR)
       target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
-        ${ROCSHMEM_SOURCE_DIR}/include)
+        "${ROCSHMEM_SOURCE_DIR}/src"
+        "${ROCSHMEM_SOURCE_DIR}/include")
     else()
       target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+        ${CMAKE_SOURCE_DIR}/../rocshmem/src
         ${CMAKE_SOURCE_DIR}/../rocshmem/include)
+    endif()
+    if(ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE ${ROCSHMEM_BUILD_DIR})
     endif()
 
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_ROCSHMEM_GIN)
