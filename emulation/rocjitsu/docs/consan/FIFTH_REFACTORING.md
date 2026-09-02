@@ -11139,3 +11139,48 @@ type references across a reusable allocation boundary.  The callback sequence
 still has duplicated per-mode assignment and Record/Replay emission staging;
 the next local direction is deletion and consolidation on those now-exact
 inputs, not another projection layer.
+
+### 16.164 Convergence checkpoint 163: consolidated barrier assignment planning
+
+Both private barrier planners independently applied the same owner-local
+transient assignment after common code had already established owner scope and
+persistent representation.  Record/Replay then duplicated its entry-workgroup
+restoration and record-emission resolution between ordinary and private
+barrier bodies.  Those repetitions were artifacts of moving complete branches
+before identifying their newly visible common seams.
+
+The common private prelude now applies transient assignment once before
+dispatching to either mode planner.  InlineShadow no longer contains assignment
+replay at all.  A Record/Replay-local helper composes its entry-workgroup
+assignment with exact record-emission resolution for both of that mode's body
+representations; the two callers retain their context-specific failure
+diagnostics.  The gate fixes the common assignment count, rejects mode-local
+transient replay, and requires both Record/Replay planners to use their one
+mode-owned emission path.
+
+| Signal | Checkpoint 163 | Cumulative change | Slice change from checkpoint 162 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,648 | **-2,328** | -1 |
+| Nonblank production lines | 96,229 | **-2,855** | -1 |
+| Production implementation lines | 88,437 | **-3,013** | -1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **246 / 52** | **-44 / +1** | 0 / 0 |
+| Private mode planners replaying transient assignment | **0 / 2** | n/a | **-2** |
+| Record/Replay barrier emission preparation paths | **1** | n/a | **-1 duplicate path** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `5046b6584ca`.  Validation includes a
+successful full `-j16` build and **109/109** nonphysical architecture-boundary
+and barrier-named host tests.  This follows the full 2,921-case nonphysical
+ConSan simulator matrix at checkpoint 162.  All tests used `-LE physical`; no
+test was removed, renamed, disabled, or replaced, and no physical GPU test was
+run.
+
+This slice is line-neutral in practical terms, but it converts the projection
+investment into one shared assignment authority and one mode-local
+Record/Replay emission authority.  The next deletion target is the now-obvious
+redundancy in the two barrier planner contracts and staged product, rather than
+adding another interface.
