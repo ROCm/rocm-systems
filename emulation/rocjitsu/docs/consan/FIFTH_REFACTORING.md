@@ -8098,3 +8098,105 @@ payback; it must enable later broad-input deletion rather than becoming a new
 facade. Larger placement and barrier transactions, material whole-refactoring
 shrinkage, and the independent completion audit remain open, so the goal
 remains active.
+
+### 16.114 Convergence checkpoint 113: exact Sampled state helpers
+
+The next Sampled access trace first exposed two smaller shared-helper
+peepholes. Causal-window bank hashing accepted a complete operating point and
+bound-runtime resource set only to reconstruct one already-authorized
+dispatch-identity source. Scalar-state temporary validation accepted a
+complete operating point only to test the selected persistent owner/epoch
+pair. Those signatures invited access, atomic, and synchronization emitters to
+carry broad state farther than the helpers' actual semantics required.
+
+Bank hashing now consumes the exact `ConSanMoiReportDispatchIdSource` beside
+the exact workgroup tuple. All access, atomic, and synchronization consumers
+project that source at their existing mode-owned boundary. Scalar temporary
+validation now consumes `ConSanMoiPersistentSgprState` directly, and both
+production consumers and its focused fail-closed tests supply only that state.
+The architecture gate rejects either broad helper signature from returning.
+
+| Signal | Checkpoint 113 | Cumulative change | Slice change from checkpoint 112 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,887 | **-2,089** | 0 |
+| Nonblank production lines | 96,544 | **-2,540** | 0 |
+| Production implementation lines | 88,816 | **-2,634** | 0 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 316 / 59 | +26 / +8 | **-4 / 0** |
+| Broad state types in the two helper contracts | **0** | n/a | **-3** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+Validation includes a complete warning-clean `-j16` rebuild, both focused
+scalar-persistent temporary tests, and the architecture-boundary gate
+**3/3**. No test was removed, renamed, disabled, or replaced, and no physical
+gfx1201 test was run.
+
+This is a small but complete cross-consumer boundary migration. It
+strengthens Sections 14.3, 14.5, and 14.6 without adding production volume,
+and leaves the access body's larger planning/emission loop as the next
+deletion-bearing slice. The remaining broad placement and barrier
+transactions, material whole-refactoring shrinkage, and independent
+completion audit remain open, so the goal remains active.
+
+### 16.115 Convergence checkpoint 114: one retained Sampled access emission plan
+
+The deep read of Sampled access lowering found that candidate planning already
+selected every fact needed to encode an access body, then discarded that
+selection after provisional sizing. Appended and inline final emission each
+reapplied owner-local transient and persistent assignments, reconstructed the
+owner/epoch VGPR tuple, rebound report and dispatch resources, recomputed
+scratch geometry, and rebuilt scalar routing policy. The public body builder
+accepted the complete request, bound resources, operating point, workgroup
+tuple, owner/epoch tuple, and a long parallel list of scalar values. Placement
+therefore reserved bytes for one reconstruction while final emission was free
+to derive another.
+
+`MoiSampledAccessEmissionPlan` now retains the complete exact site-local
+emission decision: report identity and layout, runtime sampling and delay
+policy, persistent owner/epoch state, dispatch and workgroup sources, scratch
+geometry, access-record indices, spill/private-state facts, and body-gate
+placement. Candidate planning builds it once. Provisional sizing, appended
+emission, and inline emission all consume that same object. The planned patch
+also retains the existing exact scalar-routing and scalar-ABI products for
+entry islands and long returns, so both final operating-point reconstruction
+blocks and their four assignment applications are deleted.
+
+The access emitter and its public body-builder contract no longer mention
+`ConSanRequest`, `BoundRuntimeResources`, or `ConSanMoiOperatingPoint`; nor do
+they call resource-fact, scratch-count, or dispatch-source planners. The
+single-caller delay emitter was narrowed from a complete request to
+`MoiDelayPlan` as part of the same consumer convergence. Boundary checks
+enforce all of these properties and require owner-local assignment to remain
+confined to candidate and descriptor planning.
+
+| Signal | Checkpoint 114 | Cumulative change | Slice change from checkpoint 113 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,841 | **-2,135** | **-46** |
+| Nonblank production lines | 96,497 | **-2,587** | **-47** |
+| Production implementation lines | 88,763 | **-2,687** | **-53** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 310 / 57 | +20 / +6 | **-6 / -2** |
+| Broad input types in Sampled access emission | **0** | n/a | **-3** |
+| Final-emission owner-assignment applications | **0** | n/a | **-4** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+Validation includes a complete warning-clean `-j16` rebuild, all Sampled host
+and architecture-boundary tests **160/160**, and all **1,296/1,296**
+`ConSan.*` and `ConSanMoi.*` host/component tests. The focused set covers the
+retained delay modes, private and dynamic-stack state, dense and branch-only
+routes, report identity, spill-backed recovery, and target-specific access
+forms. No test was removed, renamed, disabled, or replaced, and no physical
+gfx1201 test was run.
+
+This closes the Sampled access planning/emission loop and provides immediate
+legacy payback rather than leaving an exact-plan facade beside the old path.
+It strengthens Sections 14.1, 14.3, 14.5, 14.6, and 14.7. Larger placement
+and barrier transactions, further architecture and mode locality, material
+whole-refactoring shrinkage, and the independent completion audit remain
+open, so the goal remains active.
