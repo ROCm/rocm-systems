@@ -1154,7 +1154,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
                 planned_patch.emission.scalar_state.inline_scalar_spill
-                    ? planned_patch.emission.scalar_state.router_call->call_return_sgpr
+                    ? planned_patch.emission.scalar_state.scalar_router->call->call_return_sgpr
                     : static_cast<uint16_t>(*planned_patch.emission.scalar_state.exec_save_sgpr +
                                             28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));

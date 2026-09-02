@@ -1785,13 +1785,15 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       const auto special_state = moi_special_state_sgprs(options, group_point);
       const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
       const auto inline_dense_abi = plan_moi_dense_router(options, group_point, arch);
+      const ConSanMoiRouterCallSgprs *call_state =
+          moi_scalar_router_call(group_point.moi_scalar_router);
       const bool spill_backed_inline_router = group_point.has_inline_moi_scalar_spill();
       const bool spill_backed_record_replay_router = group_point.has_compact_moi_scalar_spill();
       const bool spill_backed_router =
           spill_backed_inline_router || spill_backed_record_replay_router;
       if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
           !indirect_state || (spill_backed_inline_router && !inline_dense_abi) ||
-          (spill_backed_record_replay_router && !group_point.moi_router_call)) {
+          (spill_backed_record_replay_router && !call_state)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
@@ -1806,8 +1808,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         key_sgpr = inline_dense_abi->dispatch_key_sgpr;
         call_return_sgpr = jump_pc_sgpr;
       } else if (spill_backed_record_replay_router) {
-        key_sgpr = group_point.moi_router_call->dispatch_key_sgpr;
-        call_return_sgpr = group_point.moi_router_call->call_return_sgpr;
+        key_sgpr = call_state->dispatch_key_sgpr;
+        call_return_sgpr = call_state->call_return_sgpr;
       }
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;

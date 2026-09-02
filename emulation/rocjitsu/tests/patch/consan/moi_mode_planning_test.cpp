@@ -331,7 +331,9 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   EXPECT_TRUE(plan.access_router_uses_dense_abi);
 
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
+  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+  };
   plan = plan_moi_scalar_abi(request, point);
   ASSERT_TRUE(plan.indirect_jump);
   EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
@@ -349,8 +351,10 @@ TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
-  point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 46u};
+  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+      .call = ConSanMoiRouterCallSgprs{44u, 46u},
+  };
   point.moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{};
 
   const auto routing_state = project_moi_scalar_routing_state(point);
@@ -358,8 +362,7 @@ TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
   EXPECT_TRUE(routing_state.has_scalar_spill());
   EXPECT_TRUE(routing_state.has_compact_spill());
   EXPECT_FALSE(routing_state.has_inline_spill());
-  EXPECT_EQ(routing_state.router_jump, point.moi_router_jump);
-  EXPECT_EQ(routing_state.router_call, point.moi_router_call);
+  EXPECT_EQ(routing_state.scalar_router, point.moi_scalar_router);
   EXPECT_TRUE(routing_state.has_branch_only_spill);
 
   point.moi_initialize_owner_epoch = true;
@@ -401,8 +404,10 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
-  point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 40u};
+  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+      .call = ConSanMoiRouterCallSgprs{44u, 40u},
+  };
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;
   auto plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
@@ -421,8 +426,7 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
-  point.moi_router_jump.reset();
-  point.moi_router_call.reset();
+  point.moi_scalar_router.reset();
   plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(plan);
   EXPECT_EQ(plan->indirect_jump, (ConSanIndirectJumpSgprs{32u, 30u}));

@@ -379,6 +379,34 @@ struct ConSanMoiRouterCallSgprs {
   auto operator<=>(const ConSanMoiRouterCallSgprs &) const = default;
 };
 
+/// Complete scalar state of one spill-backed generated router. Every router
+/// has an indirect jump; dense call state and Inline visible evidence are
+/// optional facets that cannot survive independently of that jump.
+struct ConSanMoiScalarRouterAllocation {
+  ConSanIndirectJumpSgprs jump;
+  std::optional<ConSanMoiRouterCallSgprs> call = std::nullopt;
+  std::optional<uint16_t> visible_evidence_sgpr = std::nullopt;
+
+  template <typename Visitor>
+  void for_each_sgpr_range(bool include_call, bool include_visible, Visitor &&visit) const {
+    visit(jump.pc_sgpr, 2u);
+    visit(jump.scc_save_sgpr, 1u);
+    if (include_call && call) {
+      visit(call->dispatch_key_sgpr, 1u);
+      visit(call->call_return_sgpr, 2u);
+    }
+    if (include_visible && visible_evidence_sgpr)
+      visit(*visible_evidence_sgpr, 1u);
+  }
+
+  auto operator<=>(const ConSanMoiScalarRouterAllocation &) const = default;
+};
+
+[[nodiscard]] inline const ConSanMoiRouterCallSgprs *
+moi_scalar_router_call(const std::optional<ConSanMoiScalarRouterAllocation> &allocation) {
+  return allocation && allocation->call ? &*allocation->call : nullptr;
+}
+
 /// Inline spill state reached through branch-only relays. A dynamic-stack
 /// bootstrap may additionally borrow one live ordinary pair, but that pair
 /// cannot exist independently of the branch-only preservation strategy.
@@ -458,9 +486,7 @@ struct ConSanMoiTransientSgprAssignment {
   /// and records zero generation rather than clobbering guest scalar state.
   std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
-  std::optional<ConSanIndirectJumpSgprs> router_jump;
-  std::optional<ConSanMoiRouterCallSgprs> router_call;
-  std::optional<uint16_t> visible_evidence_sgpr;
+  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
   /// The complete scalar window is preserved in private memory and control
   /// reaches the appended body through branch-only relays. This avoids any
   /// scalar value that would otherwise have to remain live from the guest
@@ -988,13 +1014,10 @@ struct ConSanMoiOperatingPoint {
   /// site-local dynamic-stack spill frame.
   bool moi_dynamic_stack_spill = false;
   /// Explicit scalar-router ABI selected when a spill-backed transient window
-  /// cannot use the mode's fixed register layout. The indirect jump, dispatch
-  /// key, and call-return pair are one shared routing mechanism used by Inline,
-  /// Record/Replay, and Sampled rather than separate mode-owned state.
-  std::optional<ConSanIndirectJumpSgprs> moi_router_jump;
-  std::optional<ConSanMoiRouterCallSgprs> moi_router_call;
-  /// Inline-only visible evidence temporary within that shared router ABI.
-  std::optional<uint16_t> moi_inline_visible_evidence_sgpr;
+  /// cannot use the mode's fixed register layout. Inline, Record/Replay, and
+  /// Sampled share the jump and optional call mechanism; Inline's optional
+  /// visible-evidence temporary remains a facet of that exact allocation.
+  std::optional<ConSanMoiScalarRouterAllocation> moi_scalar_router;
   /// Inline component whose saved scalar window is reached through branch-only
   /// relays instead of live-through SGPR state, including its optional
   /// dynamic-stack bootstrap pair.
@@ -1037,11 +1060,8 @@ struct ConSanMoiOperatingPoint {
   /// operating point. EXEC, owner, dispatch, and persistent state have
   /// separate lifetime rules and are intentionally not part of this view.
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
-    visit(moi_router_jump ? std::optional{moi_router_jump->pc_sgpr} : std::nullopt, 2u);
-    visit(moi_router_jump ? std::optional{moi_router_jump->scc_save_sgpr} : std::nullopt, 1u);
-    visit(moi_router_call ? std::optional{moi_router_call->dispatch_key_sgpr} : std::nullopt, 1u);
-    visit(moi_router_call ? std::optional{moi_router_call->call_return_sgpr} : std::nullopt, 2u);
-    visit(moi_inline_visible_evidence_sgpr, 1u);
+    if (moi_scalar_router)
+      moi_scalar_router->for_each_sgpr_range(true, true, visit);
     visit(moi_branch_only_spill ? moi_branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt,
           2u);
   }

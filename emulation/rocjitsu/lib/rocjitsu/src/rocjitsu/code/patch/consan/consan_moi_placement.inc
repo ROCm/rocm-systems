@@ -535,7 +535,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
            (point.has_inline_moi_scalar_spill() &&
-            ((point.moi_router_jump && point.moi_router_call) || point.moi_branch_only_spill));
+            (moi_scalar_router_call(point.moi_scalar_router) || point.moi_branch_only_spill));
   }
   if (saw_unassigned_owner)
     return false;
@@ -549,13 +549,11 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
     point.moi_exec_save_sgprs_persistent = false;
   point.moi_dispatch_identity.set_sgpr(selected->dispatch_id_sgpr,
                                        point.moi_dispatch_identity.automatic_sgpr());
-  point.moi_router_jump = selected->router_jump;
-  point.moi_router_call = selected->router_call;
+  point.moi_scalar_router = selected->scalar_router;
   if (spill_layout == ConSanMoiScalarSpillLayout::Inline) {
     point.automatic_moi_scalar_spill_layout = selected->spill_backed
                                                   ? ConSanMoiScalarSpillLayout::Inline
                                                   : ConSanMoiScalarSpillLayout::None;
-    point.moi_inline_visible_evidence_sgpr = selected->visible_evidence_sgpr;
     point.moi_branch_only_spill = selected->branch_only_spill;
   } else {
     point.automatic_moi_scalar_spill_layout = selected->spill_backed
@@ -1502,34 +1500,30 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   // emitted router, not a guest register window assumed to be preserved.
   // Spill-backed layouts carry their allocated registers explicitly. The
   // fixed-layout offsets below are the matching emission ABI fields.
-  if (point.has_compact_moi_scalar_spill()) {
-    if (!point.moi_router_jump || !point.moi_router_call) {
+  const bool compact_spill = point.has_compact_moi_scalar_spill();
+  const bool inline_barrier_spill = point.has_inline_moi_scalar_spill() &&
+                                    scalar_state == MoiRelocatableHostScalarState::BarrierRouter;
+  if (compact_spill || inline_barrier_spill) {
+    if (!point.moi_scalar_router ||
+        (compact_spill && !moi_scalar_router_call(point.moi_scalar_router)))
       return {};
-    }
-    return {{point.moi_router_jump->pc_sgpr, 2u},
-            {point.moi_router_jump->scc_save_sgpr, 1u},
-            {point.moi_router_call->dispatch_key_sgpr, 1u},
-            {point.moi_router_call->call_return_sgpr, 2u}};
-  }
-  if (point.has_inline_moi_scalar_spill()) {
-    if (scalar_state == MoiRelocatableHostScalarState::BarrierRouter) {
-      if (!point.moi_router_jump)
-        return {};
-      std::vector<MoiSgprRange> ranges{{point.moi_router_jump->pc_sgpr, 2u},
-                                       {point.moi_router_jump->scc_save_sgpr, 1u}};
-      if (point.moi_inline_visible_evidence_sgpr)
-        ranges.push_back({*point.moi_inline_visible_evidence_sgpr, 1u});
-      return ranges;
-    }
-    const auto abi = plan_moi_dense_router(request, point, arch);
-    if (!abi)
-      return {};
-    std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
-                                     {abi->indirect_jump.scc_save_sgpr, 1u},
-                                     {abi->dispatch_key_sgpr, 1u}};
-    if (abi->call_return_sgpr)
-      ranges.push_back({*abi->call_return_sgpr, 2u});
+    std::vector<MoiSgprRange> ranges;
+    point.moi_scalar_router->for_each_sgpr_range(
+        compact_spill, inline_barrier_spill,
+        [&](uint16_t base, uint16_t width) { ranges.push_back({base, width}); });
     return ranges;
+  }
+  const auto dense_router_ranges = [](const MoiDenseRouterPlan &abi) {
+    std::vector<MoiSgprRange> ranges{{abi.indirect_jump.pc_sgpr, 2u},
+                                     {abi.indirect_jump.scc_save_sgpr, 1u},
+                                     {abi.dispatch_key_sgpr, 1u}};
+    if (abi.call_return_sgpr)
+      ranges.push_back({*abi.call_return_sgpr, 2u});
+    return ranges;
+  };
+  if (point.has_inline_moi_scalar_spill()) {
+    const auto abi = plan_moi_dense_router(request, point, arch);
+    return abi ? dense_router_ranges(*abi) : std::vector<MoiSgprRange>{};
   }
   if (!point.moi_exec_save_sgpr)
     return {};
@@ -1538,14 +1532,7 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   if (scalar_abi.access_router_uses_dense_abi &&
       scalar_state == MoiRelocatableHostScalarState::AccessRouter) {
     const auto abi = plan_moi_dense_router(request, point, arch);
-    if (!abi)
-      return {};
-    std::vector<MoiSgprRange> ranges{{abi->indirect_jump.pc_sgpr, 2u},
-                                     {abi->indirect_jump.scc_save_sgpr, 1u},
-                                     {abi->dispatch_key_sgpr, 1u}};
-    if (abi->call_return_sgpr)
-      ranges.push_back({*abi->call_return_sgpr, 2u});
-    return ranges;
+    return abi ? dense_router_ranges(*abi) : std::vector<MoiSgprRange>{};
   }
   if (!scalar_abi.special_state)
     return {};
@@ -2740,15 +2727,24 @@ bool moi_resource_owner_anchors_admit_sgpr_ranges(MoiResourcePlanningState &stat
   return true;
 }
 
-bool moi_resource_owner_anchors_admit_call_clobber_ranges(MoiResourcePlanningState &state,
-                                                          std::span<const uint64_t> owners,
-                                                          std::span<const uint64_t> anchors,
-                                                          std::span<const MoiSgprRange> ranges) {
+bool moi_resource_owner_anchors_admit_scalar_router_ranges(MoiResourcePlanningState &state,
+                                                           std::span<const uint64_t> owners,
+                                                           std::span<const uint64_t> anchors,
+                                                           std::span<const MoiSgprRange> ranges) {
   const std::array complete_scalar_range{
       MoiSgprRange{.base = 0u, .width = moi_ordinary_sgpr_limit(state.arch)}};
   MoiDenseOwnerLivenessProof proof =
       state.prepare_dense_liveness_for_owners(owners, complete_scalar_range);
   if (!proof.complete || proof.contexts.empty() || anchors.empty() || ranges.empty())
+    return false;
+  std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
+  summaries.reserve(proof.contexts.size());
+  for (const MoiKernelResourceContext *context : proof.contexts) {
+    if (context == nullptr)
+      return false;
+    summaries.push_back(context->scalar_summary());
+  }
+  if (moi_scalar_contexts_conflict_with_physical_vcc(summaries, ranges, state.arch))
     return false;
   for (uint64_t anchor : anchors) {
     BasicBlock *block = block_for_offset(state.block_index, anchor);
@@ -2801,26 +2797,6 @@ bool moi_resource_owner_anchors_admit_call_clobber_ranges(MoiResourcePlanningSta
       return false;
   }
   return true;
-}
-
-bool moi_resource_owner_ranges_conflict_with_physical_vcc(MoiResourcePlanningState &state,
-                                                          std::span<const uint64_t> owners,
-                                                          std::span<const MoiSgprRange> ranges,
-                                                          rj_code_arch_t arch) {
-  const std::array complete_scalar_range{
-      MoiSgprRange{.base = 0u, .width = moi_ordinary_sgpr_limit(state.arch)}};
-  MoiDenseOwnerLivenessProof proof =
-      state.prepare_dense_liveness_for_owners(owners, complete_scalar_range);
-  if (!proof.complete || proof.contexts.empty())
-    return true;
-  std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
-  summaries.reserve(proof.contexts.size());
-  for (const MoiKernelResourceContext *context : proof.contexts) {
-    if (context == nullptr)
-      return true;
-    summaries.push_back(context->scalar_summary());
-  }
-  return moi_scalar_contexts_conflict_with_physical_vcc(summaries, ranges, arch);
 }
 
 /// Finds one owner-common VGPR that is dead immediately before @p text_offset
@@ -2992,17 +2968,18 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     return state_base && range_overlaps(base, width, *state_base, state_width);
   };
   const auto overlaps_assignment = [&](const ConSanMoiTransientSgprAssignment &assignment) {
+    bool overlaps_router = false;
+    if (assignment.scalar_router) {
+      assignment.scalar_router->for_each_sgpr_range(true, true, [&](uint16_t reg, uint16_t count) {
+        overlaps_router |= overlaps(reg, count);
+      });
+    }
     return range_overlaps(base, width, assignment.exec_save_sgpr,
                           moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
                                                        request, resources, point, mode_semantics),
                                                    arch)) ||
            overlaps(assignment.owner_sgpr) ||
-           overlaps(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount) ||
-           (assignment.router_jump && (overlaps(assignment.router_jump->pc_sgpr, 2u) ||
-                                       overlaps(assignment.router_jump->scc_save_sgpr))) ||
-           (assignment.router_call && (overlaps(assignment.router_call->dispatch_key_sgpr) ||
-                                       overlaps(assignment.router_call->call_return_sgpr, 2u))) ||
-           overlaps(assignment.visible_evidence_sgpr) ||
+           overlaps(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount) || overlaps_router ||
            (assignment.branch_only_spill &&
             overlaps(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u));
   };
@@ -3434,7 +3411,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
               overlaps_optional(base, width, options.moi_dispatch_identity.sgpr(),
                                 kMoiDispatchStateSgprCount) ||
-              overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
+              overlaps_optional(base, width,
+                                options.moi_scalar_router
+                                    ? options.moi_scalar_router->visible_evidence_sgpr
+                                    : std::nullopt);
           options.moi_persistent_sgprs.for_each_range(
               [&](std::optional<uint16_t> reg, uint16_t reg_width) {
                 overlaps |= overlaps_optional(base, width, reg, reg_width);
@@ -3637,13 +3617,15 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                    : options.moi_owner_sgpr.base(),
            .dispatch_id_sgpr = dispatch_id_sgpr,
            .spill_backed = spill_backed,
-           .router_jump = spill_pc && spill_scc
-                              ? std::optional{ConSanIndirectJumpSgprs{*spill_pc, *spill_scc}}
-                              : std::nullopt,
-           .router_call = spill_key && spill_call_return ? std::optional{ConSanMoiRouterCallSgprs{
-                                                               *spill_key, *spill_call_return}}
-                                                         : std::nullopt,
-           .visible_evidence_sgpr = spill_visible,
+           .scalar_router = spill_pc && spill_scc
+                                ? std::optional{ConSanMoiScalarRouterAllocation{
+                                      .jump = ConSanIndirectJumpSgprs{*spill_pc, *spill_scc},
+                                      .call = spill_key && spill_call_return
+                                                  ? std::optional{ConSanMoiRouterCallSgprs{
+                                                        *spill_key, *spill_call_return}}
+                                                  : std::nullopt,
+                                      .visible_evidence_sgpr = spill_visible}}
+                                : std::nullopt,
            .branch_only_spill =
                branch_only_scalar_spill
                    ? std::optional{ConSanMoiBranchOnlyScalarSpill{dynamic_stack_borrowed_sgpr}}
@@ -4081,9 +4063,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       if (pc && call_return && dispatch_key && scc) {
         options.moi_exec_save_sgpr = spill_base;
         options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-        options.moi_inline_visible_evidence_sgpr = visible;
-        options.moi_router_jump = ConSanIndirectJumpSgprs{*pc, *scc};
-        options.moi_router_call = ConSanMoiRouterCallSgprs{*dispatch_key, *call_return};
+        options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+            .jump = ConSanIndirectJumpSgprs{*pc, *scc},
+            .call = ConSanMoiRouterCallSgprs{*dispatch_key, *call_return},
+            .visible_evidence_sgpr = visible,
+        };
         warnings.emplace_back(
             "ConSan MOI automatically assigned spill-backed Inline SGPRs s" +
             std::to_string(*spill_base) + ":s" + std::to_string(*spill_base + count - 1u) +
@@ -4719,10 +4703,9 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
                                   overlaps_architectural_state(base, width));
   });
   const bool branch_only_scalar_invalid =
-      options.moi_branch_only_spill &&
-      (!inline_layout || !options.has_inline_moi_scalar_spill() ||
-       !consan_uses_gfx12_encoding(arch) || !options.moi_exec_save_sgpr ||
-       options.moi_router_jump || options.moi_router_call);
+      options.moi_branch_only_spill && (!inline_layout || !options.has_inline_moi_scalar_spill() ||
+                                        !consan_uses_gfx12_encoding(arch) ||
+                                        !options.moi_exec_save_sgpr || options.moi_scalar_router);
   const bool dynamic_bootstrap_invalid = [&] {
     if (!options.moi_branch_only_spill ||
         !options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
@@ -4740,7 +4723,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
            moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
            (options.moi_exec_save_sgpr &&
             range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
-           options.moi_router_jump || options.moi_router_call || overlaps_persistent;
+           options.moi_scalar_router || overlaps_persistent;
   }();
   if (!exec_invalid && !owner_invalid && !persistent_invalid && !auxiliary_invalid &&
       !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)

@@ -2440,7 +2440,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   }
   const uint16_t expected_spill_count = static_cast<uint16_t>(
       scratch_count + static_cast<uint16_t>(spill != nullptr && !spill->uses_dynamic_stack_frame &&
-                                            plan.scalar_state.scalar_spill));
+                                            plan.scalar_state.inline_scalar_spill));
   if (spill != nullptr &&
       (spill->vgpr_base != scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
     errors.emplace_back(

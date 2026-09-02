@@ -3309,8 +3309,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
         if (assignment == assignments.end())
           continue;
         const std::optional<uint16_t> reload_sgpr =
-            assignment->router_jump
-                ? std::optional{assignment->router_jump->pc_sgpr}
+            assignment->scalar_router
+                ? std::optional{assignment->scalar_router->jump.pc_sgpr}
                 : (!assignment->spill_backed
                        ? std::optional<uint16_t>(assignment->exec_save_sgpr + 12u)
                        : std::nullopt);

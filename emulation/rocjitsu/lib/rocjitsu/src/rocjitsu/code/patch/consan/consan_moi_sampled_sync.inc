@@ -76,6 +76,32 @@ struct SampledDenseSyncRoute {
   uint64_t target = 0;
 };
 
+/// Prove that every scalar range is dead at every selected call anchor and
+/// avoids all persistent, architectural, and request-owned scalar state.
+[[nodiscard]] bool
+sampled_route_ranges_are_safe(MoiResourcePlanningState &state, std::span<const uint64_t> owners,
+                              std::span<const uint64_t> anchors, const ConSanRequest &request,
+                              const ConSanMoiOperatingPoint &point,
+                              std::span<const MoiSgprRange> ranges, rj_code_arch_t arch) {
+  const uint16_t limit = moi_ordinary_sgpr_limit(arch);
+  const auto conflicts_with_reserved_state = [&](const MoiSgprRange &range) {
+    const auto overlaps = [&](std::optional<uint16_t> reg, uint16_t width = 1u) {
+      return reg && range_overlaps(range.base, range.width, *reg, width);
+    };
+    bool conflict =
+        range.width == 0u || static_cast<uint32_t>(range.base) + range.width > limit ||
+        persistent_sgpr_range_overlaps_reserved_ordinary_range(range.base, range.width, arch) ||
+        overlaps(point.moi_owner_sgpr.base()) ||
+        overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
+    point.moi_persistent_sgprs.for_each_range(
+        [&](std::optional<uint16_t> reg, uint16_t width) { conflict |= overlaps(reg, width); });
+    return conflict || (request.delay_mode == ConSanDelayMode::SleepVar &&
+                        range_overlaps(range.base, range.width, request.delay_var_ssrc, 1u));
+  };
+  return !ranges.empty() && std::ranges::none_of(ranges, conflicts_with_reserved_state) &&
+         moi_resource_owner_anchors_admit_scalar_router_ranges(state, owners, anchors, ranges);
+}
+
 /// Build the one call-key dispatcher shared by Sampled barrier and atomic
 /// synchronization relays. The semantic owners supply only their route list;
 /// key reconstruction, SCC restoration, and indirect return are one mode-local
@@ -1218,8 +1244,10 @@ void try_apply_sampled_barrier_sync_patch(
       const auto special_state = moi_special_state_sgprs(options, group_point);
       const auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
+      const ConSanMoiRouterCallSgprs *call_state =
+          moi_scalar_router_call(group_point.moi_scalar_router);
       if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !group_point.moi_router_call)) {
+          !indirect_state || (spill_backed_router && !call_state)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": incomplete scalar router state");
@@ -1230,10 +1258,10 @@ void try_apply_sampled_barrier_sync_patch(
       const uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       const uint16_t key_sgpr = spill_backed_router
-                                    ? group_point.moi_router_call->dispatch_key_sgpr
+                                    ? call_state->dispatch_key_sgpr
                                     : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
       const uint16_t call_return_sgpr =
-          spill_backed_router ? group_point.moi_router_call->call_return_sgpr
+          spill_backed_router ? call_state->call_return_sgpr
                               : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
       // S_CALL_B64 routes retain the call-return-derived entry key when their
@@ -2197,8 +2225,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
       auto special_state = moi_special_state_sgprs(options, group_point);
       auto indirect_state = moi_indirect_jump_sgprs(options, group_point);
+      const ConSanMoiRouterCallSgprs *call_state =
+          moi_scalar_router_call(group_point.moi_scalar_router);
       if ((!spill_backed_router && (!group_point.moi_exec_save_sgpr || !special_state)) ||
-          !indirect_state || (spill_backed_router && !group_point.moi_router_call)) {
+          !indirect_state || (spill_backed_router && !call_state)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container + ": incomplete scalar router state");
         continue;
@@ -2211,43 +2241,22 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       // guest SGPRs, and the entry island similarly consumes its PC, SCC, and
       // key temporaries before entering the spill-protected body.
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-      const auto overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
-        const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
-          return reg && range_overlaps(base, width, *reg, reg_width);
-        };
-        bool overlaps =
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-            overlaps_optional(group_point.moi_owner_sgpr.base()) ||
-            overlaps_optional(group_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
-        group_point.moi_persistent_sgprs.for_each_range(
-            [&](std::optional<uint16_t> reg, uint16_t reg_width) {
-              overlaps |= overlaps_optional(reg, reg_width);
-            });
-        if (options.delay_mode == ConSanDelayMode::SleepVar)
-          overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
-        return overlaps;
+      const auto ranges_are_safe = [&](std::span<const MoiSgprRange> ranges) {
+        return sampled_route_ranges_are_safe(resource_state, group_owners, anchors, options,
+                                             group_point, ranges, arch);
       };
-      const auto dead_at_atomic_anchors = [&](uint16_t base, uint16_t width) {
-        if (width == 0u || static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
-            overlaps_reserved_scalar_state(base, width)) {
-          return false;
-        }
+      const auto range_is_safe = [&](uint16_t base, uint16_t width) {
         const std::array range{MoiSgprRange{base, width}};
-        return moi_resource_owner_anchors_admit_call_clobber_ranges(resource_state, group_owners,
-                                                                    anchors, range);
+        return ranges_are_safe(range);
       };
       const auto tuple_is_safe = [&](uint16_t pc, uint16_t scc, uint16_t key,
                                      uint16_t call_return) {
         const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}, MoiSgprRange{key, 1u},
                                 MoiSgprRange{call_return, 2u}};
-        return dead_at_atomic_anchors(pc, 2u) && dead_at_atomic_anchors(scc, 1u) &&
-               dead_at_atomic_anchors(key, 1u) && dead_at_atomic_anchors(call_return, 2u) &&
-               !range_overlaps(pc, 2u, scc, 1u) && !range_overlaps(pc, 2u, key, 1u) &&
+        return !range_overlaps(pc, 2u, scc, 1u) && !range_overlaps(pc, 2u, key, 1u) &&
                (pc == call_return || !range_overlaps(pc, 2u, call_return, 2u)) &&
                !range_overlaps(scc, 1u, key, 1u) && !range_overlaps(scc, 1u, call_return, 2u) &&
-               !range_overlaps(key, 1u, call_return, 2u) &&
-               !moi_resource_owner_ranges_conflict_with_physical_vcc(resource_state, group_owners,
-                                                                     ranges, arch);
+               !range_overlaps(key, 1u, call_return, 2u) && ranges_are_safe(ranges);
       };
 
       uint16_t jump_pc_sgpr =
@@ -2255,10 +2264,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       uint16_t saved_scc_sgpr =
           spill_backed_router ? indirect_state->scc_save_sgpr : special_state->scc_save_sgpr;
       uint16_t key_sgpr = spill_backed_router
-                              ? group_point.moi_router_call->dispatch_key_sgpr
+                              ? call_state->dispatch_key_sgpr
                               : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
       uint16_t call_return_sgpr = spill_backed_router
-                                      ? group_point.moi_router_call->call_return_sgpr
+                                      ? call_state->call_return_sgpr
                                       : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
       if (spill_backed_router &&
           !tuple_is_safe(jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr)) {
@@ -2266,12 +2275,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         if (spill_backed_router) {
           for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
             const uint16_t candidate_pair = static_cast<uint16_t>(pair);
-            if (!dead_at_atomic_anchors(candidate_pair, 2u))
+            if (!range_is_safe(candidate_pair, 2u))
               continue;
             for (uint32_t scc = 0u; !found && scc < ordinary_sgpr_limit; ++scc) {
               const uint16_t candidate_scc = static_cast<uint16_t>(scc);
               if (range_overlaps(candidate_scc, 1u, candidate_pair, 2u) ||
-                  !dead_at_atomic_anchors(candidate_scc, 1u)) {
+                  !range_is_safe(candidate_scc, 1u)) {
                 continue;
               }
               for (uint32_t key = 0u; key < ordinary_sgpr_limit; ++key) {
@@ -2284,8 +2293,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                 jump_pc_sgpr = call_return_sgpr = candidate_pair;
                 saved_scc_sgpr = candidate_scc;
                 key_sgpr = candidate_key;
-                group_point.moi_router_jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr};
-                group_point.moi_router_call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr};
+                group_point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+                    .jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr},
+                    .call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr},
+                };
                 special_state = moi_special_state_sgprs(options, group_point);
                 indirect_state = moi_indirect_jump_sgprs(options, group_point);
                 found = special_state.has_value() && indirect_state.has_value();
@@ -2514,51 +2525,35 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
     if (route_point.has_compact_moi_scalar_spill()) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-      const auto route_overlaps_reserved_scalar_state = [&](uint16_t base, uint16_t width) {
-        const auto overlaps_optional = [&](std::optional<uint16_t> reg, uint16_t reg_width = 1u) {
-          return reg && range_overlaps(base, width, *reg, reg_width);
-        };
-        bool overlaps =
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-            overlaps_optional(route_point.moi_owner_sgpr.base()) ||
-            overlaps_optional(route_point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
-        route_point.moi_persistent_sgprs.for_each_range(
-            [&](std::optional<uint16_t> reg, uint16_t reg_width) {
-              overlaps |= overlaps_optional(reg, reg_width);
-            });
-        if (options.delay_mode == ConSanDelayMode::SleepVar)
-          overlaps |= range_overlaps(base, width, options.delay_var_ssrc, 1u);
-        return overlaps;
+      const std::array anchors{physical_anchor_offset};
+      const auto ranges_are_safe = [&](std::span<const MoiSgprRange> ranges) {
+        return sampled_route_ranges_are_safe(resource_state,
+                                             planned.resources.owner_descriptor_file_offsets,
+                                             anchors, options, route_point, ranges, arch);
       };
-      const auto route_dead_at_anchor = [&](uint16_t base, uint16_t width) {
-        if (width == 0u || static_cast<uint32_t>(base) + width > ordinary_sgpr_limit ||
-            route_overlaps_reserved_scalar_state(base, width)) {
-          return false;
-        }
+      const auto range_is_safe = [&](uint16_t base, uint16_t width) {
         const std::array range{MoiSgprRange{base, width}};
-        const std::array anchors{physical_anchor_offset};
-        return moi_resource_owner_anchors_admit_call_clobber_ranges(
-            resource_state, planned.resources.owner_descriptor_file_offsets, anchors, range);
+        return ranges_are_safe(range);
       };
       const auto route_tuple_is_safe = [&](uint16_t pc, uint16_t scc) {
         const std::array ranges{MoiSgprRange{pc, 2u}, MoiSgprRange{scc, 1u}};
-        return route_dead_at_anchor(pc, 2u) && route_dead_at_anchor(scc, 1u) &&
-               !range_overlaps(pc, 2u, scc, 1u) &&
-               !moi_resource_owner_ranges_conflict_with_physical_vcc(
-                   resource_state, planned.resources.owner_descriptor_file_offsets, ranges, arch);
+        return !range_overlaps(pc, 2u, scc, 1u) && ranges_are_safe(ranges);
       };
       auto route_state = moi_indirect_jump_sgprs(options, route_point);
       if (!route_state || !route_tuple_is_safe(route_state->pc_sgpr, route_state->scc_save_sgpr)) {
         bool found = false;
         for (uint32_t pair = 0u; !found && pair + 2u <= ordinary_sgpr_limit; pair += 2u) {
           const uint16_t candidate_pair = static_cast<uint16_t>(pair);
-          if (!route_dead_at_anchor(candidate_pair, 2u))
+          if (!range_is_safe(candidate_pair, 2u))
             continue;
           for (uint32_t scc = 0u; scc < ordinary_sgpr_limit; ++scc) {
             const uint16_t candidate_scc = static_cast<uint16_t>(scc);
             if (!route_tuple_is_safe(candidate_pair, candidate_scc))
               continue;
-            route_point.moi_router_jump = ConSanIndirectJumpSgprs{candidate_pair, candidate_scc};
+            const ConSanIndirectJumpSgprs jump{candidate_pair, candidate_scc};
+            route_point.moi_scalar_router = route_point.moi_scalar_router.value_or(
+                ConSanMoiScalarRouterAllocation{.jump = jump});
+            route_point.moi_scalar_router->jump = jump;
             route_state = moi_indirect_jump_sgprs(options, route_point);
             found = route_state.has_value();
             if (found)

@@ -28,13 +28,11 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
   bool automatic_moi_record_replay_sgpr_spill = false;
-  std::optional<uint16_t> router_dispatch_key_sgpr;
-  std::optional<uint16_t> router_call_return_sgpr;
+  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
   uint16_t required_sgpr_count = 0;
 };
 
@@ -45,7 +43,7 @@ moi_special_state_sgprs(const MoiRecordEventEmissionPlan &plan) {
 
 [[nodiscard]] inline std::optional<ConSanIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const MoiRecordEventEmissionPlan &plan) {
-  return plan.indirect_jump;
+  return plan.scalar_router ? std::optional{plan.scalar_router->jump} : std::nullopt;
 }
 
 [[nodiscard]] inline bool append_dynamic_record_store_moi_report_dispatch_id_pair(
@@ -61,7 +59,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
                                      uint64_t return_text_offset,
                                      const MoiRecordEventEmissionPlan &plan, rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              plan.indirect_jump, arch);
+                                              moi_indirect_jump_sgprs(plan), arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(

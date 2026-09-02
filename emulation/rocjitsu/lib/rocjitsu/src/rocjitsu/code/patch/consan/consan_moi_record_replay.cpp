@@ -214,8 +214,8 @@ MoiScalarAbiPlan plan_record_replay_scalar_abi(const MoiScalarRoutingState &rout
     const uint16_t base = *routing_state.exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
-        .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.router_jump
-                             ? routing_state.router_jump->scc_save_sgpr
+        .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.scalar_router
+                             ? routing_state.scalar_router->jump.scc_save_sgpr
                              : static_cast<uint16_t>(base + 4u),
     };
   }

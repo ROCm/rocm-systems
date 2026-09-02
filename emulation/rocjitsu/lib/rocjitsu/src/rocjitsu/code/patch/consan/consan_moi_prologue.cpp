@@ -564,10 +564,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context) {
-  return plan.indirect_jump &&
-         emit_moi_local_indirect_entry_island(
-             text, island_text_offset, cave_text_offset, anchor_text_offset, *plan.indirect_jump,
-             owner_descriptor_file_offsets, arch, patches, errors, context);
+  return plan.scalar_router && emit_moi_local_indirect_entry_island(
+                                   text, island_text_offset, cave_text_offset, anchor_text_offset,
+                                   plan.scalar_router->jump, owner_descriptor_file_offsets, arch,
+                                   patches, errors, context);
 }
 
 [[nodiscard]] bool emit_moi_local_indirect_kernel_entry_island(
@@ -2558,7 +2558,9 @@ void try_apply_owner_epoch_prologue_patch(
           !moi_entry_scalar_backup_preserves_persistent_outputs(
               emission, kernel_point.moi_exec_save_sgprs_persistent,
               kernel_point.moi_owner_sgpr.automatic(),
-              kernel_point.moi_inline_visible_evidence_sgpr, sgpr_base, sgpr_count)) {
+              kernel_point.moi_scalar_router ? kernel_point.moi_scalar_router->visible_evidence_sgpr
+                                             : std::nullopt,
+              sgpr_base, sgpr_count)) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup overlaps persistent output state");
         return;

@@ -719,9 +719,10 @@ if(_dispatch_placement MATCHES
     )
 endif()
 
-# Dispatch-key and call-return registers belong to one shared scalar-router
-# allocation. Do not restore mode-prefixed copies or independently optional
-# mechanism-owned fields in the broad operating point.
+# Every scalar router owns one indirect jump. Its optional dense-call and
+# Inline visible-evidence facets travel with that jump through owner-local
+# assignment, the broad operating point, and narrow mode projections. Do not
+# restore independently optional router fragments.
 file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "${_consan_dir}/*.inc")
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
@@ -761,6 +762,11 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
+        "moi_router_(jump|call)|moi_inline_visible_evidence_sgpr|(^|[^A-Za-z0-9_])(router_jump|router_call)[^A-Za-z0-9_]"
+        "scalar-router facets must retain one aggregate authority"
+    )
+    _consan_assert_no_match(
+        "${_file}"
         "(^|[^A-Za-z0-9_])moi_(owner|epoch)_vgpr[(]"
         "accepted owner and epoch projections must stay on the typed pair"
     )
@@ -771,6 +777,34 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 file(READ "${_consan_dir}/consan_options.h.inc" _consan_options_contract)
+if(NOT _consan_options_contract MATCHES
+       "struct ConSanMoiScalarRouterAllocation" OR
+   NOT _consan_options_contract MATCHES
+       "std::optional<ConSanMoiScalarRouterAllocation>[ 	]+scalar_router" OR
+   NOT _consan_options_contract MATCHES
+       "std::optional<ConSanMoiScalarRouterAllocation>[ 	]+moi_scalar_router")
+    message(FATAL_ERROR
+        "owner-local and global scalar routing must retain one shared aggregate"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_record_event_emission.h" _record_event_contract)
+if(NOT _record_event_contract MATCHES
+       "std::optional<ConSanMoiScalarRouterAllocation>[ \t]+scalar_router" OR
+   _record_event_contract MATCHES
+       "router_(dispatch_key|call_return)_sgpr")
+    message(FATAL_ERROR
+        "Record/Replay event emission must project the complete scalar-router allocation"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
+if(NOT _moi_placement_contract MATCHES
+       "moi_resource_owner_anchors_admit_scalar_router_ranges" OR
+   _moi_placement_contract MATCHES
+       "moi_resource_owner_(anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
+    message(FATAL_ERROR
+        "scalar-router anchor liveness and physical-VCC safety must retain one owner proof"
+    )
+endif()
 if(NOT _consan_options_contract MATCHES
        "point[.]moi_initialize_owner_epoch[ \t]*=[ \t]*options[.]moi_init_owner_epoch")
     message(FATAL_ERROR

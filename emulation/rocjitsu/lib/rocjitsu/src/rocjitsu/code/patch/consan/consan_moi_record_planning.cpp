@@ -26,8 +26,8 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
                std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
                                  &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
            return assignment != allocation.owner_transient_sgprs.end() &&
-                  assignment->branch_only_spill && assignment->router_jump &&
-                  !assignment->router_call;
+                  assignment->branch_only_spill && assignment->scalar_router &&
+                  !assignment->scalar_router->call;
          });
 }
 
@@ -87,6 +87,12 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
           *workgroup_sources);
     }
   }
+  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
+  if (const auto jump = moi_indirect_jump_sgprs(request, point)) {
+    scalar_router =
+        point.moi_scalar_router.value_or(ConSanMoiScalarRouterAllocation{.jump = *jump});
+    scalar_router->jump = *jump;
+  }
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,
       .moi_exec_save_sgpr = point.moi_exec_save_sgpr,
@@ -97,19 +103,13 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
       .automatic_moi_record_replay_sgpr_spill = point.has_compact_moi_scalar_spill(),
-      .router_dispatch_key_sgpr = point.moi_router_call
-                                      ? std::optional{point.moi_router_call->dispatch_key_sgpr}
-                                      : std::nullopt,
-      .router_call_return_sgpr = point.moi_router_call
-                                     ? std::optional{point.moi_router_call->call_return_sgpr}
-                                     : std::nullopt,
+      .scalar_router = scalar_router,
       .workgroup_sources = *workgroup_sources,
       .special_state = *special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources(
           {point, bound_resources,
            private_layout ? private_layout->dispatch_id_offset : std::nullopt}),
       .runtime_workgroup_gate = runtime_workgroup_gate,
-      .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };
 }
 

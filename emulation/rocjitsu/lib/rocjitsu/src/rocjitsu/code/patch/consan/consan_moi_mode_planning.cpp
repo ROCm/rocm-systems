@@ -112,8 +112,8 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                         .indirect_jump = std::nullopt,
                         .access_router_uses_dense_abi = access_router_uses_dense_abi};
   if (routing_state.has_scalar_spill()) {
-    if (routing_state.router_jump)
-      plan.indirect_jump = routing_state.router_jump;
+    if (routing_state.scalar_router)
+      plan.indirect_jump = routing_state.scalar_router->jump;
     return plan;
   }
   if (!routing_state.exec_save_sgpr || !special_state)
@@ -140,14 +140,15 @@ make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
     return std::nullopt;
   }
   const bool spill_backed = routing_state.has_compact_spill();
-  if (spill_backed && (!routing_state.router_jump || !routing_state.router_call))
+  const ConSanMoiRouterCallSgprs *call_state = moi_scalar_router_call(routing_state.scalar_router);
+  if (spill_backed && !call_state)
     return std::nullopt;
 
   const uint16_t base = *routing_state.exec_save_sgpr;
-  const uint16_t dispatch_key_sgpr = spill_backed ? routing_state.router_call->dispatch_key_sgpr
-                                                  : static_cast<uint16_t>(base + 5u);
+  const uint16_t dispatch_key_sgpr =
+      spill_backed ? call_state->dispatch_key_sgpr : static_cast<uint16_t>(base + 5u);
   const uint16_t call_return_sgpr =
-      spill_backed ? routing_state.router_call->call_return_sgpr : static_cast<uint16_t>(base + 6u);
+      spill_backed ? call_state->call_return_sgpr : static_cast<uint16_t>(base + 6u);
   const bool explicit_key = target.direct_call_form != ConSanDirectCallForm::SCallI64;
   return MoiDenseRouterPlan{
       .indirect_jump = *scalar_abi.indirect_jump,

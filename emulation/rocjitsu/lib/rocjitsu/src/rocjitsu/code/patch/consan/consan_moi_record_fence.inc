@@ -226,16 +226,18 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
+    const ConSanMoiRouterCallSgprs *call_state =
+        moi_scalar_router_call(candidate_options.scalar_router);
     const std::optional<uint16_t> dense_call_return_sgpr =
         candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? candidate_options.router_call_return_sgpr
+            ? (call_state ? std::optional{call_state->call_return_sgpr} : std::nullopt)
             : (candidate_options.moi_exec_save_sgpr
                    ? std::optional<uint16_t>(
                          static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 6u))
                    : std::nullopt);
     const std::optional<uint16_t> dense_dispatch_key_sgpr =
         candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? candidate_options.router_dispatch_key_sgpr
+            ? (call_state ? std::optional{call_state->dispatch_key_sgpr} : std::nullopt)
             : (candidate_options.moi_exec_save_sgpr
                    ? std::optional<uint16_t>(
                          static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 5u))

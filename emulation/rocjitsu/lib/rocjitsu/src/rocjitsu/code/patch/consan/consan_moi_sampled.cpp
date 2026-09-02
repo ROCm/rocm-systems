@@ -143,8 +143,8 @@ moi_sampled_access_return_scc_sgpr(const MoiScalarRoutingState &routing_state) {
   if (!routing_state.exec_save_sgpr)
     return std::nullopt;
   if (routing_state.has_compact_spill()) {
-    return routing_state.router_jump
-               ? std::optional<uint16_t>(routing_state.router_jump->scc_save_sgpr)
+    return routing_state.scalar_router
+               ? std::optional<uint16_t>(routing_state.scalar_router->jump.scc_save_sgpr)
                : std::nullopt;
   }
   const auto publication = moi_sampled_publication_state_sgprs(routing_state.exec_save_sgpr);
@@ -295,8 +295,8 @@ MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarRoutingState &routing_st
       publication
           ? std::optional{consan_detail::MoiSpecialStateSgprs{
                 .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-                .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.router_jump
-                                     ? routing_state.router_jump->scc_save_sgpr
+                .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.scalar_router
+                                     ? routing_state.scalar_router->jump.scc_save_sgpr
                                      : publication->publication_exec_save_sgpr,
             }}
           : std::nullopt;

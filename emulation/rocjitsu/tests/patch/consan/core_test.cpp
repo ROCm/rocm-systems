@@ -218,9 +218,12 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline,
       .moi_exec_save_sgprs_persistent = true,
       .moi_dynamic_stack_spill = true,
-      .moi_router_jump = ConSanIndirectJumpSgprs{2u, 7u},
-      .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
-      .moi_inline_visible_evidence_sgpr = 8u,
+      .moi_scalar_router =
+          ConSanMoiScalarRouterAllocation{
+              .jump = ConSanIndirectJumpSgprs{2u, 7u},
+              .call = ConSanMoiRouterCallSgprs{12u, 14u},
+              .visible_evidence_sgpr = 8u,
+          },
       .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
       .moi_dispatch_identity = {},
       .moi_persistent_sgprs = {},
@@ -266,10 +269,11 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_sgpr(16u, false); });
   expect_field_participates(
       [](auto &value) { value.moi_dispatch_identity.set_private_fallback(false); });
-  expect_field_participates([](auto &value) { value.moi_router_jump.reset(); });
-  expect_field_participates([](auto &value) { value.moi_inline_visible_evidence_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.moi_scalar_router.reset(); });
+  expect_field_participates(
+      [](auto &value) { value.moi_scalar_router->visible_evidence_sgpr.reset(); });
   expect_field_participates([](auto &value) { value.moi_branch_only_spill.reset(); });
-  expect_field_participates([](auto &value) { value.moi_router_call.reset(); });
+  expect_field_participates([](auto &value) { value.moi_scalar_router->call.reset(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.reset_sgpr(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_vgpr(18u); });
   expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });

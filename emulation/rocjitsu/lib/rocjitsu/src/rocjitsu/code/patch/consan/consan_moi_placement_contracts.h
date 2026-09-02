@@ -129,8 +129,7 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
 struct MoiScalarRoutingState {
   std::optional<uint16_t> exec_save_sgpr;
   ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
-  std::optional<ConSanIndirectJumpSgprs> router_jump;
-  std::optional<ConSanMoiRouterCallSgprs> router_call;
+  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
   bool has_branch_only_spill = false;
 
   [[nodiscard]] bool has_scalar_spill() const {
@@ -151,8 +150,7 @@ project_moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
   return {
       .exec_save_sgpr = point.moi_exec_save_sgpr,
       .spill_layout = point.automatic_moi_scalar_spill_layout,
-      .router_jump = point.moi_router_jump,
-      .router_call = point.moi_router_call,
+      .scalar_router = point.moi_scalar_router,
       .has_branch_only_spill = point.moi_branch_only_spill.has_value(),
   };
 }
@@ -349,13 +347,9 @@ moi_resource_preceding_instruction(const MoiResourcePlanningState &state, uint64
     MoiResourcePlanningState &state, std::span<const uint64_t> owners,
     std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
 
-[[nodiscard]] bool moi_resource_owner_anchors_admit_call_clobber_ranges(
+[[nodiscard]] bool moi_resource_owner_anchors_admit_scalar_router_ranges(
     MoiResourcePlanningState &state, std::span<const uint64_t> owners,
     std::span<const uint64_t> anchors, std::span<const MoiSgprRange> ranges);
-
-[[nodiscard]] bool moi_resource_owner_ranges_conflict_with_physical_vcc(
-    MoiResourcePlanningState &state, std::span<const uint64_t> owners,
-    std::span<const MoiSgprRange> ranges, rj_code_arch_t arch);
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,

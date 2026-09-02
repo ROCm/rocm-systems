@@ -101,10 +101,8 @@ MoiInlineShadowScalarState
 project_inline_shadow_scalar_state(const ConSanMoiOperatingPoint &point) {
   return {
       .exec_save_sgpr = point.moi_exec_save_sgpr,
-      .router_call = point.moi_router_call,
-      .visible_evidence_sgpr = point.moi_inline_visible_evidence_sgpr,
+      .scalar_router = point.moi_scalar_router,
       .inline_scalar_spill = point.has_inline_moi_scalar_spill(),
-      .scalar_spill = point.has_moi_scalar_spill(),
       .branch_only_spill = point.moi_branch_only_spill.has_value(),
       .exec_save_persistent = point.moi_exec_save_sgprs_persistent,
       .dynamic_stack_spill = point.moi_dynamic_stack_spill,
@@ -116,7 +114,7 @@ inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state) {
   if (!state.exec_save_sgpr)
     return std::nullopt;
   if (state.inline_scalar_spill)
-    return state.visible_evidence_sgpr;
+    return state.scalar_router ? state.scalar_router->visible_evidence_sgpr : std::nullopt;
   if (!state.exec_save_persistent)
     return std::nullopt;
   return static_cast<uint16_t>(*state.exec_save_sgpr + (state.dynamic_stack_spill ? 25u : 24u));
@@ -151,7 +149,7 @@ bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &sta
   if (!state.exec_save_sgpr)
     return true;
   if (state.inline_scalar_spill && inline_access_present &&
-      (!state.router_call && !state.branch_only_spill)) {
+      ((!state.scalar_router || !state.scalar_router->call) && !state.branch_only_spill)) {
     errors.emplace_back(
         "ConSan MOI spill-backed inline-shadow probes require a dense router or branch-only "
         "scalar spill");
@@ -345,11 +343,13 @@ plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
   uint16_t dispatch_key_sgpr = 0u;
   std::optional<uint16_t> call_return_sgpr;
   if (routing_state.has_inline_spill()) {
-    if (!routing_state.router_call)
+    const ConSanMoiRouterCallSgprs *call_state =
+        moi_scalar_router_call(routing_state.scalar_router);
+    if (!call_state)
       return std::nullopt;
-    dispatch_key_sgpr = routing_state.router_call->dispatch_key_sgpr;
+    dispatch_key_sgpr = call_state->dispatch_key_sgpr;
     if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
-      call_return_sgpr = routing_state.router_call->call_return_sgpr;
+      call_return_sgpr = call_state->call_return_sgpr;
   } else {
     if (!routing_state.exec_save_sgpr)
       return std::nullopt;

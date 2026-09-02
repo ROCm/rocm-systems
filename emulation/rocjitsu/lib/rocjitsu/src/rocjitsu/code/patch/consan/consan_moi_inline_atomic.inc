@@ -312,12 +312,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
       if (private_layout->dispatch_id_offset) {
-        if (!candidate_point.moi_router_jump) {
+        if (!candidate_point.moi_scalar_router) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic private dispatch identity has no owner-local reload pair");
           continue;
         }
-        candidate_point.moi_dispatch_identity.set_sgpr(candidate_point.moi_router_jump->pc_sgpr);
+        candidate_point.moi_dispatch_identity.set_sgpr(
+            candidate_point.moi_scalar_router->jump.pc_sgpr);
       }
     }
     if (candidate_point.has_inline_moi_scalar_spill()) {
@@ -587,7 +588,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           ConSanMoiOperatingPoint candidate_point = group_point;
           if (planned.private_layout && planned.private_layout->dispatch_id_offset)
             candidate_point.moi_dispatch_identity.set_sgpr(
-                candidate_point.moi_router_jump->pc_sgpr);
+                candidate_point.moi_scalar_router->jump.pc_sgpr);
           auto emission = plan_inline_atomic_emission(
               active_bytes, planned.candidate, options, candidate_point, result.moi_operating_point,
               semantics, planned.resources.base, planned.address_plan.scratch_vgpr_count,
