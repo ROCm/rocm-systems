@@ -21,7 +21,6 @@
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_apply.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"

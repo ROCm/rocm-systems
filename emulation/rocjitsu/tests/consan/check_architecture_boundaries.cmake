@@ -860,6 +860,8 @@ file(READ "${_consan_dir}/consan_moi_record_replay.h"
      _record_replay_contract)
 file(READ "${_consan_dir}/consan_moi_inline_shadow.inc"
      _inline_shadow_access_owner)
+file(READ "${_consan_dir}/consan_moi_inline_shadow.h"
+     _inline_shadow_contract)
 file(READ "${_consan_dir}/consan_moi_record_replay.inc"
      _record_replay_access_owner)
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h"
@@ -916,6 +918,18 @@ if(NOT _moi_barrier_contract MATCHES
        "try_apply_inline_shadow_barrier_patch[(][^;]*barrier_reservation")
     message(FATAL_ERROR
         "access producers and mode entry points must retain exact barrier reservation ownership"
+    )
+endif()
+if(NOT _inline_shadow_contract MATCHES
+       "try_apply_inline_shadow_barrier_patch" OR
+   NOT _inline_barrier_owner MATCHES
+       "try_apply_inline_shadow_barrier_patch" OR
+   _moi_barrier_contract MATCHES
+       "try_apply_inline_shadow_barrier_patch" OR
+   _moi_barrier_planning MATCHES
+       "try_apply_inline_shadow_barrier_patch")
+    message(FATAL_ERROR
+        "the InlineShadow barrier entry point must remain in mode-owned contract and implementation files"
     )
 endif()
 if(NOT _moi_placement_contract MATCHES

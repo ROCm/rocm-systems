@@ -160,3 +160,18 @@
   }
   return words;
 }
+
+void try_apply_inline_shadow_barrier_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options,
+    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state,
+    const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
+    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
+  if (!options.moi_track_barriers)
+    return;
+  ConSanMoiOperatingPoint barrier_point = operating_point;
+  if (barrier_point.has_inline_moi_scalar_spill())
+    barrier_point.moi_exec_save_sgpr.reset();
+  try_apply_shared_barrier_patch(bytes, options, barrier_point, arch, resource_state,
+                                 reserved_sync_islands, semantics, result);
+}
