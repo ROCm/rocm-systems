@@ -457,9 +457,12 @@ def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    mode_round = 'amdgpu::fp_mode::fma_f32_to_bf16('
+    mode_round = 'amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
     assert mode_round in cpp_lo
     assert mode_round in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_lo
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' not in cpp_f32
     assert 'std::fma(a, b, c)' not in cpp_lo
     assert 'std::fma(a, b, c)' not in cpp_hi
     assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
