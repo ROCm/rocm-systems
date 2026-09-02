@@ -816,3 +816,89 @@ word bounds and their transactional rejection. No pre-existing behavior bug
 was found during this replacement. Macro-slice 5 therefore closes as a
 successful subsystem replacement, but the campaign remains active pending the
 required whole-codebase reassessment and further high-leverage work.
+
+### 10.6 Macro-slice 6: one dense MOI relay transaction
+
+The review-floor reassessment returned to the whole production tree rather
+than extending the direct-reservoir work mechanically. Exact-clone scans found
+little meaningful copy-and-paste, and a semantic read of the largest remaining
+files rejected several size-only leads. The host hook body is predominantly
+distinct process-lifetime ownership, HSA interception, report collection, and
+verdict policy. Final validation's independent byte, inventory, ownership, and
+descriptor proofs remain necessary; the attempted decoded-proof replacement
+already demonstrated that its large route validators cannot be collapsed into
+the decoder economically. MOI access orchestration still has the genuinely
+different mode evidence, gate, replay, and return protocols exposed by the
+Macro-slice 1 experiment. Automatic MOI placement is large and procedural, but
+its current volume is mostly different lifetime and capacity fallbacks; a
+normalized allocator has not yet identified 500 lines that would disappear
+rather than move behind a more general solver.
+
+The stronger current finding is a repeated *mechanism*, not textual cloning.
+Four synchronization paths independently implement the same dense-relay
+transaction: Sampled barriers, Sampled atomics, InlineShadow atomics, and the
+shared Record/Replay/InlineShadow barrier lowerer. Each path partitions sites
+by container, resolves one owner-local scalar router, finds a liveness-safe
+relocated host, reserves appended bodies and a dispatcher, preserves the
+host's displaced instructions, emits an entry island, emits a keyed or
+call-return dispatcher, rewrites route anchors, and publishes the same two
+relay patch records. The paths already share `MoiDenseRouteSite`,
+`MoiDenseRouterPlan`, target-normalized call forms, scalar-range proofs,
+relocated-host search, indirect-jump builders, and patch kinds. Their repeated
+control flow exists because those common products stop immediately before the
+transaction that consumes them.
+
+The semantic differences are bounded inputs to that transaction. A mode owner
+chooses which sites are stranded, builds each evidence body, supplies its
+anchor geometry and lowering commit, and decides whether a missing host skips
+the group or falls back to direct lowering. Record/Replay barriers may first
+extend an existing S_CALL_I64 access dispatcher. Sampled gfx1250 barriers use
+clone-local route keys, and spill-backed Sampled atomics requalify their scalar
+tuple at the late-discovered call anchors. InlineShadow atomics use the
+explicit-key form instead of a scalar call. Those policies stay in their mode
+owners; none justifies four implementations of host relocation, island and
+dispatcher construction, transactional byte publication, or relay metadata.
+
+The deletion thesis is:
+
+- introduce one normalized dense-relay transaction whose input is a resolved
+  router, owner and host proof, a host-return route, and a sequence of already
+  planned semantic body routes;
+- make that transaction own dispatcher reservation and encoding, displaced
+  host return, entry-island encoding, anchor encoding, bounds checks,
+  transactional byte publication, and the common host/dispatcher patch
+  records;
+- express the existing keyed, tagged-SCC, call-return, and clone-local forms as
+  small route facts derived from `MoiDenseRouterPlan` and the target profile,
+  rather than mode switches or callbacks that reconstruct each old path;
+- leave site selection, scalar-tuple requalification, access-dispatcher reuse,
+  evidence-body construction, mode diagnostics, lowering commits, and direct
+  fallback in their present semantic owners;
+- migrate all four synchronization consumers, and then migrate the existing
+  dense-access emitter wherever the same normalized transaction removes more
+  code without weakening its already-common placement boundary; and
+- delete the Sampled-only dispatcher/patch helpers and every displaced local
+  dense host, island, dispatcher, anchor, and publication loop in the same
+  macro-slice.
+
+The four synchronization implementations contain roughly 1,250 production
+lines of repeated dense-relay mechanics, in addition to the roughly 250-line
+common dense-access emitter. The conservative target is at least 1,000 gross
+implementation lines removed and no more than 450 lines of normalized
+transaction, route facts, and retained mode adaptation, for at least 550 net
+lines deleted. Access migration is part of the slice only if it improves that
+net result and leaves the access planning boundary clearer. The attempt is
+abandoned and reverted if the transaction must accept mode enums, evidence
+objects, or a union-shaped callback protocol; if mode owners cease to control
+site admission and body semantics; if route validation becomes less
+independent; or if complete synchronization convergence cannot clear the
+500-line net abort floor.
+
+Focused validation covers direct and far Sampled barriers and atomics,
+InlineShadow atomics, Record/Replay and InlineShadow barriers, S_CALL_B64,
+S_CALL_I64 clone translation, explicit and SCC-tagged keys, scalar-spill tuple
+requalification, relocated host execution, access-dispatcher reuse, and exact
+patch/lowering publication across the five emulated targets. Existing
+exact-byte, corruption, resource-pressure, and architecture-boundary tests are
+the differential oracle; any uncovered behavior defect receives a regression
+test. The cutover gate remains the complete nonphysical RocJitsu matrix.
