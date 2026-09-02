@@ -226,29 +226,16 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const MoiRecordEventEmissionPlan &candidate_options = planned.emission;
-    const ConSanMoiRouterCallSgprs *call_state =
-        moi_scalar_router_call(candidate_options.scalar_router);
+    const MoiDenseRouterPlan *dense_router =
+        candidate_options.dense_router ? &*candidate_options.dense_router : nullptr;
     const std::optional<uint16_t> dense_call_return_sgpr =
-        candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? (call_state ? std::optional{call_state->call_return_sgpr} : std::nullopt)
-            : (candidate_options.moi_exec_save_sgpr
-                   ? std::optional<uint16_t>(
-                         static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 6u))
-                   : std::nullopt);
-    const std::optional<uint16_t> dense_dispatch_key_sgpr =
-        candidate_options.automatic_moi_record_replay_sgpr_spill
-            ? (call_state ? std::optional{call_state->dispatch_key_sgpr} : std::nullopt)
-            : (candidate_options.moi_exec_save_sgpr
-                   ? std::optional<uint16_t>(
-                         static_cast<uint16_t>(*candidate_options.moi_exec_save_sgpr + 5u))
-                   : std::nullopt);
+        dense_router ? dense_router->call_return_sgpr : std::nullopt;
     // These scalars are used only when the optionals are engaged and a dense
     // relay is selected. Materializing them here keeps that invariant explicit
     // without asking GCC 13 to retain optional engagement across the long
     // placement path.
     const uint16_t dense_call_return = dense_call_return_sgpr.value_or(0u);
-    const uint16_t dense_dispatch_key = dense_dispatch_key_sgpr.value_or(0u);
-    const auto dense_indirect_state = record_event_indirect_jump(candidate_options);
+    const uint16_t dense_dispatch_key = dense_router ? dense_router->dispatch_key_sgpr : 0u;
     const uint64_t patch_text_offset = planned.candidate.patch_text_offset;
     const uint32_t patch_size = planned.candidate.patch_size;
     const bool direct_entry =
@@ -323,8 +310,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       return;
     std::optional<DenseFenceRelay> dense_relay;
     if (!direct_entry && !has_indirect_entry_island && consan_arch_has_s_call_i64(arch) &&
-        planned.candidate.kernel_descriptor_file_offset && dense_call_return_sgpr &&
-        dense_dispatch_key_sgpr && dense_indirect_state) {
+        planned.candidate.kernel_descriptor_file_offset && dense_call_return_sgpr && dense_router) {
       dense_relay = find_dense_fence_relay(*planned.candidate.kernel_descriptor_file_offset);
       if (dense_relay &&
           !compute_sopp_branch_simm16(patch_text_offset, dense_relay->island_offset)) {
@@ -391,7 +377,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (has_indirect_entry_island) {
       if (compact_entry_without_scc && entry_island_at_anchor) {
         constexpr size_t kCompactEntryIslandWords = 7u;
-        const auto jump_sgprs = record_event_indirect_jump(candidate_options);
+        const auto jump_sgprs = candidate_options.indirect_jump;
         std::vector<uint32_t> island_words;
         bool encoded = false;
         if (jump_sgprs) {
@@ -467,8 +453,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       const uint64_t matched_offset =
           dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
       if (!append_moi_scc_preserving_indirect_jump(
-              matched_words, matched_offset, placement->body_offset, dense_indirect_state->pc_sgpr,
-              candidate_options.special_state.scc_save_sgpr, /*capture_scc=*/false, arch)) {
+              matched_words, matched_offset, placement->body_offset,
+              dense_router->indirect_jump.pc_sgpr, candidate_options.special_state.scc_save_sgpr,
+              /*capture_scc=*/false, arch)) {
         result.errors.emplace_back(
             "ConSan MOI fence record patch could not encode dense dispatch target");
         return;

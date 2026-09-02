@@ -804,13 +804,20 @@ if(NOT _consan_options_contract MATCHES
 endif()
 file(READ "${_consan_dir}/consan_moi_record_event_emission.h" _record_event_contract)
 if(NOT _record_event_contract MATCHES
-       "std::optional<ConSanMoiScalarRouterAllocation>[ \t]+scalar_router" OR
+       "std::optional<ConSanIndirectJumpSgprs>[ \t]+indirect_jump" OR
+   NOT _record_event_contract MATCHES
+       "std::optional<MoiDenseRouterPlan>[ \t]+dense_router" OR
    _record_event_contract MATCHES
-       "router_(dispatch_key|call_return)_sgpr")
+       "ConSanMoiScalarRouterAllocation|automatic_moi_record_replay_sgpr_spill|router_(dispatch_key|call_return)_sgpr")
     message(FATAL_ERROR
-        "Record/Replay event emission must project the complete scalar-router allocation"
+        "Record/Replay event emission must retain exact indirect and dense routing products"
     )
 endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_fence.inc"
+    "moi_scalar_router_call|automatic_moi_record_replay_sgpr_spill|moi_exec_save_sgpr[ \t]*[+]"
+    "Record/Replay fence lowering must not reconstruct dense-router registers"
+)
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_anchors_admit_scalar_router_ranges" OR

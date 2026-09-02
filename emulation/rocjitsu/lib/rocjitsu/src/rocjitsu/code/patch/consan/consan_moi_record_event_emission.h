@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
+#include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 
@@ -27,19 +28,14 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
-  bool automatic_moi_record_replay_sgpr_spill = false;
-  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
+  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
+  std::optional<MoiDenseRouterPlan> dense_router;
   ConSanMoiWorkgroupSources workgroup_sources;
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   uint16_t required_sgpr_count = 0;
 };
-
-[[nodiscard]] inline std::optional<ConSanIndirectJumpSgprs>
-record_event_indirect_jump(const MoiRecordEventEmissionPlan &plan) {
-  return plan.scalar_router ? std::optional{plan.scalar_router->jump} : std::nullopt;
-}
 
 [[nodiscard]] inline bool append_dynamic_record_store_moi_report_dispatch_id_pair(
     std::vector<uint32_t> &words, const consan_moi_detail::DynamicRecordLayout &layout,
@@ -54,7 +50,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
                                      uint64_t return_text_offset,
                                      const MoiRecordEventEmissionPlan &plan, rj_code_arch_t arch) {
   return append_moi_direct_or_indirect_return(words, cave_text_offset, return_text_offset,
-                                              record_event_indirect_jump(plan), arch);
+                                              plan.indirect_jump, arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(

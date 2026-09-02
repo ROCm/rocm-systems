@@ -3,6 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
+#include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 
 namespace rocjitsu {
 namespace {
@@ -21,6 +22,7 @@ using consan_moi_impl::plan_moi_operand_overlap_spill;
 using consan_moi_impl::plan_moi_persistent_state_demand;
 using consan_moi_impl::plan_moi_scalar_abi;
 using consan_moi_impl::resolve_moi_access_resource_facts;
+using consan_moi_impl::resolve_moi_record_event_emission_plan;
 
 consan_moi_impl::MoiObjectModePlan
 plan_hypothetical_mode(const ConSanRequest &, const BoundRuntimeResources &,
@@ -447,6 +449,42 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   EXPECT_EQ(plan->dispatch_key_sgpr, plan->indirect_jump.pc_sgpr);
   EXPECT_EQ(plan->call_return_sgpr, 48u);
   EXPECT_FALSE(plan->explicit_key);
+}
+
+TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarRoutingProducts) {
+  ConSanRequest request;
+  request.moi_engine = ConSanMoiEngine::RecordReplay;
+  BoundRuntimeResources resources;
+  resources.moi_report_buffer_address = 0x100000u;
+  ConSanMoiOperatingPoint point;
+  point.moi_exec_save_sgpr = 20u;
+  point.moi_persistent_sgprs.record_replay_workgroup =
+      ConSanMoiPersistentWorkgroupRegisters{6u, 7u, 8u};
+
+  auto scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  auto emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
+                                                         ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(emission);
+  EXPECT_EQ(emission->indirect_jump, scalar_abi.indirect_jump);
+  ASSERT_TRUE(emission->dense_router);
+  EXPECT_EQ(emission->dense_router->indirect_jump, *scalar_abi.indirect_jump);
+  EXPECT_EQ(emission->dense_router->dispatch_key_sgpr, 25u);
+  EXPECT_EQ(emission->dense_router->call_return_sgpr, 26u);
+
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+      .call = ConSanMoiRouterCallSgprs{44u, 46u},
+  };
+  scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
+                                                    ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(emission);
+  EXPECT_EQ(emission->indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  ASSERT_TRUE(emission->dense_router);
+  EXPECT_EQ(emission->dense_router->indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  EXPECT_EQ(emission->dense_router->dispatch_key_sgpr, 44u);
+  EXPECT_EQ(emission->dense_router->call_return_sgpr, 46u);
 }
 
 TEST(ConSanMoiModePlanning, RecordReplaySelectsDenseRoutingFromNormalizedTargetFacts) {

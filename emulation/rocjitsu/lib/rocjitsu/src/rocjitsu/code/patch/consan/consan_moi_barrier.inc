@@ -2493,7 +2493,7 @@ void try_apply_record_replay_barrier_record_patch(
           break;
         }
       }
-      const auto jump_sgprs = record_event_indirect_jump(emission);
+      const auto jump_sgprs = emission.indirect_jump;
       const auto backup_vgpr = find_moi_borrowed_entry_backup_vgpr(
           *standalone_resource_state, planned.resources.owner_descriptor_file_offsets,
           site.text_offset, planned.resources.required_vgpr_count,
@@ -2697,7 +2697,7 @@ void try_apply_record_replay_barrier_record_patch(
             "ConSan MOI barrier borrowed entry lost its branch-only return route");
         return;
       }
-      const ConSanIndirectJumpSgprs jump_sgprs = *record_event_indirect_jump(emission);
+      const ConSanIndirectJumpSgprs jump_sgprs = *emission.indirect_jump;
       info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
           .jump = jump_sgprs,
           .backup_vgpr = staged.borrowed_entry->backup_vgpr,

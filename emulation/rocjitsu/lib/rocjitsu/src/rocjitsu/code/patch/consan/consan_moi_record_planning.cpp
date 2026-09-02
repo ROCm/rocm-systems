@@ -87,12 +87,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
           *workgroup_sources);
     }
   }
-  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
-  if (const auto jump = scalar_abi.indirect_jump) {
-    scalar_router =
-        point.moi_scalar_router.value_or(ConSanMoiScalarRouterAllocation{.jump = *jump});
-    scalar_router->jump = *jump;
-  }
+  const MoiScalarRoutingState routing_state = moi_scalar_routing_state(point);
+  const MoiTargetFacts target = resolve_moi_target_facts(arch);
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,
       .moi_exec_save_sgpr = point.moi_exec_save_sgpr,
@@ -102,8 +98,10 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
-      .automatic_moi_record_replay_sgpr_spill = point.has_compact_moi_scalar_spill(),
-      .scalar_router = scalar_router,
+      .indirect_jump = scalar_abi.indirect_jump,
+      .dense_router = target.available
+                          ? make_recording_moi_dense_router_plan(scalar_abi, routing_state, target)
+                          : std::nullopt,
       .workgroup_sources = *workgroup_sources,
       .special_state = *scalar_abi.special_state,
       .dispatch_id_sources = moi_bound_dispatch_id_sources(
