@@ -610,16 +610,14 @@ struct ConSanPatchAbiEffects {
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
-  std::optional<uint16_t> indirect_pc_sgpr;
-  std::optional<uint16_t> indirect_saved_scc_sgpr;
-  std::optional<uint16_t> indirect_saved_vcc_sgpr;
-  std::optional<uint64_t> indirect_return_offset;
-  std::optional<uint16_t> indirect_return_pc_sgpr;
-  /// Return-end SCC save used by a wave64 relay reservoir whose absolute
-  /// branch scratch is an endpoint-dead ordinary SGPR pair. Wave32 reservoirs
-  /// instead preserve SCC in inactive EXEC_HI and populate the VCC-save field.
-  std::optional<uint16_t> indirect_return_saved_scc_sgpr;
-  std::optional<uint16_t> indirect_return_saved_vcc_sgpr;
+  /// Exact scalar tuple borrowed by an MOI branch-only entry while its live
+  /// values are preserved in a vector-register reservoir.
+  std::optional<ConSanIndirectJumpSgprs> moi_borrowed_entry_jump;
+  /// Exact route of an ordinary, non-dense SuperCollider indirect body.
+  std::optional<ConSanSuperColliderIndirectBodyRoute> sc_indirect_body_route;
+  /// Mutually exclusive wave32-VCC or ordinary-scalar route used by an
+  /// indirect SuperCollider relay reservoir.
+  std::optional<ConSanSuperColliderRelayReservoirRoute> sc_relay_reservoir_route;
   /// Entry island paired with this MOI dense dispatcher. This explicit
   /// relation lets later synchronization composition reuse an access router
   /// without depending on incidental result.patches ordering.

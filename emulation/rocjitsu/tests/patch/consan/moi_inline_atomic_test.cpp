@@ -998,7 +998,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   options.scratch_vgpr = 8u;
   options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
   options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1008,7 +1008,7 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
+      .router_jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_spill = std::nullopt,
@@ -4894,7 +4894,7 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_options.moi_exec_save_sgpr = 4u;
   atomic_only_options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   atomic_only_options.moi_inline_visible_evidence_sgpr = 40u;
-  atomic_only_options.moi_router_jump = ConSanMoiIndirectJumpSgprs{42u, 46u};
+  atomic_only_options.moi_router_jump = ConSanIndirectJumpSgprs{42u, 46u};
   atomic_only_options.moi_router_call = ConSanMoiRouterCallSgprs{41u, 44u};
   const ConSanTransformArtifacts atomic_only = test_lower_consan(
       make_rdna4_lds_code_object(atomic_only_words, "inline_atomic_only_scalar_spill"),
@@ -4934,7 +4934,7 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   options.moi_exec_save_sgpr = 4u;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 40u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{42u, 46u};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{42u, 46u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{41u, 44u};
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;

@@ -112,7 +112,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
               !sc_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
               !sc_sgpr_range_overlaps_delay_source(*scc_save, 1u, options) &&
               dead_for_every_owner(*scc_save, 1u)) {
-            return LdsCheckTrapIndirectScalarScratch{*vcc_pair, *pc_pair, *scc_save};
+            return LdsCheckTrapIndirectScalarScratch{*vcc_pair, {*pc_pair, *scc_save}};
           }
           if (*scc_save + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
             break;
@@ -1564,12 +1564,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           return;
         }
         const auto &scalar = *candidate.indirect_scratch;
-        planned.info.indirect_pc_sgpr = scalar.pc_sgpr_pair;
-        planned.info.indirect_saved_scc_sgpr = scalar.scc_save_sgpr;
-        planned.info.indirect_saved_vcc_sgpr = scalar.vcc_save_sgpr;
         if (candidate.entry_island_at_anchor) {
           const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
-              scalar.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+              scalar.jump.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
           if (!restore_scc) {
             result.errors.emplace_back(
                 "ConSan flat check/trap proof could not restore SCC before displaced tail");
@@ -1580,22 +1577,26 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                     candidate.displaced_tail_words.begin(),
                                     candidate.displaced_tail_words.end());
         }
-        planned.info.indirect_return_offset =
-            candidate.placement->body_offset + planned.cave_words.size() * sizeof(uint32_t);
-        planned.info.required_sgpr_count = std::max<uint16_t>(
-            planned.info.required_sgpr_count,
-            std::max<uint16_t>(std::max<uint16_t>(static_cast<uint16_t>(scalar.pc_sgpr_pair + 2u),
-                                                  static_cast<uint16_t>(scalar.scc_save_sgpr + 1u)),
-                               static_cast<uint16_t>(scalar.vcc_save_sgpr + 2u)));
-        const bool return_encoded = candidate.entry_island_at_anchor
-                                        ? append_lds_check_trap_indirect_jump(
-                                              planned.cave_words, candidate.placement->body_offset,
-                                              candidate.placement->return_target,
-                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target)
-                                        : append_lds_check_trap_indirect_return(
-                                              planned.cave_words, candidate.placement->body_offset,
-                                              candidate.placement->return_target,
-                                              scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target);
+        planned.info.sc_indirect_body_route = ConSanSuperColliderIndirectBodyRoute{
+            .jump = scalar.jump,
+            .vcc_save_sgpr = scalar.vcc_save_sgpr,
+            .return_offset =
+                candidate.placement->body_offset + planned.cave_words.size() * sizeof(uint32_t),
+        };
+        planned.info.required_sgpr_count = static_cast<uint16_t>(
+            std::max<uint32_t>(planned.info.required_sgpr_count,
+                               std::max(scalar.jump.minimum_required_sgpr_count(),
+                                        static_cast<uint32_t>(scalar.vcc_save_sgpr) + 2u)));
+        const bool return_encoded =
+            candidate.entry_island_at_anchor
+                ? append_lds_check_trap_indirect_jump(
+                      planned.cave_words, candidate.placement->body_offset,
+                      candidate.placement->return_target, scalar.jump.pc_sgpr,
+                      scalar.jump.scc_save_sgpr, target)
+                : append_lds_check_trap_indirect_return(
+                      planned.cave_words, candidate.placement->body_offset,
+                      candidate.placement->return_target, scalar.jump.pc_sgpr,
+                      scalar.jump.scc_save_sgpr, target);
         const uint64_t entry_island_offset = candidate.entry_island_at_anchor
                                                  ? site.physical_id.original_text_offset
                                                  : candidate.entry_island->text_offset;
@@ -1603,7 +1604,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
             planned.cave_words.size() * sizeof(uint32_t) != candidate.placement->body_size ||
             !append_lds_check_trap_indirect_jump(
                 planned.entry_island_words, entry_island_offset, candidate.placement->body_offset,
-                scalar.pc_sgpr_pair, scalar.scc_save_sgpr, target)) {
+                scalar.jump.pc_sgpr, scalar.jump.scc_save_sgpr, target)) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode indirect relay");
           return;

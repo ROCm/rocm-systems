@@ -118,7 +118,7 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
   }
   if (!routing_state.exec_save_sgpr || !special_state)
     return plan;
-  plan.indirect_jump = ConSanMoiIndirectJumpSgprs{
+  plan.indirect_jump = ConSanIndirectJumpSgprs{
       .pc_sgpr = static_cast<uint16_t>(*routing_state.exec_save_sgpr + fixed_indirect_pc_offset),
       .scc_save_sgpr = special_state->scc_save_sgpr,
   };
@@ -191,7 +191,7 @@ moi_special_state_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPo
   return plan_moi_scalar_abi(request, point).special_state;
 }
 
-std::optional<ConSanMoiIndirectJumpSgprs>
+std::optional<ConSanIndirectJumpSgprs>
 moi_indirect_jump_sgprs(const ConSanRequest &request, const ConSanMoiOperatingPoint &point) {
   return plan_moi_scalar_abi(request, point).indirect_jump;
 }

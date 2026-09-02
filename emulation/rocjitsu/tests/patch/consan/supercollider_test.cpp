@@ -54,6 +54,46 @@ TEST(ConSan, SuperColliderScalarVccSpillOwnsReservoirStrategy) {
   EXPECT_FALSE(spill.is_well_formed());
 }
 
+TEST(ConSan, SuperColliderIndirectRoutesOwnMutuallyExclusiveScalarStrategies) {
+  ConSanSuperColliderIndirectBodyRoute body{
+      .jump = {8u, 10u},
+      .vcc_save_sgpr = 12u,
+      .return_offset = 64u,
+  };
+  EXPECT_TRUE(body.is_well_formed(/*vcc_save_width=*/2u));
+  EXPECT_EQ(body.minimum_required_sgpr_count(/*vcc_save_width=*/2u), 14u);
+  body.vcc_save_sgpr = 9u;
+  EXPECT_FALSE(body.is_well_formed(/*vcc_save_width=*/2u));
+
+  ConSanSuperColliderRelayReservoirRoute wave32{
+      .scratch =
+          ConSanSuperColliderWave32RelayScratch{
+              .entry_vcc_save_sgpr = 8u,
+              .return_vcc_save_sgpr = 10u,
+          },
+  };
+  EXPECT_TRUE(wave32.uses_wave32_vcc());
+  EXPECT_TRUE(wave32.is_well_formed());
+  EXPECT_EQ(wave32.minimum_required_sgpr_count(), 11u);
+  std::get<ConSanSuperColliderWave32RelayScratch>(wave32.scratch).entry_vcc_save_sgpr =
+      std::numeric_limits<uint16_t>::max();
+  EXPECT_FALSE(wave32.is_well_formed());
+
+  ConSanSuperColliderRelayReservoirRoute ordinary{
+      .scratch =
+          ConSanSuperColliderOrdinaryRelayScratch{
+              .entry_jump = {8u, 10u},
+              .return_jump = {12u, 14u},
+          },
+  };
+  EXPECT_FALSE(ordinary.uses_wave32_vcc());
+  EXPECT_TRUE(ordinary.is_well_formed());
+  EXPECT_EQ(ordinary.minimum_required_sgpr_count(), 15u);
+  std::get<ConSanSuperColliderOrdinaryRelayScratch>(ordinary.scratch).return_jump.scc_save_sgpr =
+      13u;
+  EXPECT_FALSE(ordinary.is_well_formed());
+}
+
 [[nodiscard]] std::vector<uint8_t>
 make_rdna4_two_kernel_code_object(std::span<const uint32_t> first_kernel_words,
                                   std::span<const uint32_t> second_kernel_words,
@@ -198,7 +238,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->kind, ConSanPatchKind::LocalCaveFlatLoadCheckTrap);
   EXPECT_EQ(patch->original_size, 3u * sizeof(uint32_t));
-  EXPECT_FALSE(patch->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(patch->sc_indirect_body_route.has_value());
   ASSERT_FALSE(patch->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(patch->branch_only_return_relay_offsets.empty());
   const size_t relay_count = patch->branch_only_entry_relay_offsets.size() +
@@ -257,7 +297,13 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
                patch.original_size != 0u;
       });
   ASSERT_NE(malformed_reservoir, malformed.patches.end());
-  malformed_reservoir->indirect_pc_sgpr = 0u;
+  malformed_reservoir->sc_relay_reservoir_route = ConSanSuperColliderRelayReservoirRoute{
+      .scratch =
+          ConSanSuperColliderWave32RelayScratch{
+              .entry_vcc_save_sgpr = std::numeric_limits<uint16_t>::max(),
+              .return_vcc_save_sgpr = 0u,
+          },
+  };
   const std::vector<std::string> malformed_errors = validate_consan_modified_elf(bytes, malformed);
   EXPECT_TRUE(std::ranges::any_of(malformed_errors, [](const std::string &error) {
     return error.find("invalid geometry or phase") != std::string::npos;
@@ -698,7 +744,7 @@ TEST(ConSan, FlatCheckTrapProofUsesIndirectIslandForFarAppendedCave) {
   EXPECT_EQ(body->trampoline_offset, original_text_size);
   EXPECT_GT(body->required_sgpr_count, 0u);
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_TRUE(body->indirect_return_offset.has_value());
+  EXPECT_TRUE(body->sc_indirect_body_route.has_value());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -739,7 +785,7 @@ TEST(ConSan, FlatCheckTrapProofRelocatesPrefixForFarAppendedCave) {
   EXPECT_EQ(body->anchor_offset, 5u * sizeof(uint32_t));
   EXPECT_EQ(body->original_size, 7u * sizeof(uint32_t));
   EXPECT_EQ(body->trampoline_offset, original_text_size);
-  EXPECT_TRUE(body->indirect_return_offset.has_value());
+  EXPECT_TRUE(body->sc_indirect_body_route.has_value());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -5777,13 +5823,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
   EXPECT_EQ(body->trampoline_offset, original_text_size);
   EXPECT_GT(body->required_sgpr_count, 0u);
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
-  ASSERT_TRUE(body->indirect_pc_sgpr.has_value());
-  ASSERT_TRUE(body->indirect_saved_scc_sgpr.has_value());
-  ASSERT_TRUE(body->indirect_saved_vcc_sgpr.has_value());
-  ASSERT_TRUE(body->indirect_return_offset.has_value());
-  EXPECT_NE(*body->indirect_saved_scc_sgpr, *body->indirect_saved_vcc_sgpr);
-  EXPECT_TRUE(*body->indirect_saved_scc_sgpr < *body->indirect_pc_sgpr ||
-              *body->indirect_saved_scc_sgpr > *body->indirect_pc_sgpr + 1u);
+  ASSERT_TRUE(body->sc_indirect_body_route.has_value());
+  const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
+  EXPECT_TRUE(route.is_well_formed(/*vcc_save_width=*/1u));
   EXPECT_FALSE(compute_sopp_branch_simm16(body->trampoline_offset + body->trampoline_size -
                                               7u * sizeof(uint32_t),
                                           body->anchor_offset + body->original_size));
@@ -5805,7 +5847,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
   ConSanTransformArtifacts corrupted = result;
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-  std::memcpy(corrupted.replacement.data() + text_file_offset + *body->indirect_return_offset +
+  std::memcpy(corrupted.replacement.data() + text_file_offset + route.return_offset +
                   5u * sizeof(uint32_t),
               &nop, sizeof(nop));
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
@@ -5813,6 +5855,30 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
     return error.find("indirect-island proof found corrupted SCC preservation") !=
            std::string::npos;
   }));
+
+  ConSanTransformArtifacts corrupted_route = result;
+  auto corrupted_route_body = std::ranges::find(
+      corrupted_route.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap, &ConSanPatchInfo::kind);
+  ASSERT_NE(corrupted_route_body, corrupted_route.patches.end());
+  ASSERT_TRUE(corrupted_route_body->sc_indirect_body_route);
+  corrupted_route_body->sc_indirect_body_route->vcc_save_sgpr =
+      corrupted_route_body->sc_indirect_body_route->jump.pc_sgpr;
+  const auto corrupted_route_errors = validate_consan_modified_elf(bytes, corrupted_route);
+  EXPECT_TRUE(std::ranges::any_of(corrupted_route_errors, [](const std::string &error) {
+    return error.find("indirect-island proof found corrupted SCC preservation") !=
+           std::string::npos;
+  })) << testing::PrintToString(corrupted_route_errors);
+
+  ConSanTransformArtifacts misplaced_route = result;
+  auto misplaced_island =
+      std::ranges::find(misplaced_route.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(misplaced_island, misplaced_route.patches.end());
+  misplaced_island->sc_indirect_body_route = route;
+  const auto misplaced_route_errors = validate_consan_modified_elf(bytes, misplaced_route);
+  EXPECT_TRUE(std::ranges::any_of(misplaced_route_errors, [](const std::string &error) {
+    return error.find("misplaced indirect route effect") != std::string::npos;
+  })) << testing::PrintToString(misplaced_route_errors);
 }
 
 TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
@@ -5846,12 +5912,11 @@ TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
     const auto body = std::ranges::find(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                         &ConSanPatchInfo::kind);
     ASSERT_NE(body, result.patches.end());
-    ASSERT_TRUE(body->indirect_pc_sgpr);
-    ASSERT_TRUE(body->indirect_saved_scc_sgpr);
-    ASSERT_TRUE(body->indirect_saved_vcc_sgpr);
-    const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
-    const uint16_t pc = *body->indirect_pc_sgpr;
-    const uint16_t scc_save = *body->indirect_saved_scc_sgpr;
+    ASSERT_TRUE(body->sc_indirect_body_route);
+    const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
+    const uint16_t vcc_save = route.vcc_save_sgpr;
+    const uint16_t pc = route.jump.pc_sgpr;
+    const uint16_t scc_save = route.jump.scc_save_sgpr;
     const auto overlaps = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                              uint16_t rhs_width) {
       return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
@@ -5996,8 +6061,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   ASSERT_TRUE(explicit_dispatcher->sc_dense_route);
   EXPECT_FALSE(explicit_dispatcher->sc_dense_route->body.has_value());
   EXPECT_TRUE(explicit_dispatcher->sc_dense_route->is_well_formed());
-  EXPECT_FALSE(explicit_dispatcher->indirect_pc_sgpr.has_value());
-  EXPECT_FALSE(explicit_dispatcher->indirect_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(explicit_dispatcher->sc_indirect_body_route.has_value());
 
   const auto first_host = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineScDenseEntryHost, &ConSanPatchInfo::kind);
@@ -6005,8 +6069,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   ASSERT_TRUE(first_host->sc_dense_route);
   EXPECT_TRUE(first_host->sc_dense_route->same_route(*explicit_dispatcher->sc_dense_route));
   EXPECT_FALSE(first_host->sc_dense_route->body.has_value());
-  EXPECT_FALSE(first_host->indirect_pc_sgpr.has_value());
-  EXPECT_FALSE(first_host->indirect_saved_scc_sgpr.has_value());
+  EXPECT_FALSE(first_host->sc_indirect_body_route.has_value());
   const auto first_body = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap && patch.sc_dense_route;
   });
@@ -6015,10 +6078,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   EXPECT_TRUE(first_body->sc_dense_route->same_route(*explicit_dispatcher->sc_dense_route));
   EXPECT_EQ(first_body->sc_dense_route->body->vcc_save_sgpr,
             explicit_dispatcher->sc_dense_route->key_sgpr);
-  EXPECT_FALSE(first_body->indirect_pc_sgpr.has_value());
-  EXPECT_FALSE(first_body->indirect_saved_scc_sgpr.has_value());
-  EXPECT_FALSE(first_body->indirect_saved_vcc_sgpr.has_value());
-  EXPECT_FALSE(first_body->indirect_return_offset.has_value());
+  EXPECT_FALSE(first_body->sc_indirect_body_route.has_value());
 
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
   ConSanTransformArtifacts corrupted = result;
@@ -6034,7 +6094,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   })) << testing::PrintToString(validation_errors);
   const uint64_t first_host_word = first_host->anchor_offset / sizeof(uint32_t);
   ASSERT_LE(first_host_word + 17u, text_words.size());
-  const uint16_t jump_pc = first_host->sc_dense_route->jump_pc_sgpr;
+  const uint16_t jump_pc = first_host->sc_dense_route->jump.pc_sgpr;
   // Define only the high half of the return pair inside the eight displaced
   // words and consume it at the boundary instruction. The tuple is dead at
   // host entry but partially live at the appended return endpoint, so this
@@ -6060,10 +6120,10 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   ASSERT_NE(boundary_replacement_host, boundary_partial_result.patches.end());
   ASSERT_TRUE(boundary_replacement_host->sc_dense_route);
   EXPECT_NE(boundary_replacement_host->anchor_offset, first_host->anchor_offset)
-      << "first jump=" << first_host->sc_dense_route->jump_pc_sgpr
-      << " first scc=" << first_host->sc_dense_route->saved_scc_sgpr
-      << " replacement jump=" << boundary_replacement_host->sc_dense_route->jump_pc_sgpr
-      << " replacement scc=" << boundary_replacement_host->sc_dense_route->saved_scc_sgpr;
+      << "first jump=" << first_host->sc_dense_route->jump.pc_sgpr
+      << " first scc=" << first_host->sc_dense_route->jump.scc_save_sgpr
+      << " replacement jump=" << boundary_replacement_host->sc_dense_route->jump.pc_sgpr
+      << " replacement scc=" << boundary_replacement_host->sc_dense_route->jump.scc_save_sgpr;
 
   // Split the block immediately after the displaced prefix with a backward
   // branch whose target is the high-half consumer. This leaves no boundary
@@ -6092,8 +6152,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
 TEST(ConSan, SuperColliderDenseRouteOwnsExactKeyAndBodyProtocol) {
   const ConSanSuperColliderDenseRouteEffect call_route{
       .dispatcher_offset = 128u,
-      .jump_pc_sgpr = 4u,
-      .saved_scc_sgpr = 6u,
+      .jump = {.pc_sgpr = 4u, .scc_save_sgpr = 6u},
       .key_sgpr = 8u,
       .key_kind = ConSanSuperColliderDenseKeyKind::CallReturnPair,
       .body = ConSanSuperColliderDenseBodyRoute{.vcc_save_sgpr = 10u, .return_offset = 256u},
@@ -6104,8 +6163,7 @@ TEST(ConSan, SuperColliderDenseRouteOwnsExactKeyAndBodyProtocol) {
 
   ConSanSuperColliderDenseRouteEffect explicit_route{
       .dispatcher_offset = 128u,
-      .jump_pc_sgpr = 4u,
-      .saved_scc_sgpr = 6u,
+      .jump = {.pc_sgpr = 4u, .scc_save_sgpr = 6u},
       .key_sgpr = 8u,
       .key_kind = ConSanSuperColliderDenseKeyKind::ExplicitScalar,
       .body = ConSanSuperColliderDenseBodyRoute{.vcc_save_sgpr = 8u, .return_offset = 256u},
@@ -6118,9 +6176,9 @@ TEST(ConSan, SuperColliderDenseRouteOwnsExactKeyAndBodyProtocol) {
   explicit_route.body->vcc_save_sgpr = 9u;
   EXPECT_FALSE(explicit_route.is_well_formed());
   explicit_route.body->vcc_save_sgpr = explicit_route.key_sgpr;
-  explicit_route.saved_scc_sgpr = explicit_route.jump_pc_sgpr;
+  explicit_route.jump.scc_save_sgpr = explicit_route.jump.pc_sgpr;
   EXPECT_FALSE(explicit_route.is_well_formed());
-  explicit_route.saved_scc_sgpr = 6u;
+  explicit_route.jump.scc_save_sgpr = 6u;
   explicit_route.key_kind = static_cast<ConSanSuperColliderDenseKeyKind>(2u);
   EXPECT_FALSE(explicit_route.is_well_formed());
 }
@@ -6230,7 +6288,7 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   });
   ASSERT_NE(explicit_dispatcher, result.patches.end());
   ASSERT_TRUE(explicit_dispatcher->sc_dense_route);
-  EXPECT_EQ(explicit_dispatcher->sc_dense_route->jump_pc_sgpr, 10u);
+  EXPECT_EQ(explicit_dispatcher->sc_dense_route->jump.pc_sgpr, 10u);
   EXPECT_GE(explicit_dispatcher->required_sgpr_count, 12u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -6309,7 +6367,7 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(patch.scratch_vgpr, 3u);
-  EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(patch.sc_indirect_body_route.has_value());
   ASSERT_TRUE(test_sc_vcc_save_sgpr(patch));
   ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(patch));
   EXPECT_NE(*test_sc_vcc_save_sgpr(patch), options.delay_var_ssrc);
@@ -6371,7 +6429,7 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(patch.scratch_vgpr, 3u);
-  EXPECT_FALSE(patch.indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(patch.sc_indirect_body_route.has_value());
   ASSERT_TRUE(test_sc_vcc_save_sgpr(patch));
   ASSERT_TRUE(test_sc_vcc_reservoir_vgpr(patch));
   EXPECT_NE(*test_sc_vcc_save_sgpr(patch), options.delay_var_ssrc);
@@ -7233,12 +7291,11 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return (info.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
             info.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap) &&
-           info.indirect_pc_sgpr.has_value();
+           info.sc_indirect_body_route.has_value();
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(patch->indirect_saved_vcc_sgpr);
-  ASSERT_TRUE(patch->indirect_saved_scc_sgpr);
-  ASSERT_TRUE(patch->indirect_pc_sgpr);
+  ASSERT_TRUE(patch->sc_indirect_body_route);
+  const ConSanSuperColliderIndirectBodyRoute &route = *patch->sc_indirect_body_route;
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_FALSE(compute_sopp_branch_simm16(patch->anchor_offset, patch->trampoline_offset));
 
@@ -7248,14 +7305,10 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
       return live >= base && live < static_cast<uint32_t>(base) + width;
     });
   };
-  EXPECT_FALSE(overlaps_owner_live(*patch->indirect_saved_vcc_sgpr, 1u));
-  EXPECT_FALSE(overlaps_owner_live(*patch->indirect_pc_sgpr, 2u));
-  EXPECT_FALSE(overlaps_owner_live(*patch->indirect_saved_scc_sgpr, 1u));
-  EXPECT_NE(*patch->indirect_saved_vcc_sgpr, *patch->indirect_saved_scc_sgpr);
-  EXPECT_TRUE(*patch->indirect_saved_vcc_sgpr < *patch->indirect_pc_sgpr ||
-              *patch->indirect_saved_vcc_sgpr > *patch->indirect_pc_sgpr + 1u);
-  EXPECT_TRUE(*patch->indirect_saved_scc_sgpr < *patch->indirect_pc_sgpr ||
-              *patch->indirect_saved_scc_sgpr > *patch->indirect_pc_sgpr + 1u);
+  EXPECT_FALSE(overlaps_owner_live(route.vcc_save_sgpr, 1u));
+  EXPECT_FALSE(overlaps_owner_live(route.jump.pc_sgpr, 2u));
+  EXPECT_FALSE(overlaps_owner_live(route.jump.scc_save_sgpr, 1u));
+  EXPECT_TRUE(route.is_well_formed(/*vcc_save_width=*/1u));
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -7303,7 +7356,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
-  EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(branch_only->sc_indirect_body_route.has_value());
   ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 
@@ -7358,7 +7411,7 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(branch_only->anchor_offset, 0u);
-  EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
+  EXPECT_FALSE(branch_only->sc_indirect_body_route.has_value());
   ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 }
@@ -7603,8 +7656,23 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(reservoir->original_size, kReservoirWords * sizeof(uint32_t));
   EXPECT_EQ(reservoir->trampoline_size,
             (kReservoirWords + kReservoirAppendedOverheadWords) * sizeof(uint32_t));
-  ASSERT_TRUE(reservoir->indirect_saved_vcc_sgpr.has_value());
-  ASSERT_TRUE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
+  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
+  ASSERT_TRUE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
+  EXPECT_TRUE(reservoir->sc_relay_reservoir_route->is_well_formed());
+
+  ConSanTransformArtifacts corrupted_route = result;
+  auto corrupted_reservoir =
+      std::ranges::find(corrupted_route.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
+                        &ConSanPatchInfo::kind);
+  ASSERT_NE(corrupted_reservoir, corrupted_route.patches.end());
+  ASSERT_TRUE(corrupted_reservoir->sc_relay_reservoir_route);
+  std::get<ConSanSuperColliderWave32RelayScratch>(
+      corrupted_reservoir->sc_relay_reservoir_route->scratch)
+      .entry_vcc_save_sgpr = std::numeric_limits<uint16_t>::max();
+  const auto corrupted_route_errors = validate_consan_modified_elf(bytes, corrupted_route);
+  EXPECT_TRUE(std::ranges::any_of(corrupted_route_errors, [](const std::string &error) {
+    return error.find("relay reservoir proof found invalid geometry or phase") != std::string::npos;
+  })) << testing::PrintToString(corrupted_route_errors);
 
   const ConSanTransformArtifacts repeated = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(repeated));
@@ -7713,12 +7781,22 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
   EXPECT_EQ(reservoir->anchor_offset, kReservoirOffset);
-  EXPECT_TRUE(reservoir->indirect_pc_sgpr.has_value());
-  EXPECT_TRUE(reservoir->indirect_saved_scc_sgpr.has_value());
-  EXPECT_FALSE(reservoir->indirect_saved_vcc_sgpr.has_value());
-  EXPECT_TRUE(reservoir->indirect_return_pc_sgpr.has_value());
-  EXPECT_TRUE(reservoir->indirect_return_saved_scc_sgpr.has_value());
-  EXPECT_FALSE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
+  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
+  EXPECT_FALSE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
+  EXPECT_TRUE(reservoir->sc_relay_reservoir_route->is_well_formed());
+
+  ConSanTransformArtifacts corrupted = result;
+  auto corrupted_reservoir = std::ranges::find(
+      corrupted.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
+  ASSERT_NE(corrupted_reservoir, corrupted.patches.end());
+  ASSERT_TRUE(corrupted_reservoir->sc_relay_reservoir_route);
+  auto &scratch = std::get<ConSanSuperColliderOrdinaryRelayScratch>(
+      corrupted_reservoir->sc_relay_reservoir_route->scratch);
+  scratch.return_jump.scc_save_sgpr = scratch.return_jump.pc_sgpr;
+  const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
+    return error.find("relay reservoir proof found invalid geometry or phase") != std::string::npos;
+  })) << testing::PrintToString(corrupted_errors);
 }
 
 TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
@@ -7760,8 +7838,8 @@ TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
   EXPECT_EQ(reservoir->anchor_offset, candidate_kernel.size() * sizeof(uint32_t));
-  EXPECT_TRUE(reservoir->indirect_saved_scc_sgpr.has_value());
-  EXPECT_FALSE(reservoir->indirect_saved_vcc_sgpr.has_value());
+  ASSERT_TRUE(reservoir->sc_relay_reservoir_route.has_value());
+  EXPECT_FALSE(reservoir->sc_relay_reservoir_route->uses_wave32_vcc());
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOfRange) {

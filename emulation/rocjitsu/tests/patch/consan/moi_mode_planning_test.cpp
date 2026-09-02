@@ -331,7 +331,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   EXPECT_TRUE(plan.access_router_uses_dense_abi);
 
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-  point.moi_router_jump = ConSanMoiIndirectJumpSgprs{40u, 42u};
+  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
   plan = plan_moi_scalar_abi(request, point);
   ASSERT_TRUE(plan.indirect_jump);
   EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
@@ -349,7 +349,7 @@ TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_router_jump = ConSanMoiIndirectJumpSgprs{40u, 42u};
+  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
   point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 46u};
   point.moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{};
 
@@ -401,7 +401,7 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_router_jump = ConSanMoiIndirectJumpSgprs{40u, 42u};
+  point.moi_router_jump = ConSanIndirectJumpSgprs{40u, 42u};
   point.moi_router_call = ConSanMoiRouterCallSgprs{44u, 40u};
 
   request.moi_engine = ConSanMoiEngine::RecordReplay;
@@ -425,7 +425,7 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   point.moi_router_call.reset();
   plan = plan_moi_dense_router(request, point, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(plan);
-  EXPECT_EQ(plan->indirect_jump, (ConSanMoiIndirectJumpSgprs{32u, 30u}));
+  EXPECT_EQ(plan->indirect_jump, (ConSanIndirectJumpSgprs{32u, 30u}));
   EXPECT_EQ(plan->dispatch_key_sgpr, 48u);
   EXPECT_FALSE(plan->call_return_sgpr);
   EXPECT_TRUE(plan->explicit_key);

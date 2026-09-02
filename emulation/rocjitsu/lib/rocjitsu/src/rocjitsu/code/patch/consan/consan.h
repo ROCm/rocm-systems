@@ -36,9 +36,13 @@
 #include "rocjitsu/code/patch/planning_work.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include "rocjitsu/code/patch/consan/consan_indirect_jump_sgprs.h.inc"
+
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_supercollider_scalar_vcc_spill.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_supercollider_indirect_route.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_supercollider_dense_route.h.inc"
 

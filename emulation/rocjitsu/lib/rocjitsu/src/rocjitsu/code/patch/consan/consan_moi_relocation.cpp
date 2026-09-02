@@ -212,7 +212,7 @@ namespace rocjitsu::consan_moi_impl {
 
 bool append_moi_direct_or_indirect_return(
     std::vector<uint32_t> &words, uint64_t cave_text_offset, uint64_t return_text_offset,
-    const std::optional<ConSanMoiIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch) {
+    const std::optional<ConSanIndirectJumpSgprs> &indirect_jump, rj_code_arch_t arch) {
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
   if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {

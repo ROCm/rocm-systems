@@ -298,8 +298,7 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
 
 struct LdsCheckTrapIndirectScalarScratch {
   uint16_t vcc_save_sgpr = 0;
-  uint16_t pc_sgpr_pair = 0;
-  uint16_t scc_save_sgpr = 0;
+  ConSanIndirectJumpSgprs jump;
 };
 
 [[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
@@ -360,7 +359,7 @@ choose_lds_check_trap_indirect_scalar_scratch(
       const auto scc_save = choose_lds_check_trap_indirect_scc_save_sgpr(
           inst, owner_liveness, *vcc_save, vcc_width, *pair, min_preferred_vcc_save.value_or(0));
       if (scc_save)
-        return LdsCheckTrapIndirectScalarScratch{*vcc_save, *pair, *scc_save};
+        return LdsCheckTrapIndirectScalarScratch{*vcc_save, {*pair, *scc_save}};
     }
 
     if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)

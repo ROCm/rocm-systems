@@ -2839,22 +2839,18 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
                                       &ConSanPatchInfo::kind);
   ASSERT_NE(body, result.patches.end());
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
-  ASSERT_TRUE(body->indirect_saved_vcc_sgpr);
-  ASSERT_TRUE(body->indirect_pc_sgpr);
-  ASSERT_TRUE(body->indirect_saved_scc_sgpr);
-  EXPECT_LT(*body->indirect_pc_sgpr, 100u);
+  ASSERT_TRUE(body->sc_indirect_body_route);
+  const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
+  EXPECT_LT(route.jump.pc_sgpr, 100u);
   const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                  uint16_t rhs_width) {
     return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
            static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
   };
-  EXPECT_FALSE(ranges_overlap(*body->indirect_saved_vcc_sgpr, 2u, *body->indirect_pc_sgpr, 2u));
-  EXPECT_FALSE(
-      ranges_overlap(*body->indirect_saved_scc_sgpr, 1u, *body->indirect_saved_vcc_sgpr, 2u));
-  EXPECT_FALSE(ranges_overlap(*body->indirect_saved_scc_sgpr, 1u, *body->indirect_pc_sgpr, 2u));
-  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_saved_vcc_sgpr + 2u));
-  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_pc_sgpr + 2u));
-  EXPECT_GE(body->required_sgpr_count, static_cast<uint16_t>(*body->indirect_saved_scc_sgpr + 1u));
+  EXPECT_FALSE(ranges_overlap(route.vcc_save_sgpr, 2u, route.jump.pc_sgpr, 2u));
+  EXPECT_FALSE(ranges_overlap(route.jump.scc_save_sgpr, 1u, route.vcc_save_sgpr, 2u));
+  EXPECT_FALSE(ranges_overlap(route.jump.scc_save_sgpr, 1u, route.jump.pc_sgpr, 2u));
+  EXPECT_GE(body->required_sgpr_count, route.minimum_required_sgpr_count(2u));
   EXPECT_GT(body->trampoline_offset, body->anchor_offset);
 }
 

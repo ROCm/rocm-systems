@@ -50,26 +50,12 @@ enum class BranchRelayReservoirShape : uint8_t {
 [[nodiscard]] BranchRelayReservoirShape branch_relay_reservoir_shape(const ConSanPatchInfo &patch) {
   if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir)
     return BranchRelayReservoirShape::Invalid;
-  const bool has_any_indirect_field =
-      patch.indirect_pc_sgpr || patch.indirect_saved_scc_sgpr || patch.indirect_saved_vcc_sgpr ||
-      patch.indirect_return_pc_sgpr || patch.indirect_return_saved_scc_sgpr ||
-      patch.indirect_return_saved_vcc_sgpr;
-  const bool has_wave32_vcc_schema =
-      patch.indirect_pc_sgpr && patch.indirect_saved_vcc_sgpr && patch.indirect_return_pc_sgpr &&
-      patch.indirect_return_saved_vcc_sgpr && !patch.indirect_saved_scc_sgpr &&
-      !patch.indirect_return_saved_scc_sgpr;
-  const bool has_ordinary_scalar_schema =
-      patch.indirect_pc_sgpr && patch.indirect_saved_scc_sgpr && patch.indirect_return_pc_sgpr &&
-      patch.indirect_return_saved_scc_sgpr && !patch.indirect_saved_vcc_sgpr &&
-      !patch.indirect_return_saved_vcc_sgpr;
-  // Indirect reservoirs deliberately require one complete, unambiguous
-  // endpoint-resource schema.
   if (patch.original_size == 0u)
-    return !has_any_indirect_field ? BranchRelayReservoirShape::GeneratedBank
-                                   : BranchRelayReservoirShape::Invalid;
-  if (!has_any_indirect_field)
+    return !patch.sc_relay_reservoir_route ? BranchRelayReservoirShape::GeneratedBank
+                                           : BranchRelayReservoirShape::Invalid;
+  if (!patch.sc_relay_reservoir_route)
     return BranchRelayReservoirShape::DirectInstruction;
-  if (has_wave32_vcc_schema || has_ordinary_scalar_schema)
+  if (patch.sc_relay_reservoir_route->is_well_formed())
     return BranchRelayReservoirShape::IndirectInstruction;
   return BranchRelayReservoirShape::Invalid;
 }
@@ -598,6 +584,34 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
   return;
 }
 
+void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &result,
+                                          std::vector<std::string> &errors) {
+  for (const ConSanPatchInfo &patch : result.patches) {
+    const uint32_t route_count = static_cast<uint32_t>(patch.moi_borrowed_entry_jump.has_value()) +
+                                 static_cast<uint32_t>(patch.sc_indirect_body_route.has_value()) +
+                                 static_cast<uint32_t>(patch.sc_relay_reservoir_route.has_value()) +
+                                 static_cast<uint32_t>(patch.sc_dense_route.has_value());
+    const bool valid_moi_borrowed =
+        !patch.moi_borrowed_entry_jump ||
+        (patch.branch_only_continuation && patch.branch_only_borrowed_indirect_entry &&
+         (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
+          patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord));
+    const bool valid_sc_body = !patch.sc_indirect_body_route ||
+                               (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
+                                patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
+                                patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
+                                patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap);
+    const bool valid_sc_reservoir =
+        !patch.sc_relay_reservoir_route ||
+        (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
+         patch.original_size != 0u);
+    if (route_count > 1u || !valid_moi_borrowed || !valid_sc_body || !valid_sc_reservoir) {
+      errors.emplace_back("ConSan final validation found a misplaced indirect route effect");
+      return;
+    }
+  }
+}
+
 void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &environment,
                                            const ConSanFinalValidationInput &result,
                                            std::vector<std::string> &errors) {
@@ -613,47 +627,36 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
               patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
               patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
               patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
-             patch.anchor_offset == island.anchor_offset && patch.indirect_return_offset;
+             patch.anchor_offset == island.anchor_offset && patch.sc_indirect_body_route;
     });
-    if (body == result.patches.end() || !body->indirect_pc_sgpr || !body->indirect_saved_scc_sgpr ||
-        !body->indirect_saved_vcc_sgpr) {
+    if (body == result.patches.end()) {
       errors.emplace_back("ConSan indirect-island proof found incomplete scalar state metadata");
       continue;
     }
-    const uint16_t pc = *body->indirect_pc_sgpr;
-    const uint16_t scc_save = *body->indirect_saved_scc_sgpr;
-    const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
+    const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
+    const uint16_t pc = route.jump.pc_sgpr;
+    const uint16_t scc_save = route.jump.scc_save_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
     const bool gfx9_cdna =
         environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
         environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
     const uint16_t vcc_save_width = is_flat_body || gfx9_cdna ? 2u : 1u;
-    const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
-                                   uint16_t rhs_width) {
-      return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
-             static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
-    };
-    const bool disjoint = !ranges_overlap(scc_save, 1u, pc, 2u) &&
-                          !ranges_overlap(scc_save, 1u, vcc_save, vcc_save_width) &&
-                          !ranges_overlap(pc, 2u, vcc_save, vcc_save_width);
-    const uint16_t required = std::max<uint16_t>(
-        std::max<uint16_t>(static_cast<uint16_t>(pc + 2u), static_cast<uint16_t>(scc_save + 1u)),
-        static_cast<uint16_t>(vcc_save + vcc_save_width));
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
     const bool encoded =
         append_lds_check_trap_indirect_jump(expected_entry, island.trampoline_offset,
                                             body->trampoline_offset, pc, scc_save,
                                             *environment.target_profile) &&
-        append_lds_check_trap_indirect_return(expected_return, *body->indirect_return_offset,
+        append_lds_check_trap_indirect_return(expected_return, route.return_offset,
                                               body->anchor_offset + body->original_size, pc,
                                               scc_save, *environment.target_profile);
-    if (!disjoint || body->required_sgpr_count < required || !encoded ||
+    if (!body->sc_indirect_body_route->is_well_formed(vcc_save_width) ||
+        body->required_sgpr_count < route.minimum_required_sgpr_count(vcc_save_width) || !encoded ||
         expected_entry.size() != kLdsCheckTrapIndirectJumpWords ||
         expected_return.size() != kLdsCheckTrapIndirectJumpWords ||
         !environment.replacement_text.matches(island.trampoline_offset, expected_entry) ||
-        !environment.replacement_text.matches(*body->indirect_return_offset, expected_return)) {
+        !environment.replacement_text.matches(route.return_offset, expected_return)) {
       errors.emplace_back(
           "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
     }
@@ -701,19 +704,19 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
   const auto validate_borrowed_indirect_entry = [&](const ConSanPatchInfo &patch) {
     if (!patch.branch_only_borrowed_indirect_entry ||
         !patch.branch_only_entry_relay_offsets.empty() || !patch.branch_only_borrowed_backup_vgpr ||
-        !patch.indirect_pc_sgpr || !patch.indirect_saved_scc_sgpr ||
+        !patch.moi_borrowed_entry_jump ||
         (patch.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore &&
          patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord) ||
         patch.original_size == 0u || patch.original_size % sizeof(uint32_t) != 0u ||
-        *patch.indirect_pc_sgpr == *patch.indirect_saved_scc_sgpr ||
-        static_cast<uint16_t>(*patch.indirect_pc_sgpr + 1u) == *patch.indirect_saved_scc_sgpr) {
+        !patch.moi_borrowed_entry_jump->is_well_formed()) {
       return false;
     }
 
+    const ConSanIndirectJumpSgprs &jump = *patch.moi_borrowed_entry_jump;
     const std::array<uint16_t, 3> borrowed = {
-        *patch.indirect_pc_sgpr,
-        static_cast<uint16_t>(*patch.indirect_pc_sgpr + 1u),
-        *patch.indirect_saved_scc_sgpr,
+        jump.pc_sgpr,
+        static_cast<uint16_t>(jump.pc_sgpr + 1u),
+        jump.scc_save_sgpr,
     };
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_restore;
@@ -727,20 +730,19 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
       expected_entry.insert(expected_entry.end(), save->begin(), save->end());
       expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    const auto save_scc = instrumentation::build_s_cselect_b32(*patch.indirect_saved_scc_sgpr,
-                                                               scalar_positive_inline_u32(1),
-                                                               scalar_positive_inline_u32(0), arch);
+    const auto save_scc = instrumentation::build_s_cselect_b32(
+        jump.scc_save_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
     const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
     if (!save_scc || !restore_wait)
       return false;
     expected_entry.push_back(*save_scc);
     const uint64_t getpc_offset = patch.anchor_offset + expected_entry.size() * sizeof(uint32_t);
-    expected_entry.push_back(build_s_getpc_b64(*patch.indirect_pc_sgpr, arch));
+    expected_entry.push_back(build_s_getpc_b64(jump.pc_sgpr, arch));
     const uint64_t pc_after_getpc = getpc_offset + sizeof(uint32_t);
     if (patch.trampoline_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
         pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
         !append_pc_delta_builder(
-            expected_entry, arch, *patch.indirect_pc_sgpr,
+            expected_entry, arch, jump.pc_sgpr,
             static_cast<int64_t>(patch.trampoline_offset) - static_cast<int64_t>(pc_after_getpc),
             /*minimum_words=*/3u,
             /*prefer_literal64=*/
@@ -748,11 +750,11 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
       return false;
     }
     const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
-        *patch.indirect_saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
+        jump.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
     if (!restore_scc)
       return false;
     expected_entry.push_back(*restore_scc);
-    expected_entry.push_back(build_s_setpc_b64(*patch.indirect_pc_sgpr, arch));
+    expected_entry.push_back(build_s_setpc_b64(jump.pc_sgpr, arch));
     if (expected_entry.size() > patch.original_size / sizeof(uint32_t))
       return false;
     expected_entry.resize(patch.original_size / sizeof(uint32_t), build_s_nop(0u, arch));
@@ -784,7 +786,8 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
                                     patch.branch_only_entry_prologue_offset.has_value() ||
                                     patch.branch_only_borrowed_indirect_entry ||
                                     patch.branch_only_borrowed_backup_vgpr.has_value() ||
-                                    patch.branch_only_borrowed_continuation_offset.has_value();
+                                    patch.branch_only_borrowed_continuation_offset.has_value() ||
+                                    patch.moi_borrowed_entry_jump.has_value();
     if (!patch.branch_only_continuation) {
       if (has_route_metadata) {
         errors.emplace_back(
@@ -843,10 +846,12 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
                    candidate.trampoline_offset == *patch.branch_only_entry_prologue_offset &&
                    candidate.entry_prologue_chained_trampoline_offset == patch.trampoline_offset;
           });
-      valid_entry_route =
-          patch.branch_only_entry_relay_offsets.empty() && prologue != result.patches.end();
+      valid_entry_route = !patch.moi_borrowed_entry_jump &&
+                          patch.branch_only_entry_relay_offsets.empty() &&
+                          prologue != result.patches.end();
     } else {
-      valid_entry_route = validate_route(patch.anchor_offset, patch.branch_only_entry_relay_offsets,
+      valid_entry_route = !patch.moi_borrowed_entry_jump &&
+                          validate_route(patch.anchor_offset, patch.branch_only_entry_relay_offsets,
                                          patch.trampoline_offset);
     }
     if (!valid_entry_route || !validate_route(return_source, patch.branch_only_return_relay_offsets,
@@ -882,11 +887,9 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     return;
   const rj_code_arch_t arch = environment.arch();
   const uint32_t nop = build_s_nop(0, arch);
-  const auto has_generic_indirect_state = [](const ConSanPatchInfo &patch) {
-    return patch.indirect_pc_sgpr || patch.indirect_saved_scc_sgpr ||
-           patch.indirect_saved_vcc_sgpr || patch.indirect_return_offset ||
-           patch.indirect_return_pc_sgpr || patch.indirect_return_saved_scc_sgpr ||
-           patch.indirect_return_saved_vcc_sgpr;
+  const auto has_other_indirect_route = [](const ConSanPatchInfo &patch) {
+    return patch.moi_borrowed_entry_jump || patch.sc_indirect_body_route ||
+           patch.sc_relay_reservoir_route;
   };
 
   for (const ConSanPatchInfo &dispatcher : result.patches) {
@@ -894,7 +897,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       continue;
     if (!dispatcher.sc_dense_route || dispatcher.sc_dense_route->body ||
         dispatcher.sc_dense_route->dispatcher_offset != dispatcher.trampoline_offset ||
-        !dispatcher.sc_dense_route->is_well_formed() || has_generic_indirect_state(dispatcher) ||
+        !dispatcher.sc_dense_route->is_well_formed() || has_other_indirect_route(dispatcher) ||
         dispatcher.required_sgpr_count < dispatcher.sc_dense_route->minimum_required_sgpr_count()) {
       errors.emplace_back("ConSan dense-call proof found incomplete dispatcher metadata");
       continue;
@@ -906,7 +909,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     });
     if (host == result.patches.end() || host->original_size != 8u * sizeof(uint32_t) ||
         host->trampoline_size != 15u * sizeof(uint32_t) || host->sc_dense_route->body ||
-        has_generic_indirect_state(*host) ||
+        has_other_indirect_route(*host) ||
         host->required_sgpr_count < route.minimum_required_sgpr_count() ||
         host->anchor_offset > original_text.size() ||
         host->original_size > original_text.size() - host->anchor_offset ||
@@ -915,8 +918,8 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       errors.emplace_back("ConSan dense-call proof found an invalid entry-host pairing");
       continue;
     }
-    const uint16_t jump_pc = route.jump_pc_sgpr;
-    const uint16_t saved_scc = route.saved_scc_sgpr;
+    const uint16_t jump_pc = route.jump.pc_sgpr;
+    const uint16_t saved_scc = route.jump.scc_save_sgpr;
     const bool explicit_key = route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
     const uint16_t dispatch_key = route.key_sgpr;
 
@@ -1006,7 +1009,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
       const ConSanPatchInfo *body = bodies[body_index];
       const auto body_route = body->sc_dense_route->body;
-      const bool isolated_route = !has_generic_indirect_state(*body);
+      const bool isolated_route = !has_other_indirect_route(*body);
       const uint16_t vcc_save_width =
           environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
                   environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4
@@ -1361,7 +1364,9 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
             (kScRelayEntryWords + kScRelayTailRestoreWords + 1u) * sizeof(uint32_t) &&
         patch->trampoline_size ==
             patch->original_size + kScRelayAppendedOverheadWords * sizeof(uint32_t) &&
-        patch->indirect_pc_sgpr && patch->indirect_return_pc_sgpr;
+        patch->sc_relay_reservoir_route &&
+        patch->required_sgpr_count >=
+            patch->sc_relay_reservoir_route->minimum_required_sgpr_count();
     if (patch->phase != ConSanPatchPhase::Instrumentation ||
         patch->original_size > 512u * sizeof(uint32_t) ||
         patch->original_size % sizeof(uint32_t) != 0 ||
@@ -1459,28 +1464,30 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
     }
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
-    const bool wave32_vcc = patch->indirect_saved_vcc_sgpr.has_value();
-    expected_entry.push_back(
-        wave32_vcc ? build_s_mov_b32(*patch->indirect_saved_vcc_sgpr, kAmdGpuVccLo, arch)
-                   : build_s_nop(0, arch));
+    const ConSanSuperColliderRelayReservoirRoute &route = *patch->sc_relay_reservoir_route;
+    const ConSanSuperColliderRelayEncodingScratch scratch =
+        route.encoding_scratch({kAmdGpuVccLo, kAmdGpuExecHi});
+    const bool wave32_vcc = scratch.entry_vcc_save_sgpr.has_value();
+    expected_entry.push_back(wave32_vcc
+                                 ? build_s_mov_b32(*scratch.entry_vcc_save_sgpr, kAmdGpuVccLo, arch)
+                                 : build_s_nop(0, arch));
     expected_return.push_back(
-        wave32_vcc ? build_s_mov_b32(*patch->indirect_return_saved_vcc_sgpr, kAmdGpuVccLo, arch)
+        wave32_vcc ? build_s_mov_b32(*scratch.return_vcc_save_sgpr, kAmdGpuVccLo, arch)
                    : build_s_nop(0, arch));
-    if (!append_lds_check_trap_indirect_jump(
-            expected_entry, patch->anchor_offset, patch->trampoline_offset,
-            *patch->indirect_pc_sgpr, wave32_vcc ? kAmdGpuExecHi : *patch->indirect_saved_scc_sgpr,
-            *environment.target_profile) ||
+    if (!append_lds_check_trap_indirect_jump(expected_entry, patch->anchor_offset,
+                                             patch->trampoline_offset, scratch.entry_jump.pc_sgpr,
+                                             scratch.entry_jump.scc_save_sgpr,
+                                             *environment.target_profile) ||
         !append_lds_check_trap_indirect_jump(
             expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
             patch->anchor_offset + patch->original_size -
                 kScRelayTailRestoreWords * sizeof(uint32_t),
-            *patch->indirect_return_pc_sgpr,
-            wave32_vcc ? kAmdGpuExecHi : *patch->indirect_return_saved_scc_sgpr,
+            scratch.return_jump.pc_sgpr, scratch.return_jump.scc_save_sgpr,
             *environment.target_profile) ||
         std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
                     expected_entry.size() * sizeof(uint32_t)) != 0 ||
         environment.replacement_text.word(patch->trampoline_offset) !=
-            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *patch->indirect_saved_vcc_sgpr, arch)
+            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.entry_vcc_save_sgpr, arch)
                         : build_s_nop(0, arch)) ||
         std::memcmp(expected_return.data(),
                     replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
@@ -1488,9 +1495,8 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
                     expected_return.size() * sizeof(uint32_t)) != 0 ||
         environment.replacement_text.word(patch->anchor_offset + patch->original_size -
                                           sizeof(uint32_t)) !=
-            (wave32_vcc
-                 ? build_s_mov_b32(kAmdGpuVccLo, *patch->indirect_return_saved_vcc_sgpr, arch)
-                 : build_s_nop(0, arch))) {
+            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.return_vcc_save_sgpr, arch)
+                        : build_s_nop(0, arch))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
       return;
     }
@@ -4187,6 +4193,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
       make_branch_relay_validation_inventory(result.patches);
   validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
+  validate_indirect_route_effect_roles(result, errors);
   validate_sc_indirect_island_semantics(environment, result, errors);
   validate_branch_only_continuation_semantics(environment, result, relay_inventory, errors);
   validate_sc_dense_call_semantics(environment, result, errors);

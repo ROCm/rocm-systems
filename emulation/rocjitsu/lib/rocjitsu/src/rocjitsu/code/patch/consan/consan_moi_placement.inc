@@ -3638,7 +3638,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
            .dispatch_id_sgpr = dispatch_id_sgpr,
            .spill_backed = spill_backed,
            .router_jump = spill_pc && spill_scc
-                              ? std::optional{ConSanMoiIndirectJumpSgprs{*spill_pc, *spill_scc}}
+                              ? std::optional{ConSanIndirectJumpSgprs{*spill_pc, *spill_scc}}
                               : std::nullopt,
            .router_call = spill_key && spill_call_return ? std::optional{ConSanMoiRouterCallSgprs{
                                                                *spill_key, *spill_call_return}}
@@ -4082,7 +4082,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         options.moi_exec_save_sgpr = spill_base;
         options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
         options.moi_inline_visible_evidence_sgpr = visible;
-        options.moi_router_jump = ConSanMoiIndirectJumpSgprs{*pc, *scc};
+        options.moi_router_jump = ConSanIndirectJumpSgprs{*pc, *scc};
         options.moi_router_call = ConSanMoiRouterCallSgprs{*dispatch_key, *call_return};
         warnings.emplace_back(
             "ConSan MOI automatically assigned spill-backed Inline SGPRs s" +

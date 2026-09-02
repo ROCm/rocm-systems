@@ -877,7 +877,7 @@ void try_apply_direct_sampled_watchpoint_patch(
           return;
         std::optional<size_t> empty_exec_continuation_word_offset;
         std::optional<uint16_t> return_scc_sgpr;
-        std::optional<ConSanMoiIndirectJumpSgprs> return_jump_sgprs;
+        std::optional<ConSanIndirectJumpSgprs> return_jump_sgprs;
         if (planned_patch.dense_call_anchor || planned_patch.entry_island_offset) {
           return_scc_sgpr = moi_sampled_access_return_scc_sgpr(planned_patch.scalar_routing);
           return_jump_sgprs = planned_patch.scalar_abi.indirect_jump;

@@ -5664,7 +5664,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-    options.moi_router_jump = ConSanMoiIndirectJumpSgprs{70u, 72u};
+    options.moi_router_jump = ConSanIndirectJumpSgprs{70u, 72u};
     options.moi_dispatch_identity.set_sgpr(60u);
     options.moi_persistent_sgprs.record_replay_workgroup =
         ConSanMoiPersistentWorkgroupRegisters{50u, 51u, 52u};
@@ -9792,7 +9792,23 @@ TEST(ConSanMoi, Cdna4RecordReplayBorrowsEntryTupleToHalveFarRelayDemand) {
   EXPECT_TRUE(access->branch_only_entry_relay_offsets.empty());
   EXPECT_FALSE(access->branch_only_return_relay_offsets.empty());
   EXPECT_TRUE(access->branch_only_borrowed_backup_vgpr);
+  ASSERT_TRUE(access->branch_only_borrowed_indirect_entry);
+  ASSERT_TRUE(access->moi_borrowed_entry_jump);
+  EXPECT_TRUE(access->moi_borrowed_entry_jump->is_well_formed());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+
+  ConSanTransformArtifacts corrupted = result;
+  auto corrupted_access = std::ranges::find(
+      corrupted.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(corrupted_access, corrupted.patches.end());
+  ASSERT_TRUE(corrupted_access->moi_borrowed_entry_jump);
+  corrupted_access->moi_borrowed_entry_jump->scc_save_sgpr =
+      corrupted_access->moi_borrowed_entry_jump->pc_sgpr;
+  const std::vector<std::string> corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
+  EXPECT_TRUE(std::ranges::any_of(corrupted_errors, [](const std::string &error) {
+    return error.find("branch-only continuation proof found a stale, shared, or corrupted route") !=
+           std::string::npos;
+  })) << testing::PrintToString(corrupted_errors);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayDoesNotBorrowAcrossReconvergenceEntry) {
@@ -9898,6 +9914,8 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierBorrowsEntryTupleBeforeScalarProbe) {
   EXPECT_GT(patch->original_size, sizeof(uint32_t));
   EXPECT_TRUE(patch->branch_only_entry_relay_offsets.empty());
   EXPECT_TRUE(patch->branch_only_borrowed_backup_vgpr);
+  ASSERT_TRUE(patch->moi_borrowed_entry_jump);
+  EXPECT_TRUE(patch->moi_borrowed_entry_jump->is_well_formed());
   EXPECT_FALSE(patch->branch_only_borrowed_continuation_offset);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }

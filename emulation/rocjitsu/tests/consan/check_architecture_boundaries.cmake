@@ -1331,6 +1331,71 @@ _consan_assert_no_match(
     "SuperCollider dense-route effects must remain target and MOI independent"
 )
 
+# SCC-preserving indirect jumps have one mode/target-neutral scalar contract.
+# Patch publication retains exact MOI and SuperCollider effects instead of a
+# seven-field optional union whose meaning depended on patch kind.
+file(READ
+    "${_consan_dir}/consan_indirect_jump_sgprs.h.inc"
+    _indirect_jump_contract
+)
+file(READ
+    "${_consan_dir}/consan_supercollider_indirect_route.h.inc"
+    _sc_indirect_route_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_indirect_jump_sgprs[.]h[.]inc" OR
+   NOT _shared_aggregate_contract MATCHES
+       "consan_supercollider_indirect_route[.]h[.]inc" OR
+   NOT _indirect_jump_contract MATCHES
+       "struct ConSanIndirectJumpSgprs" OR
+   NOT _sc_indirect_route_contract MATCHES
+       "struct ConSanSuperColliderIndirectBodyRoute" OR
+   NOT _sc_indirect_route_contract MATCHES
+       "struct ConSanSuperColliderRelayReservoirRoute" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanIndirectJumpSgprs>[ \t]+moi_borrowed_entry_jump" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanSuperColliderIndirectBodyRoute>[ \t]+sc_indirect_body_route" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanSuperColliderRelayReservoirRoute>[ \t]+sc_relay_reservoir_route" OR
+   NOT _consan_validation MATCHES
+       "validate_indirect_route_effect_roles" OR
+   NOT _consan_validation MATCHES
+       "sc_indirect_body_route->is_well_formed" OR
+   NOT _consan_validation MATCHES
+       "sc_relay_reservoir_route->is_well_formed")
+    message(FATAL_ERROR
+        "indirect control flow lost its shared primitive or exact mode-local effects"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_code_object_types.h.inc"
+    "indirect_(pc_sgpr|saved_scc_sgpr|saved_vcc_sgpr|return_offset|return_pc_sgpr|return_saved_scc_sgpr|return_saved_vcc_sgpr)"
+    "patch effects must not regain the flattened generic indirect schema"
+)
+foreach(_indirect_contract IN ITEMS
+    consan_indirect_jump_sgprs.h.inc
+    consan_supercollider_indirect_route.h.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_indirect_contract}"
+        "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|ConSanTargetProfile"
+        "indirect route contracts must remain target independent"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_indirect_route.h.inc"
+    "consan_moi_|ConSanMoi"
+    "SuperCollider indirect route effects must remain MOI independent"
+)
+foreach(_indirect_owner IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_indirect_owner}"
+        "ConSanMoiIndirectJumpSgprs"
+        "indirect jump scratch must retain one mechanism-shared type"
+    )
+endforeach()
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(

@@ -19,8 +19,7 @@ struct ConSanSuperColliderDenseBodyRoute {
 /// VCC-preservation register and return location as one additional facet.
 struct ConSanSuperColliderDenseRouteEffect {
   uint64_t dispatcher_offset;
-  uint16_t jump_pc_sgpr;
-  uint16_t saved_scc_sgpr;
+  ConSanIndirectJumpSgprs jump;
   uint16_t key_sgpr;
   ConSanSuperColliderDenseKeyKind key_kind;
   std::optional<ConSanSuperColliderDenseBodyRoute> body;
@@ -35,37 +34,23 @@ struct ConSanSuperColliderDenseRouteEffect {
     return 0u;
   }
 
-  [[nodiscard]] uint16_t minimum_required_sgpr_count() const {
+  [[nodiscard]] uint32_t minimum_required_sgpr_count() const {
     const uint16_t width = key_width();
     if (width == 0u)
       return 0u;
-    return static_cast<uint16_t>(std::max({static_cast<uint32_t>(jump_pc_sgpr) + 2u,
-                                           static_cast<uint32_t>(saved_scc_sgpr) + 1u,
-                                           static_cast<uint32_t>(key_sgpr) + width}));
+    return std::max(jump.minimum_required_sgpr_count(), static_cast<uint32_t>(key_sgpr) + width);
   }
 
   [[nodiscard]] bool is_well_formed() const {
     const uint16_t width = key_width();
-    if (width == 0u || static_cast<uint32_t>(jump_pc_sgpr) + 2u > 65535u ||
-        static_cast<uint32_t>(saved_scc_sgpr) + 1u > 65535u ||
-        static_cast<uint32_t>(key_sgpr) + width > 65535u)
-      return false;
-    const auto overlaps = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
-                             uint16_t rhs_width) {
-      return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
-             static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
-    };
-    if (overlaps(jump_pc_sgpr, 2u, saved_scc_sgpr, 1u) ||
-        overlaps(jump_pc_sgpr, 2u, key_sgpr, width) ||
-        overlaps(saved_scc_sgpr, 1u, key_sgpr, width))
-      return false;
-    return !body || key_kind != ConSanSuperColliderDenseKeyKind::ExplicitScalar ||
-           body->vcc_save_sgpr == key_sgpr;
+    return width != 0u && jump.is_well_formed() && minimum_required_sgpr_count() <= 65535u &&
+           !jump.overlaps(key_sgpr, width) &&
+           (!body || key_kind != ConSanSuperColliderDenseKeyKind::ExplicitScalar ||
+            body->vcc_save_sgpr == key_sgpr);
   }
 
   [[nodiscard]] bool same_route(const ConSanSuperColliderDenseRouteEffect &other) const {
-    return dispatcher_offset == other.dispatcher_offset && jump_pc_sgpr == other.jump_pc_sgpr &&
-           saved_scc_sgpr == other.saved_scc_sgpr && key_sgpr == other.key_sgpr &&
-           key_kind == other.key_kind;
+    return dispatcher_offset == other.dispatcher_offset && jump == other.jump &&
+           key_sgpr == other.key_sgpr && key_kind == other.key_kind;
   }
 };

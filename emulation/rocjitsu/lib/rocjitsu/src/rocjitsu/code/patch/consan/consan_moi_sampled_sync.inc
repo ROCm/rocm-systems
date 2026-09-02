@@ -2284,8 +2284,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                 jump_pc_sgpr = call_return_sgpr = candidate_pair;
                 saved_scc_sgpr = candidate_scc;
                 key_sgpr = candidate_key;
-                group_point.moi_router_jump =
-                    ConSanMoiIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr};
+                group_point.moi_router_jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr};
                 group_point.moi_router_call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr};
                 special_state = moi_special_state_sgprs(options, group_point);
                 indirect_state = moi_indirect_jump_sgprs(options, group_point);
@@ -2559,7 +2558,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             const uint16_t candidate_scc = static_cast<uint16_t>(scc);
             if (!route_tuple_is_safe(candidate_pair, candidate_scc))
               continue;
-            route_point.moi_router_jump = ConSanMoiIndirectJumpSgprs{candidate_pair, candidate_scc};
+            route_point.moi_router_jump = ConSanIndirectJumpSgprs{candidate_pair, candidate_scc};
             route_state = moi_indirect_jump_sgprs(options, route_point);
             found = route_state.has_value();
             if (found)

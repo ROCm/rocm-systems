@@ -129,7 +129,7 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
 struct MoiScalarRoutingState {
   std::optional<uint16_t> exec_save_sgpr;
   ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
-  std::optional<ConSanMoiIndirectJumpSgprs> router_jump;
+  std::optional<ConSanIndirectJumpSgprs> router_jump;
   std::optional<ConSanMoiRouterCallSgprs> router_call;
   bool has_branch_only_spill = false;
 
@@ -161,7 +161,7 @@ project_moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
 /// Common placement and emission consume this product without inspecting the
 /// engine that produced it.
 struct MoiDenseRouterPlan {
-  ConSanMoiIndirectJumpSgprs indirect_jump;
+  ConSanIndirectJumpSgprs indirect_jump;
   uint16_t dispatch_key_sgpr = 0;
   std::optional<uint16_t> call_return_sgpr;
   uint32_t entry_island_words = 0;

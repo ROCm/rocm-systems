@@ -1183,7 +1183,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{48u, 50u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1193,7 +1193,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       .owner_sgpr = 4u,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
+      .router_jump = ConSanIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_spill = std::nullopt,
@@ -1405,7 +1405,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   MoiOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{48u, 50u};
   options.moi_router_call = ConSanMoiRouterCallSgprs{50u, 48u};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1415,7 +1415,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       .owner_sgpr = 4u,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .router_jump = ConSanMoiIndirectJumpSgprs{48u, 50u},
+      .router_jump = ConSanIndirectJumpSgprs{48u, 50u},
       .router_call = ConSanMoiRouterCallSgprs{50u, 48u},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_spill = std::nullopt,
@@ -1441,7 +1441,9 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end());
-  EXPECT_FALSE(atomic_patch->private_state_layout->dispatch_id_offset);
+  EXPECT_FALSE(atomic_patch->private_state_layout)
+      << "persistent owner, epoch, workgroup-key, and dispatch VGPRs must not publish a private "
+         "identity layout";
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -6330,7 +6332,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
   options.scratch_vgpr = 82u;
   options.set_moi_owner_epoch_vgprs(80u, 81u);
   options.moi_exec_save_sgpr = 60u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{88u, 90u};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{88u, 90u};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
@@ -6590,7 +6592,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.scratch_vgpr = 82u;
   options.set_moi_owner_epoch_vgprs(80u, 81u);
   options.moi_exec_save_sgpr = 4u;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr};
   options.moi_router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr};
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -6600,7 +6602,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .router_jump = ConSanMoiIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
+      .router_jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{kKeyAndSccSgpr, kIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_spill = std::nullopt,
@@ -7118,7 +7120,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7233,7 +7235,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7342,7 +7344,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -7429,7 +7431,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.moi_exec_save_sgpr = 60;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
   options.moi_inline_visible_evidence_sgpr = 28;
-  options.moi_router_jump = ConSanMoiIndirectJumpSgprs{30, 29};
+  options.moi_router_jump = ConSanIndirectJumpSgprs{30, 29};
   options.moi_router_call = ConSanMoiRouterCallSgprs{25, 26};
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;

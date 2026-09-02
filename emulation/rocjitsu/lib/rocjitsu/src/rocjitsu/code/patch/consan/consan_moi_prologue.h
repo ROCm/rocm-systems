@@ -23,12 +23,12 @@ struct MoiBorrowedRecordReplayEntry {
 
 [[nodiscard]] std::optional<MoiBorrowedRecordReplayEntry> build_moi_borrowed_record_replay_entry(
     uint64_t island_text_offset, uint64_t body_text_offset, uint16_t backup_vgpr,
-    const ConSanMoiIndirectJumpSgprs &jump_sgprs, uint32_t island_word_count, rj_code_arch_t arch);
+    const ConSanIndirectJumpSgprs &jump_sgprs, uint32_t island_word_count, rj_code_arch_t arch);
 
 [[nodiscard]] bool
 emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island_text_offset,
                                      uint64_t cave_text_offset, uint64_t anchor_text_offset,
-                                     const ConSanMoiIndirectJumpSgprs &jump_sgprs,
+                                     const ConSanIndirectJumpSgprs &jump_sgprs,
                                      std::span<const uint64_t> owner_descriptor_file_offsets,
                                      rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches,
                                      std::vector<std::string> &errors, std::string_view context);

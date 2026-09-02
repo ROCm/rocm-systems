@@ -206,18 +206,18 @@ struct MoiInlineBarrierEpochEmissionPlan {
   std::optional<uint16_t> epoch_vgpr;
   std::optional<MoiInlineBarrierVisibleEvidencePlan> visible_evidence;
   std::optional<MoiSpecialStateSgprs> special_state;
-  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
+  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
 /// Exact private-epoch state consumed by one InlineShadow barrier body.
 struct MoiInlinePrivateEpochBarrierEmissionPlan {
   uint16_t scratch_vgpr = 0;
   uint32_t epoch_offset = 0;
-  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
+  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
 struct MoiInlineBarrierCandidateRoutePlan {
-  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
+  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
   bool branch_only_spill = false;
 };
 
@@ -283,7 +283,7 @@ plan_inline_shadow_barrier_epoch_emission(const ConSanRequest &request,
 [[nodiscard]] bool
 append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
                              uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
-                             const std::optional<ConSanMoiIndirectJumpSgprs> &indirect_jump,
+                             const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
                              rj_code_arch_t arch) {
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -1605,7 +1605,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
       }
-      const ConSanMoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
+      const ConSanIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -2679,10 +2679,9 @@ void try_apply_record_replay_barrier_record_patch(
       info.branch_only_return_relay_offsets = branch_only_route->return_relay_offsets;
     }
     if (staged.borrowed_entry) {
-      const ConSanMoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
+      const ConSanIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(emission);
       info.branch_only_borrowed_indirect_entry = true;
-      info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
-      info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
+      info.moi_borrowed_entry_jump = jump_sgprs;
       info.branch_only_borrowed_backup_vgpr = staged.borrowed_entry->backup_vgpr;
     }
     // Descriptor mutations belong to emitted patches, not merely to

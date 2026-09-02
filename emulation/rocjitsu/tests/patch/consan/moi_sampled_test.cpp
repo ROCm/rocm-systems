@@ -7695,7 +7695,7 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .router_jump = ConSanMoiIndirectJumpSgprs{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
+      .router_jump = ConSanIndirectJumpSgprs{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
       .router_call = ConSanMoiRouterCallSgprs{5u, kLocalIndirectPcSgpr},
       .visible_evidence_sgpr = std::nullopt,
       .branch_only_spill = std::nullopt,

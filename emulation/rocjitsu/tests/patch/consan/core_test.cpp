@@ -39,6 +39,20 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
+TEST(ConSan, IndirectJumpSgprsOwnPairExtentAndSccDisjointness) {
+  ConSanIndirectJumpSgprs jump{8u, 10u};
+  EXPECT_TRUE(jump.is_well_formed());
+  EXPECT_EQ(jump.minimum_required_sgpr_count(), 11u);
+  EXPECT_TRUE(jump.overlaps(7u, 2u));
+  EXPECT_TRUE(jump.overlaps(9u, 2u));
+  EXPECT_FALSE(jump.overlaps(11u, 1u));
+
+  jump.scc_save_sgpr = 9u;
+  EXPECT_FALSE(jump.is_well_formed());
+  jump = {std::numeric_limits<uint16_t>::max(), 0u};
+  EXPECT_FALSE(jump.is_well_formed());
+}
+
 TEST(ConSan, SelectableVgprBankStateDispatchesOnlyToOwningTarget) {
   constexpr uint32_t kSetVgprBankModeFour = 0xBF860004u;
   std::array<uint8_t, sizeof(kSetVgprBankModeFour)> bytes{};
@@ -204,7 +218,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline,
       .moi_exec_save_sgprs_persistent = true,
       .moi_dynamic_stack_spill = true,
-      .moi_router_jump = ConSanMoiIndirectJumpSgprs{2u, 7u},
+      .moi_router_jump = ConSanIndirectJumpSgprs{2u, 7u},
       .moi_router_call = ConSanMoiRouterCallSgprs{12u, 14u},
       .moi_inline_visible_evidence_sgpr = 8u,
       .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
