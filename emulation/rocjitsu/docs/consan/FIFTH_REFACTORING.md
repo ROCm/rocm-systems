@@ -2263,56 +2263,6 @@ surfaces, the smallness of surviving mode/target interactions, legacy
 harvesting, material code shrinkage, and the required independent deep-read
 audit remain open.
 
-### 16.155 Convergence checkpoint 154: truthful shared barrier ownership
-
-The next trace separated three kinds of code that were obscured by InlineShadow
-names inside the common barrier mechanism.  Return emission is used only by the
-two InlineShadow epoch-body emitters, so `append_inline_barrier_return` moved to
-the InlineShadow barrier owner.  Patch-ABI construction is used by both
-Record/Replay fallback and InlineShadow, so its old Inline-prefixed name became
-the mode-neutral `plan_barrier_patch_abi`.  The transaction-local planned
-lowering likewise carries either mode's typed body and is now named
-`PlannedBarrierLowering`, not `PlannedInlineEpochBarrier`.
-
-Both mode entry points already reject disabled barrier tracking before entering
-the shared mechanism.  The duplicate enablement check in that mechanism is
-deleted, making mode ownership of the policy explicit and avoiding a third
-authority.  The gate requires both entry points to retain the check, rejects it
-inside the shared function, requires the Inline-only return helper in the
-InlineShadow file, and rejects the two misleading shared names.
-
-| Signal | Checkpoint 154 | Cumulative change | Slice change from checkpoint 153 |
-| --- | ---: | ---: | ---: |
-| Production files | 308 | +79 | 0 |
-| Physical production lines | 102,590 | **-2,386** | **-3** |
-| Nonblank production lines | 96,173 | **-2,911** | **-3** |
-| Production implementation lines | 88,387 | **-3,063** | **-3** |
-| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
-| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
-| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
-| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
-| Inline-only return helpers in the common barrier owner | **0** | n/a | **-1** |
-| Duplicate shared barrier enablement checks | **0** | n/a | **-1** |
-| Test inventory | **5,425** | **+80** | 0 |
-
-The implementation is committed as `a90d5839acd`.  Validation includes a
-successful full `-j16` build and **117/117** architecture-boundary and barrier-
-named host tests.  Six hardware-backed tests whose names omit `Physical` also
-entered that sweep despite its name exclusion; future nonphysical invocations
-use the CTest label exclusion `-LE physical`.  Checkpoint 153 supplies the
-immediately preceding broad barrier sweep and checkpoint 151 the recent full
-five-target Record/Replay plus InlineShadow simulator matrix.  No test was
-removed, renamed, disabled, or replaced.
-
-The common transaction now uses honest shared names and no longer owns an
-Inline-only emission primitive or mode enablement policy.  Its remaining real
-violation is larger: it still constructs both modes' body plans inside one
-function.  The next slice must establish a narrow mode-planning seam and then
-move each branch behind its mode owner without cloning resource, placement, or
-publication machinery.  Full target/mode locality, broad transaction and
-operating-point reduction, extension-proof revalidation, and the independent
-Section 14 audit remain open.
-
 ### 16.19 Convergence checkpoint 18: one lowering-commit authority
 
 The resumed branch contains two intentionally separate measurement intervals.
@@ -10740,3 +10690,53 @@ That seam needs a deep trace of the plan/emit dependency before attempting a
 compiled split.  Full target/mode locality, broad transaction and operating-
 point reduction, extension-proof revalidation, and the independent Section 14
 audit remain open.
+
+### 16.155 Convergence checkpoint 154: truthful shared barrier ownership
+
+The next trace separated three kinds of code that were obscured by InlineShadow
+names inside the common barrier mechanism.  Return emission is used only by the
+two InlineShadow epoch-body emitters, so `append_inline_barrier_return` moved to
+the InlineShadow barrier owner.  Patch-ABI construction is used by both
+Record/Replay fallback and InlineShadow, so its old Inline-prefixed name became
+the mode-neutral `plan_barrier_patch_abi`.  The transaction-local planned
+lowering likewise carries either mode's typed body and is now named
+`PlannedBarrierLowering`, not `PlannedInlineEpochBarrier`.
+
+Both mode entry points already reject disabled barrier tracking before entering
+the shared mechanism.  The duplicate enablement check in that mechanism is
+deleted, making mode ownership of the policy explicit and avoiding a third
+authority.  The gate requires both entry points to retain the check, rejects it
+inside the shared function, requires the Inline-only return helper in the
+InlineShadow file, and rejects the two misleading shared names.
+
+| Signal | Checkpoint 154 | Cumulative change | Slice change from checkpoint 153 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,590 | **-2,386** | **-3** |
+| Nonblank production lines | 96,173 | **-2,911** | **-3** |
+| Production implementation lines | 88,387 | **-3,063** | **-3** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| Inline-only return helpers in the common barrier owner | **0** | n/a | **-1** |
+| Duplicate shared barrier enablement checks | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `a90d5839acd`.  Validation includes a
+successful full `-j16` build and **117/117** architecture-boundary and barrier-
+named host tests.  Six hardware-backed tests whose names omit `Physical` also
+entered that sweep despite its name exclusion; future nonphysical invocations
+use the CTest label exclusion `-LE physical`.  Checkpoint 153 supplies the
+immediately preceding broad barrier sweep and checkpoint 151 the recent full
+five-target Record/Replay plus InlineShadow simulator matrix.  No test was
+removed, renamed, disabled, or replaced.
+
+The common transaction now uses honest shared names and no longer owns an
+Inline-only emission primitive or mode enablement policy.  Its remaining real
+violation is larger: it still constructs both modes' body plans inside one
+function.  The next slice must establish a narrow mode-planning seam and then
+move each branch behind its mode owner without cloning resource, placement, or
+publication machinery.  Full target/mode locality, broad transaction and
+operating-point reduction, extension-proof revalidation, and the independent
+Section 14 audit remain open.
