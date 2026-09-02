@@ -12102,3 +12102,58 @@ policy reconstruction with a single selected fact and closes another
 mode-to-common back edge.  The remaining predicate calls belong to
 Record/Replay planning and lowering; they no longer leak into common placement
 or common scalar-ABI sizing.
+
+### 16.184 Convergence checkpoint 183: physical Record/Replay access ownership
+
+Deep tracing of `consan_moi_shared_lowering.cpp` found a much larger locality
+violation than its name suggested.  The complete 1,572-line
+`build_first_light_access_record_words` implementation is the Record/Replay
+access-record protocol: static first-light and dynamic record publication,
+dispatch/access bank selection, exact identity qualification, and displaced
+guest replay.  Its only three callers were in
+`consan_moi_record_replay.inc`.  None of Sampled, InlineShadow, or the common
+pipeline consumed it.
+
+The implementation now resides in the dedicated
+`consan_moi_record_replay_access_emission.cpp` translation unit and its
+declaration is owned by `consan_moi_record_replay.h`.  The moved function body
+is byte-for-byte identical to the former body; target instruction, address,
+relocation, report, and synchronization mechanics remain dependencies through
+their existing contracts.  The nominally shared header and source no longer
+publish or implement the mode protocol.  Removing it also exposed and deleted
+sixteen shared-file imports and using declarations that existed only for
+Record/Replay access emission.
+
+The architecture boundary check now rejects restoration of the emitter to the
+shared header or source, requires its physical Record/Replay owner, and applies
+the existing immutable-input rule to the new mode file.  The pre-existing
+indexed-addressing invariant was redirected from the misleading shared owner
+to the actual Record/Replay access-emission owner.
+
+| Signal | Checkpoint 183 | Cumulative change | Slice change from checkpoint 182 |
+| --- | ---: | ---: | ---: |
+| Production files | 310 | +81 | +1 |
+| Physical production lines | 102,173 | **-2,803** | +33 |
+| Nonblank production lines | 95,758 | **-3,326** | +25 |
+| Production implementation lines | 88,020 | **-3,430** | +21 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 53** | **-43 / +2** | 0 / +1 |
+| Record/Replay access-emitter lines in shared lowering | **0** | n/a | **-1,572** |
+| `consan_moi_shared_lowering.cpp` physical lines | **768** | n/a | **-1,588** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `97231cd4621`.  Validation includes a
+successful full `-j16` build, **207/207** nonphysical Record/Replay and
+first-light behavioral tests, and **884/884** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+The new translation-unit scaffolding costs 21 counted implementation lines,
+but it moves the single largest remaining mode protocol out of a common file
+and deletes its common dependency surface.  This is a boundary investment, not
+a deferred dual path: there is one implementation and one declaration, both
+owned by Record/Replay.  The now-small shared-lowering file also makes its
+remaining Sampled- and InlineShadow-specific helpers visible as tractable next
+convergence candidates.
