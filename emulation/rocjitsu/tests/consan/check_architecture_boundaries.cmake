@@ -2006,8 +2006,8 @@ if(_moi_barrier_owner MATCHES
         "ConSan exact-subset barrier dispatch must not reopen broad body state"
     )
 endif()
-foreach(_inline_barrier_assignment_count IN ITEMS 6 2)
-    if(_inline_barrier_assignment_count EQUAL 6)
+foreach(_inline_barrier_assignment_count IN ITEMS 4 2)
+    if(_inline_barrier_assignment_count EQUAL 4)
         set(_inline_barrier_assignment apply_moi_transient_sgpr_assignment)
     else()
         set(_inline_barrier_assignment apply_moi_persistent_vgpr_assignment)
