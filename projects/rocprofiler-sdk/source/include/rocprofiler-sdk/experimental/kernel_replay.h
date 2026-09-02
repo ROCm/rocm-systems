@@ -69,10 +69,11 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  *   The tool sets @c replay_pass_count and optionally @c replay_continue during
  *   @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields are zero.
  * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
- *   @c total_passes are populated by the SDK. @c replay_pass_count and @c replay_continue read
- *   as NULL and must not be modified: the callbacks installed during CONFIG PHASE_ENTER govern
- *   the whole sequence and cannot be swapped mid-replay (such a write is discarded today, but
- *   tools must not depend on that).
+ *   @c total_passes are populated by the SDK. @c replay_pass_count reads as NULL and must not be
+ *   modified (the pass count is fixed at CONFIG PHASE_ENTER). @c replay_continue is NULL during
+ *   PASS PHASE_ENTER; during PASS PHASE_EXIT the SDK populates it with the callback in effect for
+ *   this pass, and the tool may overwrite it there to change the continue decision for this pass
+ *   only (the next pass reverts to the CONFIG default).
  *
  * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
  * (CONFIG + all PASS operations). A tool can write per-dispatch state into
@@ -80,14 +81,14 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * subsequent PASS callback and to @c replay_pass_count and @c replay_continue for the
  * same dispatch.
  *
- * Each PASS receives its own copy of that value, so a write during PASS PHASE_ENTER is scoped
- * to the pass that performed it: PASS PHASE_EXIT for that same pass observes the write, while
- * the next PASS, @c replay_continue, and CONFIG PHASE_EXIT all still observe the value set
- * during CONFIG PHASE_ENTER. @c replay_continue in particular runs after PASS PHASE_EXIT yet
- * still receives the CONFIG value, so state that must influence the continue decision belongs
- * behind @c user_data.ptr: mutating the pointed-to object is visible from every callback,
- * whereas overwriting the union itself is not. See
- * `samples/kernel_replay/basic_client_with_user_data.cpp` for a worked example.
+ * Each PASS receives its own copy of that value, so a write during a PASS callback is scoped to
+ * the pass that performed it: that pass's PASS PHASE_EXIT and its @c replay_continue decision
+ * observe the write, while the next PASS and CONFIG PHASE_EXIT still observe the value set during
+ * CONFIG PHASE_ENTER. @c replay_continue runs after PASS PHASE_EXIT and receives that pass's copy
+ * (the value its PHASE_EXIT left), not the CONFIG value. For state that must persist across the
+ * whole sequence regardless of per-pass writes, place it behind @c user_data.ptr: mutating the
+ * pointed-to object is visible from every callback, whereas overwriting the union value is
+ * per-pass. See `samples/kernel_replay/basic_client_with_user_data.cpp` for a worked example.
  *
  * Exactly one context may configure a KERNEL_REPLAY service; a second
  * @ref rocprofiler_configure_callback_tracing_service for this domain returns
@@ -137,19 +138,19 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// per dispatch and thread per-dispatch state through the callbacks.
     ///
     /// @var replay_continue
-    /// @brief [CONFIG] Optional tool-provided callback invoked after a pass completes to decide
-    /// whether another one follows. Return non-zero to continue the replay loop, zero to break
-    /// out. Required when @c replay_pass_count returns 0; with a fixed count N > 1 it allows
-    /// early exit only -- it cannot extend the loop past N. Because it only ever decides whether
-    /// a *further* pass runs, it is not consulted after the final pass of a fixed loop: for
-    /// N passes it sees @c current_pass 0 through N-2. An indefinite loop consults it after
-    /// every pass, including the one that ends the loop. It is therefore not a reliable
-    /// per-pass hook; use PASS @ref ROCPROFILER_CALLBACK_PHASE_EXIT for per-pass bookkeeping.
-    /// @c rocprofv3 does not set this callback; adaptive or early-exit control is a
-    /// custom-tool feature.
-    /// @c dispatch_info and @c user_data (the per-dispatch user data set during CONFIG
-    /// PHASE_ENTER) are provided; the same @c user_data is threaded through all callbacks
-    /// for this dispatch.
+    /// @brief [CONFIG/PASS] Optional tool-provided callback invoked after each pass completes.
+    /// Return non-zero to continue the replay loop, zero to break out.
+    /// Required when @c replay_pass_count returns 0; with a fixed count N > 1 it allows early exit
+    /// only — it cannot extend the loop past N. It is not consulted after the final pass of a
+    /// fixed loop (for N passes it sees @c current_pass 0 through N-2); an indefinite loop consults
+    /// it after every pass. @c rocprofv3 does not set this callback; adaptive or early-exit control
+    /// is a custom-tool feature.
+    /// Set the default during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the PASS @ref
+    /// ROCPROFILER_CALLBACK_PHASE_EXIT callback may override it for that pass only, after which the
+    /// next pass reverts to the CONFIG default.
+    /// @c dispatch_info and @c user_data are provided, where @c user_data is the pass-scoped copy
+    /// (the value that pass's PASS @ref ROCPROFILER_CALLBACK_PHASE_EXIT left), not the
+    /// sequence-wide CONFIG value.
     ///
     /// @var current_pass
     /// @brief [PASS] 0-indexed current pass number. Read-only, populated by SDK.

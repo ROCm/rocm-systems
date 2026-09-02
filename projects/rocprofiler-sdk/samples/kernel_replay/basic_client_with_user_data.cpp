@@ -18,22 +18,18 @@ constexpr uint64_t kMaxPasses     = 4;
 constexpr uint64_t kStopAfterPass = 1;
 
 // Per-dispatch tool state. A tool reaches this through user_data.ptr instead of keeping a side
-// table keyed on dispatch id.
+// table keyed on dispatch id. Set once during CONFIG PHASE_ENTER, it is the sequence-wide value:
+// replay_pass_count sees it and every PASS is re-seeded with it.
 struct replay_user_data
 {
-    uint64_t          max_passes      = kMaxPasses;
-    uint64_t          stop_after_pass = kStopAfterPass;
-    std::atomic<int>  replayed{0};
-    std::atomic<int>  passes_seen{0};
-    std::atomic<bool> continue_passes{true};
+    uint64_t         max_passes      = kMaxPasses;
+    uint64_t         stop_after_pass = kStopAfterPass;
+    std::atomic<int> replayed{0};
+    std::atomic<int> passes_seen{0};
 };
 
 rocprofiler_context_id_t g_replay_ctx{0};
 replay_user_data         g_replay_data{};
-
-// Distinct address parked in user_data.ptr during a PASS to show how far that write travels.
-// A real tool has no reason to do this; the sample does it to pin the scoping rules.
-replay_user_data g_pass_scratch{};
 
 #define KR_REQUIRE(cond, msg)                                                                      \
     do                                                                                             \
@@ -67,12 +63,11 @@ replay_continue(rocprofiler_kernel_dispatch_info_t,
                 uint64_t,
                 rocprofiler_user_data_t user_data)
 {
-    // Runs after PASS PHASE_EXIT, yet still receives the CONFIG value: the PASS-phase write to
-    // user_data below is not propagated here. State that must influence the continue decision
-    // therefore lives behind the pointer, not in the union itself.
-    KR_REQUIRE(user_data.ptr == &g_replay_data,
-               "replay_continue should observe the CONFIG user_data, not a PASS-phase write");
-    return get_replay_data(user_data)->continue_passes.load() ? 1 : 0;
+    // Runs after PASS PHASE_EXIT and receives THAT pass's copy of user_data -- the value its
+    // PHASE_EXIT left, not the CONFIG value. This sample's PASS PHASE_EXIT stores the per-pass
+    // continue decision in user_data.value (see kernel_replay_cb), so the decision rides the
+    // pass-scoped slot and is simply read back here.
+    return user_data.value != 0 ? 1 : 0;
 }
 
 void
@@ -92,18 +87,17 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
     {
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            // The SDK snapshots this union after CONFIG PHASE_ENTER and hands the same value to
-            // replay_pass_count, replay_continue, and every PASS callback for this dispatch.
+            // The SDK snapshots this union after CONFIG PHASE_ENTER as the sequence-wide value,
+            // hands it to replay_pass_count, and re-seeds it into every PASS for this dispatch.
             user_data->ptr = callback_data;
 
-            callback_data->continue_passes.store(true);
             callback_data->replayed.fetch_add(1);
             payload->replay_pass_count = replay_pass_count;
             payload->replay_continue   = replay_continue;
         }
         else
         {
-            // A PASS-phase write to user_data never reaches CONFIG PHASE_EXIT.
+            // A per-pass write never reaches CONFIG PHASE_EXIT: it still sees the CONFIG value.
             KR_REQUIRE(user_data->ptr == callback_data, "CONFIG EXIT lost the CONFIG user_data");
             KR_REQUIRE(payload->replay_pass_count == replay_pass_count,
                        "CONFIG EXIT should still expose the config callbacks");
@@ -117,11 +111,11 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        // Every pass starts from the CONFIG value, so the previous pass's write is gone.
-        KR_REQUIRE(user_data->ptr == callback_data,
-                   "PASS ENTER should start from the CONFIG value");
+        // Every pass is re-seeded from the CONFIG value, so the previous pass's PHASE_EXIT write is
+        // gone: user_data.ptr is the CONFIG pointer again.
+        KR_REQUIRE(user_data->ptr == callback_data, "PASS ENTER should re-seed the CONFIG value");
 
-        // Config-only fields read as null during a PASS; the pass-scoped context toggles are
+        // Config-only callbacks read as null during a PASS; the pass-scoped context toggles are
         // live only for the duration of this callback.
         KR_REQUIRE(payload->replay_pass_count == nullptr,
                    "config fields must read as null during a PASS");
@@ -137,24 +131,19 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record,
                 static_cast<unsigned long>(payload->total_passes),
                 user_data->ptr);
         callback_data->passes_seen.fetch_add(1);
-
-        // Scoped to this pass: visible at PASS EXIT below, then discarded.
-        user_data->ptr = &g_pass_scratch;
     }
     else
     {
-        KR_REQUIRE(user_data->ptr == &g_pass_scratch,
-                   "a PASS ENTER write to user_data should reach PASS EXIT of the same pass");
         KR_REQUIRE(
             payload->replay_start_context == nullptr && payload->replay_stop_context == nullptr,
             "context toggles are only valid during PASS ENTER");
 
-        if(payload->current_pass >= callback_data->stop_after_pass)
-        {
-            // replay_continue reads this through the pointer it was given at CONFIG time, which
-            // is why the flag lives in the struct rather than in user_data.value.
-            callback_data->continue_passes.store(false);
-        }
+        // Decide whether another pass should follow and hand that decision to replay_continue
+        // through the pass-scoped user_data. This write is visible to this pass's replay_continue
+        // only; the next pass is re-seeded from the CONFIG value. (replay_continue is not consulted
+        // after the final pass of a fixed loop, so that pass's decision is moot.)
+        const bool keep_going = payload->current_pass < callback_data->stop_after_pass;
+        user_data->value      = keep_going ? 1 : 0;
     }
 }
 
@@ -186,7 +175,6 @@ tool_fini(void*)
     KR_REQUIRE(g_replay_data.replayed.load() == 1, "expected exactly one replayed dispatch");
     KR_REQUIRE(g_replay_data.passes_seen.load() == expected_passes,
                "early exit did not stop the loop where expected");
-    KR_REQUIRE(g_pass_scratch.passes_seen.load() == 0, "the scratch state should never be written");
 }
 }  // namespace
 

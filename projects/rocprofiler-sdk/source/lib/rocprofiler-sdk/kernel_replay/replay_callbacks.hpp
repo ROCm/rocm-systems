@@ -65,6 +65,16 @@ struct pass_context_state_t
 {
     tracing::callback_context_data_vec_t   contexts{};
     tracing::external_correlation_id_map_t external_correlation_ids{};
+
+    // Per-pass replay_continue. Seeded from replay_plan_t::replay_continue at PASS PHASE_ENTER; the
+    // tool may reassign it from its PASS PHASE_EXIT callback and it drives only this pass's
+    // continue decision -- the next pass re-seeds from the config default. Mirrors the per-pass
+    // scoping of user_data.
+    rocprofiler_kernel_replay_continue_cb_t replay_continue = nullptr;
+
+    // Pass-scoped user_data delivered to replay_continue: the value this pass's PASS PHASE_EXIT
+    // left (see should_continue_replay), not the sequence-wide CONFIG value.
+    rocprofiler_user_data_t user_data = {.value = 0};
 };
 
 // Set once when a tool configures a KERNEL_REPLAY callback-tracing service. Acts as a cheap
@@ -124,6 +134,9 @@ execute_pass_phase_exit(const replay_plan_t&  plan,
                         pass_context_state_t& pass_state);
 
 bool
-should_continue_replay(const replay_plan_t& plan, uint64_t current_pass, bool is_final_pass);
+should_continue_replay(const replay_plan_t&        plan,
+                       const pass_context_state_t& pass_state,
+                       uint64_t                    current_pass,
+                       bool                        is_final_pass);
 }  // namespace kernel_replay
 }  // namespace rocprofiler

@@ -283,6 +283,13 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
                          pass_context_state_t&   out_pass_state)
 {
     out_pass_state = pass_context_state_t{};
+
+    // Per-pass replay_continue defaults to the config-provided callback; the tool may override it
+    // for this pass from its PASS PHASE_EXIT callback (see execute_pass_phase_exit), and
+    // should_continue_replay consumes the result. Reset every pass (like user_data) so an override
+    // never leaks past the pass that set it.
+    out_pass_state.replay_continue = plan.replay_continue;
+
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                ROCPROFILER_KERNEL_REPLAY_PASS,
                                out_pass_state.contexts,
@@ -334,15 +341,28 @@ execute_pass_phase_exit(const replay_plan_t&  plan,
     pass_data.current_pass  = current_pass;
     pass_data.total_passes  = plan.indefinite ? 0 : plan.total_passes;
 
+    // Carry the replay_continue chosen so far (config default or a PASS PHASE_ENTER override) so
+    // the tool sees the current value and may replace it here
+    pass_data.replay_continue = pass_state.replay_continue;
+
     tracing::execute_phase_exit_callbacks(pass_state.contexts,
                                           pass_state.external_correlation_ids,
                                           ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
                                           ROCPROFILER_KERNEL_REPLAY_PASS,
                                           pass_data);
+
+    // Freeze what should_continue_replay consumes for this pass: the (possibly overridden)
+    // replay_continue, and the pass-scoped user_data -- "the same copy from the pass phase exit".
+    pass_state.replay_continue = pass_data.replay_continue;
+    pass_state.user_data =
+        pass_state.contexts.empty() ? plan.user_data : pass_state.contexts.front().user_data;
 }
 
 bool
-should_continue_replay(const replay_plan_t& plan, uint64_t current_pass, bool is_final_pass)
+should_continue_replay(const replay_plan_t&        plan,
+                       const pass_context_state_t& pass_state,
+                       uint64_t                    current_pass,
+                       bool                        is_final_pass)
 {
     // Fixed-count loops never exceed total_passes; replay_continue may only break early, not
     // extend the loop past N passes.
@@ -353,11 +373,14 @@ should_continue_replay(const replay_plan_t& plan, uint64_t current_pass, bool is
     // WriteInterceptor), not at pass N-1, so lifting the cap below would be sufficient.
     if(!plan.indefinite && is_final_pass) return false;
 
-    if(plan.replay_continue)
-        return plan.replay_continue(plan.config_data.dispatch_info,
-                                    current_pass,
-                                    plan.indefinite ? 0 : plan.total_passes,
-                                    plan.user_data) != 0;
+    // Use this pass's replay_continue (seeded from the config default at PASS PHASE_ENTER, possibly
+    // overridden by the tool in PASS PHASE_EXIT) and hand it the pass-scoped user_data -- the copy
+    // this pass's PASS PHASE_EXIT saw -- rather than the sequence-wide CONFIG value.
+    if(pass_state.replay_continue)
+        return pass_state.replay_continue(plan.config_data.dispatch_info,
+                                          current_pass,
+                                          plan.indefinite ? 0 : plan.total_passes,
+                                          pass_state.user_data) != 0;
 
     // No continue cb: indefinite loops require one (rejected at config), so this is a fixed loop
     // that has not yet reached its final pass.

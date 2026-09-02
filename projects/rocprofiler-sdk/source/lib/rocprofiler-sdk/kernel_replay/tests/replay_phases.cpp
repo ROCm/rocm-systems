@@ -42,6 +42,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -85,6 +86,7 @@ replay {
 
 namespace ctxc = rocprofiler::context;
 namespace trc  = rocprofiler::tracing;
+namespace kr   = rocprofiler::kernel_replay;
 
 namespace
 {
@@ -264,6 +266,37 @@ run_replay(observations& obs, uint64_t n_passes)
                                           payload);
     }
 }
+
+// Function-pointer callbacks for the replay_continue decision. Plain function pointers can't
+// capture, so they record into a file-scope pointer the test sets before invoking the decision.
+struct continue_call
+{
+    uint64_t current_pass{};
+    uint64_t user_data{};
+    int      returned{};
+};
+
+std::vector<continue_call>* g_continue_calls = nullptr;
+
+int
+continue_always(rocprofiler_kernel_dispatch_info_t /*dispatch_info*/,
+                uint64_t current_pass,
+                uint64_t /*total_passes*/,
+                rocprofiler_user_data_t user_data)
+{
+    if(g_continue_calls) g_continue_calls->push_back({current_pass, user_data.value, 1});
+    return 1;  // continue
+}
+
+int
+stop_now(rocprofiler_kernel_dispatch_info_t /*dispatch_info*/,
+         uint64_t current_pass,
+         uint64_t /*total_passes*/,
+         rocprofiler_user_data_t user_data)
+{
+    if(g_continue_calls) g_continue_calls->push_back({current_pass, user_data.value, 0});
+    return 0;  // stop
+}
 }  // namespace
 
 // The value set in CONFIG PHASE_ENTER is what CONFIG PHASE_EXIT sees and what seeds every pass's
@@ -307,4 +340,57 @@ TEST(kernel_replay_phases, pass_enter_user_data_write_scoped_to_its_own_pass)
     // pass 2: re-seeded from CONFIG -> the pass-1 write did not persist.
     EXPECT_EQ(obs.passes[2].enter_seen, CONFIG_ENTER_VALUE);
     EXPECT_EQ(obs.passes[2].exit_seen, CONFIG_ENTER_VALUE);
+}
+
+// should_continue_replay uses THIS pass's replay_continue (the config default unless the tool
+// overrode it for the pass in PASS PHASE_EXIT) and hands it the pass-scoped user_data -- the copy
+// that pass's PASS PHASE_EXIT saw, not the sequence-wide CONFIG value. The final pass of a fixed
+// loop stops without consulting the callback.
+TEST(kernel_replay_phases, replay_continue_per_pass_override_and_pass_scoped_user_data)
+{
+    std::vector<continue_call> calls{};
+    g_continue_calls = &calls;
+
+    auto plan            = kr::replay_plan_t{};
+    plan.total_passes    = 5;
+    plan.indefinite      = false;
+    plan.replay_continue = &continue_always;    // config default: keep going
+    plan.user_data.value = CONFIG_ENTER_VALUE;  // sequence-wide value (must NOT be what cb sees)
+
+    // pass 0: no per-pass override -> the config default runs and sees this pass's user_data.
+    {
+        auto ps            = kr::pass_context_state_t{};
+        ps.replay_continue = plan.replay_continue;  // seeded from config at PASS ENTER
+        ps.user_data.value = CONFIG_ENTER_VALUE;    // pass-scoped copy (equals config for pass 0)
+        EXPECT_TRUE(kr::should_continue_replay(plan, ps, /*current_pass=*/0, /*is_final=*/false));
+    }
+
+    // pass 1: tool overrode replay_continue in PASS EXIT -> stop; it sees the pass-scoped value.
+    {
+        auto ps            = kr::pass_context_state_t{};
+        ps.replay_continue = &stop_now;           // per-pass override
+        ps.user_data.value = PASS_1_ENTER_VALUE;  // pass-scoped copy for this pass
+        EXPECT_FALSE(kr::should_continue_replay(plan, ps, /*current_pass=*/1, /*is_final=*/false));
+    }
+
+    // final pass of a fixed loop: stops regardless, and the callback is never consulted.
+    {
+        auto ps            = kr::pass_context_state_t{};
+        ps.replay_continue = &continue_always;
+        ps.user_data.value = CONFIG_ENTER_VALUE;
+        EXPECT_FALSE(kr::should_continue_replay(plan, ps, /*current_pass=*/4, /*is_final=*/true));
+    }
+
+    // Only pass 0 (continue) and pass 1 (stop) consulted the callback; the final pass
+    // short-circuited. Each callback received its own pass's user_data -- pass 1 proves it is
+    // pass-scoped, not config.
+    ASSERT_EQ(calls.size(), 2u);
+    EXPECT_EQ(calls[0].current_pass, 0u);
+    EXPECT_EQ(calls[0].user_data, CONFIG_ENTER_VALUE);
+    EXPECT_EQ(calls[0].returned, 1);
+    EXPECT_EQ(calls[1].current_pass, 1u);
+    EXPECT_EQ(calls[1].user_data, PASS_1_ENTER_VALUE);  // pass-scoped, not plan.user_data
+    EXPECT_EQ(calls[1].returned, 0);
+
+    g_continue_calls = nullptr;
 }

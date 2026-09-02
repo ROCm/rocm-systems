@@ -1066,7 +1066,8 @@ WriteInterceptor(const void* packets,
 
                 // Stop once the tool (or the fixed pass count) says we're done; the last executed
                 // pass leaves device memory as the app expects, so no restore follows the break.
-                if(!kernel_replay::should_continue_replay(replay_plan, pass, is_final)) break;
+                if(!kernel_replay::should_continue_replay(replay_plan, pass_state, pass, is_final))
+                    break;
 
                 // Restore device memory between passes so the next pass sees identical inputs.
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
