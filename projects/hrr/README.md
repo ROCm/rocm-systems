@@ -16,12 +16,19 @@ The information presented in this document is for informational purposes only an
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
-Use the in-tree `libamdhip64` from a developer build when testing capture changes:
+Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
 ```bash
 export LD_LIBRARY_PATH=<clr-build>/hipamd/lib:$LD_LIBRARY_PATH
 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
+
+The capture runtime and `hrr-playback` share the generated HRR wire-format structs. For
+capture/replay tests, build both `amdhip64` and `projects/hrr` from the same source
+commit and use the same install prefix (or matching `LD_LIBRARY_PATH`) for both. Do
+not capture with a prebuilt SDK runtime and replay with a checkout-built `hrr-playback`:
+their generated payload layouts may differ, producing `payload too small` or missing
+kernel/code-object errors.
 
 ## Build `hrr-playback`
 
