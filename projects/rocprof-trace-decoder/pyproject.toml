@@ -9,17 +9,14 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
-dynamic = ["version", "dependencies"]
+dependencies = ["pyelftools>=0.31"]
+dynamic = ["version"]
 
 [tool.setuptools]
 package-dir = { "" = "python" }
 
-[tool.setuptools.package-data]
-rocprof_trace_decoder = ["requirements.txt"]
-
 [tool.setuptools.dynamic]
 version = { attr = "rocprof_trace_decoder._version.__version__" }
-dependencies = { file = ["python/rocprof_trace_decoder/requirements.txt"] }
 
 [tool.setuptools.packages.find]
 where = ["python"]
