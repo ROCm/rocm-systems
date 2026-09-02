@@ -128,6 +128,10 @@ jobs:
           # just that the file exists. No GPU needed for import.
           "$PY_BUILD" -m pip install "$WHEEL"
           "$PY_BUILD" -c "import amdsmi; print('import amdsmi OK from', amdsmi.__file__)"
+          # A tolerant import succeeds even when the bundled .so fails to load,
+          # so assert the wheel-private libamd_smi_python.so actually loaded and
+          # that a no-GPU-safe exported symbol is callable.
+          "$PY_BUILD" "$GITHUB_WORKSPACE/projects/amdsmi/tests/verify_bundled_library_loads.py"
           echo "Build gate passed"
 
   # Single job covering every distro + package format. The build-time logic

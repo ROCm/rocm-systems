@@ -133,6 +133,11 @@ jobs:
           # build-step ordering regression that leaves it enabled fails here
           # rather than shipping a wheel that can silently load a system .so.
           ${{matrix.target.python-bin}} -c "import amdsmi.amdsmi_wrapper as w; assert not w._AMDSMI_ALLOW_SYSTEM_FALLBACK, 'wheel shipped with system fallback enabled'; print('fallback disabled OK')"
+          # A tolerant import still succeeds when the bundled .so fails to load
+          # (missing auditwheel dependency, wrong RPATH, otherwise unloadable),
+          # so assert the wheel-private libamd_smi_python.so actually loaded and
+          # that a no-GPU-safe exported symbol is callable.
+          ${{matrix.target.python-bin}} "$GITHUB_WORKSPACE/projects/amdsmi/tests/verify_bundled_library_loads.py"
 
       # Not consumed by any downstream job; kept so a reviewer can download the
       # built wheel from a run. Named by commit SHA for traceability.
