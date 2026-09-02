@@ -8602,3 +8602,60 @@ next convergence work must reap more than that investment. Full architecture
 locality, remaining mode-local transformation ownership, wider coordinator
 confinement, material additional deletion, and the independent Section 14
 audit remain open, so the goal remains active.
+
+### 16.122 Convergence checkpoint 121: one engine evidence vocabulary
+
+The report-planning trace followed flavor-specific observation intents into
+the normalized evidence plan used by every mode's report sizing contract. The
+same mode matrix was encoded three times in one common file: an engine-to-role
+acceptance switch, a twelve-case probe-kind classifier with repeated engine
+guards, and an engine-sensitive cardinality switch. Validation and
+construction could therefore drift even though they describe one semantic
+translation.
+
+`EngineEvidenceVocabulary` now gives each of the four engines one row. A row
+names its access, barrier, atomic, and optional fence probe vocabulary, its
+report-facing access role, whether it supports the shared address-capture
+operation, and whether barrier evidence is retained per semantic event.
+Construction projects a probe through the selected row; independent
+well-formedness checks the normalized role against the same row; cardinality
+consumes the row's semantic property. Common code still owns the genuinely
+shared evidence roles and domain rules, while no mode pair or target identity
+appears in the mechanics.
+
+The old acceptance switch, repeated per-probe engine guards, separate
+normalized-kind validity helper, and parallel expected-count authority are
+deleted. The architecture gate requires the one-row-per-engine vocabulary,
+including the explicit barrier cardinality property, and rejects restoration
+of the retired helpers or another `switch (engine)` in report planning. The
+existing exhaustive evidence tests already exercise all four complete rows,
+all normalized roles and counts, malformed payload domains, and cross-engine
+probe rejection; no duplicate test was added.
+
+| Signal | Checkpoint 121 | Cumulative change | Slice change from checkpoint 120 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,827 | **-2,149** | **-25** |
+| Nonblank production lines | 96,459 | **-2,625** | **-27** |
+| Production implementation lines | 88,711 | **-2,739** | **-27** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Parallel engine/evidence classification, acceptance, and cardinality authorities | **1** | n/a | **-2** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `057fb20b7bc`. Validation includes a
+warning-clean `-j16` rebuild, all focused evidence-planning, mode-extension,
+pipeline, and architecture-boundary tests **85/85**, and all **1,296/1,296**
+nonphysical host/component tests. No test was removed, renamed, disabled, or
+replaced, and no physical test was run.
+
+This slice repays checkpoint 120's eight-line interface investment and leaves
+the two-checkpoint pair nineteen implementation lines smaller. It strengthens
+Sections 14.3, 14.6, 14.7, and 14.8: the unavoidable common semantic
+interaction is one explicit O(N) vocabulary rather than several distributed
+mode matrices, and every superseded authority is gone. Full architecture
+locality, remaining mode-local transformation ownership, wider coordinator
+confinement, material additional deletion, and the independent Section 14
+audit remain open, so the goal remains active.
