@@ -25,7 +25,7 @@ MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanRequest
   MoiPersistentStateDemand demand;
   demand.needs_entry_workgroup_tuple =
       (facts.access_count || facts.atomic_count || facts.barrier_count || facts.fence_count) &&
-      !consan_moi_detail::record_replay_has_entry_workgroup_capture(point);
+      !consan_moi_detail::moi_has_exact_entry_workgroup_capture(point);
   demand.private_workgroup_tuple_supported =
       demand.needs_entry_workgroup_tuple &&
       !consan_moi_detail::record_replay_uses_automatic_banked_capture(request, resources);

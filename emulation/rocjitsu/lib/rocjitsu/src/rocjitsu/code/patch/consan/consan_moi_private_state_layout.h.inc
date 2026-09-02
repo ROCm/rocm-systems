@@ -10,7 +10,7 @@ struct ConSanMoiPrivateStateLayout {
   std::optional<uint32_t> owner_offset;
   std::optional<uint32_t> workgroup_key_offset;
   std::optional<uint32_t> dispatch_id_offset;
-  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
+  ConSanMoiPersistentWorkgroupPrivateOffsets exact_workgroup_offsets;
   uint32_t persistent_state_end = 0;
   uint32_t ephemeral_base = 0;
 
@@ -37,7 +37,7 @@ struct ConSanMoiPrivateStateLayout {
         !append(dispatch_id_offset, 2u * sizeof(uint32_t))) {
       return false;
     }
-    for (std::optional<uint32_t> offset : record_replay_workgroup_offsets.values()) {
+    for (std::optional<uint32_t> offset : exact_workgroup_offsets.values()) {
       if (!append(offset, sizeof(uint32_t)))
         return false;
     }

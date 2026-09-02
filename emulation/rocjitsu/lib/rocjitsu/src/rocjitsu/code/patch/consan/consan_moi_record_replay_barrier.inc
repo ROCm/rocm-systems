@@ -392,7 +392,7 @@ void try_apply_record_replay_barrier_record_patch(
               .owner_epoch = moi_owner_epoch_vgpr_sources(emission.moi_owner_epoch_vgprs),
               .workgroup_key = emission.moi_workgroup_key_vgpr,
               .dispatch_id = emission.moi_dispatch_id_vgpr,
-              .record_replay_workgroup = emission.moi_record_replay_workgroup_vgprs,
+              .exact_workgroup = emission.moi_exact_workgroup_vgprs,
           });
       if (!displaced_words.empty() && !overlaps_existing_patch && !crosses_control_flow_entry &&
           !overlaps_other_sync && jump_sgprs && backup_vgpr) {
@@ -650,7 +650,7 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const auto resources = resolve_moi_scratch_plan(resource_plan, point, assignments,
                                                   /*expected_count=*/6u);
-  if (!resources || !private_state_layout.record_replay_workgroup_offsets.complete()) {
+  if (!resources || !private_state_layout.exact_workgroup_offsets.complete()) {
     warnings.emplace_back(
         "ConSan MOI Record/Replay dense barrier has no complete private exact-workgroup layout in " +
         candidate.container_name);

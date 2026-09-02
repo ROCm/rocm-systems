@@ -126,8 +126,8 @@ void apply_record_replay_mode_patches(std::span<const uint8_t> bytes, const ConS
     // automatic state only when no standalone record can consume it.
     operating_point.moi_initialize_owner_epoch = false;
     operating_point.reset_moi_owner_epoch_vgprs();
-    operating_point.moi_record_replay_workgroup_vgprs = {};
-    operating_point.moi_persistent_sgprs.record_replay_workgroup = {};
+    operating_point.moi_exact_workgroup_vgprs = {};
+    operating_point.moi_persistent_sgprs.exact_workgroup = {};
     operating_point.moi_dispatch_identity.reset_vgpr();
     operating_point.owner_persistent_vgprs.clear();
     result.moi_operating_point = operating_point;

@@ -356,15 +356,15 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   };
 }
 
-/// Record/Replay probes execute after arbitrary guest code. Capture the
-/// complete workgroup tuple at entry instead of depending on descriptor SGPRs
-/// or RDNA launch TTMPs retaining their entry values.
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
+/// Exact-coordinate probes execute after arbitrary guest code. Capture the
+/// complete tuple at entry instead of depending on descriptor SGPRs or RDNA
+/// launch TTMPs retaining their entry values.
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_exact_entry_workgroup_sources(
     ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
   if (!moi_mode_operations(engine).policy.requires_entry_workgroup_capture ||
-      !record_replay_has_entry_workgroup_capture(point, private_offsets) ||
-      !record_replay_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
+      !moi_has_exact_entry_workgroup_capture(point, private_offsets) ||
+      !moi_exact_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
     return std::nullopt;
   }
   const auto scalar_source = [](uint16_t sgpr) { return ConSanMoiWorkgroupSource::scalar(sgpr); };
@@ -372,29 +372,29 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   const auto private_source = [](uint32_t offset) {
     return ConSanMoiWorkgroupSource::private_state(offset);
   };
-  if (point.moi_persistent_sgprs.record_replay_workgroup.complete()) {
+  if (point.moi_persistent_sgprs.exact_workgroup.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.x()),
-        .y = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.y()),
-        .z = scalar_source(*point.moi_persistent_sgprs.record_replay_workgroup.z()),
+        .x = scalar_source(*point.moi_persistent_sgprs.exact_workgroup.x()),
+        .y = scalar_source(*point.moi_persistent_sgprs.exact_workgroup.y()),
+        .z = scalar_source(*point.moi_persistent_sgprs.exact_workgroup.z()),
         .cluster_workgroup_id =
-            point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id()
+            point.moi_persistent_sgprs.exact_workgroup.cluster_workgroup_id()
                 ? scalar_source(
-                      *point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id())
+                      *point.moi_persistent_sgprs.exact_workgroup.cluster_workgroup_id())
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
         .cdna_guest_payload_mask = 0u,
     };
   }
-  if (point.moi_record_replay_workgroup_vgprs.complete()) {
+  if (point.moi_exact_workgroup_vgprs.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = vector_source(*point.moi_record_replay_workgroup_vgprs.x()),
-        .y = vector_source(*point.moi_record_replay_workgroup_vgprs.y()),
-        .z = vector_source(*point.moi_record_replay_workgroup_vgprs.z()),
+        .x = vector_source(*point.moi_exact_workgroup_vgprs.x()),
+        .y = vector_source(*point.moi_exact_workgroup_vgprs.y()),
+        .z = vector_source(*point.moi_exact_workgroup_vgprs.z()),
         .cluster_workgroup_id =
-            point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id()
-                ? vector_source(*point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id())
+            point.moi_exact_workgroup_vgprs.cluster_workgroup_id()
+                ? vector_source(*point.moi_exact_workgroup_vgprs.cluster_workgroup_id())
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
@@ -424,7 +424,7 @@ moi_persistent_or_descriptor_workgroup_sources(
     bool uses_cluster_workgroup_id,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
   if (const auto persistent =
-          record_replay_persistent_workgroup_sources(engine, point, private_offsets))
+          moi_exact_entry_workgroup_sources(engine, point, private_offsets))
     return persistent;
   return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
                                           uses_cluster_workgroup_id);
@@ -601,7 +601,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
       return false;
     point.reset_moi_owner_epoch_vgprs();
     point.moi_workgroup_key_vgpr.reset();
-    point.moi_record_replay_workgroup_vgprs = {};
+    point.moi_exact_workgroup_vgprs = {};
     point.moi_dispatch_identity.reset_vgpr();
     return true;
   }
@@ -621,7 +621,7 @@ apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
   point.set_moi_owner_epoch_vgprs(selected->owner_epoch_vgprs.owner,
                                   selected->owner_epoch_vgprs.epoch);
   point.moi_workgroup_key_vgpr = selected->workgroup_key_vgpr;
-  point.moi_record_replay_workgroup_vgprs = selected->record_replay_workgroup_vgprs;
+  point.moi_exact_workgroup_vgprs = selected->exact_workgroup_vgprs;
   point.moi_dispatch_identity.set_vgpr(selected->dispatch_id_vgpr);
   return true;
 }
@@ -4740,9 +4740,9 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       persistent_demand.cdna_overflow_strategy;
   const bool uses_resident_wave_private_state =
       cdna_overflow_strategy == MoiCdnaPersistentOverflowStrategy::ResidentWavePrivateState;
-  const bool needs_record_replay_workgroup_tuple = persistent_demand.needs_entry_workgroup_tuple;
+  const bool needs_exact_workgroup_tuple = persistent_demand.needs_entry_workgroup_tuple;
   const bool needs_cluster_workgroup_id =
-      needs_record_replay_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
+      needs_exact_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
       std::ranges::any_of(program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
         return kernel.uses_cluster_workgroup_id;
       });
@@ -4756,7 +4756,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       persistent_demand.private_dispatch_incompatible_with_dynamic_stack;
   const bool needs_workgroup_key = persistent_demand.needs_workgroup_key;
   const bool has_explicit_owner_epoch = options.moi_owner_epoch_vgprs.complete();
-  if (!record_replay_entry_workgroup_capture_is_unambiguous(options)) {
+  if (!moi_exact_entry_workgroup_capture_is_unambiguous(options)) {
     update.rejection = ConSanMoiPlacementRejection::AmbiguousWorkgroupCapture;
     diagnostics.emplace_back(
         "ConSan MOI Record/Replay has multiple persistent workgroup-tuple representations");
@@ -4768,8 +4768,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         "ConSan MOI persistent VGPR overrides require both owner and epoch registers");
     return update;
   }
-  if ((options.moi_workgroup_key_vgpr && !needs_record_replay_workgroup_tuple) ||
-      (has_explicit_owner_epoch && !needs_record_replay_workgroup_tuple))
+  if ((options.moi_workgroup_key_vgpr && !needs_exact_workgroup_tuple) ||
+      (has_explicit_owner_epoch && !needs_exact_workgroup_tuple))
     return update;
   if (!persistent_demand.needs_persistent_state)
     return update;
@@ -4829,12 +4829,12 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   // tail VGPRs while clearing. They must lie above every guest reference even
   // though owner/epoch remain the only persistent values.
   const uint32_t automatic_owner_epoch_count = has_explicit_owner_epoch ? 0u : 2u;
-  const uint32_t record_replay_workgroup_count =
-      needs_record_replay_workgroup_tuple ? (needs_cluster_workgroup_id ? 4u : 3u) : 0u;
+  const uint32_t exact_workgroup_count =
+      needs_exact_workgroup_tuple ? (needs_cluster_workgroup_id ? 4u : 3u) : 0u;
   const uint32_t dispatch_id_count = needs_persistent_dispatch_vgprs ? 2u : 0u;
   const uint32_t named_persistent_count = automatic_owner_epoch_count +
                                           static_cast<uint32_t>(needs_workgroup_key) +
-                                          record_replay_workgroup_count + dispatch_id_count;
+                                          exact_workgroup_count + dispatch_id_count;
   const uint32_t persistent_count =
       uses_resident_wave_private_state && consan_uses_gfx12_cdna_execution(arch)
           ? std::max<uint32_t>(named_persistent_count, 5u)
@@ -4867,8 +4867,8 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
     }
     if (needs_workgroup_key)
       options.moi_persistent_sgprs.workgroup_key = next++;
-    if (needs_record_replay_workgroup_tuple) {
-      options.moi_persistent_sgprs.record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{
+    if (needs_exact_workgroup_tuple) {
+      options.moi_persistent_sgprs.exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{
           next, static_cast<uint16_t>(next + 1u), static_cast<uint16_t>(next + 2u),
           needs_cluster_workgroup_id ? std::optional<uint16_t>(next + 3u) : std::nullopt};
     }
@@ -4961,7 +4961,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           "ConSan MOI assigned persistent scalar " +
           std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
           std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-          std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "");
+          std::string(needs_exact_workgroup_tuple ? "/exact-workgroup-tuple" : "");
       const auto commit_exact_workgroup_scalar_state = [&](uint16_t base,
                                                            std::string diagnostic_suffix) {
         std::vector<ConSanMoiPrologueScratchVgprAssignment> prologue_scratch;
@@ -4981,7 +4981,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         diagnostics.push_back(scalar_state_description + std::move(diagnostic_suffix));
       };
       if (scalar_tail) {
-        commit_exact_workgroup_scalar_state(*scalar_tail, " state for CDNA Record/Replay");
+        commit_exact_workgroup_scalar_state(*scalar_tail, " state for CDNA exact-coordinate mode");
         return update;
       }
 
@@ -5081,7 +5081,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // either homogeneous representation. Require whole-owner reference and
       // indirect-index closure for both files; this is not a calling-
       // convention or preserved-register assumption.
-      if (!has_explicit_owner_epoch && needs_record_replay_workgroup_tuple &&
+      if (!has_explicit_owner_epoch && needs_exact_workgroup_tuple &&
           every_owner_resolved && scalar_references.control_flow_closed &&
           !scalar_references.uses_indirect_sgprs && !scalar_references.uses_indirect_vgprs) {
         constexpr uint16_t kWorkgroupScalarCount = 3u;
@@ -5144,7 +5144,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           const uint16_t scalar_base = *workgroup_scalar_base;
           const uint16_t vector_base = *owner_epoch_vector_base;
           options.set_moi_owner_epoch_vgprs(vector_base, static_cast<uint16_t>(vector_base + 1u));
-          options.moi_persistent_sgprs.record_replay_workgroup =
+          options.moi_persistent_sgprs.exact_workgroup =
               ConSanMoiPersistentWorkgroupRegisters{scalar_base,
                                                     static_cast<uint16_t>(scalar_base + 1u),
                                                     static_cast<uint16_t>(scalar_base + 2u)};
@@ -5194,7 +5194,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         options.moi_initialize_owner_epoch = true;
         options.automatic_moi_private_epoch = true;
         diagnostics.emplace_back(
-            "ConSan MOI retained exact Record/Replay entry state in private storage below a "
+            "ConSan MOI retained exact entry state in private storage below a "
             "CDNA AccVGPR boundary");
         return update;
       }
@@ -5205,7 +5205,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // tuple. A component with real accumulators still fails closed against
       // its hard limit below.
       diagnostics.emplace_back(
-          "ConSan MOI deferred dynamic-stack Record/Replay state below a CDNA AccVGPR "
+          "ConSan MOI deferred dynamic-stack exact entry state below a CDNA AccVGPR "
           "boundary to owner-local persistent VGPR placement");
     }
 
@@ -5429,11 +5429,11 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
         }
         if (needs_workgroup_key)
           assignment.workgroup_key_vgpr = next++;
-        if (needs_record_replay_workgroup_tuple) {
+        if (needs_exact_workgroup_tuple) {
           const uint16_t x = next++;
           const uint16_t y = next++;
           const uint16_t z = next++;
-          assignment.record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
+          assignment.exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
               x, y, z, needs_cluster_workgroup_id ? std::optional<uint16_t>(next++) : std::nullopt};
         }
         if (component_needs_persistent_dispatch_vgprs) {
@@ -5494,7 +5494,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   const bool prefer_private_epoch =
       !has_dynamic_stack_owner && !persistent_demand.prefer_compact_barriers &&
       !needs_workgroup_key && !has_explicit_owner_epoch &&
-      (!needs_record_replay_workgroup_tuple ||
+      (!needs_exact_workgroup_tuple ||
        persistent_demand.private_workgroup_tuple_supported) &&
       !persistent_demand.synchronization_requires_persistent_owner &&
       (persistent_demand.prefer_private_epoch_for_dynamic_lds ||
@@ -5584,7 +5584,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           "ConSan MOI assigned persistent scalar " +
           std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
           std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-          std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
+          std::string(needs_exact_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
           " state for an " + rdna_arch_name + " " + consan_moi_engine_name(request.moi_engine) +
           " owner without growing the VGPR allocation");
       return update;
@@ -5597,9 +5597,9 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           " owner");
       return update;
     }
-    if (needs_record_replay_workgroup_tuple) {
+    if (needs_exact_workgroup_tuple) {
       diagnostics.emplace_back(
-          "ConSan MOI could not place the exact Record/Replay workgroup tuple in persistent " +
+          "ConSan MOI could not place the exact workgroup tuple in persistent " +
           rdna_arch_name + " scalar state; retaining it in entry-captured private state");
     }
     diagnostics.emplace_back(
@@ -5635,11 +5635,11 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   }
   if (needs_workgroup_key)
     options.moi_workgroup_key_vgpr = next_persistent_vgpr++;
-  if (needs_record_replay_workgroup_tuple) {
+  if (needs_exact_workgroup_tuple) {
     const uint16_t x = next_persistent_vgpr++;
     const uint16_t y = next_persistent_vgpr++;
     const uint16_t z = next_persistent_vgpr++;
-    options.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
+    options.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{
         x, y, z,
         needs_cluster_workgroup_id ? std::optional<uint16_t>(next_persistent_vgpr++)
                                    : std::nullopt};
@@ -5655,7 +5655,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       "ConSan MOI automatically assigned persistent " +
       std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
       std::string(needs_workgroup_key ? "/workgroup-key" : "") +
-      std::string(needs_record_replay_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
+      std::string(needs_exact_workgroup_tuple ? "/exact-workgroup-tuple" : "") +
       std::string(needs_persistent_dispatch_vgprs ? "/dispatch-ID" : "") + " VGPRs v" +
       std::to_string(persistent_base) + ":v" + std::to_string(next_persistent_vgpr - 1u) +
       (would_grow_descriptor && has_dynamic_stack_owner

@@ -557,8 +557,8 @@ void try_apply_first_light_access_record_patch(
       private_layout = private_layout_cache.resolve(
           cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup =
-               !consan_moi_detail::record_replay_has_entry_workgroup_capture(candidate_point),
+           .exact_workgroup =
+               !consan_moi_detail::moi_has_exact_entry_workgroup_capture(candidate_point),
            .dispatch_id = candidate_point.moi_dispatch_identity.private_fallback()});
       if (!private_layout) {
         result.warnings.emplace_back(
@@ -592,9 +592,9 @@ void try_apply_first_light_access_record_patch(
       };
     }
     const std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources =
-        record_replay_persistent_workgroup_sources(
+        moi_exact_entry_workgroup_sources(
             options.moi_engine, candidate_point,
-            private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+            private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
     const std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate =
         runtime_workgroup_sources && !candidate_point.has_compact_moi_scalar_spill() &&
                 candidate_point.moi_exec_save_sgpr

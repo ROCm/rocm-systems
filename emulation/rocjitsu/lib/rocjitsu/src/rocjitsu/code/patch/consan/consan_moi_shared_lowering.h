@@ -39,7 +39,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 struct MoiPrivateStateDemand {
   bool owner = false;
   bool workgroup_key = false;
-  bool record_replay_workgroup = false;
+  bool exact_workgroup = false;
   bool dispatch_id = false;
 
   bool operator==(const MoiPrivateStateDemand &) const = default;

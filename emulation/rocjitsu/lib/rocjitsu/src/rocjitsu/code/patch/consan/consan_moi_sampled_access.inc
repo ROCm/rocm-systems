@@ -101,9 +101,9 @@ void try_apply_direct_sampled_watchpoint_patch(
   // a different kernel or helper. Size the dense gates from the tuple they
   // will actually consume, not only from access-local analysis metadata.
   const bool has_cluster_workgroup_id =
-      operating_point.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id()
+      operating_point.moi_persistent_sgprs.exact_workgroup.cluster_workgroup_id()
           .has_value() ||
-      operating_point.moi_record_replay_workgroup_vgprs.cluster_workgroup_id().has_value() ||
+      operating_point.moi_exact_workgroup_vgprs.cluster_workgroup_id().has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return candidate->container.uses_cluster_workgroup_id;
       });
@@ -303,7 +303,7 @@ void try_apply_direct_sampled_watchpoint_patch(
       private_layout = private_layout_cache.resolve(
           cache_descriptor, result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup = true});
+           .exact_workgroup = true});
       if (private_layout && private_layout->owner_offset) {
         const auto owner_shift =
             common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
@@ -374,11 +374,11 @@ void try_apply_direct_sampled_watchpoint_patch(
           static_cast<uint16_t>(resources->base + resources->count),
           !private_layout || private_layout->owner_offset.has_value());
     const bool has_private_workgroup_sources =
-        private_layout && private_layout->record_replay_workgroup_offsets.complete();
+        private_layout && private_layout->exact_workgroup_offsets.complete();
     const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
         bytes, *workgroup_descriptor, options.moi_engine, candidate_point, arch, candidate_errors,
         candidate.container.uses_cluster_workgroup_id,
-        private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+        private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
     if (!workgroup_sources) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());

@@ -240,9 +240,9 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
       demand.dispatch_id ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (dispatch_id_offset)
     persistent_end += 2u * SpillManager::kSlotBytes;
-  ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
-  std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
-  if (demand.record_replay_workgroup) {
+  ConSanMoiPersistentWorkgroupPrivateOffsets exact_workgroup_offsets;
+  std::optional<std::array<uint64_t, 4>> exact_workgroup_offset_values;
+  if (demand.exact_workgroup) {
     const bool include_cluster_workgroup_id =
         consan_arch_has_cluster_facilities(arch) &&
         std::ranges::any_of(resources.owner_descriptor_file_offsets,
@@ -251,7 +251,7 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
                                   program_inventory.find_kernel_by_descriptor(descriptor_offset);
                               return kernel != nullptr && kernel->uses_cluster_workgroup_id;
                             });
-    record_replay_workgroup_offset_values = std::array<uint64_t, 4>{
+    exact_workgroup_offset_values = std::array<uint64_t, 4>{
         persistent_end,
         persistent_end + SpillManager::kSlotBytes,
         persistent_end + 2u * SpillManager::kSlotBytes,
@@ -269,14 +269,14 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
     warnings.emplace_back("ConSan MOI private epoch exceeds address-free scratch capacity");
     return std::nullopt;
   }
-  if (record_replay_workgroup_offset_values) {
-    record_replay_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{
-        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[0]),
-        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[1]),
-        static_cast<uint32_t>((*record_replay_workgroup_offset_values)[2]),
-        (*record_replay_workgroup_offset_values)[3] != 0u
+  if (exact_workgroup_offset_values) {
+    exact_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{
+        static_cast<uint32_t>((*exact_workgroup_offset_values)[0]),
+        static_cast<uint32_t>((*exact_workgroup_offset_values)[1]),
+        static_cast<uint32_t>((*exact_workgroup_offset_values)[2]),
+        (*exact_workgroup_offset_values)[3] != 0u
             ? std::optional<uint32_t>(
-                  static_cast<uint32_t>((*record_replay_workgroup_offset_values)[3]))
+                  static_cast<uint32_t>((*exact_workgroup_offset_values)[3]))
             : std::nullopt};
   }
   const auto ephemeral_base =
@@ -296,7 +296,7 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
       .dispatch_id_offset =
           dispatch_id_offset ? std::optional<uint32_t>(static_cast<uint32_t>(*dispatch_id_offset))
                              : std::nullopt,
-      .record_replay_workgroup_offsets = record_replay_workgroup_offsets,
+      .exact_workgroup_offsets = exact_workgroup_offsets,
       .persistent_state_end = static_cast<uint32_t>(persistent_end),
       .ephemeral_base = *ephemeral_base};
 }
@@ -309,7 +309,7 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
     return build_moi_private_state_layout(program_inventory, resources, arch, warnings, demand);
   const uint8_t demand_key = static_cast<uint8_t>(demand.owner) |
                              static_cast<uint8_t>(demand.workgroup_key) << 1u |
-                             static_cast<uint8_t>(demand.record_replay_workgroup) << 2u |
+                             static_cast<uint8_t>(demand.exact_workgroup) << 2u |
                              static_cast<uint8_t>(demand.dispatch_id) << 3u;
   auto [cached, inserted] = layouts_.try_emplace(std::pair{*descriptor, demand_key}, std::nullopt);
   if (inserted)
@@ -557,7 +557,7 @@ bool apply_moi_descriptor_requirements(
   const std::optional<uint32_t> private_dispatch_id_offset =
       private_layout ? private_layout->dispatch_id_offset : std::nullopt;
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_workgroup_offsets =
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
+      private_layout ? &private_layout->exact_workgroup_offsets : nullptr;
   const auto fail = [&](const char *message) -> std::optional<std::vector<uint32_t>> {
     errors.emplace_back(message);
     return std::nullopt;
@@ -626,7 +626,7 @@ bool apply_moi_descriptor_requirements(
       "MOI Record/Replay workgroup x", "MOI Record/Replay workgroup y",
       "MOI Record/Replay workgroup z", "MOI Record/Replay cluster workgroup ID"};
   const std::array<std::optional<uint16_t>, 4> workgroup_registers =
-      point.moi_record_replay_workgroup_vgprs.values();
+      point.moi_exact_workgroup_vgprs.values();
   for (size_t index = 0; index < workgroup_registers.size(); ++index) {
     if (reject_optional_scratch_range_overlap(workgroup_registers[index], scratch_vgpr,
                                               scratch_count, workgroup_names[index], errors))
@@ -669,7 +669,7 @@ bool apply_moi_descriptor_requirements(
     derived_owner_words = owner->words;
     derived_owner_words.insert(derived_owner_words.end(), owner_mask->begin(), owner_mask->end());
   }
-  const auto persistent_workgroup_sources = record_replay_persistent_workgroup_sources(
+  const auto persistent_workgroup_sources = moi_exact_entry_workgroup_sources(
       request.moi_engine, point, private_workgroup_offsets);
   if (!persistent_workgroup_sources) {
     errors.emplace_back(

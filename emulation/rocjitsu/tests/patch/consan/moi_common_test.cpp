@@ -717,7 +717,7 @@ TEST(ConSanMoi, PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries) {
       .owner_offset = 4u,
       .workgroup_key_offset = 8u,
       .dispatch_id_offset = 12u,
-      .record_replay_workgroup_offsets =
+      .exact_workgroup_offsets =
           ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
       .persistent_state_end = 36u,
       .ephemeral_base = 48u,
@@ -742,7 +742,7 @@ TEST(ConSanMoi, VgprStateEffectOwnsPairLifetimeAndDistinctRanges) {
   const ConSanMoiVgprStateEffect valid{
       .owner_epoch = {10u, 11u},
       .workgroup_key = 12u,
-      .record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u, 23u},
+      .exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u, 23u},
       .owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::OwnerLocalPersistent,
   };
   EXPECT_TRUE(valid.is_well_formed());
@@ -773,7 +773,7 @@ TEST(ConSanMoi, PrivateEpochProloguePlanTypesScratchAndDispatchRequirements) {
       .owner_offset = std::nullopt,
       .workgroup_key_offset = std::nullopt,
       .dispatch_id_offset = std::nullopt,
-      .record_replay_workgroup_offsets = {},
+      .exact_workgroup_offsets = {},
       .persistent_state_end = 4u,
       .ephemeral_base = 16u,
   };
@@ -818,7 +818,7 @@ TEST(ConSanMoi, PrivateEpochProloguePlanValidatesRuntimeSelectionDomain) {
       .owner_offset = std::nullopt,
       .workgroup_key_offset = std::nullopt,
       .dispatch_id_offset = std::nullopt,
-      .record_replay_workgroup_offsets = {},
+      .exact_workgroup_offsets = {},
       .persistent_state_end = 4u,
       .ephemeral_base = 16u,
   };
@@ -992,7 +992,7 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   patch.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   EXPECT_FALSE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
-  patch.persistent_sgpr_state.record_replay_workgroup =
+  patch.persistent_sgpr_state.exact_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u};
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
       engine, ROCJITSU_CODE_ARCH_CDNA4, patch));
@@ -1000,7 +1000,7 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
   patch.moi_vgpr_state = ConSanMoiVgprStateEffect{
       .owner_epoch = {18u, 19u},
       .workgroup_key = std::nullopt,
-      .record_replay_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u},
+      .exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{20u, 21u, 22u},
       .owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::CodeObjectPersistent,
   };
   EXPECT_TRUE(consan_detail::patch_requires_full_workgroup_id_payload(
@@ -1011,7 +1011,7 @@ TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
       .owner_offset = std::nullopt,
       .workgroup_key_offset = std::nullopt,
       .dispatch_id_offset = std::nullopt,
-      .record_replay_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u},
+      .exact_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{0u, 4u, 8u},
       .persistent_state_end = 16u,
       .ephemeral_base = 16u,
   };
@@ -2252,13 +2252,13 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
               *test_moi_persistent_sgpr_state(result).owner() + 1u);
     if (engine == ConSanMoiEngine::RecordReplay) {
       EXPECT_FALSE(test_moi_persistent_sgpr_state(result).workgroup_key);
-      ASSERT_TRUE(test_moi_persistent_sgpr_state(result).record_replay_workgroup.complete());
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.x(),
+      ASSERT_TRUE(test_moi_persistent_sgpr_state(result).exact_workgroup.complete());
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).exact_workgroup.x(),
                 *test_moi_persistent_sgpr_state(result).epoch() + 1u);
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.y(),
-                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.x() + 1u);
-      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).record_replay_workgroup.z(),
-                *test_moi_persistent_sgpr_state(result).record_replay_workgroup.y() + 1u);
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).exact_workgroup.y(),
+                *test_moi_persistent_sgpr_state(result).exact_workgroup.x() + 1u);
+      EXPECT_EQ(*test_moi_persistent_sgpr_state(result).exact_workgroup.z(),
+                *test_moi_persistent_sgpr_state(result).exact_workgroup.y() + 1u);
     }
     const auto access_patch =
         std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -2359,7 +2359,7 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_TRUE(test_moi_epoch_vgpr(result));
-  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
+  EXPECT_TRUE(test_moi_exact_workgroup_vgprs(result).complete());
   ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;

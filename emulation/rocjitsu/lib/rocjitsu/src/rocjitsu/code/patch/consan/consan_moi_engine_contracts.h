@@ -23,11 +23,11 @@ record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
 [[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
                                                                uint32_t dispatch_token_capacity);
 
-[[nodiscard]] bool record_replay_has_entry_workgroup_capture(
+[[nodiscard]] bool moi_has_exact_entry_workgroup_capture(
     const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 
-[[nodiscard]] bool record_replay_entry_workgroup_capture_is_unambiguous(
+[[nodiscard]] bool moi_exact_entry_workgroup_capture_is_unambiguous(
     const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 

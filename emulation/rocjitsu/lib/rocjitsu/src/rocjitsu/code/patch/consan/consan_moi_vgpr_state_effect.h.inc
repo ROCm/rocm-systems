@@ -21,7 +21,7 @@ consan_moi_owner_epoch_vgpr_lifetime(bool transient, bool owner_local) {
 struct ConSanMoiVgprStateEffect {
   ConSanMoiOwnerEpochRegisters owner_epoch;
   std::optional<uint16_t> workgroup_key;
-  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+  ConSanMoiPersistentWorkgroupRegisters exact_workgroup;
   ConSanMoiOwnerEpochVgprLifetime owner_epoch_lifetime = ConSanMoiOwnerEpochVgprLifetime::Transient;
 
   template <typename Visitor> void for_each_range(Visitor &&visit) const {
@@ -29,7 +29,7 @@ struct ConSanMoiVgprStateEffect {
     visit(owner_epoch.epoch, 1u);
     if (workgroup_key)
       visit(*workgroup_key, 1u);
-    for (std::optional<uint16_t> reg : record_replay_workgroup.values()) {
+    for (std::optional<uint16_t> reg : exact_workgroup.values()) {
       if (reg)
         visit(*reg, 1u);
     }

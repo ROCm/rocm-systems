@@ -37,17 +37,17 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
     std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
-  if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
+      private_layout ? &private_layout->exact_workgroup_offsets : nullptr;
+  if (!consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point,
                                                                                private_offsets))
     return false;
   if (!moi_mode_operations(request.moi_engine).policy.requires_entry_workgroup_capture ||
-      consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets)) {
+      consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }
   return apply_moi_persistent_vgpr_assignment(point, assignments, owner_descriptor_offsets) &&
-         consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets) &&
-         consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
+         consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets) &&
+         consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point,
                                                                                  private_offsets);
 }
 
@@ -66,9 +66,9 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     const ConSanMoiOperatingPoint &point, const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr,
     rj_code_arch_t arch, const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
+      private_layout ? &private_layout->exact_workgroup_offsets : nullptr;
   const auto workgroup_sources =
-      record_replay_persistent_workgroup_sources(request.moi_engine, point, private_offsets);
+      moi_exact_entry_workgroup_sources(request.moi_engine, point, private_offsets);
   if (!point.moi_exec_save_sgpr || !bound_resources.moi_report_buffer_address ||
       !workgroup_sources || !scalar_abi.special_state) {
     return std::nullopt;
@@ -95,7 +95,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       .moi_owner_epoch_vgprs = point.moi_owner_epoch_vgprs,
       .moi_workgroup_key_vgpr = point.moi_workgroup_key_vgpr,
       .moi_dispatch_id_vgpr = point.moi_dispatch_identity.vgpr(),
-      .moi_record_replay_workgroup_vgprs = point.moi_record_replay_workgroup_vgprs,
+      .moi_exact_workgroup_vgprs = point.moi_exact_workgroup_vgprs,
       .moi_persistent_sgprs = point.moi_persistent_sgprs,
       .moi_report_buffer_address = bound_resources.moi_report_buffer_address,
       .indirect_jump = scalar_abi.indirect_jump,
@@ -147,8 +147,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     private_layout = build_moi_private_state_layout(
         inventory, resources, arch, warnings,
         {.owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-         .record_replay_workgroup =
-             !consan_moi_detail::record_replay_has_entry_workgroup_capture(event_point),
+         .exact_workgroup =
+             !consan_moi_detail::moi_has_exact_entry_workgroup_capture(event_point),
          .dispatch_id = event_point.moi_dispatch_identity.private_fallback()});
     if (!private_layout)
       return std::nullopt;

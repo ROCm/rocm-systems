@@ -52,7 +52,7 @@ struct SampledBarrierCandidate {
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, descriptor_file_offset, request.moi_engine, point, arch, errors,
       uses_cluster_workgroup_id,
-      private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
+      private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
   if (!workgroup_sources)
     return std::nullopt;
   return MoiSampledSyncEmissionPlan{
@@ -1000,7 +1000,7 @@ void try_apply_sampled_barrier_sync_patch(
       private_layout = build_moi_private_state_layout(
           result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup = true});
+           .exact_workgroup = true});
       if (!private_layout)
         continue;
     }
@@ -1999,7 +1999,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       private_layout = build_moi_private_state_layout(
           result.program_inventory, *resources, arch, result.warnings,
           {.owner = options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
-           .record_replay_workgroup = true});
+           .exact_workgroup = true});
       if (!private_layout)
         continue;
     }

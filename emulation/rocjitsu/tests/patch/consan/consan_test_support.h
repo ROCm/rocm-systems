@@ -359,7 +359,7 @@ testing::AssertionResult consan_patch_succeeded(const ConSanTransformArtifacts &
 test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
   const auto consumer = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     const ConSanMoiPersistentSgprState &state = patch.persistent_sgpr_state;
-    return state.complete() || state.workgroup_key || !state.record_replay_workgroup.empty();
+    return state.complete() || state.workgroup_key || !state.exact_workgroup.empty();
   });
   return consumer == result.patches.end() ? ConSanMoiPersistentSgprState{}
                                           : consumer->persistent_sgpr_state;
@@ -403,10 +403,10 @@ test_moi_workgroup_key_vgpr(const ConSanTransformArtifacts &result) {
 }
 
 [[nodiscard]] ConSanMoiPersistentWorkgroupRegisters
-test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
+test_moi_exact_workgroup_vgprs(const ConSanTransformArtifacts &result) {
   const ConSanPatchInfo *patch = test_moi_global_persistent_vgpr_patch(result);
   return patch == nullptr ? ConSanMoiPersistentWorkgroupRegisters{}
-                          : patch->moi_vgpr_state->record_replay_workgroup;
+                          : patch->moi_vgpr_state->exact_workgroup;
 }
 
 /// Return the code-object-wide transient EXEC-save base frozen after register

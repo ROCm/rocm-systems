@@ -293,7 +293,7 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
 }
 
 [[nodiscard]] bool
-append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
+append_exact_workgroup_capture(std::vector<uint32_t> &words,
                                        ConSanMoiPersistentWorkgroupRegisters scalar_destinations,
                                        ConSanMoiPersistentWorkgroupRegisters vector_destinations,
                                        const ConSanMoiWorkgroupSources &sources,
@@ -1015,10 +1015,10 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   const std::optional<uint16_t> persistent_owner_sgpr = plan.persistent_sgprs.owner();
   const std::optional<uint16_t> persistent_epoch_sgpr = plan.persistent_sgprs.epoch();
   const std::optional<uint16_t> persistent_workgroup_key_sgpr = plan.persistent_sgprs.workgroup_key;
-  const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs =
-      plan.persistent_sgprs.record_replay_workgroup;
-  const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs =
-      plan.vgpr_state.record_replay_workgroup;
+  const ConSanMoiPersistentWorkgroupRegisters exact_workgroup_sgprs =
+      plan.persistent_sgprs.exact_workgroup;
+  const ConSanMoiPersistentWorkgroupRegisters exact_workgroup_vgprs =
+      plan.vgpr_state.exact_workgroup;
   const std::optional<ConSanMoiDispatchIdPreloadPlan> &dispatch_plan = plan.dispatch_plan;
   const ConSanMoiDispatchIdCapture dispatch_capture = plan.dispatch_capture;
   const std::optional<ConSanMoiWorkgroupSource> &runtime_workgroup_selection_source =
@@ -1045,10 +1045,10 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   // workgroup identity before that destructive repair.
   const bool capture_workgroup_before_dispatch =
       dispatch_plan && workgroup_sources && workgroup_sources->cdna_full_payload_base &&
-      (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete());
+      (exact_workgroup_sgprs.complete() || exact_workgroup_vgprs.complete());
   if (capture_workgroup_before_dispatch &&
-      !append_record_replay_workgroup_capture(words, record_replay_workgroup_sgprs,
-                                              record_replay_workgroup_vgprs, *workgroup_sources,
+      !append_exact_workgroup_capture(words, exact_workgroup_sgprs,
+                                              exact_workgroup_vgprs, *workgroup_sources,
                                               arch, errors)) {
     return std::nullopt;
   }
@@ -1124,19 +1124,19 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
     return std::nullopt;
   }
   if (!capture_workgroup_before_dispatch &&
-      (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete())) {
+      (exact_workgroup_sgprs.complete() || exact_workgroup_vgprs.complete())) {
     if (!workgroup_sources) {
       errors.emplace_back("ConSan MOI exact workgroup-tuple prologue requires launch sources");
       return std::nullopt;
     }
-    if (!append_record_replay_workgroup_capture(words, record_replay_workgroup_sgprs,
-                                                record_replay_workgroup_vgprs, *workgroup_sources,
+    if (!append_exact_workgroup_capture(words, exact_workgroup_sgprs,
+                                                exact_workgroup_vgprs, *workgroup_sources,
                                                 arch, errors))
       return std::nullopt;
   }
   if (runtime_workgroup_selection_source) {
     const auto persistent_sources = runtime_selection_workgroup_sources(
-        record_replay_workgroup_sgprs, record_replay_workgroup_vgprs);
+        exact_workgroup_sgprs, exact_workgroup_vgprs);
     if (!persistent_sources || !return_pc_sgpr ||
         !append_runtime_workgroup_selection_initialization(
             words, *runtime_workgroup_selection_source, dispatch_capture, *persistent_sources,
@@ -1375,8 +1375,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
   const std::optional<uint32_t> owner_offset = private_state_layout.owner_offset;
   const std::optional<uint32_t> workgroup_key_offset = private_state_layout.workgroup_key_offset;
   const std::optional<uint32_t> dispatch_id_offset = private_state_layout.dispatch_id_offset;
-  const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets =
-      private_state_layout.record_replay_workgroup_offsets;
+  const ConSanMoiPersistentWorkgroupPrivateOffsets &exact_workgroup_offsets =
+      private_state_layout.exact_workgroup_offsets;
   const VgprSpillSequence &spill = plan.spill;
   const std::optional<SgprSpillSequence> &entry_scalar_spill = plan.entry_scalar_spill;
   const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow = plan.workgroup_shadow;
@@ -1407,23 +1407,23 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
         static_cast<uint16_t>(scratch_vgpr + 1u), *dispatch_id_offset + SpillManager::kSlotBytes,
         arch);
   }
-  std::array<std::optional<std::vector<uint32_t>>, 4> record_replay_workgroup_stores;
-  const std::array<std::optional<uint32_t>, 4> record_replay_workgroup_offset_values =
-      record_replay_workgroup_offsets.values();
-  for (size_t index = 0; index < record_replay_workgroup_offset_values.size(); ++index) {
-    if (record_replay_workgroup_offset_values[index]) {
-      record_replay_workgroup_stores[index] = instrumentation::build_private_store_b32(
-          scratch_vgpr, *record_replay_workgroup_offset_values[index], arch);
+  std::array<std::optional<std::vector<uint32_t>>, 4> exact_workgroup_stores;
+  const std::array<std::optional<uint32_t>, 4> exact_workgroup_offset_values =
+      exact_workgroup_offsets.values();
+  for (size_t index = 0; index < exact_workgroup_offset_values.size(); ++index) {
+    if (exact_workgroup_offset_values[index]) {
+      exact_workgroup_stores[index] = instrumentation::build_private_store_b32(
+          scratch_vgpr, *exact_workgroup_offset_values[index], arch);
     }
   }
   const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
   if (!epoch_store || (owner_offset && !owner_store) ||
       (workgroup_key_offset && !workgroup_key_store) ||
       (dispatch_id_offset && (!dispatch_id_low_store || !dispatch_id_high_store)) ||
-      std::ranges::any_of(std::views::iota(size_t{0}, record_replay_workgroup_stores.size()),
+      std::ranges::any_of(std::views::iota(size_t{0}, exact_workgroup_stores.size()),
                           [&](size_t index) {
-                            return record_replay_workgroup_offset_values[index] &&
-                                   !record_replay_workgroup_stores[index];
+                            return exact_workgroup_offset_values[index] &&
+                                   !exact_workgroup_stores[index];
                           }) ||
       !wait_store) {
     errors.emplace_back(
@@ -1525,7 +1525,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
       return std::nullopt;
     words.push_back(*restore_exec);
   }
-  if (record_replay_workgroup_offsets.complete()) {
+  if (exact_workgroup_offsets.complete()) {
     if (!workgroup_sources) {
       errors.emplace_back("ConSan MOI private exact workgroup tuple requires entry ABI sources");
       return std::nullopt;
@@ -1534,7 +1534,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
         workgroup_sources->x, workgroup_sources->y, workgroup_sources->z,
         workgroup_sources->cluster_workgroup_id};
     for (size_t index = 0; index < sources.size(); ++index) {
-      if (!record_replay_workgroup_offset_values[index])
+      if (!exact_workgroup_offset_values[index])
         continue;
       if (!sources[index].is_well_formed()) {
         errors.emplace_back(
@@ -1554,8 +1554,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
             "ConSan MOI private prologue could not capture an exact workgroup coordinate");
         return std::nullopt;
       }
-      words.insert(words.end(), record_replay_workgroup_stores[index]->begin(),
-                   record_replay_workgroup_stores[index]->end());
+      words.insert(words.end(), exact_workgroup_stores[index]->begin(),
+                   exact_workgroup_stores[index]->end());
     }
   }
   if (workgroup_sources &&
@@ -1873,8 +1873,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       return;
     }
     const bool has_private_workgroup_key = layout.workgroup_key_offset.has_value();
-    const bool has_private_record_replay_workgroup =
-        layout.record_replay_workgroup_offsets.complete();
+    const bool has_private_exact_workgroup =
+        layout.exact_workgroup_offsets.complete();
 
     const auto private_limit = consan_address_free_private_limit(arch);
     if (!private_limit) {
@@ -1889,10 +1889,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
           *target, active_kernel->required_workgroup_size);
     }
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    if (has_private_workgroup_key || has_private_record_replay_workgroup) {
+    if (has_private_workgroup_key || has_private_exact_workgroup) {
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
-      if (has_private_record_replay_workgroup &&
+      if (has_private_exact_workgroup &&
           consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
         const auto exact_tuple_descriptor =
             read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
@@ -2184,7 +2184,7 @@ moi_owner_epoch_prologue_uses_vgpr(const MoiOwnerEpochPrologueEmissionPlan &emis
       overlaps(emission.dispatch_capture.vgpr(), 2u)) {
     return true;
   }
-  for (const std::optional<uint16_t> reg : emission.vgpr_state.record_replay_workgroup.values()) {
+  for (const std::optional<uint16_t> reg : emission.vgpr_state.exact_workgroup.values()) {
     if (overlaps(reg))
       return true;
   }
@@ -2428,14 +2428,14 @@ void try_apply_owner_epoch_prologue_patch(
       continue;
     }
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
-    const bool has_record_replay_workgroup_tuple =
-        !kernel_point.moi_record_replay_workgroup_vgprs.empty() ||
-        !kernel_point.moi_persistent_sgprs.record_replay_workgroup.empty();
+    const bool has_exact_workgroup_tuple =
+        !kernel_point.moi_exact_workgroup_vgprs.empty() ||
+        !kernel_point.moi_persistent_sgprs.exact_workgroup.empty();
     if (kernel_point.moi_workgroup_key_vgpr || kernel_point.moi_persistent_sgprs.workgroup_key ||
-        has_record_replay_workgroup_tuple) {
+        has_exact_workgroup_tuple) {
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
-      if (has_record_replay_workgroup_tuple &&
+      if (has_exact_workgroup_tuple &&
           consan_arch_supports_kernarg_preload_overflow_recovery(arch)) {
         full_payload_user_sgpr_count =
             dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
@@ -2459,7 +2459,7 @@ void try_apply_owner_epoch_prologue_patch(
             {
                 .owner_epoch = {*owner_epoch_vgprs.owner, *owner_epoch_vgprs.epoch},
                 .workgroup_key = kernel_point.moi_workgroup_key_vgpr,
-                .record_replay_workgroup = kernel_point.moi_record_replay_workgroup_vgprs,
+                .exact_workgroup = kernel_point.moi_exact_workgroup_vgprs,
                 .owner_epoch_lifetime = consan_moi_owner_epoch_vgpr_lifetime(
                     kernel_point.moi_persistent_sgprs.complete(),
                     !result.moi_operating_point.owner_persistent_vgprs.empty()),

@@ -249,7 +249,7 @@ struct MoiPersistentVgprStateView {
   ConSanMoiOwnerEpochVgprSources owner_epoch;
   std::optional<uint16_t> workgroup_key;
   std::optional<uint16_t> dispatch_id;
-  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+  ConSanMoiPersistentWorkgroupRegisters exact_workgroup;
 
   template <typename Visitor>
   void for_each_range(Visitor &&visit, bool include_dispatch = true) const {
@@ -258,7 +258,7 @@ struct MoiPersistentVgprStateView {
     visit(workgroup_key, 1u);
     if (include_dispatch)
       visit(dispatch_id, 2u);
-    for (std::optional<uint16_t> reg : record_replay_workgroup.values())
+    for (std::optional<uint16_t> reg : exact_workgroup.values())
       visit(reg, 1u);
   }
 
@@ -271,7 +271,7 @@ moi_persistent_vgpr_state_view(const ConSanMoiOperatingPoint &point) {
       .owner_epoch = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs),
       .workgroup_key = point.moi_workgroup_key_vgpr,
       .dispatch_id = point.moi_dispatch_identity.vgpr(),
-      .record_replay_workgroup = point.moi_record_replay_workgroup_vgprs,
+      .exact_workgroup = point.moi_exact_workgroup_vgprs,
   };
 }
 
@@ -282,7 +282,7 @@ moi_persistent_vgpr_state_view(const ConSanMoiPersistentVgprAssignment &assignme
                       .epoch = assignment.owner_epoch_vgprs.epoch},
       .workgroup_key = assignment.workgroup_key_vgpr,
       .dispatch_id = assignment.dispatch_id_vgpr,
-      .record_replay_workgroup = assignment.record_replay_workgroup_vgprs,
+      .exact_workgroup = assignment.exact_workgroup_vgprs,
   };
 }
 
@@ -551,7 +551,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &descriptor, rj_code_arch_t arc
     std::vector<std::string> &errors, bool uses_cluster_workgroup_id = false,
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt);
 
-[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_exact_entry_workgroup_sources(
     ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
 

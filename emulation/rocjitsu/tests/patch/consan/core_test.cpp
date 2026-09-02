@@ -141,13 +141,13 @@ TEST(ConSan, MoiPersistentVgprStateHasOneProjectionForEveryAllocationScope) {
   point.set_moi_owner_epoch_vgprs(3u, 4u);
   point.moi_workgroup_key_vgpr = 5u;
   point.moi_dispatch_identity.set_vgpr(6u);
-  point.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u);
+  point.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u);
 
   ConSanMoiPersistentVgprAssignment assignment{
       .descriptor_file_offset = 64u,
       .owner_epoch_vgprs = {3u, 4u},
       .workgroup_key_vgpr = 5u,
-      .record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u),
+      .exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters(8u, 9u, 10u, 11u),
       .dispatch_id_vgpr = 6u,
   };
   const auto point_state = consan_moi_impl::moi_persistent_vgpr_state_view(point);
@@ -176,7 +176,7 @@ TEST(ConSan, MoiPersistentSgprStateOwnsItsCompleteDescriptorExtent) {
   ConSanMoiOperatingPoint point;
   point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
   point.moi_persistent_sgprs.workgroup_key = 22u;
-  point.moi_persistent_sgprs.record_replay_workgroup =
+  point.moi_persistent_sgprs.exact_workgroup =
       ConSanMoiPersistentWorkgroupRegisters(23u, 24u, 25u, 26u);
   consan_moi_impl::ResolvedMoiScratchPlan resources;
   resources.owner_descriptor_file_offsets = {64u};
@@ -190,19 +190,19 @@ TEST(ConSan, MoiPersistentSgprStateOwnsItsCompleteDescriptorExtent) {
   EXPECT_EQ(requirements.at(64u), 27u);
 }
 
-TEST(ConSan, MoiPrivateWorkgroupCaptureIsAnExplicitSiteBinding) {
+TEST(ConSan, MoiExactEntryWorkgroupCaptureHasOneExplicitStorageDomain) {
   ConSanMoiOperatingPoint point;
   const ConSanMoiPersistentWorkgroupPrivateOffsets private_offsets{32u, 36u, 40u};
 
-  EXPECT_FALSE(consan_moi_detail::record_replay_has_entry_workgroup_capture(point));
+  EXPECT_FALSE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
   EXPECT_TRUE(
-      consan_moi_detail::record_replay_has_entry_workgroup_capture(point, &private_offsets));
-  EXPECT_TRUE(consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(
+      consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, &private_offsets));
+  EXPECT_TRUE(consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(
       point, &private_offsets));
 
-  point.moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
-  EXPECT_TRUE(consan_moi_detail::record_replay_has_entry_workgroup_capture(point));
-  EXPECT_FALSE(consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(
+  point.moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u};
+  EXPECT_TRUE(consan_moi_detail::moi_has_exact_entry_workgroup_capture(point));
+  EXPECT_FALSE(consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(
       point, &private_offsets));
 }
 
@@ -227,7 +227,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
       .moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{10u},
       .moi_dispatch_identity = {},
       .moi_persistent_sgprs = {},
-      .moi_record_replay_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
+      .moi_exact_workgroup_vgprs = ConSanMoiPersistentWorkgroupRegisters{26u, 27u, 28u},
       .moi_workgroup_key_vgpr = 29u,
       .owner_persistent_vgprs = {},
       .owner_transient_sgprs = {},
@@ -237,7 +237,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   state.moi_dispatch_identity.set_private_fallback(true);
   state.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
   state.moi_persistent_sgprs.workgroup_key = 22u;
-  state.moi_persistent_sgprs.record_replay_workgroup =
+  state.moi_persistent_sgprs.exact_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{23u, 24u, 25u};
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
@@ -277,7 +277,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.reset_sgpr(); });
   expect_field_participates([](auto &value) { value.moi_dispatch_identity.set_vgpr(18u); });
   expect_field_participates([](auto &value) { value.moi_persistent_sgprs = {}; });
-  expect_field_participates([](auto &value) { value.moi_record_replay_workgroup_vgprs = {}; });
+  expect_field_participates([](auto &value) { value.moi_exact_workgroup_vgprs = {}; });
   expect_field_participates([](auto &value) { value.moi_workgroup_key_vgpr.reset(); });
 }
 

@@ -350,7 +350,7 @@ struct MoiOwnerEpochPrologueEmissionPlan {
   bool one_based_owner_ids = false;
 
   /// Persistent scalar destinations selected for owner, epoch, workgroup key,
-  /// and exact Record/Replay workgroup identity.
+  /// and the exact workgroup identity shared by exact-coordinate modes.
   ConSanMoiPersistentSgprState persistent_sgprs;
 
   /// Descriptor-derived dispatch preload transformation fixed by planning.
@@ -1166,10 +1166,10 @@ patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_
     const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
     return entry_capture &&
-           (patch.persistent_sgpr_state.record_replay_workgroup.complete() ||
-            (patch.moi_vgpr_state && patch.moi_vgpr_state->record_replay_workgroup.complete()) ||
+           (patch.persistent_sgpr_state.exact_workgroup.complete() ||
+            (patch.moi_vgpr_state && patch.moi_vgpr_state->exact_workgroup.complete()) ||
             (patch.private_state_layout &&
-             patch.private_state_layout->record_replay_workgroup_offsets.complete()));
+             patch.private_state_layout->exact_workgroup_offsets.complete()));
   }
   return (patch.kind >= ConSanPatchKind::InlineMoiAccessRecordStore &&
           patch.kind <= ConSanPatchKind::TrampolineMoiFenceRecord) ||

@@ -82,8 +82,8 @@ using consan_detail::range_overlaps;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::decode_relocatable_entry_instruction;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
-using consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous;
-using consan_moi_detail::record_replay_has_entry_workgroup_capture;
+using consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous;
+using consan_moi_detail::moi_has_exact_entry_workgroup_capture;
 using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 
 namespace consan_moi_impl {

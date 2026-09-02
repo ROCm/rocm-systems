@@ -496,7 +496,7 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarRoutingProducts) {
   resources.moi_report_buffer_address = 0x100000u;
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
-  point.moi_persistent_sgprs.record_replay_workgroup =
+  point.moi_persistent_sgprs.exact_workgroup =
       ConSanMoiPersistentWorkgroupRegisters{6u, 7u, 8u};
 
   auto scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));

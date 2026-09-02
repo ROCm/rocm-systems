@@ -624,6 +624,11 @@ foreach(_file IN LISTS _consan_production_files)
         "record_replay_requires_entry_workgroup_capture"
         "retired common RR/Sampled entry-capture predicate must not return"
     )
+    _consan_assert_no_match(
+        "${_file}"
+        "record_replay_(workgroup|persistent_workgroup_sources|has_entry_workgroup_capture|entry_workgroup_capture_is_unambiguous)|moi_record_replay_workgroup"
+        "shared exact-entry workgroup state must not return to Record/Replay ownership"
+    )
 endforeach()
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
@@ -829,7 +834,7 @@ foreach(_file IN LISTS _consan_production_files)
     )
     _consan_assert_no_match(
         "${_file}"
-        "moi_record_replay_workgroup_private_offsets"
+        "moi_exact_workgroup_private_offsets"
         "site-local private workgroup capture must not return to the code-object-wide operating point"
     )
     _consan_assert_no_match(
@@ -1035,7 +1040,7 @@ if(NOT _moi_barrier_planning MATCHES
    NOT _inline_barrier_owner MATCHES
        "try_apply_shared_barrier_patch[^;]*plan_inline_shadow_private_barrier" OR
    _moi_barrier_planning MATCHES
-       "resolve_moi_record_event_emission_plan|apply_record_replay_entry_workgroup_assignment|record_replay_workgroup_offsets|MoiInlinePrivateEpochBarrierEmissionPlan[ \t\r\n]*[{]")
+       "resolve_moi_record_event_emission_plan|apply_record_replay_entry_workgroup_assignment|exact_workgroup_offsets|MoiInlinePrivateEpochBarrierEmissionPlan[ \t\r\n]*[{]")
     message(FATAL_ERROR
         "private-epoch barrier bodies must be planned by the selected mode owner"
     )
@@ -1286,7 +1291,7 @@ foreach(_target_profile IN ITEMS gfx1201 gfx1250)
     endif()
 endforeach()
 string(FIND "${_moi_placement}" "moi_descriptor_workgroup_sources" _workgroup_source_begin)
-string(FIND "${_moi_placement}" "record_replay_persistent_workgroup_sources"
+string(FIND "${_moi_placement}" "moi_exact_entry_workgroup_sources"
        _workgroup_source_end)
 if(_workgroup_source_begin LESS 0 OR _workgroup_source_end LESS_EQUAL _workgroup_source_begin)
     message(FATAL_ERROR "ConSan workgroup-source boundary could not be located")
@@ -1693,7 +1698,7 @@ foreach(_private_layout_owner IN ITEMS
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_private_layout_owner}"
-        "persistent_(epoch|owner|workgroup_key|dispatch_id)_private_offset|persistent_record_replay_workgroup_private_offsets|persistent_private_state_end"
+        "persistent_(epoch|owner|workgroup_key|dispatch_id)_private_offset|persistent_exact_workgroup_private_offsets|persistent_private_state_end"
         "private-state boundaries must retain the typed layout"
     )
 endforeach()
@@ -1740,7 +1745,7 @@ endif()
 foreach(_moi_vgpr_state_owner IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_moi_vgpr_state_owner}"
-        "(^|[^A-Za-z0-9_])persistent_(owner|epoch|workgroup_key)_vgpr([^A-Za-z0-9_]|$)|persistent_record_replay_workgroup_vgprs|persistent_vgpr_state_(owner_local|is_abi)"
+        "(^|[^A-Za-z0-9_])persistent_(owner|epoch|workgroup_key)_vgpr([^A-Za-z0-9_]|$)|persistent_exact_workgroup_vgprs|persistent_vgpr_state_(owner_local|is_abi)"
         "MOI VGPR state must retain its typed pair, destinations, and lifetime"
     )
 endforeach()
@@ -2001,7 +2006,7 @@ foreach(_persistent_sgpr_consumer IN ITEMS
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_persistent_sgpr_consumer}"
-        "moi_persistent_sgprs[.]record_replay_workgroup[.]values[(][)]"
+        "moi_persistent_sgprs[.]exact_workgroup[.]values[(][)]"
         "persistent-SGPR consumers must use the state-owned width-aware traversal"
     )
 endforeach()

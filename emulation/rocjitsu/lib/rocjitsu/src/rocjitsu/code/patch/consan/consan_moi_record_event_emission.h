@@ -25,7 +25,7 @@ struct MoiRecordEventEmissionPlan {
   ConSanMoiOwnerEpochRegisterState moi_owner_epoch_vgprs;
   std::optional<uint16_t> moi_workgroup_key_vgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
-  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  ConSanMoiPersistentWorkgroupRegisters moi_exact_workgroup_vgprs;
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
   std::optional<uint64_t> moi_report_buffer_address;
   std::optional<ConSanIndirectJumpSgprs> indirect_jump;

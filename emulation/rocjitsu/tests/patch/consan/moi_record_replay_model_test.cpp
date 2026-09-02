@@ -907,7 +907,7 @@ TEST(ConSanMoi, RecordReplayBarrierOnlyObjectCapturesPersistentEntryState) {
             1);
   EXPECT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_TRUE(test_moi_epoch_vgpr(result));
-  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
+  EXPECT_TRUE(test_moi_exact_workgroup_vgprs(result).complete());
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [](const auto &plan) {
     return plan.site_kind == ConSanResourceSiteKind::Barrier;
   }));
@@ -934,7 +934,7 @@ TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
             1);
   EXPECT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_TRUE(test_moi_epoch_vgpr(result));
-  EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
+  EXPECT_TRUE(test_moi_exact_workgroup_vgprs(result).complete());
 }
 
 TEST(ConSanMoi, RecordReplayAtomicAcquireSuppressesSameEpochConflict) {

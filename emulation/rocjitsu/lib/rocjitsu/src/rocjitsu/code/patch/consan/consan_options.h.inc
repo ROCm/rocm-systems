@@ -254,12 +254,12 @@ private:
   std::optional<T> cluster_workgroup_id_;
 };
 
-/// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes
-/// full coordinates, unlike Inline Shadow's separately packed cell key.
+/// Exact persistent workgroup tuple shared by Record/Replay and Sampled.
+/// Both modes publish full coordinates, unlike Inline Shadow's packed key.
 using ConSanMoiPersistentWorkgroupRegisters = ConSanMoiPersistentWorkgroupTuple<uint16_t>;
 
-/// Per-workitem private offsets holding the exact Record/Replay workgroup
-/// tuple when no lifetime-safe persistent register window exists.
+/// Per-workitem private offsets holding that exact workgroup tuple when no
+/// lifetime-safe persistent register window exists.
 using ConSanMoiPersistentWorkgroupPrivateOffsets = ConSanMoiPersistentWorkgroupTuple<uint32_t>;
 
 /// Register pair carrying one owner identity and its synchronization epoch.
@@ -330,13 +330,13 @@ public:
   std::optional<uint16_t> workgroup_key;
   /// Exact x/y/z and optional gfx1250 cluster coordinates retained by
   /// Record/Replay and Sampled instrumentation.
-  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+  ConSanMoiPersistentWorkgroupRegisters exact_workgroup;
 
   template <typename Visitor> void for_each_range(Visitor &&visit) const {
     visit(owner(), 1u);
     visit(epoch(), 1u);
     visit(workgroup_key, 1u);
-    for (std::optional<uint16_t> reg : record_replay_workgroup.values())
+    for (std::optional<uint16_t> reg : exact_workgroup.values())
       visit(reg, 1u);
   }
 
@@ -350,7 +350,7 @@ struct ConSanMoiPersistentVgprAssignment {
   uint64_t descriptor_file_offset = 0;
   ConSanMoiOwnerEpochRegisters owner_epoch_vgprs;
   std::optional<uint16_t> workgroup_key_vgpr;
-  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
+  ConSanMoiPersistentWorkgroupRegisters exact_workgroup_vgprs;
   /// Entry-captured hardware dispatch identity. The pair is used when no
   /// lifetime-safe persistent SGPR pair exists for an automatic banked report.
   std::optional<uint16_t> dispatch_id_vgpr;
@@ -1038,12 +1038,12 @@ struct ConSanMoiOperatingPoint {
   ConSanMoiDispatchIdentityAllocation moi_dispatch_identity;
   /// Uniform persistent scalar state selected when an MOI owner cannot retain
   /// the equivalent values in ordinary VGPRs. The owner is captured from the
-  /// entry workitem ID; epoch, compact workgroup key, and exact Record/Replay
+  /// entry workitem ID; epoch, compact workgroup key, and exact workgroup
   /// coordinates are uniform for every lane. Keeping the complete ABI in one
   /// value prevents planning, emission, and prologue telemetry from assembling
   /// different partial tuples.
   ConSanMoiPersistentSgprState moi_persistent_sgprs;
-  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
+  ConSanMoiPersistentWorkgroupRegisters moi_exact_workgroup_vgprs;
   /// Persistent packed workgroup identity used only by Inline Shadow. Launch
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.
