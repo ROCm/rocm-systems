@@ -1164,6 +1164,34 @@ _consan_assert_no_match(
     "inline_shadow_(scratch_count|spill_backed_scratch_count|visible_evidence_sgpr)[(].*ConSan(Request|MoiOperatingPoint)"
     "InlineShadow emission must consume exact scalar and resource facts"
 )
+foreach(_inline_emission_file IN ITEMS
+    consan_moi_inline_shadow_emission.h
+    consan_moi_inline_shadow_emission.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_inline_emission_file}"
+        "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint"
+        "InlineShadow body emission must consume only its retained exact plan"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+    "resolve_moi_access_resource_facts|resolve_moi_exec_save_requirement|moi_target_dispatch_id_sources|moi_special_state_sgprs|moi_has_runtime_hardware_dispatch_id"
+    "InlineShadow body emission must not reconstruct resource, scalar, or dispatch plans"
+)
+file(READ "${_consan_dir}/consan_moi_inline_shadow_emission.h" _moi_inline_emission_contract)
+if(NOT _moi_inline_emission_contract MATCHES "struct MoiInlineShadowEmissionPlan" OR
+   NOT _moi_inline_emission_contract MATCHES
+       "build_inline_shadow_words[^;]*const MoiInlineShadowEmissionPlan &plan")
+    message(FATAL_ERROR
+        "ConSan InlineShadow body emission lost its retained exact-plan contract"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_exact_shadow_emission.h"
+    "append_inline_shadow_(owner|epoch)_field[^;]*(ConSanRequest|ConSanMoiOperatingPoint)"
+    "InlineShadow owner/epoch field emission must consume exact representation plans"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_prologue.cpp"
     "consan_moi_inline_shadow_emission[.]h"

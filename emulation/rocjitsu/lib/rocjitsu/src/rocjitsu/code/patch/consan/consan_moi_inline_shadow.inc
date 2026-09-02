@@ -71,11 +71,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   struct PlannedInlineShadowPatch : MoiPlannedAccessPatch {
     std::optional<uint64_t> branch_only_relay_bank_offset;
     uint64_t branch_only_relay_bank_word_count = 0;
-    ConSanMoiWorkgroupSources workgroup_sources;
-    std::optional<uint32_t> private_workgroup_key_offset;
-    std::optional<uint32_t> private_dispatch_id_offset;
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
-    uint16_t workgroup_shadow_compact_token = 0;
+    MoiInlineShadowEmissionPlan emission;
   };
   std::vector<PlannedInlineShadowPatch> planned_patches;
   planned_patches.reserve(candidates.size());
@@ -515,14 +511,52 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
     std::vector<std::string> candidate_errors;
     uint32_t guest_instruction_word_count = 0;
-    auto words = build_inline_shadow_words(
-        bytes, candidate, options, options, candidate_point, resources->base, semantics, arch,
-        layout, *workgroup_sources, workgroup_shadow, requires_wave_partitioned_exact_shadow,
-        private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        owner_derivation, private_layout ? private_layout->workgroup_key_offset : std::nullopt,
-        private_layout ? private_layout->dispatch_id_offset : std::nullopt,
-        workgroup_shadow_compact_token, resources->count, spill.has_value(),
-        spill ? &*spill : nullptr, candidate_errors, &guest_instruction_word_count);
+    MoiInlineShadowEmissionPlan emission{
+        .report_buffer_address = *options.moi_report_buffer_address,
+        .report_generation = options.moi_report_generation,
+        .report_dispatch_id = options.moi_report_dispatch_id,
+        .track_atomics = options.moi_track_atomics,
+        .byte_granular_external_shadow = requires_wave_partitioned_exact_shadow,
+        .spill_overlaps_guest_operands = spill.has_value(),
+        .required_exec_save_sgpr_count = moi_exec_save_sgpr_count(
+            resolve_moi_exec_save_requirement(options, options, candidate_point, semantics), arch),
+        .scratch_vgpr = resources->base,
+        .scratch_count = resources->count,
+        .workgroup_shadow_compact_token = workgroup_shadow_compact_token,
+        .scalar_state = project_inline_shadow_scalar_state(candidate_point),
+        .scalar_abi = plan_moi_scalar_abi(options, candidate_point),
+        .dispatch_id =
+            consan_moi_detail::moi_target_dispatch_id_sources({candidate_point, options}, arch),
+        .owner_field =
+            {
+                .owner_vgpr = candidate_point.moi_owner_epoch_vgprs.owner(),
+                .persistent_owner_sgpr = candidate_point.moi_persistent_sgprs.owner(),
+                .automatic_private_epoch = candidate_point.automatic_moi_private_epoch,
+                .private_owner_source = options.moi_owner_source,
+                .resident_wave_owner_sgpr = candidate_point.moi_owner_sgpr.base(),
+                .borrowed_resident_wave_owner_sgpr = candidate_point.moi_owner_sgpr.automatic(),
+            },
+        .epoch_field =
+            {
+                .epoch_vgpr = candidate_point.moi_owner_epoch_vgprs.epoch(),
+                .persistent_epoch_sgpr = candidate_point.moi_persistent_sgprs.epoch(),
+                .automatic_private_epoch = candidate_point.automatic_moi_private_epoch,
+            },
+        .workgroup_key_registers = moi_workgroup_key_register_plan(candidate_point),
+        .access_resource_facts = access_resource_facts,
+        .workgroup_sources = *workgroup_sources,
+        .workgroup_shadow = workgroup_shadow,
+        .private_epoch_offset =
+            private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
+        .owner_derivation = owner_derivation,
+        .private_workgroup_key_offset =
+            private_layout ? private_layout->workgroup_key_offset : std::nullopt,
+        .private_dispatch_id_offset =
+            private_layout ? private_layout->dispatch_id_offset : std::nullopt,
+    };
+    auto words = build_inline_shadow_words(bytes, candidate, emission, arch, layout,
+                                           spill ? &*spill : nullptr, candidate_errors,
+                                           &guest_instruction_word_count);
     if (!words) {
       for (std::string &error : candidate_errors) {
         error += " for " + candidate.mnemonic + " at text offset " +
@@ -799,18 +833,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       planned.dense_dispatcher_offset = dense_dispatchers.at(candidate_ptr);
     planned.displaced_tail_words = std::move(displaced_tail_words);
     planned.resources = *resources;
-    planned.workgroup_sources = *workgroup_sources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
-      planned.private_workgroup_key_offset = private_layout->workgroup_key_offset;
       planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
       planned.persistent_private_state_end = private_layout->persistent_state_end;
     }
     planned.owner_derivation = owner_derivation;
-    planned.workgroup_shadow = workgroup_shadow;
-    planned.workgroup_shadow_compact_token = workgroup_shadow_compact_token;
+    planned.emission = std::move(emission);
     planned.required_private_bytes = required_private_bytes;
     planned.guest_instruction_word_count = guest_instruction_word_count;
     const bool routed_through_branch_only = planned.branch_only_route.has_value();
@@ -885,9 +916,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, options, options,
                                candidate_point, semantics, arch);
-    if (planned_patch.workgroup_shadow) {
+    if (planned_patch.emission.workgroup_shadow) {
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
-                                *planned_patch.workgroup_shadow);
+                                *planned_patch.emission.workgroup_shadow);
     }
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
@@ -919,38 +950,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       return;
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      ConSanMoiOperatingPoint candidate_point = operating_point;
-      if (!apply_moi_transient_sgpr_assignment(
-              options, candidate_point, result.moi_operating_point,
-              planned_patch.resources.owner_descriptor_file_offsets)) {
-        result.errors.emplace_back(
-            "ConSan MOI inline-shadow access lost its transient scalar assignment");
-        return;
-      }
-      if (!apply_moi_persistent_vgpr_assignment(
-              candidate_point, result.moi_operating_point,
-              planned_patch.resources.owner_descriptor_file_offsets)) {
-        result.errors.emplace_back(
-            "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
-        return;
-      }
-      if (planned_patch.private_dispatch_id_offset) {
-        const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
-        if (!reload) {
-          result.errors.emplace_back(
-              "ConSan MOI inline-shadow access lost its private dispatch reload pair");
-          return;
-        }
-        candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
-      }
-      auto words = build_inline_shadow_words(
-          bytes, candidate, options, options, candidate_point, planned_patch.resources.base,
-          semantics, arch, layout, planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
-          requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
-          planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
-          planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
-          planned_patch.resources.count, planned_patch.spill.has_value(),
-          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
+      auto words = build_inline_shadow_words(bytes, candidate, planned_patch.emission, arch, layout,
+                                             planned_patch.spill ? &*planned_patch.spill : nullptr,
+                                             result.errors);
       if (!words)
         return;
 
@@ -979,19 +981,23 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                       : ConSanPatchKind::InlineMoiExactShadowStore;
       info.anchor_offset = candidate.anchor();
       note_moi_access_patch_info(info, planned_patch);
-      info.persistent_workgroup_key_private_offset = planned_patch.private_workgroup_key_offset;
-      info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
-      if (planned_patch.workgroup_shadow) {
-        info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
-        info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;
-        info.workgroup_shadow_validity_base = planned_patch.workgroup_shadow->validity_base;
-        info.workgroup_shadow_validity_size = planned_patch.workgroup_shadow->validity_size;
+      info.persistent_workgroup_key_private_offset =
+          planned_patch.emission.private_workgroup_key_offset;
+      info.persistent_dispatch_id_private_offset =
+          planned_patch.emission.private_dispatch_id_offset;
+      if (planned_patch.emission.workgroup_shadow) {
+        info.workgroup_shadow_base = planned_patch.emission.workgroup_shadow->base;
+        info.workgroup_shadow_size = planned_patch.emission.workgroup_shadow->size;
+        info.workgroup_shadow_validity_base =
+            planned_patch.emission.workgroup_shadow->validity_base;
+        info.workgroup_shadow_validity_size =
+            planned_patch.emission.workgroup_shadow->validity_size;
         info.workgroup_shadow_lazy_initialization =
-            planned_patch.workgroup_shadow->lazy_initialization;
-        info.workgroup_shadow_compact = planned_patch.workgroup_shadow->compact;
-        info.workgroup_shadow_compact_token = planned_patch.workgroup_shadow_compact_token;
+            planned_patch.emission.workgroup_shadow->lazy_initialization;
+        info.workgroup_shadow_compact = planned_patch.emission.workgroup_shadow->compact;
+        info.workgroup_shadow_compact_token = planned_patch.emission.workgroup_shadow_compact_token;
         info.required_group_segment_size =
-            planned_patch.workgroup_shadow->required_group_segment_size;
+            planned_patch.emission.workgroup_shadow->required_group_segment_size;
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1028,7 +1034,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           return;
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
+          const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no indirect jump scalar state");
@@ -1079,8 +1085,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
           body_options.high_bank_address_destination = static_cast<uint16_t>(
               consan_detail::inline_shadow_loop_counter_vgpr(
-                  planned_patch.resources.base, candidate_point.moi_exec_save_sgpr.has_value(),
-                  options.moi_track_atomics) +
+                  planned_patch.resources.base,
+                  planned_patch.emission.scalar_state.exec_save_sgpr.has_value(),
+                  planned_patch.emission.track_atomics) +
               inline_shadow_loop_scratch_count(candidate));
         }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "inline-shadow probe",
@@ -1113,8 +1120,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cave_words->erase(displaced_begin, cave_words->end());
         }
         if (planned_patch.branch_only_route) {
-          if (!candidate_point.moi_branch_only_spill || planned_patch.entry_island_offset ||
-              planned_patch.dense_call_anchor || !planned_patch.displaced_tail_words.empty()) {
+          if (!planned_patch.emission.scalar_state.branch_only_spill ||
+              planned_patch.entry_island_offset || planned_patch.dense_call_anchor ||
+              !planned_patch.displaced_tail_words.empty()) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe found inconsistent branch-only state");
             return;
@@ -1166,12 +1174,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
                                displaced_tail_words.end());
             const uint16_t call_return_sgpr =
-                candidate_point.has_inline_moi_scalar_spill()
-                    ? candidate_point.moi_router_call->call_return_sgpr
-                    : static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 28u);
+                planned_patch.emission.scalar_state.inline_scalar_spill
+                    ? planned_patch.emission.scalar_state.router_call->call_return_sgpr
+                    : static_cast<uint16_t>(*planned_patch.emission.scalar_state.exec_save_sgpr +
+                                            28u);
             cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {
-            const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
+            const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
             empty_exec_continuation_word_offset = cave_words->size();
             if (!jump_sgprs ||
                 !append_moi_scc_preserving_indirect_jump(
@@ -1196,7 +1205,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                displaced_tail_words.end());
           }
         } else if (planned_patch.entry_island_offset) {
-          const auto jump_sgprs = moi_indirect_jump_sgprs(options, candidate_point);
+          const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
           empty_exec_continuation_word_offset = cave_words->size();
           if (!jump_sgprs) {
             result.errors.emplace_back(
@@ -1335,39 +1344,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           bytes, planned_patches, descriptor_requirements, scalar_requirements,
           private_requirements, &lds_requirements, &options, "inline-shadow probe", arch,
           [&](const PlannedInlineShadowPatch &planned_patch) {
-            ConSanMoiOperatingPoint candidate_point = operating_point;
-            if (!apply_moi_transient_sgpr_assignment(
-                    options, candidate_point, result.moi_operating_point,
-                    planned_patch.resources.owner_descriptor_file_offsets)) {
-              result.errors.emplace_back(
-                  "ConSan MOI inline-shadow access lost its transient scalar assignment");
-              return std::optional<std::vector<uint32_t>>{};
-            }
-            if (!apply_moi_persistent_vgpr_assignment(
-                    candidate_point, result.moi_operating_point,
-                    planned_patch.resources.owner_descriptor_file_offsets)) {
-              result.errors.emplace_back(
-                  "ConSan MOI inline-shadow access lost its persistent VGPR assignment");
-              return std::optional<std::vector<uint32_t>>{};
-            }
-            if (planned_patch.private_dispatch_id_offset) {
-              const auto reload = moi_indirect_jump_sgprs(options, candidate_point);
-              if (!reload) {
-                result.errors.emplace_back(
-                    "ConSan MOI inline-shadow access lost its private dispatch reload pair");
-                return std::optional<std::vector<uint32_t>>{};
-              }
-              candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
-            }
             return build_inline_shadow_words(
-                bytes, *planned_patch.candidate, options, options, candidate_point,
-                planned_patch.resources.base, semantics, arch, layout,
-                planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
-                requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
-                planned_patch.owner_derivation, planned_patch.private_workgroup_key_offset,
-                planned_patch.private_dispatch_id_offset,
-                planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
-                planned_patch.spill.has_value(),
+                bytes, *planned_patch.candidate, planned_patch.emission, arch, layout,
                 planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
           },
           [](const PlannedInlineShadowPatch &planned_patch) {
@@ -1379,19 +1357,23 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
             note_moi_access_patch_info(info, planned_patch);
             info.persistent_workgroup_key_private_offset =
-                planned_patch.private_workgroup_key_offset;
-            info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
-            if (planned_patch.workgroup_shadow) {
-              info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
-              info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;
-              info.workgroup_shadow_validity_base = planned_patch.workgroup_shadow->validity_base;
-              info.workgroup_shadow_validity_size = planned_patch.workgroup_shadow->validity_size;
+                planned_patch.emission.private_workgroup_key_offset;
+            info.persistent_dispatch_id_private_offset =
+                planned_patch.emission.private_dispatch_id_offset;
+            if (planned_patch.emission.workgroup_shadow) {
+              info.workgroup_shadow_base = planned_patch.emission.workgroup_shadow->base;
+              info.workgroup_shadow_size = planned_patch.emission.workgroup_shadow->size;
+              info.workgroup_shadow_validity_base =
+                  planned_patch.emission.workgroup_shadow->validity_base;
+              info.workgroup_shadow_validity_size =
+                  planned_patch.emission.workgroup_shadow->validity_size;
               info.workgroup_shadow_lazy_initialization =
-                  planned_patch.workgroup_shadow->lazy_initialization;
-              info.workgroup_shadow_compact = planned_patch.workgroup_shadow->compact;
-              info.workgroup_shadow_compact_token = planned_patch.workgroup_shadow_compact_token;
+                  planned_patch.emission.workgroup_shadow->lazy_initialization;
+              info.workgroup_shadow_compact = planned_patch.emission.workgroup_shadow->compact;
+              info.workgroup_shadow_compact_token =
+                  planned_patch.emission.workgroup_shadow_compact_token;
               info.required_group_segment_size =
-                  planned_patch.workgroup_shadow->required_group_segment_size;
+                  planned_patch.emission.workgroup_shadow->required_group_segment_size;
             }
             return info;
           },

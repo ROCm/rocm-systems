@@ -48,15 +48,14 @@ using consan_moi_detail::append_publish_visible_evidence_if_zero;
 using consan_moi_detail::append_store_u32_sgpr;
 using consan_moi_detail::append_store_u32_vgpr;
 using consan_moi_detail::append_store_u32_vgpr_at_offset;
-using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    uint16_t scratch_vgpr, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    uint16_t old_value_vgpr, uint16_t old_value_hi_vgpr, uint16_t current_value_vgpr,
-    uint16_t current_field_vgpr, uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset,
-    uint32_t byte_count, uint32_t shadow_granule_bytes, bool special_state_already_saved = false,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate,
+    const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &layout, uint16_t old_value_vgpr, uint16_t old_value_hi_vgpr,
+    uint16_t current_value_vgpr, uint16_t current_field_vgpr, uint16_t lds_byte_offset_vgpr,
+    uint32_t static_byte_offset, uint32_t byte_count, uint32_t shadow_granule_bytes,
+    bool special_state_already_saved = false,
     std::optional<uint16_t> diagnostic_lane_mask_sgpr = std::nullopt,
     bool capture_first_diagnostic_only = false, bool compact_local_shadow = false,
     bool workgroup_local_shadow = false, bool generation_tagged_local_shadow = false,
@@ -64,34 +63,35 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     std::optional<uint16_t> current_byte_provenance_vgpr = std::nullopt,
     std::optional<uint16_t> relative_cell_index_vgpr = std::nullopt,
     uint32_t relative_cell_index = 0u) {
-  if (!point.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)
+  if (!plan.scalar_state.exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
   if (shadow_granule_bytes != 1u && shadow_granule_bytes != consan_moi_shadow_cell::granule_bytes)
     return false;
   if (prior_byte_provenance_vgpr.has_value() != current_byte_provenance_vgpr.has_value())
     return false;
 
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
-  const uint64_t report_base = *bound_resources.moi_report_buffer_address;
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
+  const uint64_t report_base = plan.report_buffer_address;
   const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
 
   if (!special_state_already_saved &&
-      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
+      !append_save_moi_special_state(words, plan.scalar_abi.special_state, arch))
     return false;
 
-  const uint16_t workgroup_key = static_cast<uint16_t>(scratch_vgpr + 19u);
-  if (request.moi_track_atomics) {
+  const uint16_t workgroup_key = static_cast<uint16_t>(plan.scratch_vgpr + 19u);
+  if (plan.track_atomics) {
     if (workgroup_local_shadow) {
       // An LDS shadow is workgroup-local. Its optional generation tag guards
       // reuse of the local cells; it is not the identity used by the global
       // atomic release/token tables. Validate those tables with the persistent
       // workgroup key for every local-shadow representation.
-      if (point.moi_workgroup_key_vgpr) {
+      if (plan.workgroup_key_registers.cached_key_vgpr) {
         words.push_back(build_v_mov_b32_e32(
-            workgroup_key, vector_source_vgpr(*point.moi_workgroup_key_vgpr), arch));
-      } else if (point.moi_persistent_sgprs.workgroup_key) {
-        words.push_back(
-            build_v_mov_b32_e32(workgroup_key, *point.moi_persistent_sgprs.workgroup_key, arch));
+            workgroup_key, vector_source_vgpr(*plan.workgroup_key_registers.cached_key_vgpr),
+            arch));
+      } else if (plan.workgroup_key_registers.cached_key_sgpr) {
+        words.push_back(build_v_mov_b32_e32(workgroup_key,
+                                            *plan.workgroup_key_registers.cached_key_sgpr, arch));
       } else {
         return false;
       }
@@ -121,8 +121,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   const uint32_t mov_zero = build_v_mov_b32_e32(tmp_vgpr, scalar_positive_inline_u32(0), arch);
   const auto prior_nonempty =
       instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(old_value_vgpr), tmp_vgpr, arch);
-  const auto narrow_nonempty =
-      instrumentation::build_s_and_saveexec_b64(*point.moi_exec_save_sgpr, kAmdGpuVccLo, arch);
+  const auto narrow_nonempty = instrumentation::build_s_and_saveexec_b64(
+      *plan.scalar_state.exec_save_sgpr, kAmdGpuVccLo, arch);
   if (!prior_nonempty || !narrow_nonempty)
     return false;
   words.push_back(mov_zero);
@@ -131,11 +131,12 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const uint16_t address_lo_vgpr = scratch_vgpr;
+  const uint16_t address_lo_vgpr = plan.scratch_vgpr;
   // Predicate save destinations are scratch: after each empty-mask branch,
   // only the narrowed EXEC matters. Reuse one pair instead of consuming the
   // VCC/SCC preservation window at higher offsets as predicates are reordered.
-  const uint16_t predicate_exec_save_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u);
+  const uint16_t predicate_exec_save_sgpr =
+      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
   if (!workgroup_local_shadow || generation_tagged_local_shadow) {
     if (!append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr, old_value_hi_vgpr,
                                                 address_lo_vgpr, arch) ||
@@ -216,9 +217,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!owner_ne)
     return false;
   if (prior_byte_provenance_vgpr) {
-    const uint16_t candidate_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u);
-    const uint16_t different_owner_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u);
-    const uint16_t predicate_exec = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 6u);
+    const uint16_t candidate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u);
+    const uint16_t different_owner_exec =
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u);
+    const uint16_t predicate_exec = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 6u);
     const auto save_candidates =
         instrumentation::build_s_mov_b64(candidate_exec, kAmdGpuExecLo, arch);
     const auto narrow_different_owner =
@@ -287,8 +289,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool has_epoch = point.moi_owner_epoch_vgprs.epoch() ||
-                         point.moi_persistent_sgprs.epoch() || point.automatic_moi_private_epoch;
+  const bool has_epoch = plan.epoch_field.epoch_vgpr || plan.epoch_field.persistent_epoch_sgpr ||
+                         plan.epoch_field.automatic_private_epoch;
   if (has_epoch) {
     if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
                                            consan_moi_exact_shadow::epoch_shift,
@@ -310,9 +312,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       return false;
   }
 
-  if (request.moi_track_atomics) {
-    const uint16_t base = scratch_vgpr;
-    const uint16_t exec_base = *point.moi_exec_save_sgpr;
+  if (plan.track_atomics) {
+    const uint16_t base = plan.scratch_vgpr;
+    const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
     const uint16_t conflict_exec = static_cast<uint16_t>(exec_base + 2u);
     const uint16_t predicate_exec = static_cast<uint16_t>(exec_base + 6u);
     // The wave-coalesced exact-shadow caller keeps +7:+12 live across this
@@ -358,9 +360,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                                              consan_moi_exact_shadow::max_epoch, arch))
         return false;
       if (!append_inline_acquired_token_slot_address(
-              words,
-              *bound_resources.moi_report_buffer_address +
-                  layout.inline_acquired_epoch_token_slots_offset,
+              words, plan.report_buffer_address + layout.inline_acquired_epoch_token_slots_offset,
               layout.inline_acquired_epoch_token_capacity, workgroup_key, token_consumer_owner,
               token_producer_owner, source_version, address_lo_vgpr, token_hash,
               static_cast<uint16_t>(address_lo_vgpr + 1u),
@@ -387,10 +387,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       };
       const auto require_dispatch_equal = [&](size_t offset, bool high_word) {
         if (!append_load_u32_vgpr_at_offset(words, address_lo_vgpr, offset, tmp_vgpr, arch) ||
-            !append_compare_moi_report_dispatch_id_word(
-                words,
-                consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
-                tmp_vgpr, source_version, high_word, arch)) {
+            !append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, tmp_vgpr,
+                                                        source_version, high_word, arch)) {
           return false;
         }
         return narrow();
@@ -588,7 +586,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool compact_local_diagnostic = workgroup_local_shadow && !request.moi_track_atomics;
+  const bool compact_local_diagnostic = workgroup_local_shadow && !plan.track_atomics;
   // The first-diagnostic claim uses SLOT as both the returned value and the
   // low half of the compare-swap data tuple. Keep it in the dead tail of the
   // ordinary transaction window on every target: exact-range construction
@@ -600,22 +598,22 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                                                              /*track_atomics=*/false) -
       2u;
   const uint16_t diagnostic_tuple_candidate =
-      static_cast<uint16_t>(scratch_vgpr + diagnostic_tuple_offset);
+      static_cast<uint16_t>(plan.scratch_vgpr + diagnostic_tuple_offset);
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
   const uint16_t slot_vgpr =
       consan_uses_gfx9_cdna_encoding(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
-      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kAmdGpuExecLo, arch);
+      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      tmp_vgpr, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u),
+      tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u),
       scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      tmp_vgpr, static_cast<uint16_t>(*point.moi_exec_save_sgpr + 3u), vector_source_vgpr(tmp_vgpr),
-      arch);
+      tmp_vgpr, static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 3u),
+      vector_source_vgpr(tmp_vgpr), arch);
   const auto first_active_lane =
       instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
   const auto narrow_representative = instrumentation::build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
+      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
   const auto saved_exec_wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
   if (!save_conflict_exec || !saved_exec_wait || !mbcnt_lo || !mbcnt_hi || !first_active_lane ||
       !narrow_representative)
@@ -635,20 +633,21 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     // EXEC and writes slot zero.
     const uint64_t count_address = report_base + offsetof(ConSanMoiReportHeader, diagnostic_count);
     const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
-        scratch_vgpr, static_cast<uint32_t>(count_address), arch);
+        plan.scratch_vgpr, static_cast<uint32_t>(count_address), arch);
     const auto mov_address_hi =
-        instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
+        instrumentation::build_v_mov_b32_literal(static_cast<uint16_t>(plan.scratch_vgpr + 1u),
                                                  static_cast<uint32_t>(count_address >> 32u), arch);
     const uint32_t mov_claimed =
         build_v_mov_b32_e32(slot_vgpr, scalar_positive_inline_u32(1), arch);
     const uint32_t mov_unclaimed = build_v_mov_b32_e32(static_cast<uint16_t>(slot_vgpr + 1u),
                                                        scalar_positive_inline_u32(0), arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-        scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
+        plan.scratch_vgpr, slot_vgpr, slot_vgpr, /*return_old_value=*/true, kAmdGpuScopeDevice,
+        arch);
     const auto claim_won =
         instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), slot_vgpr, arch);
     const auto narrow_winner = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
     if (!mov_address_lo || !mov_address_hi || !claim || !claim_won || !narrow_winner)
       return false;
     words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
@@ -663,14 +662,14 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   } else {
     if (!append_atomic_fetch_add_one_u32(
             words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), slot_vgpr,
-            scratch_vgpr, arch))
+            plan.scratch_vgpr, arch))
       return false;
     const auto mov_capacity =
         instrumentation::build_v_mov_b32_literal(tmp_vgpr, layout.diagnostic_capacity, arch);
     const auto slot_in_capacity =
         instrumentation::build_v_cmp_gt_u32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch);
     const auto narrow_capacity = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 4u), kAmdGpuVccLo, arch);
     if (!mov_capacity || !slot_in_capacity || !narrow_capacity)
       return false;
     words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
@@ -686,8 +685,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // diagnostic record.
   const uint16_t diagnostic_address_vgpr =
       compact_local_diagnostic && !consan_uses_gfx9_cdna_encoding(arch)
-          ? static_cast<uint16_t>(scratch_vgpr + 11u)
-          : scratch_vgpr;
+          ? static_cast<uint16_t>(plan.scratch_vgpr + 11u)
+          : plan.scratch_vgpr;
   if (!append_dynamic_diagnostic_record_address(words, diagnostic_base, slot_vgpr,
                                                 diagnostic_address_vgpr, arch)) {
     return false;
@@ -732,21 +731,19 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return true;
   };
   bool stored_generation = false;
-  if (request.moi_track_atomics && point.moi_dispatch_identity.sgpr()) {
+  if (plan.track_atomics && plan.dispatch_id.sgpr) {
     stored_generation =
-        store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation),
-                     *point.moi_dispatch_identity.sgpr()) &&
+        store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.sgpr) &&
         store_scalar(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                     static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u));
-  } else if (request.moi_track_atomics && point.moi_dispatch_identity.vgpr()) {
+                     static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u));
+  } else if (plan.track_atomics && plan.dispatch_id.vgpr) {
     stored_generation =
-        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation),
-                   *point.moi_dispatch_identity.vgpr()) &&
+        store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation), *plan.dispatch_id.vgpr) &&
         store_vgpr(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t),
-                   static_cast<uint16_t>(*point.moi_dispatch_identity.vgpr() + 1u));
+                   static_cast<uint16_t>(*plan.dispatch_id.vgpr + 1u));
   } else {
-    const uint64_t generation = request.moi_track_atomics ? bound_resources.moi_report_dispatch_id
-                                                          : bound_resources.moi_report_generation;
+    const uint64_t generation =
+        plan.track_atomics ? plan.report_dispatch_id : plan.report_generation;
     stored_generation =
         store_literal(offsetof(ConSanMoiDiagnosticRecord, generation),
                       static_cast<uint32_t>(generation)) &&
@@ -766,12 +763,13 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask) + sizeof(uint32_t), 0u) ||
       !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask),
                     diagnostic_lane_mask_sgpr.value_or(
-                        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u))) ||
-      !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
-                    static_cast<uint16_t>(
-                        diagnostic_lane_mask_sgpr.value_or(*point.moi_exec_save_sgpr + 2u) + 1u)))
+                        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u))) ||
+      !store_scalar(
+          offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
+          static_cast<uint16_t>(
+              diagnostic_lane_mask_sgpr.value_or(*plan.scalar_state.exec_save_sgpr + 2u) + 1u)))
     return false;
-  if (request.moi_track_atomics &&
+  if (plan.track_atomics &&
       !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, reserved), workgroup_key))
     return false;
 
@@ -1002,11 +1000,11 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
 
   const auto restore_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *point.moi_exec_save_sgpr, arch);
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, *plan.scalar_state.exec_save_sgpr, arch);
   if (!restore_exec)
     return false;
   words.push_back(*restore_exec);
-  return append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch);
+  return append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch);
 }
 
 // Publish one exact slot through an odd-version reservation. EXEC on entry is
@@ -1019,8 +1017,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 // protocol. Every entering lane that still cannot commit increments
 // undercoverage exactly once.
 [[nodiscard]] bool append_versioned_exact_shadow_transaction(
-    std::vector<uint32_t> &words, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    std::vector<uint32_t> &words, const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
     uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t old_value_vgpr,
     uint16_t publisher_exec_sgpr, uint16_t committed_exec_sgpr, bool retry_contention,
     std::vector<std::string> &errors) {
@@ -1034,17 +1031,13 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                             std::string(stage));
     }
   } failure{errors};
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  const bool literal_dispatch_id =
-      target != nullptr &&
-      target->dispatch_identity == ConSanDispatchIdentitySource::CodeObjectLiteral &&
-      !moi_has_runtime_hardware_dispatch_id(point);
-  if (!point.moi_exec_save_sgpr ||
-      (!moi_has_runtime_hardware_dispatch_id(point) && !literal_dispatch_id) ||
-      !bound_resources.moi_report_buffer_address)
+  const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
+  if (!plan.scalar_state.exec_save_sgpr ||
+      (!has_hardware_dispatch_id && !plan.dispatch_id.literal) ||
+      !plan.dispatch_id.is_well_formed())
     return false;
 
-  const uint16_t exec_base = *point.moi_exec_save_sgpr;
+  const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 2u);
   const uint16_t empty_exec_sgpr = exec_base;
   const uint16_t ready_exec_sgpr = temporary_exec_sgpr;
@@ -1062,7 +1055,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   const uint16_t ready_version_vgpr = static_cast<uint16_t>(old_value_vgpr + 8u);
   const uint16_t cas_new_vgpr = static_cast<uint16_t>(old_value_vgpr + 9u);
   const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
   const auto narrow_vcc = [&]() -> bool {
     const auto narrow =
@@ -1415,9 +1408,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!save_claimed_publishers)
     return false;
   words.push_back(*save_claimed_publishers);
-  if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
-          prior_dispatch_low_vgpr, tmp_vgpr, /*high_word=*/false, arch)) {
+  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_low_vgpr,
+                                                  tmp_vgpr,
+                                                  /*high_word=*/false, arch)) {
     return false;
   }
   if (!narrow_vcc())
@@ -1426,9 +1419,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch);
   const auto restore_claimed_publishers =
       instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch);
-  if (!append_compare_moi_report_dispatch_id_word(
-          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
-          prior_dispatch_high_vgpr, tmp_vgpr, /*high_word=*/true, arch) ||
+  if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_high_vgpr,
+                                                  tmp_vgpr,
+                                                  /*high_word=*/true, arch) ||
       !save_same_dispatch || !restore_claimed_publishers) {
     return false;
   }
@@ -1462,9 +1455,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                                        current_low_vgpr, arch)) {
     return false;
   }
-  if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
-          current_low_vgpr, static_cast<uint16_t>(current_low_vgpr + 1u), arch) ||
+  if (!append_moi_report_dispatch_id_pair(words, plan.dispatch_id, current_low_vgpr,
+                                          static_cast<uint16_t>(current_low_vgpr + 1u), arch) ||
       !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
                                        current_low_vgpr, arch) ||
@@ -1516,10 +1508,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // Count successful publications before excluding cross-dispatch priors from
   // diagnosis. The event counter therefore remains a successful-commit count.
   failure.stage = "accounting";
-  if (!append_atomic_fetch_add_one_u32(words,
-                                       *bound_resources.moi_report_buffer_address +
-                                           offsetof(ConSanMoiReportHeader, event_counter),
-                                       tmp_vgpr, address_lo_vgpr, arch)) {
+  if (!append_atomic_fetch_add_one_u32(
+          words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
+          tmp_vgpr, address_lo_vgpr, arch)) {
     return false;
   }
   restore_slot_address();
@@ -1536,8 +1527,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   words.push_back(*select_failed);
   if (!append_atomic_fetch_add_one_u32(
           words,
-          *bound_resources.moi_report_buffer_address +
-              offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
+          plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
           tmp_vgpr, address_lo_vgpr, arch)) {
     return false;
   }
@@ -1770,14 +1760,14 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 // at least one lane on every iteration, so runtime work is bounded by the
 // hardware wave size while generated code size remains constant.
 [[nodiscard]] bool append_wave_coalesced_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    uint16_t scratch_vgpr, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    uint16_t address_lo_vgpr, uint16_t current_low_vgpr, uint16_t current_high_vgpr,
-    uint16_t old_value_vgpr, uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset,
-    uint32_t byte_count, uint32_t shadow_granule_bytes, uint32_t relative_cell_index,
-    std::optional<uint16_t> relative_cell_index_vgpr, const VgprSpillSequence *spill,
-    std::optional<uint16_t> spill_backed_lds_byte_offset_source, std::vector<std::string> &errors) {
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate,
+    const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &layout, uint16_t address_lo_vgpr, uint16_t current_low_vgpr,
+    uint16_t current_high_vgpr, uint16_t old_value_vgpr, uint16_t lds_byte_offset_vgpr,
+    uint32_t static_byte_offset, uint32_t byte_count, uint32_t shadow_granule_bytes,
+    uint32_t relative_cell_index, std::optional<uint16_t> relative_cell_index_vgpr,
+    const VgprSpillSequence *spill, std::optional<uint16_t> spill_backed_lds_byte_offset_source,
+    std::vector<std::string> &errors) {
   struct FailureStage {
     std::vector<std::string> &errors;
     std::string_view stage = "preflight";
@@ -1788,10 +1778,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                             std::string(stage));
     }
   } failure{errors};
-  if (!point.moi_exec_save_sgpr)
+  if (!plan.scalar_state.exec_save_sgpr)
     return false;
 
-  const uint16_t base = *point.moi_exec_save_sgpr;
+  const uint16_t base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(base + 2u);
   const uint16_t publisher_exec_sgpr = static_cast<uint16_t>(base + 4u);
   const uint16_t committed_exec_sgpr = static_cast<uint16_t>(base + 6u);
@@ -1877,7 +1867,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!append_exact_byte_cell_provenance_base(
           words, arch, lds_byte_offset_vgpr, static_byte_offset, relative_cell_index,
           relative_cell_index_vgpr, byte_count, shadow_granule_bytes, current_low_vgpr,
-          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(scratch_vgpr + 4u))) {
+          lane_rank_vgpr, current_high_vgpr, static_cast<uint16_t>(plan.scratch_vgpr + 4u))) {
     errors.emplace_back(
         "ConSan MOI inline-shadow probe could not encode exact byte-cell provenance");
     return false;
@@ -1926,10 +1916,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return false;
   }
   failure.stage = "composite-key transaction";
-  if (!append_versioned_exact_shadow_transaction(words, bound_resources, point, scratch_vgpr, arch,
-                                                 address_lo_vgpr, current_low_vgpr, old_value_vgpr,
-                                                 publisher_exec_sgpr, committed_exec_sgpr,
-                                                 /*retry_contention=*/true, errors)) {
+  if (!append_versioned_exact_shadow_transaction(
+          words, plan, arch, address_lo_vgpr, current_low_vgpr, old_value_vgpr, publisher_exec_sgpr,
+          committed_exec_sgpr, /*retry_contention=*/true, errors)) {
     return false;
   }
   // The representative stands for the complete metadata-identical subgroup.
@@ -1963,14 +1952,13 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // the existing diagnostic helper can snapshot and restore the true program
   // state while evaluating every lane in this address group.
   failure.stage = "pre-diagnostic state restoration";
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
+  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
     return false;
   failure.stage = "diagnostic encoding";
   if (!append_inline_shadow_diagnostic_words(
-          words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
-          old_value_vgpr, static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr,
-          current_high_vgpr, lds_byte_offset_vgpr, static_byte_offset, byte_count,
-          shadow_granule_bytes,
+          words, candidate, plan, arch, layout, old_value_vgpr,
+          static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
+          lds_byte_offset_vgpr, static_byte_offset, byte_count, shadow_granule_bytes,
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/publisher_exec_sgpr,
           /*capture_first_diagnostic_only=*/false,
@@ -2013,7 +2001,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // access starts from the original owner/epoch/workgroup metadata.
   words.push_back(restore_current_low);
   words.push_back(restore_current_high);
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch))
+  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch))
     return false;
 
   const auto branch_offset = [](size_t from, size_t to) -> std::optional<int16_t> {
@@ -2039,20 +2027,20 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 // lane then polls that ready bit before the normal exact exchange. Two bits
 // per slot allow neighboring cells to share one atomic state word safely.
 [[nodiscard]] bool append_workgroup_local_lazy_shadow_ready(
-    std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr,
-    rj_code_arch_t arch, const ConSanMoiWorkgroupShadowLayout &workgroup_shadow,
-    uint16_t saved_cell_vgpr, std::vector<std::string> &errors) {
+    std::vector<uint32_t> &words, const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
+    const ConSanMoiWorkgroupShadowLayout &workgroup_shadow, uint16_t saved_cell_vgpr,
+    std::vector<std::string> &errors) {
   if (!workgroup_shadow.lazy_initialization)
     return true;
   if (consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))
     return true;
-  if ((!consan_uses_gfx12_encoding(arch)) || !point.moi_exec_save_sgpr ||
+  if ((!consan_uses_gfx12_encoding(arch)) || !plan.scalar_state.exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
     errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
     return false;
   }
 
-  const uint16_t scratch = scratch_vgpr;
+  const uint16_t scratch = plan.scratch_vgpr;
   const uint16_t address_vgpr = scratch;
   const uint16_t temporary_vgpr = static_cast<uint16_t>(scratch + 4u);
   const uint16_t state_vgpr = static_cast<uint16_t>(scratch + 5u);
@@ -2060,8 +2048,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   const uint16_t initializing_mask_vgpr = static_cast<uint16_t>(scratch + 8u);
   const uint16_t ready_mask_vgpr = static_cast<uint16_t>(scratch + 11u);
   const uint16_t validity_address_vgpr = static_cast<uint16_t>(scratch + 12u);
-  const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
-  const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 16u);
+  const uint16_t temporary_exec_sgpr =
+      static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 14u);
+  const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 16u);
 
   const auto state_word = instrumentation::build_v_lshrrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(4u), saved_cell_vgpr, arch);
@@ -2198,16 +2187,16 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 // the complete prior 64-bit entry, so it needs neither dispatch qualification
 // nor a multi-instruction reservation protocol.
 [[nodiscard]] bool append_workgroup_local_exact_shadow_swap(
-    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanRequest &request,
-    const BoundRuntimeResources &bound_resources, const ConSanMoiOperatingPoint &point,
-    uint16_t scratch_vgpr, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &report_layout,
+    std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate,
+    const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
+    const ConSanMoiReportBufferLayout &report_layout,
     const ConSanMoiWorkgroupShadowLayout &workgroup_shadow, uint16_t address_vgpr,
     uint16_t current_low_vgpr, uint16_t current_high_vgpr, uint16_t old_value_vgpr,
     uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t cell_index,
     uint32_t byte_count, uint16_t diagnostic_lds_byte_offset_vgpr,
     uint32_t diagnostic_static_byte_offset, std::optional<uint16_t> relative_cell_index_vgpr,
     std::vector<std::string> &errors) {
-  if (!point.moi_exec_save_sgpr)
+  if (!plan.scalar_state.exec_save_sgpr)
     return false;
   if (workgroup_shadow.compact || consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow)) {
     errors.emplace_back(
@@ -2215,11 +2204,11 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return false;
   }
 
-  const uint16_t temporary_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  const uint16_t temporary_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
   const uint16_t saved_current_low_vgpr = static_cast<uint16_t>(old_value_vgpr + 4u);
   const uint16_t saved_current_high_vgpr = static_cast<uint16_t>(old_value_vgpr + 5u);
   const uint16_t saved_cell_vgpr = static_cast<uint16_t>(old_value_vgpr + 2u);
-  const uint16_t exec_base = *point.moi_exec_save_sgpr;
+  const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
   const uint16_t incoming_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
   const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t bounded_exec_sgpr = static_cast<uint16_t>(exec_base + 16u);
@@ -2315,8 +2304,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   words.push_back(0);
   if (!append_atomic_fetch_add_one_u32(
           words,
-          *bound_resources.moi_report_buffer_address +
-              offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
+          plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_undercoverage_count),
           temporary_vgpr, address_vgpr, arch)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not encode undercoverage accounting");
@@ -2340,7 +2328,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return false;
   }
   words[skip_empty_undercoverage_index] = *skip_empty_undercoverage;
-  if (!append_workgroup_local_lazy_shadow_ready(words, point, scratch_vgpr, arch, workgroup_shadow,
+  if (!append_workgroup_local_lazy_shadow_ready(words, plan, arch, workgroup_shadow,
                                                 saved_cell_vgpr, errors)) {
     return false;
   }
@@ -2373,7 +2361,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // Address formation and conflict filtering use condition state. Reinstall
   // the displaced program's state before the diagnostic helper, whose final
   // restoration makes the local path observationally transparent.
-  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+  if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not restore special scalar state");
     return false;
@@ -2389,10 +2377,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return false;
   }
   if (!append_inline_shadow_diagnostic_words(
-          words, candidate, request, bound_resources, point, scratch_vgpr, arch, report_layout,
-          old_value_vgpr, static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr,
-          current_high_vgpr, diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset,
-          byte_count, consan_moi_shadow_cell::granule_bytes,
+          words, candidate, plan, arch, report_layout, old_value_vgpr,
+          static_cast<uint16_t>(old_value_vgpr + 1u), current_low_vgpr, current_high_vgpr,
+          diagnostic_lds_byte_offset_vgpr, diagnostic_static_byte_offset, byte_count,
+          consan_moi_shadow_cell::granule_bytes,
           /*special_state_already_saved=*/true,
           /*diagnostic_lane_mask_sgpr=*/std::nullopt,
           /*capture_first_diagnostic_only=*/true,
@@ -2413,34 +2401,37 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   return true;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
-    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr,
-    const MoiObjectModeSemantics &semantics, rj_code_arch_t arch,
-    const ConSanMoiReportBufferLayout &layout, const ConSanMoiWorkgroupSources &workgroup_sources,
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
-    bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
-    const std::optional<MoiWorkitemOwnerDerivationPlan> &owner_derivation,
-    std::optional<uint32_t> private_workgroup_key_offset,
-    std::optional<uint32_t> private_dispatch_id_offset, uint16_t workgroup_shadow_compact_token,
-    uint16_t scratch_count, bool spill_overlaps_guest_operands, const VgprSpillSequence *spill,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_word_count) {
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+                          const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,
+                          const ConSanMoiReportBufferLayout &layout, const VgprSpillSequence *spill,
+                          std::vector<std::string> &errors,
+                          uint32_t *guest_instruction_word_count) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (!point.moi_exec_save_sgpr ||
-      (!moi_has_runtime_hardware_dispatch_id(point) &&
-       (target == nullptr ||
-        target->dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral))) {
+  const uint16_t scratch_vgpr = plan.scratch_vgpr;
+  const uint16_t scratch_count = plan.scratch_count;
+  const auto &workgroup_sources = plan.workgroup_sources;
+  const auto &workgroup_shadow = plan.workgroup_shadow;
+  const auto &private_epoch_offset = plan.private_epoch_offset;
+  const auto &owner_derivation = plan.owner_derivation;
+  const auto &private_workgroup_key_offset = plan.private_workgroup_key_offset;
+  const auto &private_dispatch_id_offset = plan.private_dispatch_id_offset;
+  const uint16_t workgroup_shadow_compact_token = plan.workgroup_shadow_compact_token;
+  const bool byte_granular_external_shadow = plan.byte_granular_external_shadow;
+  const bool spill_overlaps_guest_operands = plan.spill_overlaps_guest_operands;
+  const bool has_hardware_dispatch_id = plan.dispatch_id.sgpr || plan.dispatch_id.vgpr;
+  if (!plan.scalar_state.exec_save_sgpr ||
+      (!has_hardware_dispatch_id && !plan.dispatch_id.literal) ||
+      !plan.dispatch_id.is_well_formed()) {
     errors.emplace_back(
         "ConSan MOI versioned exact-shadow probe requires EXEC-save and dispatch-ID state");
     return std::nullopt;
   }
-  const MoiAccessResourceFacts access_resource_facts =
-      resolve_moi_access_resource_facts(point, candidate, arch);
+  const MoiAccessResourceFacts &access_resource_facts = plan.access_resource_facts;
   const uint16_t normal_scratch_count =
-      inline_shadow_scratch_count(request.moi_track_atomics, access_resource_facts, candidate);
+      inline_shadow_scratch_count(plan.track_atomics, access_resource_facts, candidate);
   const uint16_t spill_scratch_count = inline_shadow_spill_backed_scratch_count(
-      request.moi_track_atomics, access_resource_facts, candidate);
+      plan.track_atomics, access_resource_facts, candidate);
   if (scratch_count != normal_scratch_count &&
       (spill == nullptr || scratch_count != spill_scratch_count)) {
     errors.emplace_back(
@@ -2449,7 +2440,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
   const uint16_t expected_spill_count = static_cast<uint16_t>(
       scratch_count + static_cast<uint16_t>(spill != nullptr && !spill->uses_dynamic_stack_frame &&
-                                            (point.has_moi_scalar_spill())));
+                                            plan.scalar_state.scalar_spill));
   if (spill != nullptr &&
       (spill->vgpr_base != scratch_vgpr || spill->vgpr_count != expected_spill_count)) {
     errors.emplace_back(
@@ -2460,11 +2451,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     errors.emplace_back("ConSan MOI inline-shadow probe scratch VGPR window exceeds the limit");
     return std::nullopt;
   }
-  if (!validate_inline_shadow_exec_save_sgpr(
-          project_inline_shadow_scalar_state(point), semantics.inline_access_present,
-          moi_exec_save_sgpr_count(
-              resolve_moi_exec_save_requirement(request, bound_resources, point, semantics), arch),
-          arch, errors))
+  if (!validate_inline_shadow_exec_save_sgpr(plan.scalar_state,
+                                             /*inline_access_present=*/true,
+                                             plan.required_exec_save_sgpr_count, arch, errors))
     return std::nullopt;
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
@@ -2472,20 +2461,21 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (!spill_overlaps_guest_operands &&
       reject_candidate_scratch_range_overlap(candidate, scratch_vgpr, scratch_count, errors))
     return std::nullopt;
-  if (!point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner() &&
-      !point.automatic_moi_private_epoch) {
+  if (!plan.owner_field.owner_vgpr && !plan.owner_field.persistent_owner_sgpr &&
+      !plan.owner_field.automatic_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return std::nullopt;
   }
-  if (reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.owner(), scratch_vgpr,
+  if (reject_optional_scratch_range_overlap(plan.owner_field.owner_vgpr, scratch_vgpr,
                                             scratch_count, "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.epoch(), scratch_vgpr,
+      reject_optional_scratch_range_overlap(plan.epoch_field.epoch_vgpr, scratch_vgpr,
                                             scratch_count, "MOI epoch", errors) ||
-      reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
-                                            scratch_count, "MOI workgroup key", errors))
+      reject_optional_scratch_range_overlap(plan.workgroup_key_registers.cached_key_vgpr,
+                                            scratch_vgpr, scratch_count, "MOI workgroup key",
+                                            errors))
     return std::nullopt;
-  if (point.moi_dispatch_identity.vgpr() &&
-      range_overlaps(*point.moi_dispatch_identity.vgpr(), 2u, scratch_vgpr, scratch_count)) {
+  if (plan.dispatch_id.vgpr &&
+      range_overlaps(*plan.dispatch_id.vgpr, 2u, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI scratch VGPRs overlap the dispatch-ID VGPR pair");
     return std::nullopt;
   }
@@ -2528,7 +2518,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (candidate.is_direct_to_lds()) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
         consan_detail::inline_shadow_loop_counter_vgpr(
-            scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics) +
+            scratch_vgpr, plan.scalar_state.exec_save_sgpr.has_value(), plan.track_atomics) +
         inline_shadow_loop_scratch_count(candidate));
   } else if (materialize_flat_address) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
@@ -2543,7 +2533,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
              !compact_spill_keeps_disjoint_clobbered_address) {
     saved_lds_byte_offset_vgpr = static_cast<uint16_t>(
         consan_detail::inline_shadow_loop_counter_vgpr(
-            scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics) +
+            scratch_vgpr, plan.scalar_state.exec_save_sgpr.has_value(), plan.track_atomics) +
         inline_shadow_loop_scratch_count(candidate));
   }
 
@@ -2566,15 +2556,16 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
                 (candidate.anchor() & consan_moi_exact_shadow::max_instruction_offset)
                 << (consan_moi_exact_shadow::instruction_offset_shift - 32u));
   const uint64_t exact_shadow_base =
-      *bound_resources.moi_report_buffer_address + layout.exact_shadow_entries_offset;
+      plan.report_buffer_address + layout.exact_shadow_entries_offset;
   const uint32_t external_shadow_granule_bytes =
       byte_granular_external_shadow ? 1u : consan_moi_shadow_cell::granule_bytes;
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size() / sizeof(uint32_t) + 64u + (point.moi_exec_save_sgpr ? 120u : 0u) +
-                (point.moi_owner_epoch_vgprs.epoch() ? 2u : 0u));
+  words.reserve(candidate.size() / sizeof(uint32_t) + 64u +
+                (plan.scalar_state.exec_save_sgpr ? 120u : 0u) +
+                (plan.epoch_field.epoch_vgpr ? 2u : 0u));
   if (private_dispatch_id_offset) {
-    if (!point.moi_dispatch_identity.sgpr()) {
+    if (!plan.dispatch_id.sgpr) {
       errors.emplace_back(
           "ConSan MOI private dispatch reload requires a transient scalar destination");
       return std::nullopt;
@@ -2584,10 +2575,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     const auto load_high = instrumentation::build_private_load_b32(
         address_hi_vgpr, *private_dispatch_id_offset + SpillManager::kSlotBytes, arch);
     const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
-    const auto read_low = instrumentation::build_v_readfirstlane_b32(
-        *point.moi_dispatch_identity.sgpr(), address_lo_vgpr, arch);
+    const auto read_low =
+        instrumentation::build_v_readfirstlane_b32(*plan.dispatch_id.sgpr, address_lo_vgpr, arch);
     const auto read_high = instrumentation::build_v_readfirstlane_b32(
-        static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u), address_hi_vgpr, arch);
+        static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u), address_hi_vgpr, arch);
     const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
     if (!load_low || !load_high || !wait_load || !read_low || !read_high || !wait_scalar) {
       errors.emplace_back(
@@ -2623,13 +2614,13 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   if (saved_lds_byte_offset_vgpr) {
     if (!spill_backed_lds_byte_offset_source) {
       if (candidate.is_direct_to_lds()) {
-        if (!point.moi_exec_save_sgpr) {
+        if (!plan.scalar_state.exec_save_sgpr) {
           errors.emplace_back(
               "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
           return std::nullopt;
         }
         if (!append_materialize_direct_to_lds_address(words, candidate, *saved_lds_byte_offset_vgpr,
-                                                      *point.moi_exec_save_sgpr, arch)) {
+                                                      *plan.scalar_state.exec_save_sgpr, arch)) {
           errors.emplace_back("ConSan MOI inline-shadow probe could not materialize a "
                               "direct-to-LDS destination");
           return std::nullopt;
@@ -2652,9 +2643,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   // epoch, address, and partition setup all use VCC/SCC-producing
   // instructions; snapshotting inside the exchange loop would retain those
   // generated values rather than the state at the displaced LDS access.
-  const bool preserve_special_state = point.moi_exec_save_sgpr.has_value();
+  const bool preserve_special_state = plan.scalar_state.exec_save_sgpr.has_value();
   if (preserve_special_state &&
-      !append_save_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+      !append_save_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not preserve application VCC/SCC");
     return std::nullopt;
   }
@@ -2673,15 +2664,15 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   const bool generation_tagged_local_shadow =
       workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
-  MoiWorkgroupKeyRegisterPlan key_registers = moi_workgroup_key_register_plan(point);
+  MoiWorkgroupKeyRegisterPlan key_registers = plan.workgroup_key_registers;
   // Eagerly initialized and bitmap-backed workgroup-local mirrors are
   // physically unreachable from every other live workgroup and omit the
   // generation field. A generation-tagged local mirror deliberately retains
   // that field so reused, uncleared LDS is distinguishable from current state.
   if (workgroup_shadow) {
     const auto save_original_exec = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset), kAmdGpuExecLo,
-        arch);
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + original_exec_save_offset),
+        kAmdGpuExecLo, arch);
     if (!save_original_exec) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not retain its original workgroup lanes");
@@ -2703,14 +2694,14 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     key_registers.cached_key_vgpr = workgroup_key_vgpr;
     key_registers.cached_key_sgpr = std::nullopt;
   }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr &&
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr &&
       !append_inline_workgroup_key(words, workgroup_sources, key_registers, workgroup_key_vgpr,
                                    tmp_vgpr, address_lo_vgpr, original_exec_save_offset, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
   }
   if (generation_tagged_local_shadow) {
-    if (!moi_has_runtime_hardware_dispatch_id(point)) {
+    if (!has_hardware_dispatch_id) {
       errors.emplace_back("ConSan MOI generation-tagged local shadow requires dispatch identity");
       return std::nullopt;
     }
@@ -2718,13 +2709,11 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     // dispatch identity into the bounded generation and reserve zero for an
     // empty/unqualified cell, so LDS reuse cannot manufacture a prior owner.
     const uint16_t dispatch_low_source =
-        point.moi_dispatch_identity.sgpr()
-            ? *point.moi_dispatch_identity.sgpr()
-            : vector_source_vgpr(*point.moi_dispatch_identity.vgpr());
+        plan.dispatch_id.sgpr ? *plan.dispatch_id.sgpr : vector_source_vgpr(*plan.dispatch_id.vgpr);
     const uint16_t dispatch_high_source =
-        point.moi_dispatch_identity.sgpr()
-            ? static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + 1u)
-            : vector_source_vgpr(static_cast<uint16_t>(*point.moi_dispatch_identity.vgpr() + 1u));
+        plan.dispatch_id.sgpr
+            ? static_cast<uint16_t>(*plan.dispatch_id.sgpr + 1u)
+            : vector_source_vgpr(static_cast<uint16_t>(*plan.dispatch_id.vgpr + 1u));
     const auto mix_dispatch_low = instrumentation::build_v_xor_b32(
         workgroup_key_vgpr, dispatch_low_source, workgroup_key_vgpr, arch);
     const auto mix_dispatch_high = instrumentation::build_v_xor_b32(
@@ -2742,12 +2731,12 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     words.insert(words.end(), bound_generation->begin(), bound_generation->end());
     words.insert(words.end(), make_nonzero_generation->begin(), make_nonzero_generation->end());
   }
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr) {
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr) {
     // The packed key is injective only inside its documented dimensional
     // bounds. Keep the guest running, but make every excluded lane-site
     // encounter observable in the Inline-only header flags/count field so a
     // clean acceptance run cannot silently pass with detector undercoverage.
-    const uint16_t exec_base = *point.moi_exec_save_sgpr;
+    const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
     const auto save_valid_exec = instrumentation::build_s_mov_b64(exec_base, kAmdGpuExecLo, arch);
     const auto select_invalid_exec = instrumentation::build_s_andn2_b64(
         kAmdGpuExecLo, static_cast<uint16_t>(exec_base + original_exec_save_offset), exec_base,
@@ -2758,8 +2747,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     if (!save_valid_exec || !select_invalid_exec || !restore_valid_exec ||
         !append_atomic_fetch_add_one_u32(
             accounting_words,
-            *bound_resources.moi_report_buffer_address +
-                offsetof(ConSanMoiReportHeader, inline_unsupported_count),
+            plan.report_buffer_address + offsetof(ConSanMoiReportHeader, inline_unsupported_count),
             tmp_vgpr, address_lo_vgpr, arch)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not account unsupported workgroup identity");
@@ -2797,7 +2785,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     const auto in_shared_aperture =
         instrumentation::build_v_cmp_eq_u32_vcc(kScalarOperandSharedBase, address_hi_source, arch);
     const auto retain_shared_lanes = instrumentation::build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 2u), kAmdGpuVccLo, arch);
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuVccLo, arch);
     if (!in_shared_aperture || !retain_shared_lanes) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not resolve a maybe-group flat aperture");
@@ -2808,7 +2796,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
   if (workgroup_shadow) {
     const auto retain_valid_workgroup = instrumentation::build_s_mov_b64(
-        static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u), kAmdGpuExecLo, arch);
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 22u), kAmdGpuExecLo, arch);
     if (!retain_valid_workgroup) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not retain validated workgroup lanes");
@@ -2824,18 +2812,18 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     return std::nullopt;
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if (!append_inline_shadow_owner_field(words, request, point, low_vgpr, tmp_vgpr, high_vgpr, arch,
-                                        owner_derivation, errors)) {
+  if (!append_inline_shadow_owner_field(words, plan.owner_field, low_vgpr, tmp_vgpr, high_vgpr,
+                                        arch, owner_derivation, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }
-  if (!append_inline_shadow_epoch_field(words, point, private_epoch_offset, low_vgpr, tmp_vgpr,
-                                        arch, errors)) {
+  if (!append_inline_shadow_epoch_field(words, plan.epoch_field, private_epoch_offset, low_vgpr,
+                                        tmp_vgpr, arch, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode epoch field");
     return std::nullopt;
   }
   words.insert(words.end(), mov_high->begin(), mov_high->end());
-  if ((!workgroup_shadow || generation_tagged_local_shadow) && point.moi_exec_save_sgpr &&
+  if ((!workgroup_shadow || generation_tagged_local_shadow) && plan.scalar_state.exec_save_sgpr &&
       !append_add_exact_shadow_generation(words, low_vgpr, high_vgpr, workgroup_key_vgpr, tmp_vgpr,
                                           arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode workgroup identity");
@@ -2873,7 +2861,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
           if (cell_index != 0u)
             continue;
           const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-              scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics);
+              scratch_vgpr, plan.scalar_state.exec_save_sgpr.has_value(), plan.track_atomics);
           const uint16_t loop_offset_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
           if (static_cast<uint32_t>(loop_offset_vgpr) >=
               static_cast<uint32_t>(scratch_vgpr) + scratch_count) {
@@ -2900,9 +2888,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
               build_v_mov_b32_e32(loop_counter_vgpr, scalar_positive_inline_u32(0), arch));
           const size_t loop_begin = words.size();
           if (!append_workgroup_local_exact_shadow_swap(
-                  words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
-                  *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr, local_old_value_vgpr,
-                  loop_offset_vgpr,
+                  words, candidate, plan, arch, layout, *workgroup_shadow, address_lo_vgpr,
+                  low_vgpr, high_vgpr, local_old_value_vgpr, loop_offset_vgpr,
                   /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_width,
                   *lds_byte_offset_vgpr, candidate.lowering_offset(range), loop_counter_vgpr,
                   errors)) {
@@ -2918,9 +2905,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
           const auto more_cells = instrumentation::build_v_cmp_gt_u32_vcc(
               scalar_positive_inline_u32(cell_range.cell_count), loop_counter_vgpr, arch);
           const uint16_t loop_exec_save_sgpr =
-              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
+              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 14u);
           const uint16_t valid_workgroup_exec_sgpr =
-              static_cast<uint16_t>(*point.moi_exec_save_sgpr + 22u);
+              static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 22u);
           const auto narrow_more_cells =
               instrumentation::build_s_and_saveexec_b64(loop_exec_save_sgpr, kAmdGpuVccLo, arch);
           const auto restore_valid_workgroup =
@@ -2960,9 +2947,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
           words.push_back(*restore_valid_workgroup);
         } else if (!reload_spill_backed_lds_byte_offset() ||
                    !append_workgroup_local_exact_shadow_swap(
-                       words, candidate, request, bound_resources, point, scratch_vgpr, arch,
-                       layout, *workgroup_shadow, address_lo_vgpr, low_vgpr, high_vgpr,
-                       local_old_value_vgpr, *lds_byte_offset_vgpr,
+                       words, candidate, plan, arch, layout, *workgroup_shadow, address_lo_vgpr,
+                       low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
                        candidate.lowering_offset(range), cell_index, range.byte_width,
                        *lds_byte_offset_vgpr, candidate.lowering_offset(range),
                        /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
@@ -2974,7 +2960,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       }
       const bool loop_external_cells = use_cell_loop;
       const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-          scratch_vgpr, point.moi_exec_save_sgpr.has_value(), request.moi_track_atomics);
+          scratch_vgpr, plan.scalar_state.exec_save_sgpr.has_value(), plan.track_atomics);
       const uint16_t saved_workgroup_key_vgpr = static_cast<uint16_t>(loop_counter_vgpr + 1u);
       if (loop_external_cells) {
         if (static_cast<uint32_t>(saved_workgroup_key_vgpr) >=
@@ -3026,11 +3012,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
         }
       }
       std::vector<uint32_t> copy_dispatch_id;
-      if (!append_moi_report_dispatch_id_word(
-              copy_dispatch_id,
-              consan_moi_detail::moi_target_dispatch_id_sources({point, bound_resources}, arch),
-              tmp_vgpr,
-              /*high_word=*/false, arch)) {
+      if (!append_moi_report_dispatch_id_word(copy_dispatch_id, plan.dispatch_id, tmp_vgpr,
+                                              /*high_word=*/false, arch)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode dispatch ID");
         return std::nullopt;
       }
@@ -3121,21 +3104,18 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
         words.insert(words.end(), add_cell->begin(), add_cell->end());
       }
       if (!append_wave_coalesced_exact_shadow_swap(
-              words, candidate, request, bound_resources, point, scratch_vgpr, arch, layout,
-              address_lo_vgpr, low_vgpr, high_vgpr, old_value_vgpr, *lds_byte_offset_vgpr,
-              candidate.lowering_offset(range), range.byte_width, external_shadow_granule_bytes,
-              cell_index,
+              words, candidate, plan, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
+              old_value_vgpr, *lds_byte_offset_vgpr, candidate.lowering_offset(range),
+              range.byte_width, external_shadow_granule_bytes, cell_index,
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(
             "ConSan MOI inline-shadow probe could not encode versioned shadow publish with "
             "EXEC base s" +
-            std::to_string(*point.moi_exec_save_sgpr) + " and dispatch base " +
-            (point.moi_dispatch_identity.sgpr()
-                 ? "s" + std::to_string(*point.moi_dispatch_identity.sgpr())
-             : point.moi_dispatch_identity.vgpr()
-                 ? "v" + std::to_string(*point.moi_dispatch_identity.vgpr())
-                 : std::string("literal")));
+            std::to_string(*plan.scalar_state.exec_save_sgpr) + " and dispatch base " +
+            (plan.dispatch_id.sgpr   ? "s" + std::to_string(*plan.dispatch_id.sgpr)
+             : plan.dispatch_id.vgpr ? "v" + std::to_string(*plan.dispatch_id.vgpr)
+                                     : std::string("literal")));
         return std::nullopt;
       }
       if (loop_external_cells) {
@@ -3143,8 +3123,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
             loop_counter_vgpr, scalar_positive_inline_u32(1), loop_counter_vgpr, arch);
         const auto more_cells = instrumentation::build_v_cmp_gt_u32_vcc(
             scalar_positive_inline_u32(cell_range.cell_count), loop_counter_vgpr, arch);
-        const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 14u);
-        const uint16_t incoming_exec_sgpr = static_cast<uint16_t>(*point.moi_exec_save_sgpr + 12u);
+        const uint16_t temporary_exec_sgpr =
+            static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 14u);
+        const uint16_t incoming_exec_sgpr =
+            static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 12u);
         const auto narrow_more_cells =
             instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch);
         const auto restore_incoming_exec =
@@ -3180,7 +3162,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
   }
   if (workgroup_shadow) {
     const std::optional<uint16_t> visible_evidence_sgpr =
-        inline_shadow_visible_evidence_sgpr(project_inline_shadow_scalar_state(point));
+        inline_shadow_visible_evidence_sgpr(plan.scalar_state);
     std::optional<size_t> skip_visible_evidence_index;
     if (visible_evidence_sgpr) {
       const auto already_published = instrumentation::build_s_cmp_lg_u32(
@@ -3194,7 +3176,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
       skip_visible_evidence_index = words.size();
       words.push_back(*skip_visible_evidence);
     }
-    const uint16_t exec_base = *point.moi_exec_save_sgpr;
+    const uint16_t exec_base = *plan.scalar_state.exec_save_sgpr;
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(exec_base + 12u);
     const uint16_t temporary_exec_sgpr = static_cast<uint16_t>(exec_base + 14u);
     const auto save_active_exec =
@@ -3219,11 +3201,9 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
     words.push_back(*first_active);
     words.push_back(*narrow_first);
-    if (!append_publish_visible_evidence_if_zero(words,
-                                                 *bound_resources.moi_report_buffer_address +
-                                                     offsetof(ConSanMoiReportHeader, event_counter),
-                                                 tmp_vgpr, address_lo_vgpr, temporary_exec_sgpr,
-                                                 arch)) {
+    if (!append_publish_visible_evidence_if_zero(
+            words, plan.report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter),
+            tmp_vgpr, address_lo_vgpr, temporary_exec_sgpr, arch)) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not publish visible evidence");
       return std::nullopt;
     }
@@ -3240,10 +3220,10 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
           *instrumentation::build_s_cbranch_scc1(static_cast<int16_t>(skip_delta), arch);
     }
   }
-  if (point.moi_exec_save_sgpr) {
+  if (plan.scalar_state.exec_save_sgpr) {
     const auto restore_original_exec = instrumentation::build_s_mov_b64(
-        kAmdGpuExecLo, static_cast<uint16_t>(*point.moi_exec_save_sgpr + original_exec_save_offset),
-        arch);
+        kAmdGpuExecLo,
+        static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + original_exec_save_offset), arch);
     if (!restore_original_exec) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not restore workgroup-filtered state");
@@ -3251,7 +3231,7 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
     }
     words.push_back(*restore_original_exec);
     if (preserve_special_state &&
-        !append_restore_moi_special_state(words, moi_special_state_sgprs(request, point), arch)) {
+        !append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not restore workgroup-filtered state");
       return std::nullopt;
