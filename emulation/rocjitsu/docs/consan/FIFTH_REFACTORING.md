@@ -11184,3 +11184,52 @@ investment into one shared assignment authority and one mode-local
 Record/Replay emission authority.  The next deletion target is the now-obvious
 redundancy in the two barrier planner contracts and staged product, rather than
 adding another interface.
+
+### 16.165 Convergence checkpoint 164: Record/Replay emission owns owner derivation
+
+The staged barrier product still carried `derived_owner` as a top-level field
+even though that fact is meaningful only to Record/Replay record emission.
+The same parallel representation existed in `MoiPlannedRecordEvent`, and the
+atomic, fence, and barrier emitters each accepted the derivation beside their
+otherwise complete `MoiRecordEventEmissionPlan`.  This was not merely a
+barrier-local irregularity: it was one Record/Replay emission input represented
+outside its authority throughout every synchronization-record path.
+
+`MoiRecordEventEmissionPlan` now retains the optional workitem-owner derivation
+alongside the persistent owner sources that determine whether it is consumed.
+Generic Record/Replay event planning and private-barrier planning populate that
+one product.  All three native record emitters consume it directly.  The
+parallel field is deleted from both `MoiPlannedRecordEvent` and the common
+`PlannedBarrierLowering`, InlineShadow no longer initializes an irrelevant
+Record/Replay fact, and three emitter interfaces lose their parallel argument.
+The architecture-boundary gate requires this ownership and rejects restoring
+either staging field or emitter-side argument.
+
+| Signal | Checkpoint 164 | Cumulative change | Slice change from checkpoint 163 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,639 | **-2,337** | -9 |
+| Nonblank production lines | 96,220 | **-2,864** | -9 |
+| Production implementation lines | 88,428 | **-3,022** | -9 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **246 / 52** | **-44 / +1** | 0 / 0 |
+| Record owner-derivation staging fields outside the emission plan | **0** | n/a | **-2** |
+| Record-emitter owner-derivation side arguments | **0** | n/a | **-3** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `b0bdb5e7a33`.  Validation includes a
+successful full `-j16` build and **250/250** nonphysical architecture-boundary,
+barrier, atomic, and fence host tests.  This follows the complete 2,921-case
+nonphysical ConSan simulator-device matrix at checkpoint 162.  All tests used
+`-LE physical`; no test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+This slice converts a mode peephole in the common barrier product into a
+mode-local exact emission fact and deletes nine implementation lines.  With
+the staged product narrowed, the remaining high-leverage barrier question is
+whether the ordinary and private planner seams expose one honest common
+operation or merely force disjoint mode requirements through union-shaped
+signatures.  The next trace must answer that from both mode implementations
+before changing another interface.
