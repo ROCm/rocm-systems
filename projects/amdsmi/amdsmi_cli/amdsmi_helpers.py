@@ -1582,8 +1582,8 @@ class AMDSMIHelpers:
     def get_fan_support(self):
         """Check if fan control is supported and return dynamic range info for all devices.
 
-        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
-        legacy hwmon GPUs. Results are cached to improve CLI performance.
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and falls
+        back to the legacy hwmon range. Results are cached to improve CLI performance.
 
         Returns:
             str: Range description for all GPUs, "N/A" if not supported.
@@ -1604,29 +1604,19 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
 
-                # Determine the range based on interface type
-                if max_speed <= 100:
-                    # This is likely a gpu_od GPU - try to get actual min from sysfs
-                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
-                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+                # Advertise the range the set path validates against: the gpu_od
+                # OD_RANGE where present, otherwise the legacy hwmon 0-255
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
 
-                    if has_gpu_od:
-                        # Use shared helper function to parse OD_RANGE
-                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
-                        if min_speed is not None:
-                            # Successfully parsed - use the actual range from sysfs
-                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
-                        else:
-                            # Parsing failed - fallback to 0-max_speed
-                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
-                    else:
-                        # gpu_od directory doesn't exist but max_speed <= 100
-                        # Could be an edge case - use 0-max_speed
-                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                min_speed = None
+                if has_gpu_od:
+                    min_speed, max_speed = self.parse_gpu_od_fan_range(gpu_od_path)
+
+                if min_speed is not None:
+                    gpu_ranges.append((idx, f"{min_speed}-{max_speed} or 0-100%%"))
                 else:
-                    # Legacy hwmon GPU (0-255)
                     gpu_ranges.append((idx, "0-255 or 0-100%%"))
 
             except amdsmi_interface.AmdSmiLibraryException as e:

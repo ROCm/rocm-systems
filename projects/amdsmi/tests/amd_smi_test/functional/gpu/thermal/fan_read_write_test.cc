@@ -4,12 +4,40 @@
 #include "fan_read_write.h"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "test_common.h"
+
+namespace {
+
+// amdsmi_set_gpu_fan_speed validates against the gpu_od OD_RANGE on GPUs that
+// expose it. That range is a different unit space than pwm1/pwm1_max, so it
+// cannot be derived from amdsmi_get_gpu_fan_speed_max().
+bool GetGpuOdFanSetRange(amdsmi_processor_handle handle, uint64_t* od_min, uint64_t* od_max) {
+  amdsmi_bdf_t bdf;
+  if (amdsmi_get_gpu_device_bdf(handle, &bdf) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+
+  std::ostringstream path;
+  path << "/sys/bus/pci/devices/" << std::hex << std::setfill('0') << std::setw(4)
+       << static_cast<uint64_t>(bdf.bdf.domain_number) << ":" << std::setw(2)
+       << static_cast<uint64_t>(bdf.bdf.bus_number) << ":" << std::setw(2)
+       << static_cast<uint64_t>(bdf.bdf.device_number) << "."
+       << static_cast<uint64_t>(bdf.bdf.function_number) << "/gpu_od/fan_ctrl/fan_minimum_pwm";
+
+  return amd::smi::ParseGpuOdFanRange(path.str(), od_min, od_max) == 0;
+}
+
+}  // namespace
 
 TestFanReadWrite::TestFanReadWrite() : TestBase() {
   set_title("AMDSMI Fan Read/Write Test");
@@ -84,23 +112,41 @@ void TestFanReadWrite::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) { std::cout << "Max fan speed: " << max_speed << std::endl; }
-    // Max speed must be > 0 and either 255 (legacy hwmon) or <= 100 (gpu_od OD_RANGE)
+    // max_speed always reports the hwmon pwm1_max ceiling, in the same unit
+    // space as amdsmi_get_gpu_fan_speed()
     ASSERT_GT(max_speed, static_cast<uint64_t>(0));
     ASSERT_LE(max_speed, static_cast<uint64_t>(AMDSMI_MAX_FAN_SPEED));
 
-    if (can_read_speed && orig_speed > 0) {
+    // The set path validates against the gpu_od OD_RANGE where available, which
+    // max_speed does not describe.
+    uint64_t od_min = 0;
+    uint64_t od_max = 0;
+    const bool has_gpu_od = GetGpuOdFanSetRange(processor_handles_[dv_ind], &od_min, &od_max);
+    const int64_t set_min = has_gpu_od ? static_cast<int64_t>(od_min) : 0;
+    const int64_t set_max =
+        has_gpu_od ? static_cast<int64_t>(od_max) : static_cast<int64_t>(max_speed);
+    IF_VERB(STANDARD) {
+      std::cout << "Settable fan speed range: " << set_min << "-" << set_max << " ("
+                << (has_gpu_od ? "gpu_od OD_RANGE" : "legacy hwmon") << ")" << std::endl;
+    }
+    if (set_max <= set_min) {
+      std::cout << "***No usable fan speed range on this GPU. Skipping." << std::endl;
+      continue;
+    }
+
+    if (!has_gpu_od && can_read_speed && orig_speed > 0) {
       // Fans are spinning — use a speed slightly above current for the test
       new_speed = static_cast<int64_t>(1.1F * static_cast<float>(orig_speed));
 
-      if (new_speed > static_cast<int64_t>(max_speed)) {
+      if (new_speed > set_max) {
         std::cout << "***System fan speed value is close to max. Will not adjust upward."
                   << std::endl;
         continue;
       }
     } else {
-      // Fans are idle or read is unavailable — use a safe mid-range value
-      // that works for both legacy hwmon (0-255) and gpu_od (typically 20-100)
-      new_speed = max_speed / 2;
+      // orig_speed is not comparable to the settable range on gpu_od GPUs, so
+      // drive the midpoint of the range the set path actually accepts
+      new_speed = set_min + (set_max - set_min) / 2;
     }
 
     IF_VERB(STANDARD) { std::cout << "Setting fan speed to " << new_speed << std::endl; }
@@ -126,8 +172,8 @@ void TestFanReadWrite::Run(void) {
     if (ret == AMDSMI_STATUS_SUCCESS) {
       IF_VERB(STANDARD) { std::cout << "New fan speed: " << cur_speed << std::endl; }
 
-      // Only verify readback range when fans were originally spinning
-      if (can_read_speed && orig_speed > 0) {
+      // Readback is only comparable to new_speed in the hwmon unit space
+      if (!has_gpu_od && can_read_speed && orig_speed > 0) {
         IF_VERB(STANDARD) {
           if (!((cur_speed > static_cast<int64_t>(0.80 * static_cast<double>(new_speed)) &&
                  cur_speed < static_cast<int64_t>(1.25 * static_cast<double>(new_speed))) ||

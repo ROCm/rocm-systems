@@ -54,7 +54,7 @@ AMDSMI_MAX_NUM_PM_POLICIES = 32
 # Max supported frequencies
 AMDSMI_MAX_NUM_FREQUENCIES = 33
 
-# Max Fan speed (legacy hwmon). For gpu_od GPUs, use amdsmi_get_gpu_fan_speed_max().
+# Max Fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max()
 AMDSMI_MAX_FAN_SPEED = 255
 
 # Max Votlage Curve Points

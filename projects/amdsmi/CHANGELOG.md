@@ -71,6 +71,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
   - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
 
+- **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs**.  
+  - `amdsmi_get_gpu_fan_speed()` read the gpu_od `fan_minimum_pwm` node, which is a user-set fan curve floor (`0` by default) and not a live reading. Both it and `amdsmi_get_gpu_fan_speed_max()` now read the hwmon `pwm1`/`pwm1_max` duty cycle again.
+  - The range accepted by `amdsmi_set_gpu_fan_speed()` on gpu_od GPUs is the gpu_od `OD_RANGE` and is not derivable from `amdsmi_get_gpu_fan_speed_max()`; `amd-smi set --fan --help` now advertises that range instead of deriving it from the reported maximum.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
