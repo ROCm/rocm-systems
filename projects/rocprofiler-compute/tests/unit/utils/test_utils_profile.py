@@ -333,8 +333,12 @@ def test_run_prof_failure_subprocess(
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
     assert (
-        utils_profile._DUPLICATE_ROCM_INSTALL_MESSAGE,
-        False,
+        utils_profile._DUPLICATE_ROCM_COMGR_MESSAGE,
+        True,
+    ) not in errors
+    assert (
+        utils_profile._DUPLICATE_ROCM_REGISTER_MESSAGE,
+        True,
     ) not in errors
 
 
@@ -380,12 +384,12 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
-    assert (abort_line, False) in errors
+    assert (abort_line, False) not in errors
     assert (
-        utils_profile._DUPLICATE_ROCM_INSTALL_MESSAGE,
-        False,
+        utils_profile._DUPLICATE_ROCM_COMGR_MESSAGE,
+        True,
     ) in errors
-    assert ("Profiling execution failed.", True) in errors
+    assert ("Profiling execution failed.", True) not in errors
 
 
 def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
