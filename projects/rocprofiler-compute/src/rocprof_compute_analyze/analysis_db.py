@@ -7,7 +7,6 @@ import warnings
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-import astunparse
 import numpy as np
 import pandas as pd
 
@@ -866,7 +865,7 @@ class db_analysis(OmniAnalyze_Base):
             ast_node = ast.parse(value)
             if not transform_expression(ast_node, original_value):
                 return None
-            value = astunparse.unparse(ast_node)
+            value = ast.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
         else:
