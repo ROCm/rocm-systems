@@ -179,12 +179,13 @@ __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
     return expanded_code
 
 def alltoallv_wg_api(T, TNAME):
+    function_name_len = len(f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoallv_wg(")
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoallv_wg(rocshmem_team_t team,\n"
-        f"                                                             {T} *dest, const size_t dest_nelems[],\n"
-        f"                                                             const size_t dest_displs[],\n"
-        f"                                                             {T} *source, const size_t source_nelems[],\n"
-        f"                                                             const size_t source_displs[]);\n"
+        f"{' ' * function_name_len}{T} *dest, const size_t dest_nelems[],\n"
+        f"{' ' * function_name_len}const size_t dest_displs[],\n"
+        f"{' ' * function_name_len}{T} *source, const size_t source_nelems[],\n"
+        f"{' ' * function_name_len}const size_t source_displs[]);\n\n"
     )
 
 def generate_alltoallv_wg_api():

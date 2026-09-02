@@ -192,7 +192,7 @@ __device__ ATTR_NO_INLINE void rocshmem_uint16_alltoall_wg(
  *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
  *
- * @return int; zero on success, non-zero otherwise
+ * @return void
  */
 __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
@@ -328,100 +328,119 @@ __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
  */
 
 __device__ ATTR_NO_INLINE void rocshmem_float_alltoallv_wg(rocshmem_team_t team,
-                                                             float *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             float *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           float *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           float *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_double_alltoallv_wg(rocshmem_team_t team,
-                                                             double *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             double *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                            double *dest, const size_t dest_nelems[],
+                                                            const size_t dest_displs[],
+                                                            double *source, const size_t source_nelems[],
+                                                            const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_char_alltoallv_wg(rocshmem_team_t team,
-                                                             char *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             char *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                          char *dest, const size_t dest_nelems[],
+                                                          const size_t dest_displs[],
+                                                          char *source, const size_t source_nelems[],
+                                                          const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_schar_alltoallv_wg(rocshmem_team_t team,
-                                                             signed char *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             signed char *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           signed char *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           signed char *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_short_alltoallv_wg(rocshmem_team_t team,
-                                                             short *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             short *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           short *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           short *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_int_alltoallv_wg(rocshmem_team_t team,
-                                                             int *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             int *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                         int *dest, const size_t dest_nelems[],
+                                                         const size_t dest_displs[],
+                                                         int *source, const size_t source_nelems[],
+                                                         const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_long_alltoallv_wg(rocshmem_team_t team,
-                                                             long *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             long *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                          long *dest, const size_t dest_nelems[],
+                                                          const size_t dest_displs[],
+                                                          long *source, const size_t source_nelems[],
+                                                          const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_longlong_alltoallv_wg(rocshmem_team_t team,
-                                                             long long *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             long long *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                              long long *dest, const size_t dest_nelems[],
+                                                              const size_t dest_displs[],
+                                                              long long *source, const size_t source_nelems[],
+                                                              const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_uchar_alltoallv_wg(rocshmem_team_t team,
-                                                             unsigned char *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             unsigned char *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           unsigned char *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           unsigned char *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_ushort_alltoallv_wg(rocshmem_team_t team,
-                                                             unsigned short *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             unsigned short *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                            unsigned short *dest, const size_t dest_nelems[],
+                                                            const size_t dest_displs[],
+                                                            unsigned short *source, const size_t source_nelems[],
+                                                            const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_uint_alltoallv_wg(rocshmem_team_t team,
-                                                             unsigned int *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             unsigned int *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                          unsigned int *dest, const size_t dest_nelems[],
+                                                          const size_t dest_displs[],
+                                                          unsigned int *source, const size_t source_nelems[],
+                                                          const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_ulong_alltoallv_wg(rocshmem_team_t team,
-                                                             unsigned long *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             unsigned long *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           unsigned long *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           unsigned long *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoallv_wg(rocshmem_team_t team,
-                                                             unsigned long long *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             unsigned long long *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                               unsigned long long *dest, const size_t dest_nelems[],
+                                                               const size_t dest_displs[],
+                                                               unsigned long long *source, const size_t source_nelems[],
+                                                               const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_half_alltoallv_wg(rocshmem_team_t team,
-                                                             __half *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             __half *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                          __half *dest, const size_t dest_nelems[],
+                                                          const size_t dest_displs[],
+                                                          __half *source, const size_t source_nelems[],
+                                                          const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_bfloat16_alltoallv_wg(rocshmem_team_t team,
-                                                             __hip_bfloat16 *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             __hip_bfloat16 *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                              __hip_bfloat16 *dest, const size_t dest_nelems[],
+                                                              const size_t dest_displs[],
+                                                              __hip_bfloat16 *source, const size_t source_nelems[],
+                                                              const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_int8_alltoallv_wg(rocshmem_team_t team,
-                                                             int8_t *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             int8_t *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                          int8_t *dest, const size_t dest_nelems[],
+                                                          const size_t dest_displs[],
+                                                          int8_t *source, const size_t source_nelems[],
+                                                          const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_int16_alltoallv_wg(rocshmem_team_t team,
-                                                             int16_t *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             int16_t *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           int16_t *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           int16_t *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_uint8_alltoallv_wg(rocshmem_team_t team,
-                                                             uint8_t *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             uint8_t *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                           uint8_t *dest, const size_t dest_nelems[],
+                                                           const size_t dest_displs[],
+                                                           uint8_t *source, const size_t source_nelems[],
+                                                           const size_t source_displs[]);
+
 __device__ ATTR_NO_INLINE void rocshmem_uint16_alltoallv_wg(rocshmem_team_t team,
-                                                             uint16_t *dest, const size_t dest_nelems[],
-                                                             const size_t dest_displs[],
-                                                             uint16_t *source, const size_t source_nelems[],
-                                                             const size_t source_displs[]);
+                                                            uint16_t *dest, const size_t dest_nelems[],
+                                                            const size_t dest_displs[],
+                                                            uint16_t *source, const size_t source_nelems[],
+                                                            const size_t source_displs[]);
+
 
 /**
  * @name SHMEM_BROADCAST
@@ -433,15 +452,15 @@ __device__ ATTR_NO_INLINE void rocshmem_uint16_alltoallv_wg(rocshmem_team_t team
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
  * @param[in] source       Source address. Must be an address on the symmetric
-                           heap.
+ *                         heap.
  * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
-                           active set, from which the data is copied
+ *                         active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
  * @param[in] logPE_stride Stride of PEs participating in the reduction.
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
-                           be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
+ *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
  *
  * @return void
  */
