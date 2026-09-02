@@ -68,20 +68,11 @@ magnitude. The middle rows use width-matched controls because `nt-store-64` read
 against `plain-128` but +0.23% against `plain-64` — the width did the work, not the hint. That
 is why PR 2616 looks like evidence against non-temporal stores when it is evidence about width.
 
-#### Alternative: `TH_STORE_NT_RT`
-
-Not shippable: no builtin, so it needs hand-written gfx12 asm in a kernel that compiles for
-every target. Measured anyway, so the question has an answer.
-
-| change | measured against | effect [95% CI] |
-|---|---|---|
-| hand-written store, *default* hint | `plain-128` | **-1.26% [-1.71, -0.95]** |
-| `TH_STORE_NT_RT` hint | `asm-plain-128` | -0.29% [-0.59, +0.05] (noise) |
-
-Against `plain-128` it reads -1.56% and looks like a win, but -1.26% of that is the
-hand-writing, not the hint. The hint is worth nothing — it leaves the line in GL2, so there is
-no pollution for it to avoid. [CHANGELOG.md](CHANGELOG.md) has the earlier revision that
-credited it.
+**The other hint, `TH_STORE_NT_RT`, was tried and rejected.** It has no builtin, so it would
+need hand-written gfx12 asm in a kernel that compiles for every target. Net of that
+hand-writing — worth -1.26% by itself — the hint measures -0.29%, noise. It leaves the line in
+GL2, so there is nothing for it to avoid. Full rows in `isolated_copy`;
+[CHANGELOG.md](CHANGELOG.md) has the earlier revision that credited it as a win.
 
 ### Where in the size range the hint does anything
 
