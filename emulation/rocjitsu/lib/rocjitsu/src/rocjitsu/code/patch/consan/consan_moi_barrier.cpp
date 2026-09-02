@@ -79,6 +79,8 @@ namespace consan_moi_impl {
 
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
+#include "rocjitsu/code/patch/consan/consan_moi_record_replay_barrier.inc"
+
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc"
 

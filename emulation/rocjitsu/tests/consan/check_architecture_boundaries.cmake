@@ -852,11 +852,15 @@ file(READ "${_consan_dir}/consan_moi_inline_shadow_private_barrier.inc"
      _inline_private_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
      _inline_barrier_owner)
+file(READ "${_consan_dir}/consan_moi_record_replay_barrier.inc"
+     _record_replay_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
 if(NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc\"" OR
+   NOT _moi_barrier_source MATCHES
+       "#include \"rocjitsu/code/patch/consan/consan_moi_record_replay_barrier.inc\"" OR
    NOT _inline_private_barrier_owner MATCHES
        "build_inline_shadow_private_epoch_barrier_cave_words" OR
    NOT _inline_barrier_owner MATCHES
@@ -868,6 +872,22 @@ if(NOT _moi_barrier_source MATCHES
    _inline_private_barrier_owner MATCHES "scalar_spill->restore_words[.]begin")
     message(FATAL_ERROR
         "InlineShadow barrier emission must remain in its mode-named owners"
+    )
+endif()
+if(NOT _record_replay_barrier_owner MATCHES
+       "try_apply_record_replay_barrier_record_patch" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "try_apply_record_replay_barrier_patch" OR
+   NOT _record_replay_barrier_owner MATCHES "try_apply_shared_barrier_patch" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "prune_unused_record_replay_direct_reservoirs" OR
+   NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
+   _moi_barrier_planning MATCHES
+       "try_apply_record_replay_barrier_(record_)?patch|prune_unused_record_replay_direct_reservoirs" OR
+   _moi_barrier_planning MATCHES
+       "try_apply_inline_shadow_barrier_epoch_patch")
+    message(FATAL_ERROR
+        "Record/Replay barrier transactions must remain mode-owned over the honestly named shared fallback"
     )
 endif()
 file(READ "${_consan_dir}/consan_capability_contract.h"
@@ -3514,6 +3534,7 @@ set(
     consan_moi_inline_shadow_private_barrier.inc
     consan_moi_inline_shadow.inc
     consan_moi_pipeline.inc
+    consan_moi_record_replay_barrier.inc
     consan_moi_placement.inc
     consan_moi_record_atomic.inc
     consan_moi_record_fence.inc
