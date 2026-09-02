@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed roofline axes changing between runs on the same GPU; initial bounds are now derived only from machine ceilings.
+
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
 
 * Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
