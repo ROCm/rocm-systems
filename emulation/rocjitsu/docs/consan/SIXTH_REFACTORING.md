@@ -586,3 +586,62 @@ Record/Replay, Sampled, and InlineShadow across gfx942, gfx950, gfx1100,
 gfx1201, and gfx1250 emulation. No physical-GPU tests were run. Macro-slice 3
 therefore closes as a qualified subsystem replacement rather than a retained
 cleanup experiment.
+
+### 10.4 Macro-slice 4 (active): decoded proofs instead of mirrored emitters
+
+The post-vocabulary candidate comparison rejected three attractive but
+low-leverage representation changes. `ConSanTransformArtifacts` is the
+lowerer's mutable, proof-rich construction aggregate, while `TransformResult`
+is the pipeline's reviewed public product; their only direct duplication is a
+short move-publication boundary, and merging them would expose private lowering
+state rather than delete a subsystem. Kernels and non-dispatchable functions
+share decoded container facts, but their distinct descriptor, dispatch, and
+ownership semantics leave only a small number of paired traversal lines to
+remove. Finally, ConSan's target-operation packages already have thin common
+dispatch and physically local concrete implementations. Combining their
+registries would mostly move declarations and would not remove 500 lines.
+
+The stronger finding is in final validation. Byte accounting, original-image
+semantic reconstruction, patch association, graph ownership, and descriptor
+comparison are independent proofs and must remain. In contrast, nine route,
+entry, dispatch, exact-shadow, and release validators reconstruct complete
+emitted instruction sequences using the same instruction-builder functions as
+the producer and compare those reconstructed words to the replacement image.
+The affected regions span roughly 1,600 source lines and contain 101 direct
+builder invocations. This is both large and less independent than it appears:
+an encoding defect shared by a builder and its mirrored validator can satisfy
+the comparison.
+
+The deletion thesis is:
+
+- make the existing decoder and its normalized instruction/operand semantics
+  the authority for proving emitted machine behavior;
+- replace validation-side construction of expected instruction vectors with
+  direct checks of decoded opcode meaning, register roles, constants, branch
+  destinations, memory effects, and instruction boundaries;
+- retain the existing independent patch-byte accounting, original-program
+  reconstruction, route graph ownership, typed patch association, resource
+  bounds, and whole-descriptor comparisons;
+- use small direct semantic predicates, not a general instruction-pattern
+  language, generated validation program, or opaque table DSL; and
+- migrate every qualifying final validator and remove its mirrored builder
+  imports and reconstruction helpers in the same macro-slice.
+
+The conservative estimate is at least 1,050 gross implementation lines of
+mirrored construction removed, no more than 450 lines of decoded-view and
+direct semantic proof code added, and therefore at least 600 net implementation
+lines deleted. The first bounded cut covers the complete indirect-route and
+entry/prologue family. The attempt is abandoned and reverted if that cut
+cannot preserve exact opcode/operand/branch corruption detection while still
+projecting at least 500 net lines for the completed family, if target-specific
+raw encodings leak back into common validation, or if a generic matcher starts
+to obscure the machine behavior being proved.
+
+Existing adversarial tests already corrupt indirect-island SCC preservation,
+dense-call keys, branch-only routes, relay-reservoir geometry and displaced
+payload, entry scalar backup bytes and resources, dispatch prologue state,
+exact-shadow bodies, release transactions, and mutation composition. Focused
+validation will retain those tests and add decoder-proof cases for any
+previously unpinned opcode, operand, modifier, or branch-target distinction.
+The cutover gate remains the complete nonphysical RocJitsu matrix across all
+four modes and five emulated targets.
