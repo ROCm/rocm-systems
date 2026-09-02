@@ -10017,3 +10017,68 @@ implementation lines smaller than it began. Full target and mode locality,
 remaining broad transaction and operating-point surfaces, larger
 whole-refactoring deletion, final extension-proof revalidation, and the
 independent Section 14 audit remain open, so the goal remains active.
+
+### 16.144 Convergence checkpoint 143: modes own dense-barrier router tuples
+
+The routing trace next reached the shared dense-barrier fallback used by
+InlineShadow and Record/Replay. Although that emitter already called the
+mode-owned dense-router planner, it discarded the exact product for barrier
+routing. It reopened the scalar-router allocation, distinguished InlineShadow
+spill from compact Record/Replay spill, reconstructed the fixed key and return
+registers at `exec_save + 5/+6`, and selected a different jump tuple through a
+parallel set of mode-specific predicates. The shared emitter therefore knew
+both modes' fixed and spill-backed register layouts.
+
+`MoiDenseRouterPlan` now contains an exact `MoiDenseBarrierRouterPlan`. The
+Record/Replay/Sampled recording planner publishes its barrier tuple beside its
+access tuple; InlineShadow publishes the distinct fixed and spill-backed
+barrier tuple in its own mode file. Shared barrier lowering consumes only the
+resolved jump state, key, return register, and entry-key policy. Its scalar-ABI
+replanning, scalar-router inspection, two spill-layout discriminators, fixed
+offset reconstruction, and compatibility predicates are deleted. The nearby
+S_CALL_I64 access-dispatcher reuse path deliberately continues to consume the
+access tuple because it is extending an access router, not creating the
+independent barrier router.
+
+The direct mode-planning test now covers barrier tuples for compact
+Record/Replay, compact Sampled, fixed InlineShadow on both direct-call forms,
+and spill-backed InlineShadow. Structural enforcement prevents shared barrier
+lowering from reopening the scalar-router call state, restoring either
+mode-specific spill discriminator, or reconstructing the fixed key/return
+pair.
+
+| Signal | Checkpoint 143 | Cumulative change | Slice change from checkpoint 142 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,719 | **-2,257** | +12 |
+| Nonblank production lines | 96,301 | **-2,783** | +11 |
+| Production implementation lines | 88,513 | **-2,937** | +6 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| Shared barrier scalar-router allocation peepholes | **0** | n/a | **-1** |
+| Shared barrier mode-specific spill discriminators | **0** | n/a | **-2** |
+| Shared barrier fixed key/return reconstructions | **0** | n/a | **-2** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The six-line implementation cost is the explicit four-field barrier product
+and its mode-owned construction after deleting 29 implementation lines from
+the shared emitter. This is an intentional ownership product rather than a
+forwarding facade: its fields are directly tested, every affected consumer
+uses it, and the old reconstruction path is structurally forbidden. The
+routing series from checkpoint 133 through 143 remains 22 implementation lines
+smaller than it began.
+
+The implementation is committed as `deb469b3381`. Validation includes a
+successful full `-j16` build; all **26/26** focused mode-planning, dense-barrier,
+and architecture-boundary host tests; and all **20/20** Record/Replay and
+InlineShadow fence/barrier publication simulator-device cases across gfx942,
+gfx950, gfx1100, gfx1201, and gfx1250. Checkpoint 141 remains the immediately
+preceding complete **4,789/4,789** nonphysical gate. No test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+This closes another mode-locality violation but does not complete the fifth
+refactoring. Full target and mode locality, remaining broad transaction and
+operating-point surfaces, larger deletion harvests, extension-proof
+revalidation, and the independent Section 14 audit remain open.
