@@ -9960,3 +9960,60 @@ fence lowering only consumes it. Full target and mode locality, remaining
 broad transaction and operating-point surfaces, larger whole-refactoring
 deletion, final extension-proof revalidation, and the independent Section 14
 audit remain open, so the goal remains active.
+
+### 16.143 Convergence checkpoint 142: Sampled synchronization consumes dense plans
+
+The exact-router trace next crossed Sampled barrier and atomic synchronization.
+Both dense paths called the mode-owned scalar-ABI planner, then independently
+reconstructed the same `MoiDenseRouterPlan`: they reopened the scalar-router
+allocation for compact spill, selected fixed `exec_save + 5/+6` key and return
+registers otherwise, and separately chose the jump and SCC-save registers.
+This duplicated both fixed and spill-backed mode policy after the public dense
+planner had already made those decisions.
+
+Sampled dense barrier and atomic routing now call `plan_moi_dense_router` once
+after the final owner-local assignment and consume its indirect jump, dispatch
+key, and call-return pair directly. The atomic call-anchor retry remains an
+intentional mutation point; after installing a replacement owner-safe scalar
+allocation, it refreshes and validates the complete dense plan rather than
+checking only a separately projected scalar ABI. The two allocation peepholes,
+four fixed-offset reconstructions, and their parallel validity predicates are
+deleted.
+
+The mode-planning test now verifies the exact compact Sampled dense tuple in
+addition to its routing mechanics. Structural enforcement prohibits Sampled
+synchronization from reopening `moi_scalar_router_call` or reconstructing key
+and return registers from the broad operating point.
+
+| Signal | Checkpoint 142 | Cumulative change | Slice change from checkpoint 141 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,707 | **-2,269** | **-21** |
+| Nonblank production lines | 96,290 | **-2,794** | **-21** |
+| Production implementation lines | 88,507 | **-2,943** | **-21** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| Sampled dense-sync scalar-allocation peepholes | **0** | n/a | **-2** |
+| Sampled dense-sync fixed key/return reconstructions | **0** | n/a | **-4** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `1d106d4be8f`. Validation includes a
+successful `-j16` build, the architecture-boundary gate, all **49/49** focused
+mode-planning and Sampled dense/far-routing host tests, and **18/18** focused
+correct/incorrect simulator-device cases. The device slice covers dense SCC,
+fence/barrier publication, and ordered atomics wherever applicable across
+gfx942, gfx950, gfx1100, gfx1201, and gfx1250. Checkpoint 141 remains the
+immediately preceding complete **4,789/4,789** nonphysical gate, including all
+**2,918/2,918** simulator-device rows. No test was removed, renamed, disabled,
+or replaced, and no physical GPU test was run.
+
+This second deletion-bearing slice deepens the same authority boundary:
+mode-owned dense planning now feeds Record/Replay event emission and Sampled
+barrier/atomic synchronization without either consumer reconstructing its
+register tuple. The route series from checkpoint 133 through 142 is now 28
+implementation lines smaller than it began. Full target and mode locality,
+remaining broad transaction and operating-point surfaces, larger
+whole-refactoring deletion, final extension-proof revalidation, and the
+independent Section 14 audit remain open, so the goal remains active.
