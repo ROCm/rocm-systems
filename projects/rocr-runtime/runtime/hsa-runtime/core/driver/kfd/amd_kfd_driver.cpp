@@ -927,6 +927,12 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
 }
 
 hsa_status_t KfdDriver::SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const {
+  // Optional thunk: the loader binds this one without failing the table load,
+  // so it stays null against a libhsakmt that does not export the RAS-poison
+  // opt-in. Missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtSetSigbusDelay) == nullptr)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+
   if (HSAKMT_CALL(hsaKmtSetSigbusDelay(node_id, delay_ms)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
