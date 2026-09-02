@@ -15,7 +15,15 @@ import torch.distributed as dist
 __version__ = "0.1.0"
 
 # The public API uses int64 topk indices.
-__all__ = ["ElasticBuffer", "EventOverlap", "EPHandle", "topk_idx_t"]
+__all__ = [
+    "ElasticBuffer",
+    "EventOverlap",
+    "EPHandle",
+    "get_bf16_lanes_per_token",
+    "get_threads_per_cta",
+    "get_waves_per_cta",
+    "topk_idx_t",
+]
 
 topk_idx_t = torch.int64
 
@@ -53,9 +61,30 @@ def _lib():
         lib.ep_destroy.argtypes = [ctypes.c_void_p]
         # Every data-path entry takes the caller's stream as a trailing argument.
         lib.ep_barrier.argtypes = [ctypes.c_void_p, P]
-        lib.ep_plan.argtypes = [ctypes.c_void_p, P, I, P, P, P, P]
+        lib.ep_plan.argtypes = [I, I, I, P, I, P, P, P, P, I, I, P]
         lib.ep_dispatch.restype = I
-        lib.ep_dispatch.argtypes = [ctypes.c_void_p, P, P, P, P, I, P, P, I, I, P, P, P, P, P, P]
+        lib.ep_dispatch.argtypes = [
+            ctypes.c_void_p,
+            P,
+            P,
+            P,
+            P,
+            I,
+            P,
+            P,
+            I,
+            P,
+            P,
+            I,
+            I,
+            P,
+            P,
+            P,
+            P,
+            P,
+            P,
+            P,
+        ]
         lib.ep_recv_counts.argtypes = [ctypes.c_void_p, P, P]
         lib.ep_expert_counts.argtypes = [ctypes.c_void_p, P, I, P, P]
         lib.ep_expand_build.restype = I
@@ -66,6 +95,9 @@ def _lib():
         lib.ep_combine.argtypes = [ctypes.c_void_p, P, P, P, P, P, I, P, I, P, P, I, P, P, I, P]
         lib.ep_get_unique_id.argtypes = [ctypes.c_void_p]
         lib.ep_unique_id_size.restype = I
+        lib.ep_threads_per_cta.restype = I
+        lib.ep_waves_per_cta.restype = I
+        lib.ep_bf16_lanes_per_token.restype = I
         _LIB = lib
     return _LIB
 
@@ -78,13 +110,24 @@ def _align(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def get_threads_per_cta() -> int:
+    return int(_lib().ep_threads_per_cta())
+
+
+def get_waves_per_cta() -> int:
+    return int(_lib().ep_waves_per_cta())
+
+
+def get_bf16_lanes_per_token() -> int:
+    return int(_lib().ep_bf16_lanes_per_token())
+
+
 class EventOverlap:
     """Completion handle returned by the data path.
 
-    rccl_ep's data path runs synchronously on the current stream, so the event
-    is already complete by the time it is handed back. The type is kept because
-    callers hold it, pass it as `previous_event` and call `current_stream_wait`;
-    all three stay meaningful, they just never block.
+    rccl_ep queues work on the caller's current stream rather than a private
+    communication stream. Same-stream consumers are ordered without an event;
+    this wrapper preserves the DeepEP-compatible call surface.
     """
 
     def __init__(self, event=None):
@@ -116,6 +159,9 @@ class EPHandle:
         self.sendc = None
         self.num_tokens = 0
         self.num_recv = 0
+        self.recv_counts_host = None
+        self.recv_rank_offsets = None
+        self.recv_rank_prefix = None
         self.recv_src_metadata = None                   # [n, 2 + num_topk]
         self.recv_topk_idx = None                       # local ids, [n, num_topk]
         self.dst_buffer_slot_idx = None
@@ -135,9 +181,9 @@ class ElasticBuffer:
 
     Implemented: BF16 and FP8 dispatch, expanded (grouped-by-expert) dispatch
     with alignment and zero padding, cached replay, both combine reduction
-    recipes, one or two bias tensors, and deterministic ordering -- which is
-    inherent here, since routing uses no atomics and no arrival-order
-    dependence, so repeated runs are byte-identical.
+    recipes, one or two bias tensors, and deterministic ordering. The normal
+    DeepEP V2-style route planner assigns slots atomically; deterministic mode
+    selects the ordered planner so repeated runs remain byte-identical.
 
     Scale-up only: every peer must be reachable by load and store, so a
     communicator spanning more than one node is rejected at construction.
@@ -199,7 +245,11 @@ class ElasticBuffer:
         # neither accepts the other's tensors, so follow the backend.
         t = torch.frombuffer(bytearray(buf.raw), dtype=torch.uint8).clone()
         t = t.cuda() if dist.get_backend(group) != "gloo" else t.cpu()
-        dist.broadcast(t, src=0, group=group)
+        # `src` is a global rank even when a group is given, while rank_idx above is the
+        # rank within the group. They coincide only for the group that happens to contain
+        # global rank 0, so passing 0 here works on a single node and raises "Global rank 0
+        # is not part of group" on every other node's expert-parallel group.
+        dist.broadcast(t, src=dist.get_global_rank(group, 0), group=group)
         t = t.cpu()
         raw = bytes(bytearray(t.tolist()))
 
@@ -249,11 +299,51 @@ class ElasticBuffer:
         self._configured = key
         self.num_experts, self.num_topk = num_experts, num_topk
 
+    @staticmethod
+    def plan_layout(
+        topk_idx, num_ranks, num_experts, deterministic=False, num_sms=0
+    ):
+        """Build the routing plan and counts consumed by dispatch."""
+        ti32 = topk_idx.to(torch.int32).contiguous()
+        num_tokens, num_topk = ti32.shape
+        slot = torch.empty(
+            (num_ranks, num_tokens), dtype=torch.int32, device=ti32.device
+        )
+        send_list = torch.empty_like(slot)
+        sendc = torch.empty((num_ranks,), dtype=torch.int32, device=ti32.device)
+        expertc = torch.empty((num_experts,), dtype=torch.int32, device=ti32.device)
+        stream = torch.cuda.current_stream().cuda_stream
+        if _lib().ep_plan(
+            num_ranks,
+            num_experts,
+            num_topk,
+            ti32.data_ptr(),
+            num_tokens,
+            slot.data_ptr(),
+            send_list.data_ptr(),
+            sendc.data_ptr(),
+            expertc.data_ptr(),
+            1 if deterministic else 0,
+            num_sms,
+            stream,
+        ) != 0:
+            raise RuntimeError("ep_plan failed")
+        return ti32, slot, send_list, sendc, expertc
+
+    def plan(self, topk_idx, num_experts, num_sms=0):
+        return self.plan_layout(
+            topk_idx,
+            self.num_ranks,
+            num_experts,
+            deterministic=self.deterministic,
+            num_sms=num_sms,
+        )
+
     @property
     def num_local_experts(self):
         return self.num_experts // self.num_ranks
 
-    def _expert_metadata(self, h, counts, expert_alignment):
+    def _expert_metadata(self, h, counts, expert_alignment, counts_list=None):
         """Fill in the two different per-expert prefix sums the handle reports.
 
         They are genuinely different quantities: the plain handle reports a
@@ -262,7 +352,7 @@ class ElasticBuffer:
         handle reports the end of each expert's REAL rows inside the tensor that
         was actually produced.
         """
-        cl = counts.tolist()
+        cl = counts.tolist() if counts_list is None else counts_list
         aligned = [_align(c, expert_alignment) for c in cl]
         h.num_recv_tokens_per_expert_list = aligned
         h.expert_counts = counts
@@ -287,6 +377,11 @@ class ElasticBuffer:
                  do_handle_copy=1, do_cpu_sync=1,
                  do_expand=False, use_tma_aligned_col_major_sf=False,
                  do_zero_padding=False, handle=None,
+                 routing_plan=None,
+                 recv_rank_counts=None,
+                 recv_rank_offsets=None,
+                 recv_rank_prefix=None,
+                 recv_expert_counts=None,
                  cumulative_local_expert_recv_stats=None,
                  previous_event=None, **kwargs):
         lib = _lib()
@@ -295,8 +390,8 @@ class ElasticBuffer:
         cached = handle is not None
 
         # `async_with_compute_stream` and `allocate_on_comm_stream` are accepted
-        # for API compatibility and ignored: the data path is synchronous on the
-        # caller's stream rather than overlapped on a private comm stream.
+        # for API compatibility and ignored: work stays ordered on the caller's
+        # stream rather than moving to a private communication stream.
         if previous_event is not None:
             previous_event.current_stream_wait()
         stream = torch.cuda.current_stream().cuda_stream
@@ -304,6 +399,8 @@ class ElasticBuffer:
         if cached:
             topk_idx = handle.topk_idx if topk_idx is None else topk_idx
             num_experts = self.num_experts
+            recv_rank_offsets = handle.recv_rank_offsets
+            recv_rank_prefix = handle.recv_rank_prefix
             # A cached call replays the handle's plan verbatim, so the alignment
             # it was built with is the only one that keeps the replay exact.
             expert_alignment = handle.expert_alignment
@@ -315,6 +412,11 @@ class ElasticBuffer:
                     "ElasticBuffer constructor")
 
         num_tokens = x.shape[0]
+        if cached and num_tokens != handle.num_tokens:
+            raise ValueError(
+                f"cached dispatch has {num_tokens} tokens, but its handle was "
+                f"built for {handle.num_tokens}"
+            )
         if num_tokens > self.num_max_tokens_per_rank:
             raise ValueError(
                 f"num_tokens {num_tokens} exceeds num_max_tokens_per_rank "
@@ -325,7 +427,11 @@ class ElasticBuffer:
 
         x = x.contiguous()
         x_sf = x_sf.contiguous().float() if x_sf is not None else None
-        ti32 = topk_idx.to(torch.int32).contiguous()
+        ti32 = (
+            routing_plan[0]
+            if routing_plan is not None
+            else topk_idx.to(torch.int32).contiguous()
+        )
         tw = (topk_weights if topk_weights is not None
               else torch.zeros(topk_idx.shape, dtype=torch.float32,
                                device=x.device)).to(torch.float32).contiguous()
@@ -342,14 +448,20 @@ class ElasticBuffer:
             # do_handle_copy is observable: callers compare data_ptr identity.
             h.topk_idx = topk_idx.clone() if do_handle_copy else topk_idx
             h.topk_idx_i32 = ti32
-            slot = torch.empty((self.num_ranks, num_tokens), dtype=torch.int32, device=x.device)
-            # Dense slot -> token map, so the send kernel skips no iterations.
-            send_list = torch.empty((self.num_ranks, num_tokens), dtype=torch.int32, device=x.device)
-            sendc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
-            if lib.ep_plan(self._h, ti32.data_ptr(), num_tokens, slot.data_ptr(),
-                           send_list.data_ptr(), sendc.data_ptr(), stream) != 0:
-                raise RuntimeError("ep_plan failed")
+            if routing_plan is None:
+                ti32, slot, send_list, sendc, _ = self.plan(
+                    topk_idx, num_experts, num_sms
+                )
+                h.topk_idx_i32 = ti32
+            else:
+                _, slot, send_list, sendc, _ = routing_plan
             h.slot, h.sendc, h.send_list = slot, sendc, send_list
+            if recv_rank_counts is not None:
+                h.recv_counts_host = (ctypes.c_int32 * self.num_ranks)(
+                    *(int(value) for value in recv_rank_counts)
+                )
+            h.recv_rank_offsets = recv_rank_offsets
+            h.recv_rank_prefix = recv_rank_prefix
 
         cap = self.num_ranks * self.num_max_tokens_per_rank
         hidden_sf = (self.hidden + 127) // 128
@@ -360,12 +472,33 @@ class ElasticBuffer:
         rtk = torch.empty((cap, num_topk), dtype=torch.int32, device=x.device)
         rtw = torch.empty((cap, num_topk), dtype=torch.float32, device=x.device)
         rsrc = torch.empty((cap,), dtype=torch.int32, device=x.device)
+        epr = self.num_local_experts
+        reused_counts = cached and h.expert_counts is not None
+        supplied_counts = recv_expert_counts is not None and not do_expand
+        if reused_counts:
+            counts = h.expert_counts
+            counts_list = h.num_recv_tokens_per_expert_list
+        elif supplied_counts:
+            counts, counts_list = recv_expert_counts
+        else:
+            counts = torch.zeros((epr,), dtype=torch.int32, device=x.device)
+            counts_list = None
 
+        expected_num_recv = (
+            h.num_recv
+            if cached
+            else sum(recv_rank_counts) if recv_rank_counts is not None else -1
+        )
         n = lib.ep_dispatch(self._h, x.data_ptr(), _ptr(x_sf), ti32.data_ptr(), tw.data_ptr(),
                             num_tokens, send_list.data_ptr(), sendc.data_ptr(),
+                            expected_num_recv,
+                            ctypes.addressof(h.recv_counts_host)
+                            if h.recv_counts_host is not None else 0,
+                            _ptr(h.recv_rank_offsets),
                             1 if use_fp8 else 0, num_sms,
                             rx.data_ptr(), _ptr(rsf), rtk.data_ptr(), rtw.data_ptr(),
-                            rsrc.data_ptr(), stream)
+                            rsrc.data_ptr(),
+                            0 if do_expand or supplied_counts or reused_counts else counts.data_ptr(), stream)
         if n < 0:
             raise RuntimeError("ep_dispatch failed")
 
@@ -374,18 +507,28 @@ class ElasticBuffer:
         h.num_recv, h.recv_topk_idx = n, rtk
 
         # Per-source-rank prefix sum.
-        rc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
-        lib.ep_recv_counts(self._h, rc.data_ptr(), stream)
-        h.psum_num_recv_tokens_per_scaleup_rank = torch.cumsum(rc, 0).to(torch.int32)
+        if h.recv_rank_prefix is not None:
+            h.psum_num_recv_tokens_per_scaleup_rank = h.recv_rank_prefix
+        else:
+            rc = torch.empty((self.num_ranks,), dtype=torch.int32, device=x.device)
+            lib.ep_recv_counts(self._h, rc.data_ptr(), stream)
+            if h.recv_counts_host is None:
+                h.recv_counts_host = (ctypes.c_int32 * self.num_ranks)(
+                    *(int(value) for value in rc.tolist())
+                )
+            h.psum_num_recv_tokens_per_scaleup_rank = torch.cumsum(
+                rc, 0, dtype=torch.int32
+            )
+            h.recv_rank_offsets = (
+                h.psum_num_recv_tokens_per_scaleup_rank - rc
+            )
+            h.recv_rank_prefix = h.psum_num_recv_tokens_per_scaleup_rank
         h.dst_buffer_slot_idx = slot
 
-        epr = self.num_local_experts
-        counts = torch.zeros((epr,), dtype=torch.int32, device=x.device)
-
         if not do_expand:
-            lib.ep_expert_counts(self._h, rtk.data_ptr(), n, counts.data_ptr(), stream)
             h.expanded = False
-            self._expert_metadata(h, counts, expert_alignment)
+            if not reused_counts:
+                self._expert_metadata(h, counts, expert_alignment, counts_list)
             # recv_src_metadata: column 0 is src_token_global_idx (the only
             # column callers rely on); column 1 carries the source rank,
             # and the remaining num_topk columns are the expand map, absent here.

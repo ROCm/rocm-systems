@@ -30,6 +30,12 @@ using bf16_t = __hip_bfloat16;
 // silently exchanging incompatible bytes.
 using fp8_t = __hip_fp8_e4m3;
 
+// DeepEP V2 schedules 32 independent CUDA warps per CTA at hidden=2048. A
+// gfx950 wave has 64 lanes, so splitting it into eight-lane copy groups keeps
+// 32 tokens in flight from a 256-thread CTA without increasing the CTA's
+// hardware footprint to DeepEP's 1024 threads.
+constexpr int kBf16TokenGroupSize = 8;
+
 // Byte view of a rank's symmetric window plus the offsets into it.
 struct WindowView {
   uint8_t* base;
@@ -89,14 +95,161 @@ __device__ __forceinline__ int last_local_slot(const int32_t* __restrict__ recv_
 __device__ __forceinline__ void wave_copy_bf16(bf16_t* __restrict__ dst, const bf16_t* __restrict__ src, int n) {
   const int lane = get_lane_idx();
   constexpr int kPerVec = 8;  // 8 * 2B = 16B = dwordx4
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kWarpSize * kUnroll;
   const int nvec = n / kPerVec;
 
   const auto* s4 = reinterpret_cast<const uint4*>(src);
   auto* d4 = reinterpret_cast<uint4*>(dst);
-  for (int i = lane; i < nvec; i += kWarpSize) d4[i] = s4[i];
+  int i = lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = s4[i];
+    const uint4 value1 = s4[i + kWarpSize];
+    const uint4 value2 = s4[i + 2 * kWarpSize];
+    const uint4 value3 = s4[i + 3 * kWarpSize];
+    d4[i] = value0;
+    d4[i + kWarpSize] = value1;
+    d4[i + 2 * kWarpSize] = value2;
+    d4[i + 3 * kWarpSize] = value3;
+  }
+  for (; i < nvec; i += kWarpSize) d4[i] = s4[i];
 
   // scalar tail
   for (int i = nvec * kPerVec + lane; i < n; i += kWarpSize) dst[i] = src[i];
+}
+
+// Peer-window payloads are streaming writes: no later work on the sender
+// reuses these cache lines. Bypassing the sender's caches matches RCCL's gfx950
+// copy path and prevents four-wave blocks from stalling behind L2 writeback.
+__device__ __forceinline__ void store16_peer(uint4* dst, uint4 value) {
+  auto* p = reinterpret_cast<int32_t*>(dst);
+  __builtin_nontemporal_store(static_cast<int32_t>(value.x), p + 0);
+  __builtin_nontemporal_store(static_cast<int32_t>(value.y), p + 1);
+  __builtin_nontemporal_store(static_cast<int32_t>(value.z), p + 2);
+  __builtin_nontemporal_store(static_cast<int32_t>(value.w), p + 3);
+}
+
+__device__ __forceinline__ uint4 load16_peer(const uint4* src) {
+  const auto* p = reinterpret_cast<const int32_t*>(src);
+  uint4 value;
+  value.x = __builtin_nontemporal_load(p + 0);
+  value.y = __builtin_nontemporal_load(p + 1);
+  value.z = __builtin_nontemporal_load(p + 2);
+  value.w = __builtin_nontemporal_load(p + 3);
+  return value;
+}
+
+__device__ __forceinline__ void wave_copy_bf16_peer(
+    bf16_t* __restrict__ dst, const bf16_t* __restrict__ src, int n) {
+  const int lane = get_lane_idx();
+  constexpr int kPerVec = 8;
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kWarpSize * kUnroll;
+  const int nvec = n / kPerVec;
+
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = s4[i];
+    const uint4 value1 = s4[i + kWarpSize];
+    const uint4 value2 = s4[i + 2 * kWarpSize];
+    const uint4 value3 = s4[i + 3 * kWarpSize];
+    store16_peer(d4 + i, value0);
+    store16_peer(d4 + i + kWarpSize, value1);
+    store16_peer(d4 + i + 2 * kWarpSize, value2);
+    store16_peer(d4 + i + 3 * kWarpSize, value3);
+  }
+  for (; i < nvec; i += kWarpSize) store16_peer(d4 + i, s4[i]);
+
+  for (int i = nvec * kPerVec + lane; i < n; i += kWarpSize) dst[i] = src[i];
+}
+
+template <int kGroupSize>
+__device__ __forceinline__ void group_copy_bf16_peer(
+    bf16_t* __restrict__ dst, const bf16_t* __restrict__ src, int n,
+    int group_lane) {
+  constexpr int kPerVec = 8;
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kGroupSize * kUnroll;
+  const int nvec = n / kPerVec;
+
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = group_lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = s4[i];
+    const uint4 value1 = s4[i + kGroupSize];
+    const uint4 value2 = s4[i + 2 * kGroupSize];
+    const uint4 value3 = s4[i + 3 * kGroupSize];
+    store16_peer(d4 + i, value0);
+    store16_peer(d4 + i + kGroupSize, value1);
+    store16_peer(d4 + i + 2 * kGroupSize, value2);
+    store16_peer(d4 + i + 3 * kGroupSize, value3);
+  }
+  for (; i < nvec; i += kGroupSize) store16_peer(d4 + i, s4[i]);
+
+  for (int i = nvec * kPerVec + group_lane; i < n; i += kGroupSize) {
+    dst[i] = src[i];
+  }
+}
+
+__device__ __forceinline__ void wave_copy_bf16_from_peer(
+    bf16_t* __restrict__ dst, const bf16_t* __restrict__ src, int n) {
+  const int lane = get_lane_idx();
+  constexpr int kPerVec = 8;
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kWarpSize * kUnroll;
+  const int nvec = n / kPerVec;
+
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = load16_peer(s4 + i);
+    const uint4 value1 = load16_peer(s4 + i + kWarpSize);
+    const uint4 value2 = load16_peer(s4 + i + 2 * kWarpSize);
+    const uint4 value3 = load16_peer(s4 + i + 3 * kWarpSize);
+    d4[i] = value0;
+    d4[i + kWarpSize] = value1;
+    d4[i + 2 * kWarpSize] = value2;
+    d4[i + 3 * kWarpSize] = value3;
+  }
+  for (; i < nvec; i += kWarpSize) d4[i] = load16_peer(s4 + i);
+
+  for (int tail = nvec * kPerVec + lane; tail < n; tail += kWarpSize) {
+    dst[tail] = src[tail];
+  }
+}
+
+template <int kGroupSize>
+__device__ __forceinline__ void group_copy_bf16_from_peer(
+    bf16_t* __restrict__ dst, const bf16_t* __restrict__ src, int n,
+    int group_lane) {
+  constexpr int kPerVec = 8;
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kGroupSize * kUnroll;
+  const int nvec = n / kPerVec;
+
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = group_lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = load16_peer(s4 + i);
+    const uint4 value1 = load16_peer(s4 + i + kGroupSize);
+    const uint4 value2 = load16_peer(s4 + i + 2 * kGroupSize);
+    const uint4 value3 = load16_peer(s4 + i + 3 * kGroupSize);
+    d4[i] = value0;
+    d4[i + kGroupSize] = value1;
+    d4[i + 2 * kGroupSize] = value2;
+    d4[i + 3 * kGroupSize] = value3;
+  }
+  for (; i < nvec; i += kGroupSize) d4[i] = load16_peer(s4 + i);
+
+  for (int tail = nvec * kPerVec + group_lane; tail < n;
+       tail += kGroupSize) {
+    dst[tail] = src[tail];
+  }
 }
 
 // Cross-rank rendezvous, device side. Must be launched with exactly
@@ -130,6 +283,56 @@ __device__ __forceinline__ void wave_copy_bytes(uint8_t* __restrict__ dst, const
   auto* d4 = reinterpret_cast<uint4*>(dst);
   for (int i = lane; i < nvec; i += kWarpSize) d4[i] = s4[i];
   for (int i = nvec * 16 + lane; i < n; i += kWarpSize) dst[i] = src[i];
+}
+
+__device__ __forceinline__ void wave_copy_bytes_peer(
+    uint8_t* __restrict__ dst, const uint8_t* __restrict__ src, int n) {
+  const int lane = get_lane_idx();
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kWarpSize * kUnroll;
+  const int nvec = n / 16;
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = s4[i];
+    const uint4 value1 = s4[i + kWarpSize];
+    const uint4 value2 = s4[i + 2 * kWarpSize];
+    const uint4 value3 = s4[i + 3 * kWarpSize];
+    store16_peer(d4 + i, value0);
+    store16_peer(d4 + i + kWarpSize, value1);
+    store16_peer(d4 + i + 2 * kWarpSize, value2);
+    store16_peer(d4 + i + 3 * kWarpSize, value3);
+  }
+  for (; i < nvec; i += kWarpSize) store16_peer(d4 + i, s4[i]);
+  for (int i = nvec * 16 + lane; i < n; i += kWarpSize) {
+    __builtin_nontemporal_store(src[i], dst + i);
+  }
+}
+
+__device__ __forceinline__ void wave_copy_bytes_from_peer(
+    uint8_t* __restrict__ dst, const uint8_t* __restrict__ src, int n) {
+  const int lane = get_lane_idx();
+  constexpr int kUnroll = 4;
+  constexpr int kLoopStride = kWarpSize * kUnroll;
+  const int nvec = n / 16;
+  const auto* s4 = reinterpret_cast<const uint4*>(src);
+  auto* d4 = reinterpret_cast<uint4*>(dst);
+  int i = lane;
+  for (; i < (nvec / kLoopStride) * kLoopStride; i += kLoopStride) {
+    const uint4 value0 = load16_peer(s4 + i);
+    const uint4 value1 = load16_peer(s4 + i + kWarpSize);
+    const uint4 value2 = load16_peer(s4 + i + 2 * kWarpSize);
+    const uint4 value3 = load16_peer(s4 + i + 3 * kWarpSize);
+    d4[i] = value0;
+    d4[i + kWarpSize] = value1;
+    d4[i + 2 * kWarpSize] = value2;
+    d4[i + 3 * kWarpSize] = value3;
+  }
+  for (; i < nvec; i += kWarpSize) d4[i] = load16_peer(s4 + i);
+  for (int tail = nvec * 16 + lane; tail < n; tail += kWarpSize) {
+    dst[tail] = src[tail];
+  }
 }
 
 }  // namespace rccl_ep
