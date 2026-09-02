@@ -16,7 +16,11 @@ import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
-from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
+from roofline.roofline_frame import (
+    FRAME_X_MIN,
+    canonical_frame,
+    points_outside_frame,
+)
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel
 from roofline.roofline_main import Roofline
@@ -242,6 +246,62 @@ def test_canonical_frame_requires_bandwidths_and_peaks() -> None:
     assert canonical_frame([BANDWIDTH], [0.0, math.nan]) is None
 
 
+FRAME = (1e-2, 1e2, 1e0, 1e5)
+
+
+def test_points_outside_frame_measures_how_far_past_each_edge() -> None:
+    """Inside is silence; outside is a signed count of decades per axis, so a
+    caller can say which edge a point went past and by how much."""
+    outside = points_outside_frame(
+        FRAME,
+        [
+            (1.0, 100.0),  # inside
+            (1.0, 0.1),  # a decade under the performance axis
+            (1e3, 1e6),  # a decade past both upper bounds
+            (0.0, 100.0),  # a log axis cannot place this at all
+        ],
+    )
+
+    assert outside == [
+        (1, 0.0, pytest.approx(-1.0)),
+        (2, pytest.approx(1.0), pytest.approx(1.0)),
+        (3, -math.inf, 0.0),
+    ]
+
+
+def test_a_kernel_under_the_frame_is_reported_and_left_where_it_is(
+    benchmarked_roofline, caplog
+) -> None:
+    """A kernel the machine frame does not reach is named in a warning, drawn at
+    its true position, and never allowed to widen the frame: the axes have to
+    stay the ones the next run will open on too."""
+    sunken = {
+        "ai_hbm": [[1.0, 1.0], [0.1, 500.0]],
+        "kernelNames": ["sunken", "framed"],
+    }
+    inside = {"ai_hbm": [[1.0], [500.0]], "kernelNames": ["framed"]}
+
+    with caplog.at_level("WARNING"):
+        figure = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+            sunken, datatypes=["FP64"]
+        )[1]
+    reference = benchmarked_roofline(["FP64"]).construct_plotly_figures(
+        inside, datatypes=["FP64"]
+    )[1]
+
+    warnings = [
+        record.message for record in caplog.records if "falls outside" in record.message
+    ]
+    assert len(warnings) == 1, "expected one warning, for the one off-plot kernel"
+    assert "sunken" in warnings[0]
+    assert "1.00 decades below the performance axis" in warnings[0]
+
+    assert figure.layout.yaxis.range == reference.layout.yaxis.range
+    assert figure.layout.xaxis.range == reference.layout.xaxis.range
+    drawn = {trace.name: trace.y for trace in figure.data if trace.mode == "markers"}
+    assert drawn["sunken"] == (0.1,), "the marker must not be pulled onto the edge"
+
+
 FRAME_MAX_DECADES = 6.0
 
 
@@ -373,9 +433,9 @@ def test_two_kernel_sets_ship_the_same_axes_in_the_page(benchmarked_roofline) ->
     )
 
     assert axis_ranges(slow_figure) == axis_ranges(fast_figure)
-    assert embedded_model(slow_document)["frame"] == embedded_model(fast_document)[
-        "frame"
-    ]
+    assert (
+        embedded_model(slow_document)["frame"] == embedded_model(fast_document)["frame"]
+    )
 
 
 def test_view_model_to_json_escapes_script_close() -> None:
