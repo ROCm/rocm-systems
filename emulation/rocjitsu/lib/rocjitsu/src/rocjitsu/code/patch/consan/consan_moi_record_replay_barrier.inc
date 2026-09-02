@@ -311,11 +311,8 @@ void try_apply_record_replay_barrier_record_patch(
 
   struct StagedBarrierRecord {
     const PlannedBarrierRecord *planned = nullptr;
-    const MoiRecordEventEmissionPlan *emission = nullptr;
     uint32_t original_barrier_word = 0u;
-    uint64_t cave_text_offset = 0u;
     uint64_t return_text_offset = 0u;
-    bool branch_only_scalar_spill = false;
     DbiPatchPlacement placement;
     std::vector<uint32_t> cave_words;
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;
@@ -424,11 +421,8 @@ void try_apply_record_replay_barrier_record_patch(
     const size_t staged_index = staged_barriers.size();
     staged_barriers.push_back({
         .planned = &planned,
-        .emission = &planned.emission,
         .original_barrier_word = original_barrier_word,
-        .cave_text_offset = cave_text_offset,
         .return_text_offset = return_text_offset,
-        .branch_only_scalar_spill = branch_only_scalar_spill,
         .placement = *placement,
         .cave_words = std::move(*cave_words),
         .borrowed_entry = std::move(borrowed_entry),
@@ -439,9 +433,9 @@ void try_apply_record_replay_barrier_record_patch(
       branch_only_requests.push_back({
           .entry_source = site.text_offset,
           .entry_target =
-              staged.borrowed_entry ? site.text_offset + sizeof(uint32_t) : staged.cave_text_offset,
+              staged.borrowed_entry ? site.text_offset + sizeof(uint32_t) : cave_text_offset,
           .return_source =
-              staged.cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t),
+              cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t),
           .return_target = return_text_offset,
           .entry_preplaced = staged.borrowed_entry.has_value(),
       });
@@ -468,7 +462,8 @@ void try_apply_record_replay_barrier_record_patch(
         StagedBarrierRecord &staged = staged_barriers[branch_only_staged_indices[route_index]];
         staged.branch_only_route = std::move(route_plan.routes[route_index]);
         const uint64_t return_branch_offset =
-            staged.cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t);
+            staged.placement.body_offset +
+            (staged.cave_words.size() - 1u) * sizeof(uint32_t);
         const uint64_t return_hop_target =
             staged.branch_only_route->return_relay_offsets.empty()
                 ? staged.return_text_offset
@@ -490,14 +485,15 @@ void try_apply_record_replay_barrier_record_patch(
     const PlannedBarrierRecord &planned = *staged.planned;
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
-    const MoiRecordEventEmissionPlan &emission = *staged.emission;
-    const uint64_t cave_text_offset = staged.cave_text_offset;
+    const MoiRecordEventEmissionPlan &emission = planned.emission;
+    const uint64_t cave_text_offset = staged.placement.body_offset;
     const uint64_t return_text_offset = staged.return_text_offset;
-    const bool branch_only_scalar_spill = staged.branch_only_scalar_spill;
+    const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
+        result.moi_operating_point, planned.resources.owner_descriptor_file_offsets);
     std::optional<BranchOnlyRelayRoute> &branch_only_route = staged.branch_only_route;
-    while (new_text.size() < staged.placement.body_offset)
+    while (new_text.size() < cave_text_offset)
       append_word_bytes(new_text, build_s_nop(0u, arch));
-    if (new_text.size() != staged.placement.body_offset) {
+    if (new_text.size() != cave_text_offset) {
       result.errors.emplace_back("ConSan MOI barrier record patch has a stale cave mapping");
       return;
     }
@@ -530,7 +526,7 @@ void try_apply_record_replay_barrier_record_patch(
     const uint64_t entry_target =
         branch_only_route && !branch_only_route->entry_relay_offsets.empty()
             ? branch_only_route->entry_relay_offsets.front()
-            : (has_entry_island ? entry_island : staged.placement.body_offset);
+            : (has_entry_island ? entry_island : cave_text_offset);
     if (staged.borrowed_entry) {
       const uint64_t island_bytes = staged.borrowed_entry->island_words.size() * sizeof(uint32_t);
       if (site.text_offset > new_text.size() || island_bytes > new_text.size() - site.text_offset) {
@@ -554,7 +550,7 @@ void try_apply_record_replay_barrier_record_patch(
     }
     if (has_entry_island) {
       const bool emitted = emit_moi_local_indirect_entry_island(
-          new_text, entry_island, staged.placement.body_offset, site.text_offset, emission,
+          new_text, entry_island, cave_text_offset, site.text_offset, emission,
           planned.resources.owner_descriptor_file_offsets, arch, patches, result.errors,
           "ConSan MOI barrier record patch");
       if (!emitted)
@@ -562,8 +558,8 @@ void try_apply_record_replay_barrier_record_patch(
     }
     append_words_bytes(new_text, staged.cave_words);
     if (branch_only_route && !BranchOnlyRelayRouter::emit_and_record(
-                                 new_text, *branch_only_route, staged.placement.body_offset,
-                                 return_text_offset, arch, patches, &placement_error)) {
+                                 new_text, *branch_only_route, cave_text_offset, return_text_offset,
+                                 arch, patches, &placement_error)) {
       result.errors.emplace_back("ConSan MOI barrier record patch " + placement_error);
       return;
     }

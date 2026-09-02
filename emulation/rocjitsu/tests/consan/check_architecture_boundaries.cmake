@@ -880,16 +880,27 @@ if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch" OR
    NOT _record_replay_barrier_owner MATCHES "try_apply_shared_barrier_patch" OR
    NOT _record_replay_barrier_owner MATCHES
-       "prune_unused_record_replay_direct_reservoirs" OR
-   NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
-   _moi_barrier_planning MATCHES
-       "try_apply_record_replay_barrier_(record_)?patch|prune_unused_record_replay_direct_reservoirs" OR
-   _moi_barrier_planning MATCHES
-       "try_apply_inline_shadow_barrier_epoch_patch")
+       "prune_unused_record_replay_direct_reservoirs")
     message(FATAL_ERROR
-        "Record/Replay barrier transactions must remain mode-owned over the honestly named shared fallback"
+        "the Record/Replay barrier owner must retain its complete mode transaction"
     )
 endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_record_replay_barrier.inc"
+    "const MoiRecordEventEmissionPlan [*]emission[ \t]*=[ \t]*nullptr|uint64_t[ \t]+cave_text_offset[ \t]*=[ \t]*0u|bool[ \t]+branch_only_scalar_spill[ \t]*=[ \t]*false"
+    "staged Record/Replay barriers must derive emission, body offset, and route class from retained products"
+)
+if(NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
+   _moi_barrier_planning MATCHES "try_apply_inline_shadow_barrier_epoch_patch")
+    message(FATAL_ERROR
+        "the shared barrier mechanism must retain its mode-neutral entry point"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_barrier.inc"
+    "try_apply_record_replay_barrier_(record_)?patch|prune_unused_record_replay_direct_reservoirs"
+    "Record/Replay barrier transactions must remain outside the shared barrier owner"
+)
 file(READ "${_consan_dir}/consan_capability_contract.h"
      _visible_evidence_target_contract)
 file(READ "${_consan_dir}/consan_gfx9_cdna_target_profile.h.inc"
