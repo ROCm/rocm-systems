@@ -2597,6 +2597,11 @@ _consan_assert_no_match(
     "common placement must consume typed target facts"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_placement.inc"
+    "MoiResourcePlanSite(Key|Index)"
+    "resource-plan lookup must not restore the dormant parallel site index"
+)
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_evidence_planning.h"
     "ConSanTransformArtifacts"
     "evidence planning must consume immutable forward products, not the mutable transaction bus"

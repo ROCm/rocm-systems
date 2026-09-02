@@ -2880,43 +2880,6 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
   return it == plans.end() ? nullptr : &*it;
 }
 
-struct MoiResourcePlanSiteKey {
-  ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
-  uint64_t text_offset = 0;
-
-  bool operator==(const MoiResourcePlanSiteKey &) const = default;
-};
-
-struct MoiResourcePlanSiteKeyHash {
-  size_t operator()(const MoiResourcePlanSiteKey &key) const noexcept {
-    const size_t offset_hash = std::hash<uint64_t>{}(key.text_offset);
-    const size_t kind_hash = std::hash<uint8_t>{}(static_cast<uint8_t>(key.kind));
-    return offset_hash ^ (kind_hash + 0x9e3779b9u + (offset_hash << 6u) + (offset_hash >> 2u));
-  }
-};
-
-class MoiResourcePlanSiteIndex {
-public:
-  explicit MoiResourcePlanSiteIndex(std::span<const ConSanCandidateResourcePlan> plans)
-      : plans_(plans) {
-    indices_.reserve(plans.size());
-    for (size_t index = 0; index < plans.size(); ++index) {
-      const ConSanCandidateResourcePlan &plan = plans[index];
-      indices_.try_emplace(MoiResourcePlanSiteKey{plan.site_kind, plan.text_offset}, index);
-    }
-  }
-
-  [[nodiscard]] const ConSanCandidateResourcePlan *find(ConSanResourceSiteKind kind,
-                                                        uint64_t text_offset) const {
-    const auto found = indices_.find(MoiResourcePlanSiteKey{kind, text_offset});
-    return found == indices_.end() ? nullptr : &plans_[found->second];
-  }
-
-private:
-  std::span<const ConSanCandidateResourcePlan> plans_;
-  std::unordered_map<MoiResourcePlanSiteKey, size_t, MoiResourcePlanSiteKeyHash> indices_;
-};
-
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
