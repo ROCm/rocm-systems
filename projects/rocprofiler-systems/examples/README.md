@@ -18,9 +18,8 @@ This directory contains example applications demonstrating various profiling sce
 
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
-| [user-api](user-api/) | User API for named regions, annotations, and selective thread tracing | rocprofiler-systems user library |
 | [roctx](roctx/) | ROCTx range/marker API with thread naming, pause/resume, and device labeling | rocprofiler-sdk-roctx, HIP |
-| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems user library |
+| [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems causal API library |
 | [rewrite-caller](rewrite-caller/) | Minimal call chain for binary rewrite instrumentation testing | None |
 | [trace-time-window](trace-time-window/) | Mixed CPU-bound and sleep workload for time-windowed trace analysis | None |
 
@@ -124,9 +123,9 @@ rocprofiler-systems supports several instrumentation modes:
 
 | Variable | Description | Default |
 | ---------- | ------------- | --------- |
-| `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `true` |
-| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `true` |
-| `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `false` |
+| `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `false` |
+| `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `false` |
+| `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `true` |
 | `ROCPROFSYS_USE_SAMPLING` | Enable statistical sampling | `false` |
 | `ROCPROFSYS_SAMPLING_FREQ` | Sampling frequency (interrupts/sec) | `50` |
 | `ROCPROFSYS_USE_PROCESS_SAMPLING` | Enable process-level resource sampling | `true` |

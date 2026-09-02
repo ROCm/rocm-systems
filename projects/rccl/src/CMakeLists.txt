@@ -598,13 +598,14 @@ foreach(SRC_FILE ${SRC_FILES})
   endif()
 endforeach()
 
-set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/nccl_device.h")
+set(NCCL_DEVICE_HEADER_STAMP "${PROJECT_BINARY_DIR}/include/.nccl_device_headers.stamp")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
 set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
 set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
 add_custom_command(
   OUTPUT ${HIP_COMPAT_DST}
-  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
   MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
   COMMENT "Copying hip_compat.h (no hipification)"
 )
@@ -624,9 +625,7 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
 
-# copy_directory_if_different was added in CMake 3.26.  On older toolchains
-# fall back to the unconditional copy_directory (same behaviour, just causes
-# unnecessary recompilation on no-op rebuilds).
+# copy_directory_if_different was added in CMake 3.26.
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
   add_custom_command(
     OUTPUT ${NCCL_DEVICE_HEADER}
@@ -636,17 +635,23 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER})
 else()
+  # On older CMake, copy_directory is unconditional and can retrigger rebuilds.
+  # Use a touched stamp to keep OUTPUT >= DEPENDS after successful staging.
   add_custom_command(
-    OUTPUT ${NCCL_DEVICE_HEADER}
+    OUTPUT ${NCCL_DEVICE_HEADER_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    COMMAND ${CMAKE_COMMAND} -E touch "${NCCL_DEVICE_HEADER_STAMP}"
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    COMMENT "Staging nccl_device headers into include/"
     VERBATIM
   )
+  set(COPY_NCCL_DEVICE_HEADERS_OUTPUT ${NCCL_DEVICE_HEADER_STAMP})
 endif()
-add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
+add_custom_target(copy_nccl_device_headers DEPENDS ${COPY_NCCL_DEVICE_HEADERS_OUTPUT})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are

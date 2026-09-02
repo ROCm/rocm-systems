@@ -25,6 +25,7 @@
 
 #include "auxv.hpp"
 
+#include <fstream>
 #include <vector>
 
 namespace fs = rocprofiler::common::filesystem;

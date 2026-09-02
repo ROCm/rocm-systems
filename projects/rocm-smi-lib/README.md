@@ -3,7 +3,7 @@
 Starting with ROCm 7.0, only critical bug fixes will be applied to ROCm-SMI.
 For a seamless experience and continued support, please switch to [AMD-SMI](https://github.com/ROCm/amdsmi).
 
-As of ROCm 10.0, ROCm-SMI is no longer included in TheRock builds. It can still be built from source if desired (see the [installation guide](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/install/install.html)).
+As of ROCm 10.1, ROCm-SMI is no longer included in TheRock builds. It can still be built from source if desired (see the [installation guide](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/install/install.html)).
 
 ## Use C++ in ROCm SMI
 

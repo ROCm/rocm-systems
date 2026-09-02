@@ -1471,6 +1471,9 @@ memory:
     tags: [multigpu, transfer, P1]
     # Disabling test tracked SWDEV-391555
     disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyPeer_Positive_OrderingWithSrcBlockingStream:
+    <<: *level_2
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeer_Negative_Parameters:
     <<: *level_2
     tags: [multigpu, transfer, P1]

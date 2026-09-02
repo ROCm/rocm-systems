@@ -10,7 +10,9 @@ import re
 
 import pytest
 
-from amdisa.codegen.execute.simd_codegen import simd_probe_line
+from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
+from amdisa.codegen.execute.simd_codegen import SIMD_VOP1_UNARY, simd_probe_line
+from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -28,9 +30,23 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_swaprel,
     gen_vector_trig_preop,
 )
+from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+
+
+def test_cls_i32_codegen():
+    scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
+    semantic = _INLINE_UNARY_OPS['cls_i32']
+    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
+
+    for emitted in (scalar, semantic, simd):
+        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
+        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
+        assert 'countl_zero(abs_val)) - 1' not in emitted
+        assert 'countl_zero(a)) - 1' not in emitted
+        assert 'clz_u32_simd(u) - 1' not in emitted
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -279,6 +295,7 @@ def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
 
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
+    codegen.config = CodegenConfig()
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),
@@ -343,6 +360,7 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
 
 def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
     codegen = object.__new__(CodeGenerator)
+    codegen.config = CodegenConfig()
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),

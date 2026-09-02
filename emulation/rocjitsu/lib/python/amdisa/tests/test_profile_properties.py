@@ -14,7 +14,12 @@ from amdisa.codegen._generator import (
     _SourceImplUnit,
 )
 from amdisa.codegen.config import CodegenConfig
-from amdisa.__main__ import _detect_profile
+from amdisa.__main__ import (
+    _apply_codegen_identity,
+    _codegen_config,
+    _detect_profile,
+    _parse_isa_arg,
+)
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
@@ -24,6 +29,7 @@ from amdisa.isa_profile import (
     CdnaProfile,
     Cdna5Profile,
     DppOpcodeRule,
+    DppCtrlDialect,
     MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
@@ -32,7 +38,32 @@ from amdisa.isa_profile import (
     Rdna3_5Profile,
     Rdna4Profile,
     SwmmacLayout,
+    WaveStateLayout,
 )
+
+
+@pytest.mark.parametrize(
+    (
+        'profile',
+        'renders_halves',
+        'opsel_field',
+        'vop3p_hi_high_field',
+        'dpp_dialect',
+    ),
+    [
+        (CdnaProfile(), False, 'op_sel', 'op_sel_hi_2', DppCtrlDialect.GFX9),
+        (Rdna4Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+        (Cdna5Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+    ],
+)
+def test_vop3_disassembly_profile(
+    profile, renders_halves, opsel_field, vop3p_hi_high_field, dpp_dialect
+):
+    assert profile.uses_true16_vop3_opsel
+    assert profile.renders_true16_vop3_operands is renders_halves
+    assert profile.vop3_opsel_field == opsel_field
+    assert profile.vop3p_opsel_hi_high_field == vop3p_hi_high_field
+    assert profile.dpp_ctrl_dialect == dpp_dialect
 
 
 @pytest.mark.parametrize(
@@ -60,6 +91,34 @@ def test_supports_wgp_mode(profile, expected):
 def test_ttmp_workgroup_id_properties(profile, uses_ttmp, uses_cluster_ttmp):
     assert profile.uses_ttmp_workgroup_ids is uses_ttmp
     assert profile.uses_cluster_ttmp_workgroup_ids is uses_cluster_ttmp
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (CdnaProfile(), WaveStateLayout.LEGACY),
+        (Rdna3Profile(), WaveStateLayout.LEGACY),
+        (Rdna4Profile(), WaveStateLayout.GFX12),
+        (Cdna5Profile(), WaveStateLayout.GFX12_5),
+    ],
+)
+def test_wave_state_layout(profile, expected):
+    assert profile.wave_state_layout is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'granule', 'bits'),
+    [
+        (CdnaProfile(), 1024, 13),
+        (Rdna2Profile(), 1024, 13),
+        (Rdna3Profile(), 256, 15),
+        (Rdna4Profile(), 256, 18),
+        (Cdna5Profile(), 256, 18),
+    ],
+)
+def test_compute_tmpring_wavesize_properties(profile, granule, bits):
+    assert profile.compute_tmpring_wavesize_granule == granule
+    assert profile.compute_tmpring_wavesize_bits == bits
 
 
 @pytest.mark.parametrize(
@@ -426,6 +485,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
 
     assert 'uint32_t max_addressable_vgprs_per_wf = 0;' in output
     assert 'bool mode_has_gpr_idx_en = false;' in output
+    assert 'enum class WaveStateLayout : uint8_t {' in output
+    assert 'uint32_t compute_tmpring_wavesize_granule = 0;' in output
+    assert 'uint32_t compute_tmpring_wavesize_bits = 0;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
@@ -439,6 +501,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_state_layout = WaveStateLayout::Legacy,\n'
+        '        .compute_tmpring_wavesize_granule = 1024,\n'
+        '        .compute_tmpring_wavesize_bits = 13,\n'
         '        .wave_size = 64,\n'
         '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
@@ -454,6 +519,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .wave_state_layout = WaveStateLayout::Gfx12,\n'
+        '        .compute_tmpring_wavesize_granule = 256,\n'
+        '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 64,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
@@ -469,6 +537,9 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .wave_state_layout = WaveStateLayout::Gfx12_5,\n'
+        '        .compute_tmpring_wavesize_granule = 256,\n'
+        '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 32,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
@@ -476,6 +547,21 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
         '    };'
     ) in output
+
+
+def test_isa_properties_codegen_uses_source_arch_for_custom_identity(tmp_path):
+    specs = [
+        (
+            'gfx1250',
+            SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile()),
+            None,
+        )
+    ]
+
+    output = emit_isa_properties(str(tmp_path), specs).read_text()
+
+    assert 'case ROCJITSU_CODE_ARCH_CDNA5:' in output
+    assert '.max_addressable_vgprs_per_wf = 1024,' in output
 
 
 def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
@@ -566,6 +652,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'apply_gpr_idx(wf, *off, amdgpu::VgprMsbRole::Dst)' not in operand_exec_cpp
     assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
+    assert 'RegisterAccess(wf.cu())' not in operand_exec_cpp
+    assert 'RegisterAccess(wf)' in operand_exec_cpp
+    assert 'owns_vgpr_range(wf, reg, 1)' in operand_exec_cpp
 
 
 def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):
@@ -1134,6 +1223,105 @@ class TestCdna5Profile:
             '</Architecture></ISA></Spec>'
         )
         assert _detect_profile(str(xml)) == 'cdna5'
+
+    def test_parse_single_isa_arg_with_profile(self):
+        assert _parse_isa_arg('cdna5:/tmp/isa.xml') == (
+            'cdna5',
+            '/tmp/isa.xml',
+            'cdna5',
+        )
+
+    def test_parse_single_isa_arg_without_profile(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
+        assert _parse_isa_arg(str(xml)) == (None, str(xml), 'cdna5')
+
+    @pytest.mark.parametrize('name', ['rdna3.5', 'rdna3_5'])
+    def test_parse_single_isa_arg_accepts_rdna3_5_aliases(self, name):
+        assert _parse_isa_arg(f'{name}:/tmp/isa.xml') == (
+            name,
+            '/tmp/isa.xml',
+            'rdna3.5',
+        )
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            '',
+            '1250gfx',
+            'gfx-1250',
+            'gfx@1250',
+            'nested/gfx1250',
+            r'nested\gfx1250',
+            '/tmp/escaped',
+        ],
+    )
+    def test_parse_single_isa_arg_rejects_invalid_codegen_identity(
+        self, name, tmp_path
+    ):
+        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
+        xml.write_text('<Spec />')
+
+        with pytest.raises(ValueError, match='invalid ISA name'):
+            _parse_isa_arg(f'{name}:{xml}')
+
+    def test_explicit_name_controls_codegen_identity(self):
+        spec = SimpleNamespace(
+            arch_name='cdna5',
+            generated_dir_name='cdna5',
+            cpp_namespace='cdna5',
+        )
+
+        _apply_codegen_identity(spec, 'gfx1250')
+
+        assert spec.arch_name == 'cdna5'
+        assert spec.generated_dir_name == 'gfx1250'
+        assert spec.cpp_namespace == 'gfx1250'
+
+    def test_codegen_include_paths_keep_handwritten_base_independent(self):
+        config = _codegen_config(
+            'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated',
+            include_root='lib/rocjitsu/src',
+        )
+
+        assert config.include_base == 'rocjitsu/isa/arch/amdgpu'
+        assert (
+            config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+        assert (
+            config.shared_generated_include_base
+            == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+
+    def test_codegen_include_paths_allow_independent_handwritten_base(self):
+        config = CodegenConfig.for_output(
+            '/tmp/generated',
+            handwritten_include_base='custom/amdgpu',
+        )
+
+        assert config.include_base == 'custom/amdgpu'
+        assert config.generated_include_base == '/tmp/generated'
+
+    def test_regeneration_helper_uses_stable_generated_include_prefix(self):
+        rocjitsu = Path(__file__).resolve().parents[4]
+        source_root = rocjitsu / 'lib' / 'rocjitsu' / 'src'
+        isa_output = source_root / 'rocjitsu' / 'isa' / 'arch' / 'amdgpu' / 'generated'
+
+        helper = (rocjitsu / 'scripts' / 'generate-amdisa.sh').read_text()
+        assert '--include-root "$rocjitsu/lib/rocjitsu/src"' in helper
+
+        config = _codegen_config(str(isa_output), include_root=str(source_root))
+        assert config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/generated'
+
+    def test_explicit_codegen_prefix_remains_independent_of_output(self):
+        config = CodegenConfig(generated_include_base='stable/generated')
+
+        assert config.generated_include('rdna4', 'vop3.h') == (
+            'stable/generated/rdna4/vop3.h'
+        )
 
     def test_test_encoding_uses_primary_decode_key(self):
         generator = object.__new__(CodeGenerator)
