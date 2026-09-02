@@ -1795,6 +1795,22 @@ _consan_assert_no_match(
     "ConSanMoiEngine"
     "the shared Record/Replay-Sampled runtime gate must consume its exact-subset flavor"
 )
+file(READ "${_consan_dir}/consan_moi_record_replay.inc" _moi_record_replay_access_owner)
+string(
+    REGEX MATCHALL
+    "plan_moi_runtime_workgroup_gate[(]"
+    _moi_record_replay_gate_planners
+    "${_moi_record_replay_access_owner}"
+)
+list(LENGTH _moi_record_replay_gate_planners _moi_record_replay_gate_planner_count)
+if(NOT _moi_record_replay_gate_planner_count EQUAL 1 OR
+   _moi_record_replay_access_owner MATCHES
+       "planned(_patch)?[.]dense_runtime_workgroup_gate")
+    message(
+        FATAL_ERROR
+        "ConSan Record/Replay access lowering must retain one selected runtime gate plan"
+    )
+endif()
 foreach(_file IN LISTS _consan_sources)
     file(STRINGS "${_file}" _generated_includes REGEX "isa/arch/amdgpu/generated/")
     if(NOT _generated_includes)

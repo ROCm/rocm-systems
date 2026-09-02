@@ -52,8 +52,7 @@ void try_apply_first_light_access_record_patch(
       options.max_patches_is_expert_limit ? options.max_patches : candidates.size();
 
   struct PlannedAccessRecordPatch : MoiPlannedReplayAccessPatch {
-    bool runtime_workgroup_gate = false;
-    bool dense_runtime_workgroup_gate = false;
+    std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
     std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources;
     uint32_t record_index = 0;
     uint32_t record_count = 0;
@@ -594,9 +593,12 @@ void try_apply_first_light_access_record_patch(
         record_replay_persistent_workgroup_sources(
             options.moi_engine, candidate_point,
             private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
-    const bool has_probe_entry_runtime_workgroup_gate =
-        runtime_workgroup_sources &&
-        moi_has_probe_entry_runtime_workgroup_gate(*runtime_workgroup_sources);
+    const std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate =
+        runtime_workgroup_sources && !candidate_point.has_compact_moi_scalar_spill()
+            ? plan_moi_runtime_workgroup_gate(
+                  options, options, candidate_point, *runtime_workgroup_sources,
+                  MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch)
+            : std::nullopt;
     const bool needs_vgpr_spill =
         resources->source == ConSanRegisterAllocationSource::SpillRequired ||
         moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
@@ -826,8 +828,7 @@ void try_apply_first_light_access_record_patch(
                                        : candidate_entry_island_words * sizeof(uint32_t));
       }
       const bool dense_runtime_workgroup_gate =
-          use_dense_call && options.moi_runtime_sample_stride > 1u &&
-          !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
+          use_dense_call && runtime_workgroup_gate.has_value();
       const uint64_t patch_bytes =
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
           spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes +
@@ -894,13 +895,9 @@ void try_apply_first_light_access_record_patch(
                                                                   : candidate_entry_island_words;
     planned.entry_island_at_anchor = entry_island_at_anchor;
     planned.dense_call_anchor = use_dense_call;
-    planned.runtime_workgroup_gate =
-        uses_reserved_entry_relay && options.moi_runtime_sample_stride > 1u &&
-        !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
-    planned.dense_runtime_workgroup_gate =
-        use_dense_call && options.moi_runtime_sample_stride > 1u &&
-        !candidate_point.has_compact_moi_scalar_spill() && has_probe_entry_runtime_workgroup_gate;
-    if (planned.runtime_workgroup_gate || planned.dense_runtime_workgroup_gate)
+    if ((uses_reserved_entry_relay || use_dense_call) && runtime_workgroup_gate)
+      planned.runtime_workgroup_gate = runtime_workgroup_gate;
+    if (planned.runtime_workgroup_gate)
       planned.runtime_workgroup_sources = runtime_workgroup_sources;
     if (use_dense_call)
       planned.dense_dispatcher_offset = dense_dispatchers.at(candidate_ptr);
@@ -1226,18 +1223,13 @@ void try_apply_first_light_access_record_patch(
                   "ConSan MOI first-light probe lost its runtime workgroup sources");
               return;
             }
-            const auto gate_plan = plan_moi_runtime_workgroup_gate(
-                options, options, candidate_point, *planned_patch.runtime_workgroup_sources,
-                MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
-            if (gate_plan) {
-              auto gate = build_moi_runtime_workgroup_gate_island_words(
-                  bytes, candidate, *gate_plan, *planned_patch.runtime_workgroup_sources,
-                  *planned_patch.entry_island_offset, cave_text_offset,
-                  planned_patch.placement.return_target, planned_patch.entry_island_word_count,
-                  arch);
-              if (gate)
-                island_words = std::move(*gate);
-            }
+            auto gate = build_moi_runtime_workgroup_gate_island_words(
+                bytes, candidate, *planned_patch.runtime_workgroup_gate,
+                *planned_patch.runtime_workgroup_sources, *planned_patch.entry_island_offset,
+                cave_text_offset, planned_patch.placement.return_target,
+                planned_patch.entry_island_word_count, arch);
+            if (gate)
+              island_words = std::move(*gate);
           } else if (append_moi_scc_preserving_indirect_jump(
                          island_words, *planned_patch.entry_island_offset, cave_text_offset,
                          indirect_jump->pc_sgpr, special_state.scc_save_sgpr,
@@ -1255,24 +1247,17 @@ void try_apply_first_light_access_record_patch(
         }
 
         std::vector<uint32_t> dense_gate_words;
-        if (planned_patch.dense_runtime_workgroup_gate) {
+        if (planned_patch.dense_call_anchor && planned_patch.runtime_workgroup_gate) {
           if (!planned_patch.runtime_workgroup_sources) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe lost its dense runtime workgroup sources");
             return;
           }
-          const auto gate_plan = plan_moi_runtime_workgroup_gate(
-              options, options, candidate_point, *planned_patch.runtime_workgroup_sources,
-              MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
-          if (!gate_plan) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe lost its dense runtime workgroup gate plan");
-            return;
-          }
           auto gate = build_moi_runtime_workgroup_gate_call_words(
-              bytes.subspan(candidate.file_offset, candidate.size()), *gate_plan,
-              *planned_patch.runtime_workgroup_sources, cave_text_offset,
-              planned_patch.placement.return_target, runtime_gate_island_words, arch);
+              bytes.subspan(candidate.file_offset, candidate.size()),
+              *planned_patch.runtime_workgroup_gate, *planned_patch.runtime_workgroup_sources,
+              cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
+              arch);
           if (!gate) {
             const auto describe_source = [](const ConSanMoiWorkgroupSource &source) {
               if (source.scalar_src)
@@ -1286,7 +1271,8 @@ void try_apply_first_light_access_record_patch(
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its dense runtime gate at " +
                 std::to_string(candidate.anchor()) + " with exec-save s" +
-                std::to_string(*candidate_point.moi_exec_save_sgpr) + " and workgroup sources " +
+                std::to_string(planned_patch.runtime_workgroup_gate->exec_save_sgpr) +
+                " and workgroup sources " +
                 describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
