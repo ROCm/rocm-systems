@@ -53,11 +53,28 @@ public:
   /// @returns The tick of the last event processed by this partition.
   Tick current_tick() const { return event_queue.current_tick(); }
 
+  /// @brief Return the number of event handlers this partition has run.
+  ///
+  /// @details An entry with no handler, and one dropped as a stale wake, are
+  /// not counted: this measures work done, which is what a model asserting
+  /// that an idle component costs nothing needs. Readable from any thread, so
+  /// a test or a progress readout can sample it while the partition's own
+  /// worker is still processing.
+  /// @returns Cumulative count since create().
+  uint64_t events_processed() const { return events_processed_.load(std::memory_order_relaxed); }
+
 private:
   friend class SimulationEngine;
 
   PartitionID partition_id; ///< This partition's ID.
   EventQueue event_queue;   ///< Thread-local event priority queue.
+
+  /// @brief Events this partition has executed.
+  /// @details Written only by the owning worker thread; atomic because
+  /// foreign threads read it. Relaxed on both sides: it carries no other
+  /// state, and a reader that sees a slightly stale count is in the same
+  /// position as one that read a moment earlier.
+  std::atomic<uint64_t> events_processed_{0};
 
   /// @brief Min timestamp of outgoing cross-partition events in this epoch.
   /// @details Only accessed by the owning worker thread during event processing
@@ -182,6 +199,74 @@ public:
   /// then enters the PDES epoch loop. Components are shut down on return.
   /// @returns An ExitStatus describing why the simulation stopped.
   ExitStatus run();
+
+  /// @brief Run queued events until @p done becomes true, or the queue drains.
+  ///
+  /// @details The resumable middle ground between step(), which advances only
+  /// to the next event time, and run(), which owns the whole execution
+  /// lifecycle and returns only once the simulation has ended. Neither of
+  /// those is "drain what is queued, stop on a predicate, stay resumable",
+  /// which is what a model asked for one answer -- the tick a particular
+  /// request completes -- needs.
+  ///
+  /// Quiescence here means the partition's event queue is empty and no async
+  /// event is waiting to be merged into it. It is deliberately not run()'s
+  /// termination contract: no primary-component check and no wall-clock
+  /// pacing. A caller that wants those wants run(). A configured max_ticks is
+  /// still honoured, because it is armed by the shared lazy startup and its
+  /// sentinel sets the same exit flag this loop stops on.
+  ///
+  /// Every other event in flight advances with it, which is the point: this is
+  /// a bounded run of a shared simulation, not a private one per query.
+  ///
+  /// Resume with run_bounded() or step(), not with run(): run() has its own
+  /// lifecycle and would not resume this one.
+  ///
+  /// **A caller that loops until its predicate flips must also check
+  /// is_done()**, or it spins forever once the engine has exited -- on
+  /// max_ticks, on any request_exit(), or after shutdown().
+  ///
+  /// Single-threaded engines only. Nesting a *different* engine inside a
+  /// handler is the supported arrangement and is tested; re-entering this one,
+  /// through any entry point, throws.
+  /// @param done Predicate polled between events; the caller flips it. Held by
+  ///        reference and read repeatedly, so it must outlive the call and be
+  ///        something the handlers can actually change.
+  /// @returns The tick the engine reached.
+  /// @throws std::logic_error if this engine is already executing.
+  /// @throws std::invalid_argument if the engine has more than one partition.
+  Tick run_bounded(const bool &done);
+
+  /// @brief Refuse a temporary predicate.
+  ///
+  /// @details `run_bounded(flag.load())` would bind a frozen copy and turn a
+  /// bounded run into an unbounded one, silently.
+  Tick run_bounded(bool &&done) = delete;
+
+  /// @brief Run every queued event, leaving the engine resumable.
+  ///
+  /// @details Stops early if the engine exits; see run_bounded().
+  /// @returns The tick the engine reached, which is the previous one if there
+  ///          was nothing to run.
+  /// @throws Whatever run_bounded() throws.
+  Tick run_until_idle();
+
+  /// @brief Whether the engine has exited and will process no further events.
+  ///
+  /// @details Latched by max_ticks, by request_exit(), and by shutdown(). A
+  /// drive loop around run_bounded() has to test it, because a finished engine
+  /// is otherwise indistinguishable from one with nothing to do.
+  /// @retval true The simulation has ended; see last_exit() for why.
+  /// @retval false The engine will still process events.
+  bool is_done() const { return done_.load(std::memory_order_acquire); }
+
+  /// @brief Number of event handlers run since create(), across all partitions.
+  ///
+  /// @details Zero after shutdown(), because the counters live in the
+  /// partition contexts and those are the generation. Safe to call from any
+  /// thread: it takes the same lock shutdown() clears the contexts under.
+  /// @returns Cumulative count of entries whose handler ran.
+  uint64_t events_processed() const;
 
   /// @brief Block until run() (or step()'s first call) has completed component
   /// startup.
@@ -431,6 +516,23 @@ private:
   /// @brief Set up partition contexts, async queues, and engine pointers.
   void setup_partitions();
 
+  /// @brief Start components and arm the max-ticks sentinel, once per create().
+  ///
+  /// @details Shared by run(), step(), and run_bounded(), so that whichever
+  /// reaches the engine first starts it and the others find it started. It is
+  /// keyed on a flag separate from running_, because running_ means "executing
+  /// right now" and run() clears it on return -- a shared startup keyed on it
+  /// would start every component a second time for `run_until_idle(); run();`,
+  /// double-scheduling their first events and double-registering primaries.
+  /// @param propagate_failure Whether to rethrow a component's startup()
+  ///        exception. True for the foreground entry points; false for run(),
+  ///        which may be on a background thread whose lambda has no catch and
+  ///        which converts the failure into an ExitStatus instead.
+  /// @retval true The engine is started and may process events.
+  /// @retval false A startup() threw; this create() generation is terminal and
+  ///         the caller must shutdown() + create() to retry.
+  bool ensure_started(bool propagate_failure);
+
   /// @brief Wake an idle single-threaded worker so it re-checks its exit and event state.
   ///
   /// @details No-op outside single-threaded mode, or once the partition is gone.
@@ -456,7 +558,7 @@ private:
   /// own (the host thread calling request_exit(), the doorbell monitor releasing a
   /// primary) and can overlap shutdown() clearing these vectors. Those readers take a
   /// shared lock; shutdown() takes it exclusively around the clear.
-  std::shared_mutex contexts_mutex_;
+  mutable std::shared_mutex contexts_mutex_;
   std::vector<std::unique_ptr<PartitionContext>>
       contexts_;                      ///< Per-partition state (one per thread).
   std::vector<std::jthread> workers_; ///< Worker threads (multi-threaded mode).
@@ -471,7 +573,18 @@ private:
   std::atomic<bool> has_primaries_{false}; ///< Set on first register_as_primary().
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
   bool created_ = false; ///< Whether create() has completed (components initialized).
-  bool running_ = false; ///< True while running; also guards step() first-call startup.
+  bool running_ = false; ///< True while an execution loop is in progress.
+  bool started_ = false; ///< True once this create() generation has started components.
+  /// @brief Set while any entry point is driving this engine's queue.
+  ///
+  /// @details A runtime guard rather than an assert, unlike this class's other
+  /// preconditions. Re-entering -- run() or step() or run_bounded() from
+  /// inside a handler -- has the inner loop popping from the very queue the
+  /// outer process_event() frame is iterating and rewriting the partition tick
+  /// underneath it. That corrupts a run rather than merely misbehaving, and a
+  /// release build would do it in silence. Atomic because run()'s worker
+  /// threads clear it from whichever thread returns last.
+  std::atomic<bool> executing_{false};
   /// @brief Latched true once startup() has run for every component (or thrown);
   /// reset by create(). Read by wait_until_started() from an embedding thread.
   std::atomic<bool> startup_complete_{false};
