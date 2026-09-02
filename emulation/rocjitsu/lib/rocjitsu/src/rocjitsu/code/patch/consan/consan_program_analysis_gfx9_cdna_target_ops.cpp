@@ -113,8 +113,9 @@ decode_gfx9_cdna_direct_lds_transfer(std::string_view mnemonic,
 
 bool decode_gfx9_cdna_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                   std::span<const uint8_t> instruction) {
-  return decode_pregfx12_atomic_site<cdna4::FlatMachineInst, cdna4::FlatGlblMachineInst>(
-      site, mnemonic, instruction, kCdnaGlobalNoSaddrEncoding);
+  return decode_pregfx12_atomic_site<cdna4::DsMachineInst, cdna4::FlatMachineInst,
+                                     cdna4::FlatGlblMachineInst>(site, mnemonic, instruction,
+                                                                 kCdnaGlobalNoSaddrEncoding);
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
