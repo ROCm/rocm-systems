@@ -136,12 +136,16 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
-    const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
-    if (str) {
-      int disable = strtol(str, NULL, 0);
-      if (disable == 1) {
-        info->protocol = NCCL_PROTO_SIMPLE;
-      }
+    int p2p_disabled = (ncclParamP2pDisable() != 0);
+    // const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
+    // if (str) {
+    //   int disable = strtol(str, NULL, 0);
+    //   if (disable == 1) {
+    //     info->protocol = NCCL_PROTO_SIMPLE;
+    //   }
+    // }
+    if (p2p_disabled) {
+      info->protocol = NCCL_PROTO_SIMPLE;
     }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
@@ -212,7 +216,9 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
-  if ((!IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120") && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
+  const bool isGfx120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  //Make an exception for isGfx120x
+  if ((!isGfx120x && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
     INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
     return ncclSuccess;
   }

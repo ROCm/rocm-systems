@@ -132,6 +132,7 @@ NCCL_PARAM(NumRmaCtx, "NUM_RMA_CTX", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(MaxP2pPeers, "P2P_MAX_PEERS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(MultiRankGpuEnable, "MULTI_RANK_GPU_ENABLE", 0);
+NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -1704,23 +1705,36 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   ringGraph->maxChannels = MAXCHANNELS / 2;
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") || rcclParamIntraGraphGen()) { 
-    /**
-     * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
-     * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
-     * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated
-     * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
-     * optimal 4-node load balancing). Missing channel data is backfilled
-     * by repairMissingChannels() during Postset.
-     * */
-    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
-    INFO(NCCL_ENV,"rcclParamIntraGraphGen(): %d rcclParamInitChannels(): %d ringGraph->minChannels: %d ringGraph->maxChannels: %d", rcclParamIntraGraphGen() , numChannels, ringGraph->minChannels, ringGraph->maxChannels);
-    ringGraph->minChannels = std::min(1,numChannels);
-    ringGraph->maxChannels = std::min(MAXCHANNELS/2,numChannels);
-    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+
+  {
+    const bool isGfx1151 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151");
+    const bool isGfx120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+    const bool p2pDisabled = ncclParamP2pDisable();
+    //Identical with ncclTopoPreset() in connect.cc
+    const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx120x);
+    
+    if (isGfx1151 || intraGraphGen) {
+      /**
+      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+      * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+      * is required during Preset. Therefore, nChannels cannot be auto-calculated
+      * based on nNodes at this stage.
+      * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+      * optimal 4-node load balancing). Missing channel data is backfilled
+      * by repairMissingChannels() during Postset.
+      * */
+     int initChannels = (int)rcclParamInitChannels();
+     int defaultNumChannels = isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx120x && p2pDisabled) ? 16: ringGraph->nChannels);
+     int numChannels =  initChannels > 0 ? initChannels : defaultNumChannels ;
+     INFO(NCCL_ENV,
+      "intraGraphGen : %d rcclParamInitChannels:%d numChannels : %d ringGraph->minChannels: %d ringGraph->maxChannels: %d", 
+      (int) intraGraphGen , initChannels, numChannels, ringGraph->minChannels, ringGraph->maxChannels);
+     ringGraph->minChannels = std::min(1,numChannels);
+     ringGraph->maxChannels = std::min(MAXCHANNELS/2,numChannels);
+     ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+    }
   }
   INFO(NCCL_INIT, "ringGraph->nChannels = %d ", ringGraph->nChannels);
 

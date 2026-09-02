@@ -41,6 +41,7 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
 #endif
 }
 
+RCCL_PARAM(RdDiv,"RG_DIV",0);
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
@@ -95,8 +96,8 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   int nChannels = comm->nChannels;
 
   // --- Bounds & Resource Checks ---
-  if (nChannels > MAXCHANNELS) {
-    WARN("TopoPreset: nChannels (%d) exceeds MAXCHANNELS (%d)", nChannels, MAXCHANNELS);
+  if (nChannels <= 0 || nChannels > MAXCHANNELS) {
+    WARN("TopoPreset: invalid nChannels=%d should be [1,%d]", nChannels, MAXCHANNELS);
     return ncclInvalidUsage;
   }
 
@@ -105,6 +106,18 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     WARN("TopoPreset: Required topology graphs (Ring/Tree) are missing");
     return ncclInternalError;
   }
+
+  if (graphs[NCCL_ALGO_RING]->nChannels < nChannels || graphs[NCCL_ALGO_TREE]->nChannels < nChannels) {
+    WARN("TopoPreset: graph channel count smaller than comm->nChannels");
+    return ncclInternalError;
+  }
+
+  if (localRanks <= 0) {
+    WARN("TopoPreset: invalid localRanks=%d", localRanks);
+    return ncclInternalError;
+  }
+
+  ncclResult_t res = ncclSuccess;
 
   // ---Pre-validation of Rank Presence ---
   // We check the first channel of the Ring to ensure this rank is even part of the plan
@@ -123,6 +136,12 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
+  
+  const bool isGfx120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  const bool p2pDisabled = ncclParamP2pDisable();
+  const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx120x);
+  const bool interGraphGen = rcclParamInterGraphGen();
+  const bool disableRingDiversity = isGfx120x && !p2pDisabled;
 
   // ---- POISONING / INITIALIZATION ---
   // set all the uninitialized topoRanks rank values to -1 , 0 from calloc is ambiguous with rank 0
@@ -155,14 +174,14 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
   int* localRankOrder = nullptr;
   int* cutIndices = nullptr;
-  if ( rcclParamIntraGraphGen() ) {
-     NCCLCHECK(ncclCalloc(&localRankOrder, nChannels * localRanks));
-     NCCLCHECK(generateRings(localRanks, nChannels, localRankOrder));
+  if ( intraGraphGen ) {
+     NCCLCHECKGOTO(ncclCalloc(&localRankOrder, nChannels * localRanks),res,fail);
+     NCCLCHECKGOTO(generateRings(localRanks, nChannels, localRankOrder),res,fail);
      for ( int c = 1; c < nChannels ; c++ ) {
       memcpy(graphs[NCCL_ALGO_RING]->intra+c*localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks*sizeof(int));
     }
-    if ( rcclParamInterGraphGen() ) {
-      NCCLCHECK(ncclCalloc(&cutIndices,nChannels));
+    if ( interGraphGen ) {
+      NCCLCHECKGOTO(ncclCalloc(&cutIndices,nChannels),res,fail);
       findRingCutIndices(nChannels, localRanks, localRankOrder,cutIndices);
     }
   }
@@ -171,11 +190,9 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
     struct ncclChannel* channel = comm->channels + c;
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra + c * localRanks;
-    if ( rcclParamIntraGraphGen() ) {
-      const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
-      int p2_disable = str ? strtol(str, NULL, 0) : 0;
-      int copy_index = c*(1-p2_disable);
-      permute_array_inplace(ringIntra,localRanks,localRankOrder+copy_index*localRanks); /* copy_index -> 0 or c */
+    // Permute only when we need diversity in rings
+    if ( intraGraphGen && !disableRingDiversity) {
+      permute_array_inplace(ringIntra,localRanks,localRankOrder + c*localRanks); 
     }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra + c * localRanks;
     int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra + c * localRanks;
@@ -186,7 +203,7 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
         topoRanks->ringSend[c] = ringIntra[localRanks - 1];
         topoRanks->ringPrev[c] = (i == 0) ? -1 : ringIntra[i - 1];
         topoRanks->ringNext[c] = (i == localRanks - 1) ? -1 : ringIntra[i + 1];
-        if ( rcclParamIntraGraphGen() && rcclParamInterGraphGen() ) {
+        if ( intraGraphGen && interGraphGen ) {
           topoRanks->ringRecv[c] = ringIntra[ ( cutIndices[c] + 1 ) % localRanks] ; 
           topoRanks->ringSend[c] = ringIntra[cutIndices[c]];
           topoRanks->ringPrev[c] = ringIntra[ ( localRanks  +  i-1 ) % localRanks];
@@ -210,12 +227,13 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       }
     }
   }
-  free(localRankOrder);
-  free(cutIndices);
+ 
   // Duplicate channels trees
-  struct ncclChannel* channel0 = comm->channels;
-  struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
-  if (channel1) memcpy(channel1, channel0, nChannels * sizeof(struct ncclChannel));
+  {
+    struct ncclChannel* channel0 = comm->channels;
+    struct ncclChannel* channel1 = (nChannels > MAXCHANNELS / 2) ? 0 : channel0 + nChannels;
+    if (channel1) memcpy(channel1, channel0, nChannels * sizeof(struct ncclChannel));
+  }
 
   // Get nvls heads and the number of heads. Duplicate head is not allowed.
   for (int c = 0; c < graphs[NCCL_ALGO_NVLS]->nChannels; ++c) {
@@ -234,7 +252,14 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
   }
   memcpy(comm->nvlsHeads, topoRanks->nvlsHeads, sizeof(int) * topoRanks->nvlsHeadNum);
 
+  free(localRankOrder);
+  free(cutIndices);
   return ncclSuccess;
+
+  fail:
+    free(localRankOrder);
+    free(cutIndices);
+    return res;
 }
 
 bool isRankHere(const char* s, int start, int end, int rank) {

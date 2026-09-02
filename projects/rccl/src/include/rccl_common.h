@@ -232,6 +232,7 @@ RCCL_PARAM_DECLARE(DdaLLThreshold);
 RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
+NCCL_PARAM_DECLARE(P2pDisable);
 
 // Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
 constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
