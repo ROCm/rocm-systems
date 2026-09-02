@@ -125,10 +125,9 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
   return plan;
 }
 
-MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
-                                     const ConSanMoiOperatingPoint &point) {
-  return moi_mode_operations(request.moi_engine)
-      .scalar_abi(project_moi_scalar_routing_state(point));
+MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
+                                     const MoiScalarRoutingState &routing_state) {
+  return moi_mode_operations(engine).scalar_abi(routing_state);
 }
 
 std::optional<MoiDenseRouterPlan>
@@ -163,18 +162,17 @@ make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
   };
 }
 
-std::optional<MoiDenseRouterPlan> plan_moi_dense_router(const ConSanRequest &request,
-                                                        const ConSanMoiOperatingPoint &point,
+std::optional<MoiDenseRouterPlan> plan_moi_dense_router(ConSanMoiEngine engine,
+                                                        const MoiScalarRoutingState &routing_state,
                                                         rj_code_arch_t arch) {
   const MoiTargetFacts target = resolve_moi_target_facts(arch);
-  const MoiModeOperations &operations = moi_mode_operations(request.moi_engine);
+  const MoiModeOperations &operations = moi_mode_operations(engine);
   if (!target.available || operations.dense_router == nullptr ||
       (operations.dense_access_route.requires_target_dense_call_capability &&
        target.direct_call_form != ConSanDirectCallForm::SCallI64 &&
        !target.supports_dense_s_call_b64)) {
     return std::nullopt;
   }
-  const MoiScalarRoutingState routing_state = project_moi_scalar_routing_state(point);
   return operations.dense_router(operations.scalar_abi(routing_state), routing_state, target);
 }
 

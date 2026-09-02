@@ -1500,15 +1500,16 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
   // emitted router, not a guest register window assumed to be preserved.
   // Spill-backed layouts carry their allocated registers explicitly. The
   // fixed-layout offsets below are the matching emission ABI fields.
-  const bool compact_spill = point.has_compact_moi_scalar_spill();
-  const bool inline_barrier_spill = point.has_inline_moi_scalar_spill() &&
+  const MoiScalarRoutingState routing_state = moi_scalar_routing_state(point);
+  const bool compact_spill = routing_state.has_compact_spill();
+  const bool inline_barrier_spill = routing_state.has_inline_spill() &&
                                     scalar_state == MoiRelocatableHostScalarState::BarrierRouter;
   if (compact_spill || inline_barrier_spill) {
-    if (!point.moi_scalar_router ||
-        (compact_spill && !moi_scalar_router_call(point.moi_scalar_router)))
+    if (!routing_state.scalar_router ||
+        (compact_spill && !moi_scalar_router_call(routing_state.scalar_router)))
       return {};
     std::vector<MoiSgprRange> ranges;
-    point.moi_scalar_router->for_each_sgpr_range(
+    routing_state.scalar_router->for_each_sgpr_range(
         compact_spill, inline_barrier_spill,
         [&](uint16_t base, uint16_t width) { ranges.push_back({base, width}); });
     return ranges;
@@ -1521,17 +1522,17 @@ plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
       ranges.push_back({*abi.call_return_sgpr, 2u});
     return ranges;
   };
-  if (point.has_inline_moi_scalar_spill()) {
-    const auto abi = plan_moi_dense_router(request, point, arch);
+  if (routing_state.has_inline_spill()) {
+    const auto abi = plan_moi_dense_router(request.moi_engine, routing_state, arch);
     return abi ? dense_router_ranges(*abi) : std::vector<MoiSgprRange>{};
   }
-  if (!point.moi_exec_save_sgpr)
+  if (!routing_state.exec_save_sgpr)
     return {};
-  const uint16_t base = *point.moi_exec_save_sgpr;
-  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
+  const uint16_t base = *routing_state.exec_save_sgpr;
+  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request.moi_engine, routing_state);
   if (scalar_abi.access_router_uses_dense_abi &&
       scalar_state == MoiRelocatableHostScalarState::AccessRouter) {
-    const auto abi = plan_moi_dense_router(request, point, arch);
+    const auto abi = plan_moi_dense_router(request.moi_engine, routing_state, arch);
     return abi ? dense_router_ranges(*abi) : std::vector<MoiSgprRange>{};
   }
   if (!scalar_abi.special_state)
@@ -1966,7 +1967,8 @@ moi_candidate_uses_branch_only_scalar_spill(std::span<const ConSanCandidateResou
       (void)apply_moi_transient_sgpr_assignment(request, group_point, point,
                                                 group_resource->owner_descriptor_file_offsets);
 
-    const auto dense_router = plan_moi_dense_router(request, group_point, arch);
+    const auto dense_router =
+        plan_moi_dense_router(request.moi_engine, moi_scalar_routing_state(group_point), arch);
     if (!dense_router)
       continue;
     const uint32_t entry_island_words = dense_router->entry_island_words;

@@ -177,7 +177,8 @@ template <typename PlannedPatch, typename Eligible>
         !eligible(*group.front(), group_point)) {
       continue;
     }
-    const auto dense_router = plan_moi_dense_router(request, group_point, arch);
+    const auto dense_router =
+        plan_moi_dense_router(request.moi_engine, moi_scalar_routing_state(group_point), arch);
     if (!dense_router) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) + " lost its dense router plan");
       return false;
@@ -236,7 +237,8 @@ template <typename PlannedPatch, typename Eligible, typename FinalizeHostWords>
       errors.emplace_back(std::string(lost_assignment_error));
       return false;
     }
-    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, group_point);
+    const MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(group_point));
     std::vector<uint32_t> host_words = host.displaced_words;
     if (!scalar_abi.indirect_jump || (!use_indirect_jump_scc_save && !scalar_abi.special_state) ||
         !append_moi_scc_preserving_indirect_jump(

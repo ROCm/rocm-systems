@@ -410,7 +410,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      const auto reload = plan_moi_scalar_abi(options, candidate_point).indirect_jump;
+      const auto reload =
+          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point))
+              .indirect_jump;
       if (!reload) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
@@ -524,7 +526,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         .scratch_count = resources->count,
         .workgroup_shadow_compact_token = workgroup_shadow_compact_token,
         .scalar_state = project_inline_shadow_scalar_state(candidate_point),
-        .scalar_abi = plan_moi_scalar_abi(options, candidate_point),
+        .scalar_abi =
+            plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point)),
         .dispatch_id =
             consan_moi_detail::moi_target_dispatch_id_sources({candidate_point, options}, arch),
         .owner_field =

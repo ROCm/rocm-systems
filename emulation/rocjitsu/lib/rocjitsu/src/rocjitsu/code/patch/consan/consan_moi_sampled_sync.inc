@@ -62,7 +62,7 @@ struct SampledBarrierCandidate {
       .automatic_private_epoch = point.automatic_moi_private_epoch,
       .workitem_owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
       .persistent_sgprs = point.moi_persistent_sgprs,
-      .scalar_abi = plan_moi_scalar_abi(request, point),
+      .scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point)),
       .dispatch_id = consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
       .workgroup_sources = *workgroup_sources,
       .owner_epoch_vgprs = owner_epoch_vgprs,
@@ -1241,7 +1241,8 @@ void try_apply_sampled_barrier_sync_patch(
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
+      const MoiScalarAbiPlan scalar_abi =
+          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
@@ -2223,7 +2224,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
-      MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
+      MoiScalarAbiPlan scalar_abi =
+          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
       if ((!spill_backed_router &&
@@ -2297,7 +2299,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                     .jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr},
                     .call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr},
                 };
-                scalar_abi = plan_moi_scalar_abi(options, group_point);
+                scalar_abi =
+                    plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
                 found =
                     scalar_abi.special_state.has_value() && scalar_abi.indirect_jump.has_value();
                 break;
@@ -2523,7 +2526,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");
       continue;
     }
-    MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, route_point);
+    MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(route_point));
     if (route_point.has_compact_moi_scalar_spill()) {
       const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
       const std::array anchors{physical_anchor_offset};
@@ -2556,7 +2560,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
             route_point.moi_scalar_router = route_point.moi_scalar_router.value_or(
                 ConSanMoiScalarRouterAllocation{.jump = jump});
             route_point.moi_scalar_router->jump = jump;
-            scalar_abi = plan_moi_scalar_abi(options, route_point);
+            scalar_abi =
+                plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(route_point));
             found = scalar_abi.indirect_jump.has_value();
             if (found)
               break;

@@ -576,7 +576,8 @@ void try_apply_first_light_access_record_patch(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
       continue;
     }
-    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+    const MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
     std::optional<MoiWorkitemOwnerDerivationPlan> owner_derivation;
     if (!candidate_point.moi_owner_epoch_vgprs.owner() &&
         !candidate_point.moi_persistent_sgprs.owner()) {
@@ -1149,7 +1150,8 @@ void try_apply_first_light_access_record_patch(
             "ConSan MOI first-light probe lost its owner-local register assignment");
         return;
       }
-      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+      const MoiScalarAbiPlan scalar_abi =
+          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
       auto words = build_first_light_access_record_words(
           bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
           planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,

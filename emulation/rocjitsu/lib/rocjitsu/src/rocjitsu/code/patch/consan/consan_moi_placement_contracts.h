@@ -146,7 +146,7 @@ struct MoiScalarRoutingState {
 };
 
 [[nodiscard]] inline MoiScalarRoutingState
-project_moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
+moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
   return {
       .exec_save_sgpr = point.moi_exec_save_sgpr,
       .spill_layout = point.automatic_moi_scalar_spill_layout,

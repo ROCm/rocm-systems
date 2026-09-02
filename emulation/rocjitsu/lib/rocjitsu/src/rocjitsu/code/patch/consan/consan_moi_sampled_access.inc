@@ -600,8 +600,8 @@ void try_apply_direct_sampled_watchpoint_patch(
     planned.branch_only_route = std::move(branch_only_route);
     planned.workgroup_descriptor_file_offset = *workgroup_descriptor;
     planned.emission = std::move(emission);
-    planned.scalar_routing = project_moi_scalar_routing_state(candidate_point);
-    planned.scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+    planned.scalar_routing = moi_scalar_routing_state(candidate_point);
+    planned.scalar_abi = plan_moi_scalar_abi(options.moi_engine, planned.scalar_routing);
     planned.resources = std::move(probe->resources);
     planned.spill = std::move(probe->spill);
     planned.scalar_spill = std::move(probe->scalar_spill);

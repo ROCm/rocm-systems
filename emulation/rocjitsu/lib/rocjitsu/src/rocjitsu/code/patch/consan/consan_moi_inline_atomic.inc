@@ -8,7 +8,8 @@
   if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
-  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, point);
+  const MoiScalarAbiPlan scalar_abi =
+      plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
   const auto workgroup_sources = moi_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
   if (!scalar_abi.special_state || !workgroup_sources)
@@ -503,15 +504,16 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
               "assignment");
           continue;
         }
-        const auto scalar_abi = plan_moi_dense_router(options, group_point, arch);
-        if (!scalar_abi || scalar_abi->call_return_sgpr) {
+        const auto dense_router =
+            plan_moi_dense_router(options.moi_engine, moi_scalar_routing_state(group_point), arch);
+        if (!dense_router || dense_router->call_return_sgpr) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay has no explicit-key scalar ABI");
           continue;
         }
-        const uint16_t jump_pc_sgpr = scalar_abi->indirect_jump.pc_sgpr;
-        const uint16_t saved_scc_sgpr = scalar_abi->indirect_jump.scc_save_sgpr;
-        const uint16_t key_sgpr = scalar_abi->dispatch_key_sgpr;
+        const uint16_t jump_pc_sgpr = dense_router->indirect_jump.pc_sgpr;
+        const uint16_t saved_scc_sgpr = dense_router->indirect_jump.scc_save_sgpr;
+        const uint16_t key_sgpr = dense_router->dispatch_key_sgpr;
         const bool key_encodes_scc = key_sgpr == saved_scc_sgpr;
 
         uint64_t owner_begin = 0u;

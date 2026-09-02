@@ -263,8 +263,8 @@ make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
                          std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
                          uint16_t fixed_indirect_pc_offset, bool access_router_uses_dense_abi);
 
-[[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(const ConSanRequest &request,
-                                                   const ConSanMoiOperatingPoint &point);
+[[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
+                                                   const MoiScalarRoutingState &routing_state);
 
 /// Compose the common Record/Replay + Sampled dense-router representation
 /// from a mode-owned scalar ABI and normalized target facts.
@@ -276,7 +276,7 @@ make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
 /// Resolve the selected mode's dense-router mechanics at the narrow mode
 /// registry boundary. Consumers never branch on the engine themselves.
 [[nodiscard]] std::optional<MoiDenseRouterPlan>
-plan_moi_dense_router(const ConSanRequest &request, const ConSanMoiOperatingPoint &point,
+plan_moi_dense_router(ConSanMoiEngine engine, const MoiScalarRoutingState &routing_state,
                       rj_code_arch_t arch);
 
 [[nodiscard]] MoiDenseAccessRouteTraits moi_dense_access_route_traits(ConSanMoiEngine engine);

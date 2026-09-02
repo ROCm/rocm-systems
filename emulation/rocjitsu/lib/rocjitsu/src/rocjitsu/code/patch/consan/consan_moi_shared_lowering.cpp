@@ -424,7 +424,8 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
       return std::nullopt;
     }
     const bool spill_backed_scalar_window = point.has_moi_scalar_spill();
-    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
+    const MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
     if (!scalar_abi.special_state || (spill_backed_scalar_window && !scalar_abi.indirect_jump)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
@@ -569,7 +570,8 @@ bool apply_moi_descriptor_requirements(
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return fail("ConSan MOI first-light probe has no target profile");
-  const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(request, point);
+  const MoiScalarAbiPlan scalar_abi =
+      plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       request, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;

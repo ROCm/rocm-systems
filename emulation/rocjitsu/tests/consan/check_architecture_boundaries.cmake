@@ -622,6 +622,16 @@ if(NOT _moi_mode_planning_contract MATCHES
         "MOI mode contracts lost the normalized atomic-alignment target fact"
     )
 endif()
+foreach(_planner IN ITEMS plan_moi_scalar_abi plan_moi_dense_router)
+    if(NOT _moi_mode_planning_contract MATCHES
+           "${_planner}[(][^;]*ConSanMoiEngine[^;]*MoiScalarRoutingState" OR
+       _moi_mode_planning_contract MATCHES
+           "${_planner}[(][^;]*(ConSanRequest|ConSanMoiOperatingPoint)")
+        message(FATAL_ERROR
+            "${_planner} must cross the mode boundary with exact scalar-routing inputs"
+        )
+    endif()
+endforeach()
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
@@ -901,15 +911,15 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 
-# Scalar ABI and dense-router selection share one projection of the accepted
-# operating point. Mode callbacks consume that projection, and dense routing
-# consumes the scalar ABI already selected by the same mode rather than
-# reconstructing it inside each router planner.
+# Scalar ABI and dense-router selection share one narrow projection of the
+# accepted operating point. Mode callbacks consume that projection, and dense
+# routing consumes the scalar ABI selected by the same mode rather than
+# reconstructing the broad operating point inside each router planner.
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_implementation)
 file(READ "${_consan_dir}/consan_moi_sampled_contracts.h" _moi_sampled_contract)
 if(NOT _moi_placement_contract MATCHES "struct MoiScalarRoutingState" OR
-   NOT _moi_placement_contract MATCHES "project_moi_scalar_routing_state")
+   NOT _moi_placement_contract MATCHES "moi_scalar_routing_state")
     message(FATAL_ERROR
         "ConSan scalar routing lost its narrow operating-point projection"
     )

@@ -974,7 +974,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
-        const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+        const MoiScalarAbiPlan scalar_abi =
+            plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
         const auto record_emission =
             resolve_moi_record_event_emission_plan(options, options, candidate_point, scalar_abi,
                                                    resources->base, arch, &private_state_layout);
@@ -1068,7 +1069,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       ConSanPatchAbiEffects patch_abi =
           plan_inline_barrier_patch_abi(owners, access_patch->scratch_vgpr, private_state_layout,
                                         &*spill, required_private_bytes);
-      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, owner_point);
+      const MoiScalarAbiPlan scalar_abi =
+          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(owner_point));
       planned_candidates.push_back(PlannedInlineEpochBarrier{
           .candidate = candidate,
           .owner_descriptor_file_offsets = owners,
@@ -1213,7 +1215,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         continue;
       }
     }
-    const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, candidate_point);
+    const MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
     if (emits_barrier_record) {
       record_emission = resolve_moi_record_event_emission_plan(options, options, candidate_point,
                                                                scalar_abi, *scratch_vgpr, arch);
@@ -1609,13 +1612,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       if (!relay)
         return ReusedDenseRelayResult::Unavailable;
 
-      const auto scalar_abi = plan_moi_dense_router(options, group_point, arch);
-      if (!scalar_abi || !scalar_abi->call_return_sgpr) {
+      const auto dense_router =
+          plan_moi_dense_router(options.moi_engine, moi_scalar_routing_state(group_point), arch);
+      if (!dense_router || !dense_router->call_return_sgpr) {
         result.errors.emplace_back("ConSan MOI reused barrier relay has no compatible scalar ABI");
         return ReusedDenseRelayResult::Failed;
       }
-      const ConSanIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
-      const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
+      const ConSanIndirectJumpSgprs indirect_state = dense_router->indirect_jump;
+      const uint16_t call_return_sgpr = *dense_router->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
       };
@@ -1788,8 +1792,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       case ReusedDenseRelayResult::Unavailable:
         break;
       }
-      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options, group_point);
-      const auto inline_dense_abi = plan_moi_dense_router(options, group_point, arch);
+      const MoiScalarRoutingState routing_state = moi_scalar_routing_state(group_point);
+      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options.moi_engine, routing_state);
+      const auto inline_dense_abi = plan_moi_dense_router(options.moi_engine, routing_state, arch);
       const ConSanMoiRouterCallSgprs *call_state =
           moi_scalar_router_call(group_point.moi_scalar_router);
       const bool spill_backed_inline_router = group_point.has_inline_moi_scalar_spill();
