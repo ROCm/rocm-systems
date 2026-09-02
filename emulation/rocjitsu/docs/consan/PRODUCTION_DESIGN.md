@@ -2933,6 +2933,15 @@ The fifth-refactoring follow-through subsequently removed
 `covered_sync_event_count` as well. Intent-bound commits now carry the sole
 original-semantic-site set, and tests inspect that authoritative set rather
 than retaining synchronization cardinality in generic patch telemetry.
+The same authority trace then removed the remaining Sampled access semantics
+from generic patch telemetry. `ConSanSampledStaticAccessMapping` now owns the
+selected slot, window-bank count, access range, and access kind. Sampled
+barrier and atomic composition consume those committed typed mappings instead
+of reconstructing windows from `ConSanPatchInfo`, while the common access
+commit path receives a mode-owned mapping constructor and cannot inspect those
+Sampled facts. Generic diagnostics and hook logging no longer publish a second
+copy. Mechanical patch geometry remains in the patch transaction because
+placement, byte application, and independent validation still consume it.
 
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 

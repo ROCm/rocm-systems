@@ -8944,3 +8944,69 @@ purpose. The slice strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, and
 14.8. Full architecture locality, remaining broad coordinator and patch-state
 paths, material additional whole-refactoring shrinkage, and the independent
 Section 14 audit remain open, so the goal remains active.
+
+### 16.128 Convergence checkpoint 127: committed Sampled access mappings own synchronization composition
+
+The adjacent Sampled synchronization trace found four remaining mode-specific
+facts stored in generic patch telemetry: the first slot, window-bank count,
+access kind, and access-range count. Sampled access lowering copied those
+planned facts into `ConSanPatchInfo`; barrier and atomic lowering later scanned
+the patches and reconstructed causal windows from the copies. The generic
+diagnostic projection and HSA-hook debug log published three of the same facts,
+and focused tests treated those replicas as the observable contract. Meanwhile
+the intent-bound lowering ledger already retained a typed static access mapping
+for every successfully committed access.
+
+`ConSanSampledStaticAccessMapping` is now the sole owner of the selected slot,
+window-bank count, access range, and access kind. The Sampled access owner
+constructs it directly from the retained Sampled plan plus mechanical patch
+geometry. Sampled barrier and atomic composition consume the committed runtime
+mappings, including their stable original site and owner descriptor, and
+canonicalize the owner copy only when descriptor growth changes that durable
+identity. No synchronization path reconstructs semantic windows from patch
+telemetry.
+
+The common access-application component now constructs only the shared static
+attribution. It accepts a mode-owned mapping callable closed over the exact
+mode-local facts, invokes it when the patch is committed, and never names or
+type-erases those facts. The previous runtime-mapping factory and commit-policy
+interfaces are deleted rather than retained alongside that direct ownership.
+Record/Replay consumes only the shared attribution; InlineShadow additionally
+consumes its narrow patch ABI effects; and Sampled consumes its retained
+slot/range/bank/kind values. All four Sampled patch fields, their effect type,
+their writes, and their generic diagnostic and hook projections are deleted.
+Tests now inspect typed Sampled mappings. Structural checks prohibit restoring
+either the deleted telemetry or the type-erased policy path.
+
+| Signal | Checkpoint 127 | Cumulative change | Slice change from checkpoint 126 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,800 | **-2,176** | **-3** |
+| Nonblank production lines | 96,436 | **-2,648** | +2 |
+| Production implementation lines | 88,679 | **-2,771** | 0 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Sampled semantic fields in generic patch telemetry | **0** | n/a | **-4** |
+| Type-erased access commit policies/factories | **0** | n/a | **-2** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `5f38af671b4`. Validation on that exact
+commit includes a successful compiler-clean `-j16` rebuild (with only the
+pre-existing CMake CMP0174 development warnings), the architecture-boundary
+and focused access/atomic gate **4/4**, all **1,296/1,296** nonphysical
+`ConSan.*` and `ConSanMoi.*` host/component tests, and all **576/576** Sampled
+simulator-device tests across gfx942, gfx950, gfx1100, gfx1201, and gfx1250. No
+test was removed, renamed, disabled, or replaced, and no physical test was run.
+
+The explicit mode-owned construction boundary is paid for by deletion of the
+parallel fields, writes, readers, projections, and policy interfaces, leaving
+the implementation-line count flat and physical source three lines smaller.
+The more important result is that a complete parallel mode-specific authority
+has left generic patch state. This strengthens Sections 14.1, 14.3, 14.5,
+14.6, and 14.7. It does not strengthen Section 14.8, so the next checkpoint
+must harvest deletion rather than add another schema layer. Full architecture
+locality, remaining broad coordinator and patch-state paths, material
+additional whole-refactoring shrinkage, and the independent Section 14 audit
+remain open; the goal therefore remains active.
