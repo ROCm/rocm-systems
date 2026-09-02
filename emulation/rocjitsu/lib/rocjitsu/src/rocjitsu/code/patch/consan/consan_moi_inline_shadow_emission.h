@@ -42,6 +42,41 @@ struct MoiInlineShadowEmissionPlan {
   std::optional<uint32_t> private_dispatch_id_offset;
 };
 
+/// Exact private-state materialization selected for one InlineShadow atomic
+/// body. The alternatives are resolved while the owner-local operating point
+/// is still available; native emission cannot rediscover owner policy or
+/// descriptor geometry.
+struct MoiInlineAtomicPrivateStatePlan {
+  uint32_t epoch_offset = 0;
+  uint32_t workgroup_key_offset = 0;
+  std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> workitem_owner;
+  std::optional<consan_detail::MoiResidentWaveOwnerRequest> resident_wave_owner;
+  bool resident_wave_owner_is_borrowed = false;
+  std::optional<uint32_t> dispatch_id_offset;
+  std::optional<uint16_t> dispatch_id_sgpr;
+};
+
+/// Complete exact state consumed by one InlineShadow atomic-ordering body.
+/// Candidate or dense-group planning publishes this immutable product after
+/// owner-local assignment. The body emitter sees neither the request, bound
+/// resources, mutable operating point, nor object-wide mode semantics.
+struct MoiInlineAtomicEmissionPlan {
+  uint64_t report_buffer_address = 0;
+  ConSanMoiReportBufferLayout report_layout;
+  bool inline_access_present = false;
+  uint16_t scratch_vgpr = 0;
+  uint16_t exec_save_sgpr = 0;
+  ConSanMoiOwnerEpochRegisters owner_epoch_vgprs;
+  ConSanMoiPersistentSgprState persistent_sgprs;
+  consan_detail::MoiSpecialStateSgprs special_state;
+  consan_detail::MoiWorkgroupKeyRegisterPlan workgroup_key_registers;
+  ConSanMoiWorkgroupSources workgroup_sources;
+  consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id;
+  std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
+  std::optional<MoiInlineAtomicPrivateStatePlan> private_state;
+  ConSanPatchAbiEffects patch_abi;
+};
+
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
                           const MoiInlineShadowEmissionPlan &plan, rj_code_arch_t arch,

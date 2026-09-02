@@ -112,6 +112,21 @@ inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state) {
   return static_cast<uint16_t>(*state.exec_save_sgpr + (state.dynamic_stack_spill ? 25u : 24u));
 }
 
+bool validate_inline_atomic_exec_save_sgpr(std::optional<uint16_t> exec_save_sgpr,
+                                           std::vector<std::string> &errors) {
+  if (!exec_save_sgpr) {
+    errors.emplace_back(
+        "ConSan MOI inline atomic acquire patch requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
+    return false;
+  }
+  if (*exec_save_sgpr > 86u || *exec_save_sgpr % 2u != 0u) {
+    errors.emplace_back("ConSan MOI inline atomic acquire patch requires an even "
+                        "RJ_CONSAN_MOI_EXEC_SAVE_SGPR in 0..86");
+    return false;
+  }
+  return true;
+}
+
 uint16_t inline_shadow_loop_scratch_count(const ConSanMoiCandidate &candidate) {
   // Wide local accesses retain an offset and iteration counter. Wide external
   // accesses retain an iteration counter and the workgroup key, since the

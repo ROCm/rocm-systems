@@ -1958,6 +1958,34 @@ _consan_assert_no_match(
     "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|resolve_moi_access_resource_facts|direct_sampled_scratch_count|moi_bound_dispatch_id_sources"
     "Sampled access emission may not rediscover retained mode, resource, or placement facts"
 )
+file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_emission_contract)
+if(_moi_sync_emission_contract MATCHES
+   "build_inline_atomic_ordering_cave_words[^;]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics)")
+    message(
+        FATAL_ERROR
+        "ConSan InlineShadow atomic emission must consume its retained exact plan"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics|moi_special_state_sgprs|moi_target_dispatch_id_sources|moi_workgroup_key_register_plan|validate_inline_atomic_exec_save_sgpr"
+    "InlineShadow atomic body emission may not rediscover retained mode, resource, or placement facts"
+)
+file(READ "${_consan_dir}/consan_moi_inline_atomic.inc" _moi_inline_atomic_owner)
+foreach(_inline_atomic_assignment IN ITEMS
+    apply_moi_transient_sgpr_assignment
+    apply_moi_persistent_vgpr_assignment
+)
+    string(REGEX MATCHALL "${_inline_atomic_assignment}[(]"
+           _inline_atomic_assignment_calls "${_moi_inline_atomic_owner}")
+    list(LENGTH _inline_atomic_assignment_calls _inline_atomic_assignment_call_count)
+    if(NOT _inline_atomic_assignment_call_count EQUAL 2)
+        message(
+            FATAL_ERROR
+            "ConSan InlineShadow atomic lowering may apply ${_inline_atomic_assignment} only during candidate and dense-group planning"
+        )
+    endif()
+endforeach()
 foreach(_sampled_assignment IN ITEMS
     apply_moi_transient_sgpr_assignment
     apply_moi_persistent_vgpr_assignment

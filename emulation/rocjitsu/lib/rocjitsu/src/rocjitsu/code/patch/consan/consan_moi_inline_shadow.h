@@ -46,6 +46,9 @@ inline_shadow_spill_backed_scratch_count(bool track_atomics,
 [[nodiscard]] std::optional<uint16_t>
 inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state);
 
+[[nodiscard]] bool validate_inline_atomic_exec_save_sgpr(std::optional<uint16_t> exec_save_sgpr,
+                                                         std::vector<std::string> &errors);
+
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    const ConSanMoiOperatingPoint &operating_point,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,

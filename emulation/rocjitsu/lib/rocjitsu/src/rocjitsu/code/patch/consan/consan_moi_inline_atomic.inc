@@ -1,3 +1,112 @@
+[[nodiscard]] std::optional<MoiInlineAtomicEmissionPlan> plan_inline_atomic_emission(
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
+    const ConSanOptions &options, const ConSanMoiOperatingPoint &point,
+    const ConSanMoiOperatingPoint &allocation, const MoiObjectModeSemantics &semantics,
+    uint16_t scratch_vgpr, uint16_t scratch_count, const MoiPrivateEpochLayout *private_layout,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (!options.moi_report_buffer_address || !point.moi_exec_save_sgpr ||
+      !candidate.kernel_descriptor_file_offset)
+    return std::nullopt;
+  const auto special_state = moi_special_state_sgprs(options, point);
+  const auto workgroup_sources = moi_descriptor_workgroup_sources(
+      bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+  if (!special_state || !workgroup_sources)
+    return std::nullopt;
+  if (!validate_inline_atomic_exec_save_sgpr(point.moi_exec_save_sgpr, errors) ||
+      reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.owner(), scratch_vgpr,
+                                            scratch_count, "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_owner_epoch_vgprs.epoch(), scratch_vgpr,
+                                            scratch_count, "MOI epoch", errors) ||
+      reject_optional_scratch_range_overlap(point.moi_workgroup_key_vgpr, scratch_vgpr,
+                                            scratch_count, "MOI workgroup key", errors))
+    return std::nullopt;
+
+  const uint16_t required_scratch_count = inline_shadow_atomic_scratch_count(arch);
+  ConSanMoiOwnerEpochRegisterState owner_epoch_vgprs = point.moi_owner_epoch_vgprs;
+  consan_detail::MoiWorkgroupKeyRegisterPlan workgroup_key_registers =
+      moi_workgroup_key_register_plan(point);
+  std::optional<MoiInlineAtomicPrivateStatePlan> private_state;
+  if (point.moi_persistent_sgprs.complete()) {
+    const uint16_t owner = static_cast<uint16_t>(scratch_vgpr + required_scratch_count - 4u);
+    owner_epoch_vgprs.set_owner_epoch(owner, static_cast<uint16_t>(owner + 1u));
+  }
+  if (private_layout) {
+    if (!private_layout->workgroup_key_offset) {
+      errors.emplace_back("ConSan MOI inline atomic patch has an incomplete private state plan");
+      return std::nullopt;
+    }
+    const uint16_t workgroup_key =
+        static_cast<uint16_t>(scratch_vgpr + required_scratch_count - 6u);
+    const uint16_t owner = static_cast<uint16_t>(scratch_vgpr + required_scratch_count - 4u);
+    owner_epoch_vgprs.set_owner_epoch(owner, static_cast<uint16_t>(owner + 1u));
+    workgroup_key_registers.cached_key_vgpr = workgroup_key;
+    workgroup_key_registers.cached_key_sgpr.reset();
+
+    MoiInlineAtomicPrivateStatePlan state{
+        .epoch_offset = private_layout->epoch_offset,
+        .workgroup_key_offset = *private_layout->workgroup_key_offset,
+        .workitem_owner = std::nullopt,
+        .resident_wave_owner = std::nullopt,
+        .resident_wave_owner_is_borrowed = false,
+        .dispatch_id_offset = private_layout->dispatch_id_offset,
+        .dispatch_id_sgpr =
+            private_layout->dispatch_id_offset ? point.moi_dispatch_identity.sgpr() : std::nullopt,
+    };
+    if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      const auto owner_shift =
+          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+      if (!private_layout->owner_offset || !owner_shift)
+        return std::nullopt;
+      state.workitem_owner = consan_detail::MoiWorkitemOwnerDerivationPlan{
+          .entry_workitem_x_private_offset = private_layout->owner_offset,
+          .wave_size_shift = *owner_shift,
+      };
+    } else if (options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
+               point.moi_owner_sgpr.base()) {
+      state.resident_wave_owner = consan_detail::MoiResidentWaveOwnerRequest{
+          .destination_sgpr = *point.moi_owner_sgpr.base(),
+          .one_based = true,
+      };
+      state.resident_wave_owner_is_borrowed = point.moi_owner_sgpr.automatic();
+    } else {
+      errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
+      return std::nullopt;
+    }
+    if (state.dispatch_id_offset && !state.dispatch_id_sgpr) {
+      errors.emplace_back("ConSan MOI inline atomic patch has no private dispatch reload pair");
+      return std::nullopt;
+    }
+    private_state = std::move(state);
+  }
+  if (!owner_epoch_vgprs.complete() || !workgroup_key_registers.is_well_formed())
+    return std::nullopt;
+  const auto dispatch_id =
+      consan_moi_detail::moi_target_dispatch_id_sources({point, options}, arch);
+  if (!dispatch_id.is_well_formed())
+    return std::nullopt;
+
+  const ConSanMoiReportBufferLayout &layout = semantics.report_layout;
+  MoiInlineAtomicEmissionPlan plan{
+      .report_buffer_address = *options.moi_report_buffer_address,
+      .report_layout = layout,
+      .inline_access_present = semantics.inline_access_present,
+      .scratch_vgpr = scratch_vgpr,
+      .exec_save_sgpr = *point.moi_exec_save_sgpr,
+      .owner_epoch_vgprs = *owner_epoch_vgprs.operator->(),
+      .persistent_sgprs = point.moi_persistent_sgprs,
+      .special_state = *special_state,
+      .workgroup_key_registers = workgroup_key_registers,
+      .workgroup_sources = *workgroup_sources,
+      .dispatch_id = dispatch_id,
+      .indirect_jump = moi_indirect_jump_sgprs(options, point),
+      .private_state = std::move(private_state),
+      .patch_abi = {},
+  };
+  note_moi_persistent_vgpr_state(plan.patch_abi, point, allocation);
+  plan.patch_abi.persistent_sgpr_state = point.moi_persistent_sgprs;
+  return plan;
+}
+
 void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             const ConSanOptions &options,
                                             const ConSanMoiOperatingPoint &operating_point,
@@ -30,7 +139,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");
     return;
   }
-  if (!validate_inline_atomic_exec_save_sgpr(operating_point, result.warnings))
+  if (!validate_inline_atomic_exec_save_sgpr(operating_point.moi_exec_save_sgpr, result.warnings))
     return;
 
   std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
@@ -57,6 +166,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   struct PlannedInlineAtomic : MoiPlannedProbeResources {
     MoiAtomicEvidenceSitePlan candidate;
     ConSanMoiAtomicAddressPlan address_plan;
+    MoiInlineAtomicEmissionPlan emission;
     uint32_t relocated_guest_size = 0;
     std::vector<uint32_t> trailing_guest_words;
   };
@@ -214,6 +324,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         continue;
       }
     }
+    auto emission = plan_inline_atomic_emission(
+        active_bytes, planned_candidate, options, candidate_point, result.moi_operating_point,
+        semantics, resources->base, address_plan.scratch_vgpr_count,
+        private_layout ? &*private_layout : nullptr, arch, result.errors);
+    if (!emission)
+      return;
     auto probe = plan_moi_probe_resources(
         result.program_inventory, *resources, options, options, candidate_point, semantics,
         spill_managers, arch, std::move(private_layout),
@@ -225,7 +341,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_sgpr_requirements(scalar_requirements, probe->resources, options, options,
                                candidate_point, semantics, arch);
     planned_candidates.push_back({std::move(*probe), std::move(planned_candidate), address_plan,
-                                  relocated_guest_size, std::move(trailing_guest_words)});
+                                  std::move(*emission), relocated_guest_size,
+                                  std::move(trailing_guest_words)});
   }
   // Retain every admitted release even when this code object contains no
   // acquire. Its consumer can live in another large code object, and pruning
@@ -447,6 +564,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           uint64_t offset = 0u;
           std::vector<uint32_t> words;
           uint32_t guest_instruction_offset = 0u;
+          MoiInlineAtomicEmissionPlan emission;
         };
         std::vector<DenseBody> bodies;
         for (size_t index : group) {
@@ -456,17 +574,20 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           if (planned.private_layout && planned.private_layout->dispatch_id_offset)
             candidate_point.moi_dispatch_identity.set_sgpr(
                 candidate_point.moi_router_jump->pc_sgpr);
+          auto emission = plan_inline_atomic_emission(
+              active_bytes, planned.candidate, options, candidate_point, result.moi_operating_point,
+              semantics, planned.resources.base, planned.address_plan.scratch_vgpr_count,
+              planned.private_layout ? &*planned.private_layout : nullptr, arch, result.errors);
+          if (!emission) {
+            result.errors.emplace_back(
+                "ConSan MOI inline atomic dense body lost its exact emission plan");
+            return;
+          }
           uint32_t guest_instruction_offset = 0u;
           auto cave_words = build_inline_atomic_ordering_cave_words(
-              active_bytes, planned.candidate, planned.address_plan, options, options,
-              candidate_point, semantics, planned.resources.base,
+              active_bytes, planned.candidate, planned.address_plan, *emission,
               planned.spill ? &*planned.spill : nullptr,
-              planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-              planned.private_layout ? &*planned.private_layout : nullptr, arch,
-              layout.inline_atomic_release_slots_offset, layout.inline_atomic_release_capacity,
-              layout.inline_causal_snapshots_offset, layout.inline_causal_snapshot_capacity,
-              layout.inline_acquired_epoch_token_slots_offset,
-              layout.inline_acquired_epoch_token_capacity, cave_offset,
+              planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, cave_offset,
               planned.candidate.site.text_offset + planned.relocated_guest_size,
               guest_instruction_offset, result.errors, planned.trailing_guest_words);
           if (!cave_words)
@@ -480,7 +601,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
             return;
           }
           append_words_bytes(new_text, *cave_words);
-          bodies.push_back({index, cave_offset, std::move(*cave_words), guest_instruction_offset});
+          bodies.push_back({index, cave_offset, std::move(*cave_words), guest_instruction_offset,
+                            std::move(*emission)});
         }
 
         const uint64_t host_body_offset = placement_planner.appended_end();
@@ -645,9 +767,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           info.original_size = planned.relocated_guest_size;
           info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
+          static_cast<ConSanPatchAbiEffects &>(info) = body.emission.patch_abi;
           note_moi_probe_patch_info(info, planned);
-          note_moi_persistent_vgpr_state(info, group_point, result.moi_operating_point);
-          info.persistent_sgpr_state = group_point.moi_persistent_sgprs;
           if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors,
                                                planned.candidate, info, "inline atomic patch",
                                                lowering_commits))
@@ -668,33 +789,12 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
-    ConSanMoiOperatingPoint candidate_point = operating_point;
-    if (!apply_moi_transient_sgpr_assignment(options, candidate_point, result.moi_operating_point,
-                                             planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI inline atomic patch lost its transient SGPR assignment");
-      return;
-    }
-    if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_point, result.moi_operating_point,
-                                              planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI inline atomic patch lost its persistent VGPR assignment");
-      return;
-    }
-    if (planned.private_layout && planned.private_layout->dispatch_id_offset)
-      candidate_point.moi_dispatch_identity.set_sgpr(candidate_point.moi_router_jump->pc_sgpr);
     uint32_t guest_instruction_offset = 0;
     auto cave_words = build_inline_atomic_ordering_cave_words(
-        active_bytes, candidate, planned.address_plan, options, options, candidate_point, semantics,
-        planned.resources.base, planned.spill ? &*planned.spill : nullptr,
-        planned.scalar_spill ? &*planned.scalar_spill : nullptr,
-        planned.private_layout ? &*planned.private_layout : nullptr, arch,
-        layout.inline_atomic_release_slots_offset, layout.inline_atomic_release_capacity,
-        layout.inline_causal_snapshots_offset, layout.inline_causal_snapshot_capacity,
-        layout.inline_acquired_epoch_token_slots_offset,
-        layout.inline_acquired_epoch_token_capacity, cave_text_offset, return_text_offset,
-        guest_instruction_offset, result.errors, planned.trailing_guest_words);
+        active_bytes, candidate, planned.address_plan, planned.emission,
+        planned.spill ? &*planned.spill : nullptr,
+        planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, cave_text_offset,
+        return_text_offset, guest_instruction_offset, result.errors, planned.trailing_guest_words);
     if (!cave_words)
       return;
 
@@ -741,12 +841,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::memcpy(new_text.data() + site.text_offset, anchor_words.data(),
                 anchor_words.size() * sizeof(uint32_t));
     if (indirect_entry_island) {
-      const auto indirect_state = moi_indirect_jump_sgprs(options, candidate_point);
-      if (!indirect_state ||
+      if (!planned.emission.indirect_jump ||
           !emit_moi_local_indirect_entry_island(
               new_text, *indirect_entry_island, placement->body_offset, site.text_offset,
-              *indirect_state, planned.resources.owner_descriptor_file_offsets, arch, patches,
-              result.errors, "ConSan MOI inline atomic patch")) {
+              *planned.emission.indirect_jump, planned.resources.owner_descriptor_file_offsets,
+              arch, patches, result.errors, "ConSan MOI inline atomic patch")) {
         return;
       }
     }
@@ -759,9 +858,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.original_size = planned.relocated_guest_size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
+    static_cast<ConSanPatchAbiEffects &>(info) = planned.emission.patch_abi;
     note_moi_probe_patch_info(info, planned);
-    note_moi_persistent_vgpr_state(info, candidate_point, result.moi_operating_point);
-    info.persistent_sgpr_state = candidate_point.moi_persistent_sgprs;
     if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors, candidate, info,
                                          "inline atomic patch", lowering_commits))
       return;
