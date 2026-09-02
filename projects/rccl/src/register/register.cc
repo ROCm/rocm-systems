@@ -54,8 +54,9 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
     } else {
       // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
       // that we're calling ncclCuMemGetAddressRange only when necessary.
-      CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
-                                    (CUdeviceptr)base));
+      //CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+      //                              (CUdeviceptr)base));
+      legacyIpcCap = 0;
       if (!legacyIpcCap) {
         NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)data, size, (CUdeviceptr*)&base, &baseSize, &numSegments,
                                            &hasSysmemSegment));

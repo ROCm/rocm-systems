@@ -371,7 +371,7 @@ static void queryModel_gin(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
       float intraTime = (float)(nBytes * comm->nRanks) / intraBw;
       float interTime = (float)(nBytes * (rail.nRanks - 1)) / interBw;
       uint32_t steps = DIVUP(nBytes, railChunkSize) * (rail.nRanks - 1);
-      *timeUs = steps * ginLat + std::max(intraTime, interTime);
+      *timeUs = (/*usec/sec=*/1.e6) * (steps * ginLat + std::max(intraTime, interTime));
       *nBlocks = std::max(nMinBlocks, std::min(nMaxBlocks, requiredBlocks));
     }
     break;
