@@ -402,14 +402,19 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
     uint32_t src0;
     uint32_t src1;
     bool carry_in;
+    uint32_t expected_vdst;
+    bool expected_carry;
+    bool initial_carry = false;
   };
   constexpr std::array kCases{
-      TestCase{cdna5::kVAddCoU32Vop3SdstEnc, UINT32_MAX, 1u, false},
-      TestCase{cdna5::kVSubCoU32Vop3SdstEnc, 0u, 1u, false},
-      TestCase{cdna5::kVSubrevCoU32Vop3SdstEnc, 1u, 0u, false},
-      TestCase{cdna5::kVAddCoCiU32Vop3SdstEnc, UINT32_MAX, 0u, true},
-      TestCase{cdna5::kVSubCoCiU32Vop3SdstEnc, 0u, 0u, true},
-      TestCase{cdna5::kVSubrevCoCiU32Vop3SdstEnc, 0u, 0u, true},
+      TestCase{cdna5::kVAddCoU32Vop3SdstEnc, UINT32_MAX, 1u, false, UINT32_MAX, true},
+      TestCase{cdna5::kVSubCoU32Vop3SdstEnc, 0u, 1u, false, 0u, true},
+      TestCase{cdna5::kVSubrevCoU32Vop3SdstEnc, 1u, 0u, false, 0u, true},
+      TestCase{cdna5::kVAddCoCiU32Vop3SdstEnc, UINT32_MAX, 0u, true, UINT32_MAX, true},
+      TestCase{cdna5::kVSubCoCiU32Vop3SdstEnc, 0u, 0u, true, 0u, true},
+      TestCase{cdna5::kVSubrevCoCiU32Vop3SdstEnc, 0u, 0u, true, 0u, true},
+      TestCase{cdna5::kVAddCoU32Vop3SdstEnc, 1u, 2u, false, 3u, false, true},
+      TestCase{cdna5::kVSubCoU32Vop3SdstEnc, 2u, 1u, false, 1u, false, true},
   };
   for (uint32_t scalar = 0; scalar < 2; ++scalar) {
     util::set_force_scalar_for_testing(scalar != 0);
@@ -423,7 +428,7 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
       cu->write_vgpr(base, 0, test.src0);
       cu->write_vgpr(base + 1, 0, test.src1);
       write_wave_sgpr(*cu, *wf, 4, test.carry_in ? 1u : 0u);
-      write_wave_sgpr(*cu, *wf, 2, 0u);
+      write_wave_sgpr(*cu, *wf, 2, test.initial_carry ? 1u : 0u);
       const auto words = cdna5::build_vop3_sdst_enc(
           test.opcode, {.vdst = 2, .sdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 4});
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
@@ -431,12 +436,9 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       inst->execute(*inst, wf);
-      EXPECT_EQ(cu->read_vgpr(base + 2, 0), test.opcode == cdna5::kVAddCoU32Vop3SdstEnc ||
-                                                    test.opcode == cdna5::kVAddCoCiU32Vop3SdstEnc
-                                                ? UINT32_MAX
-                                                : 0u)
+      EXPECT_EQ(cu->read_vgpr(base + 2, 0), test.expected_vdst) << "scalar " << scalar;
+      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, test.expected_carry ? 1u : 0u)
           << "scalar " << scalar;
-      EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, 1u) << "scalar " << scalar;
     }
   }
 }
