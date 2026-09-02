@@ -180,6 +180,9 @@ void IbCastLogSched(struct ncclIbSendComm* comm) {
 }
 
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase* base, int nreqs, int size) {
+  // BY_ORDER pins schedParms at comm init; neither the global nor the staged copy may
+  // re-enable the scheduler underneath it.
+  if (base->recvMatchingScheme == BY_ORDER) return;
   if (!base->schedParmsInit) {
     base->schedParms = castGlobalQpSchedParms;
     base->schedParmsInit = true;

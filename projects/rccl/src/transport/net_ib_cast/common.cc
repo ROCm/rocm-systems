@@ -23,6 +23,61 @@ NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
 extern int ncclParamIbCastOooRq();
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
+
+// BY_ORDER matches a completion to a request through the identity of the posted work request.
+// That holds only while every request maps to exactly one recv WR, posted on the same QPs the
+// sender uses. The features disabled below each break that mapping, so they are turned off up
+// front rather than left to mis-attribute completions later.
+bool IbCastByOrderRequested() {
+  return ncclParamIbCastReceiverSideMatchingScheme() == BY_ORDER;
+}
+
+// The disabled features are all process-wide settings, so a single warning per feature is
+// enough; warning per communicator would flood the log on large jobs.
+static std::atomic<bool> byOrderWarnedResiliency{false};
+static std::atomic<bool> byOrderWarnedSched{false};
+static std::atomic<bool> byOrderWarnedPrepost{false};
+static std::atomic<bool> byOrderWarnedOooRq{false};
+
+static inline bool IbCastByOrderClaimWarn(std::atomic<bool>* warned) {
+  return !warned->exchange(true, std::memory_order_relaxed);
+}
+
+static ncclResult_t IbCastByOrderDisableUnsupported(struct ncclIbNetCommBase* baseComm) {
+  if (baseComm->resiliency) {
+    if (IbCastByOrderClaimWarn(&byOrderWarnedResiliency)) {
+      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+           "(port failover and port recovery)",
+           BY_ORDER);
+    }
+    NCCLCHECK(IbCastResiliencyDestroy(&baseComm->resiliency));
+  }
+
+  baseComm->schedParms = castGlobalQpSchedParms;
+  if (baseComm->schedParms.enable || baseComm->schedParms.splitData || baseComm->schedParms.doWrr) {
+    if (IbCastByOrderClaimWarn(&byOrderWarnedSched)) {
+      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling the QP "
+           "scheduler, split-data and WRR",
+           BY_ORDER);
+    }
+  }
+  baseComm->schedParms.enable = false;
+  baseComm->schedParms.splitData = false;
+  baseComm->schedParms.doWrr = false;
+  baseComm->schedParms.logEnable = false;
+  // Claim the parameters so IbCastUpdateSchedParmsTry() cannot re-seed them from the global or
+  // staged copies.
+  baseComm->schedParmsInit = true;
+  baseComm->splitDataOnQps = 0;
+
+  // The OOO RQ itself is declined during the peer exchange (IbCastAdvertiseOooRq).
+  if (ncclParamIbCastOooRq() && IbCastByOrderClaimWarn(&byOrderWarnedOooRq)) {
+    WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling out-of-order RQ",
+         BY_ORDER);
+  }
+  return ncclSuccess;
+}
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
@@ -62,6 +117,10 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
 
   NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
 
+  if (IbCastByOrderRequested()) {
+    NCCLCHECK(IbCastByOrderDisableUnsupported(baseComm));
+  }
+
   return ncclSuccess;
 }
 
@@ -83,6 +142,16 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
       INFO(NCCL_NET, "NET/IB: %s: OOO RQ is enabled, Overriding pre-posting to true (1).", __func__);
     }
     recvComm->prepostReceiveWorkRequests = true;
+  }
+
+  // Pre-posted WRs carry a dummy wr_id, which BY_ORDER cannot map back to a request.
+  if (IbCastByOrderRequested() && recvComm->prepostReceiveWorkRequests) {
+    if (IbCastByOrderClaimWarn(&byOrderWarnedPrepost)) {
+      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling pre-posted "
+           "receive work requests",
+           BY_ORDER);
+    }
+    recvComm->prepostReceiveWorkRequests = false;
   }
 
   INFO(NCCL_NET, "NET/IB: %s: Receive work requests will be %s", __func__,
