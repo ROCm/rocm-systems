@@ -444,6 +444,7 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
+    analysis/free_registers_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/log_buffer_test.cpp

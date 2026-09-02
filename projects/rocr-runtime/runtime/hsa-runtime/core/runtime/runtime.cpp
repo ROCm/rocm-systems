@@ -2692,8 +2692,16 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  // Probe aqlprofile availability once and cache the result. Prefer the
+  // version-suffixed file name (libhsa-amd-aqlprofile64.so.<major>) that matches
+  // the aqlprofile ABI this runtime is built against; the unversioned dev
+  // symlink may point at an incompatible major version. Fall back to the
+  // unversioned name only if the expected versioned file is absent.
+  aqlprofile_lib_ = os::LoadLib(std::string(kAqlProfileLib) + "." +
+                                std::to_string(hsa_ven_amd_aqlprofile_VERSION_MAJOR));
+  if (aqlprofile_lib_ == nullptr) {
+    aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  }
 
   // Load extensions
   LoadExtensions();
@@ -3133,7 +3141,9 @@ hsa_status_t Runtime::LoadHotswapTool() {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),

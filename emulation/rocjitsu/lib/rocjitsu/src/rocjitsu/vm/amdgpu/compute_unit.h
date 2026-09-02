@@ -840,6 +840,19 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Replace the concrete decoder in scheduler-level tests.
+  /// @details Some concrete targets intentionally remain unavailable to full
+  /// simulator configuration while individual instructions acquire execution
+  /// support. This seam lets a production-topology test exercise fetch, decode,
+  /// issue, and completion for such an instruction without weakening target
+  /// capability validation. The CU must be idle when its decoder is replaced.
+  void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
+    assert(decoder != nullptr);
+    assert(!has_active_wfs());
+    decoder->enable_pool();
+    decoder_ = std::move(decoder);
+  }
+
   /// @brief Return the completer port (receives dispatch requests from CP).
   /// @returns Pointer to the completer port.
   simdojo::Port *cpl_port() { return cpl_; }
@@ -1328,6 +1341,7 @@ protected:
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
   void execute_instruction(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
     inst->execute(*inst, &wf);
   }
 
