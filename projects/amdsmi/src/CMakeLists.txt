@@ -130,23 +130,130 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
-# CUID support. QUIET, not REQUIRED: the dependency is optional. Where
-# libamdcuid is absent the CUID entry points are still in the ABI and return
-# AMDSMI_STATUS_NOT_SUPPORTED, so amd-smi builds on a tree that has not built
-# the CUID project.
-find_package(amdcuid CONFIG QUIET)
+# CUID support.
+#
+# BUILD_CUID is AUTO, ON or OFF rather than a plain boolean, and it is not an
+# option(). option() writes a BOOL cache entry on the first configure and then
+# does nothing on every later one, so a tree configured before libamdcuid was
+# installed keeps CUID off for the life of that build directory -- silently,
+# and with `cmake .` reporting nothing -- until somebody deletes CMakeCache.txt.
+# Here the cache holds only the user's intent; whether the package was actually
+# found is a normal variable recomputed on every run.
+#
+# ON is a demand, and fails configure when it cannot be met. AUTO is the
+# developer convenience and must not be relied on by a packaging job: a build
+# whose feature set depends on what happens to be installed on the build host
+# ships one thing from a distro image and another from a manylinux container,
+# with no diagnostic either way. Packaging passes an explicit ON or OFF.
+set(BUILD_CUID "AUTO" CACHE STRING "Link libamdcuid and enable the CUID API: AUTO, ON or OFF")
+set_property(CACHE BUILD_CUID PROPERTY STRINGS AUTO ON OFF)
 
-# option(), not cmake_dependent_option(): the latter sets a normal variable when
-# its condition is false, shadowing a `-DBUILD_CUID=ON` the user asked for and
-# suppressing the diagnostic below.
-option(BUILD_CUID "Link libamdcuid and enable the CUID API" "${amdcuid_FOUND}")
+# libamdcuid takes ${ROCM_DIR}/core as its own install prefix while AMD SMI
+# takes ${ROCM_DIR}, and config mode has no search template with an arbitrary
+# intermediate directory: searching the prefix /opt/rocm never reaches
+# /opt/rocm/core/lib/cmake/amdcuid. Without this hint the package is found only
+# by accident, through the /opt/rocm/lib -> /opt/rocm/core-X.Y/lib symlink that
+# a separate ROCm package creates, and not at all in a container that has no
+# ROCm installed.
+if(ROCM_DIR)
+    set(_amdsmi_rocm_dir "${ROCM_DIR}")
+else()
+    set(_amdsmi_rocm_dir "/opt/rocm")
+endif()
+set(
+    AMDCUID_HINT_DIR
+    "${_amdsmi_rocm_dir}/core"
+    CACHE PATH
+    "Additional prefix searched for the amdcuid CMake package"
+)
+unset(_amdsmi_rocm_dir)
 
-if(BUILD_CUID AND NOT amdcuid_FOUND)
-    message(
-        FATAL_ERROR
-        "BUILD_CUID=ON but no amdcuid package was found. Install libamdcuid or "
-        "add its prefix to CMAKE_PREFIX_PATH."
-    )
+# The sibling in the monorepo. When AMD SMI is built from a rocm-systems
+# checkout there is no reason to require libamdcuid to have been installed
+# first: the sources are right there, and building them here is what makes CUID
+# reach every packaging channel without any of them having to learn about a
+# second project. TheRock registers no amdcuid subproject or artifact, the
+# manylinux wheel container has no /opt/rocm at all, and the deb/rpm build runs
+# one CMake project -- so without this, three of the four channels ship a
+# library whose CUID entry points all answer AMDSMI_STATUS_NOT_SUPPORTED.
+set(
+    AMDCUID_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../cuid"
+    CACHE PATH
+    "In-tree libamdcuid sources, built when no installed amdcuid package is found"
+)
+
+set(_amdsmi_cuid_request "${BUILD_CUID}")
+set(_amdsmi_cuid_in_tree OFF)
+set(AMDSMI_CUID_IN_TREE OFF CACHE INTERNAL "libamdcuid is built here, not found")
+
+if(_amdsmi_cuid_request STREQUAL "OFF")
+    set(BUILD_CUID OFF)
+else()
+    find_package(amdcuid CONFIG QUIET HINTS "${AMDCUID_HINT_DIR}")
+
+    # An installed package wins, so a distribution that ships libamdcuid
+    # separately gets the one it shipped rather than a second copy built here.
+    if(NOT amdcuid_FOUND AND EXISTS "${AMDCUID_SOURCE_DIR}/CMakeLists.txt")
+        # Not add_subdirectory directly: the sibling is a full project() with
+        # its own install rules, and it needs telling to build nothing but the
+        # library and to install none of it, because these objects end up inside
+        # libamd_smi and there is no libamdcuid.a for anyone to link.
+        set(AMDCUID_INSTALL OFF CACHE BOOL "" FORCE)
+        set(AMDCUID_BUILD_CLI OFF)
+        set(AMDCUID_BUILD_TESTS OFF)
+        set(AMDCUID_BUILD_EXAMPLES OFF)
+        set(AMDCUID_BUILD_DAEMON OFF)
+        add_subdirectory("${AMDCUID_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/amdcuid" EXCLUDE_FROM_ALL)
+        if(TARGET amdcuid_objs)
+            set(_amdsmi_cuid_in_tree ON)
+            set(AMDSMI_CUID_IN_TREE ON CACHE INTERNAL "libamdcuid is built here, not found")
+            get_target_property(_amdcuid_incs amdcuid_objs INTERFACE_INCLUDE_DIRECTORIES)
+            set(AMDCUID_INCLUDE_DIRS "${_amdcuid_incs}" CACHE INTERNAL "")
+            set(amdcuid_FOUND TRUE)
+            set(amdcuid_VERSION "in-tree")
+            set(amdcuid_DIR "${AMDCUID_SOURCE_DIR}")
+        endif()
+    endif()
+
+    set(BUILD_CUID "${amdcuid_FOUND}")
+
+    # Any value other than AUTO is read as the boolean this used to be, so an
+    # existing -DBUILD_CUID=ON, =1 or =TRUE still means "require it".
+    if(NOT _amdsmi_cuid_request STREQUAL "AUTO" AND NOT amdcuid_FOUND)
+        message(
+            FATAL_ERROR
+            "BUILD_CUID=${_amdsmi_cuid_request} but libamdcuid was neither found nor "
+            "buildable here.\n"
+            "No installed amdcuid CMake package on CMAKE_PREFIX_PATH, amdcuid_ROOT, "
+            "CMAKE_INSTALL_PREFIX (${CMAKE_INSTALL_PREFIX}) or AMDCUID_HINT_DIR "
+            "(${AMDCUID_HINT_DIR}), and no sources at AMDCUID_SOURCE_DIR "
+            "(${AMDCUID_SOURCE_DIR}).\n"
+            "A sparse checkout of projects/amdsmi alone has no sibling to build from: "
+            "add projects/cuid to it, point AMDCUID_HINT_DIR at an install prefix, or "
+            "set -DBUILD_CUID=OFF."
+        )
+    endif()
+endif()
+
+# The outcome, not the request, and reachable from the parent directory: the
+# top-level CMakeLists expands it into amd_smi-config.cmake, which must call
+# find_dependency(amdcuid) exactly when the exported static target names it.
+# A normal variable set here would not survive the return to the parent scope,
+# and the BUILD_CUID cache entry holds the request rather than the answer.
+if(BUILD_CUID)
+    set(AMDSMI_WITH_CUID 1 CACHE INTERNAL "AMD SMI links libamdcuid (computed each configure)")
+else()
+    set(AMDSMI_WITH_CUID 0 CACHE INTERNAL "AMD SMI links libamdcuid (computed each configure)")
+endif()
+
+# Only an installed package leaves anything for a downstream consumer to find.
+# The in-tree build absorbs the objects, so the exported targets name no
+# amdcuid at all and amd_smi-config.cmake must not ask for one.
+if(BUILD_CUID AND NOT _amdsmi_cuid_in_tree)
+    set(AMDSMI_CUID_NEEDS_FIND_DEPENDENCY 1 CACHE INTERNAL "amd_smi-config.cmake resolves amdcuid")
+else()
+    set(AMDSMI_CUID_NEEDS_FIND_DEPENDENCY 0 CACHE INTERNAL "amd_smi-config.cmake resolves amdcuid")
 endif()
 
 # Relocating the sysfs root lets any unprivileged user report a forged
@@ -159,11 +266,26 @@ option(
 )
 
 if(BUILD_CUID)
-    message(STATUS "CUID support: enabled (amdcuid ${amdcuid_VERSION})")
-elseif(amdcuid_FOUND)
+    if(_amdsmi_cuid_in_tree)
+        message(STATUS "CUID support: enabled (built from ${AMDCUID_SOURCE_DIR}, absorbed into the library)")
+    else()
+        message(STATUS "CUID support: enabled (amdcuid ${amdcuid_VERSION} at ${amdcuid_DIR})")
+    endif()
+elseif(_amdsmi_cuid_request STREQUAL "OFF")
     message(STATUS "CUID support: disabled (BUILD_CUID=OFF)")
 else()
-    message(STATUS "CUID support: disabled (amdcuid package not found)")
+    # AUTO and not found. Loud, because the same source tree then produces a
+    # library with a different feature set depending on the build host, and a
+    # packaging job that meant to ship CUID has no other sign that it did not.
+    message(
+        WARNING
+        "CUID support: disabled -- BUILD_CUID=AUTO and no amdcuid CMake package was found "
+        "(AMDCUID_HINT_DIR=${AMDCUID_HINT_DIR}), and no sources at AMDCUID_SOURCE_DIR "
+        "(${AMDCUID_SOURCE_DIR}). amdsmi_get_gpu_cuid_info() and "
+        "amdsmi_set_cuid_seed() will return AMDSMI_STATUS_NOT_SUPPORTED in this build. "
+        "Pass -DBUILD_CUID=ON to make this a hard error, or -DBUILD_CUID=OFF to make it "
+        "deliberate."
+    )
 endif()
 
 #
@@ -230,7 +352,18 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE amdcuid::amdcuid)
+        if(AMDSMI_CUID_IN_TREE)
+            # Objects, not a link. A private link dependency of a *static*
+            # library is not absorbed -- an archive is not linked -- so linking
+            # here would put $<LINK_ONLY:amdcuid::amdcuid> into
+            # amd_smi_static's exported interface, naming a target no consumer
+            # has and one this build never installs. Absorbing leaves nothing
+            # to export and nothing to ship.
+            target_sources(${_TARGET} PRIVATE ${AMDCUID_IN_TREE_OBJECTS})
+            target_include_directories(${_TARGET} SYSTEM PRIVATE ${AMDCUID_INCLUDE_DIRS})
+        else()
+            target_link_libraries(${_TARGET} PRIVATE amdcuid::amdcuid)
+        endif()
 
         if(AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
             message(

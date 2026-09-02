@@ -75,9 +75,26 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
-    continue-on-error: true
+    # Advisory on every distro except one.
+    #
+    # The whole matrix was continue-on-error, so a CUID build failure or a test
+    # failure on any distro -- or on all nine -- reported green and merged. That
+    # is not a gate, and it is how three privileged tests that fail on any
+    # machine with an SMBIOS system UUID, and four handle-lookup tests that
+    # accepted the failure mode of the code under test as a pass, both reached
+    # develop.
+    #
+    # Made conditional rather than simply removed: eight of these are
+    # self-hosted GPU containers whose flakiness is a separate problem from
+    # CUID's, and making all nine required would swap "no gate" for "a gate
+    # nobody can keep green". One distro that must pass is a gate; nine that
+    # may all fail is not.
+    continue-on-error: ${{ matrix.os != 'Ubuntu22' }}
     strategy:
       max-parallel: 10
+      # Every distro still runs, and every distro's log is still uploaded: the
+      # point is which of them can block a merge, not which of them run.
+      fail-fast: false
       matrix:
         os:
           - Ubuntu20

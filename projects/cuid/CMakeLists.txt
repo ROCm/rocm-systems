@@ -16,8 +16,16 @@ set(AMDCUID_PACKAGE ${AMDCUID} CACHE STRING "")
 # ROCM_DIR should be passed in via command line
 set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
 
-# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+# ROCm installs flat under /opt/rocm and never into lib64, so default libdir to
+# "lib" rather than let GNUInstallDirs pick the distro's arch-specific name.
+#
+# Only when this project is the top level, and never with FORCE. CMAKE_INSTALL_LIBDIR
+# is a cache variable and the cache is global to a build tree, so seeding it
+# from a subdirectory decides the install layout of every sibling project in a
+# superbuild -- depending on which of them CMake happens to process first.
+if(NOT DEFINED CMAKE_INSTALL_LIBDIR AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CMAKE_INSTALL_LIBDIR "lib" CACHE PATH "Library install directory")
+endif()
 
 # Read version from amd_cuid.h so there is a single source of truth
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
@@ -36,9 +44,11 @@ set(CMAKE_INSTALL_MESSAGE LAZY)
 # This must go after some CMAKE_* variables
 project(${AMDCUID} VERSION "${VERSION_STRING}")
 
-# Usually ROCM tools are installed into /opt/rocm
-# CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project()
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+# Usually ROCM tools are installed into /opt/rocm.
+# CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project().
+# Skipped when this project is a subdirectory of another: forcing the prefix
+# would relocate the parent's entire install.
+if(PROJECT_IS_TOP_LEVEL AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
         set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/ROCM/AMDCUID" CACHE PATH "Default installation directory." FORCE)
     else() # Linux/Unix
@@ -54,12 +64,26 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
-option(BUILD_TESTS "Build test suite" OFF)
-# When cmake -DBUILD_EXAMPLES off by default, it will not build the CUID examples
-option(BUILD_EXAMPLES "Build examples" OFF)
-# When cmake -DBUILD_DAEMON off by default, it will not build the CUID daemon
-option(BUILD_DAEMON "Build daemon" OFF)
+# BUILD_TESTS, BUILD_EXAMPLES and BUILD_DAEMON are generic enough that a parent
+# project almost certainly has its own -- projects/amdsmi does, and sets
+# BUILD_TESTS=ON -- and an option() would silently adopt the parent's answer for
+# a different question. Declared only at the top level; as a subdirectory this
+# project builds the library and nothing else, unless the parent asks by the
+# prefixed name.
+if(PROJECT_IS_TOP_LEVEL)
+    # When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
+    option(BUILD_TESTS "Build test suite" OFF)
+    # When cmake -DBUILD_EXAMPLES off by default, it will not build the CUID examples
+    option(BUILD_EXAMPLES "Build examples" OFF)
+    # When cmake -DBUILD_DAEMON off by default, it will not build the CUID daemon
+    option(BUILD_DAEMON "Build daemon" OFF)
+    set(AMDCUID_BUILD_CLI ON)
+else()
+    set(BUILD_TESTS ${AMDCUID_BUILD_TESTS})
+    set(BUILD_EXAMPLES ${AMDCUID_BUILD_EXAMPLES})
+    set(BUILD_DAEMON ${AMDCUID_BUILD_DAEMON})
+    set(AMDCUID_BUILD_CLI ${AMDCUID_BUILD_CLI})
+endif()
 
 # Version-independent directory shared by all installed versions.
 # The HMAC key and daemon config file are stored here so that multi-version
@@ -95,6 +119,13 @@ message("-----------ROCM_DIR : " ${ROCM_DIR})
 message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
 message("--------Build Type  : " ${CMAKE_BUILD_TYPE})
 
+# Whether this project installs anything. A parent that absorbs
+# AMDCUID_IN_TREE_OBJECTS carries the code inside its own binary and must not
+# also ship a libamdcuid.a, a header, or a CMake package for a library nobody
+# links -- Fedora's packaging guidelines ask for static archives to be left out
+# where they can be, and this is a case where they can.
+option(AMDCUID_INSTALL "Install the library, headers and CMake package" ${PROJECT_IS_TOP_LEVEL})
+
 # Define all the install component labels
 set(LIB_COMPONENT "library")
 set(DAEMON_COMPONENT "daemon")
@@ -103,7 +134,9 @@ set(EXAMPLE_COMPONENT "example")
 set(TESTS_COMPONENT "tests")
 
 add_subdirectory(lib)
-add_subdirectory(cli)
+if(AMDCUID_BUILD_CLI)
+    add_subdirectory(cli)
+endif()
 if(BUILD_DAEMON)
     add_subdirectory(daemon)
 endif()
@@ -116,7 +149,11 @@ endif()
 
 # Unified post-install wrapper: runs the library post-install always, and the
 # daemon post-install automatically when the daemon binary is present.
-if(UNIX AND NOT APPLE)
+#
+# Nothing here installs when this project is a subdirectory: a parent that
+# absorbs the objects ships no libamdcuid, so a maintainer script for one would
+# be run against a file that is not there.
+if(PROJECT_IS_TOP_LEVEL AND UNIX AND NOT APPLE)
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/scripts/amdcuid_postinst_wrapper.sh.in
         ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh

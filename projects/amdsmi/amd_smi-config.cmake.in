@@ -7,6 +7,44 @@
 @PACKAGE_INIT@
 get_filename_component(AMD_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
+include(CMakeFindDependencyMacro)
+
+# The PACKAGE_INIT block above defines PACKAGE_PREFIX_DIR, and on a consumer
+# running CMake 3.29 or older any nested find_package overwrites it. Snapshot it
+# before the find_dependency calls below and put it back afterwards, so a later
+# configured path variable, or a consumer reading it, still sees this package's
+# prefix rather than amdcuid's.
+set(_amd_smi_package_prefix_dir "${PACKAGE_PREFIX_DIR}")
+
+# amd_smi_static links libamdcuid PRIVATE. A private link dependency of a
+# *static* library is not absorbed -- an archive is not linked -- so CMake
+# records it in the exported target's INTERFACE_LINK_LIBRARIES wrapped in
+# $<LINK_ONLY:>, and amd_smiTargets.cmake below names amdcuid::amdcuid. Without
+# this call any consumer that links amd_smi_static fails at generate time with
+# "The link interface of target amd_smi_static contains: amdcuid::amdcuid but
+# the target was not found", including the standalone example build that the
+# packaging CI runs on every distro.
+#
+# The shared library needs nothing here: its private dependency is absorbed at
+# link time and never reaches the export. Nor does an in-tree build of any
+# kind, which absorbs the objects into both targets and exports no amdcuid --
+# hence the separate flag rather than "was CUID enabled".
+#
+# HINTS, because libamdcuid installs under ${ROCM_DIR}/core while AMD SMI
+# installs under ${ROCM_DIR}, and config mode has no search template with an
+# arbitrary intermediate directory: a prefix of /opt/rocm never reaches
+# /opt/rocm/core/lib/cmake/amdcuid.
+if(@AMDSMI_CUID_NEEDS_FIND_DEPENDENCY@)
+    find_dependency(amdcuid CONFIG HINTS "${_amd_smi_package_prefix_dir}/core" "@AMDCUID_HINT_DIR@")
+endif()
+
+# Threads::Threads is in the same position: linked PRIVATE into amd_smi_static
+# and therefore named by the exported interface.
+find_dependency(Threads)
+
+set(PACKAGE_PREFIX_DIR "${_amd_smi_package_prefix_dir}")
+unset(_amd_smi_package_prefix_dir)
+
 set_and_check(amd_smi_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 set_and_check(AMD_SMI_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")

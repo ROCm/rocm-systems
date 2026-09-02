@@ -579,6 +579,20 @@ class ConfigureCITest(unittest.TestCase):
             }
             self.assertIn("amdsmi", tests, group)
 
+    def test_every_subtree_maps_to_a_known_project(self):
+        """A subtree naming a project that does not exist selects nothing.
+
+        configure_ci looks the value up with project_map.get() and skips a miss
+        without a diagnostic, so a typo costs a subtree its entire CI coverage
+        and nothing fails. projects/cuid said "rdc" for exactly that reason.
+        """
+        for subtree, project in therock_matrix.subtree_to_project_map.items():
+            self.assertIn(
+                project,
+                therock_matrix.project_map,
+                f"{subtree} maps to {project!r}, which is not a key of project_map",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

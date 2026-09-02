@@ -9,8 +9,13 @@ subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/hrr": "hrr",
-
-    "projects/cuid": "rdc",
+    # cuid is compiled into amd-smi from this same checkout when no installed
+    # amdcuid package is found, so a change here changes the amd-smi binary and
+    # has to run amd-smi's group. It used to say "rdc", which is not a key of
+    # project_map -- the lookup below skips an unknown project silently, so a
+    # change confined to projects/cuid selected no cmake options and no tests
+    # at all.
+    "projects/cuid": "amdsmi",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",

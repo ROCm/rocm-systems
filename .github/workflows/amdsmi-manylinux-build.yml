@@ -18,6 +18,14 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamdcuid is compiled into libamd_smi from the sibling directory when
+      # no installed amdcuid package is found, which is what every packaging
+      # channel does, so a change under projects/cuid or shared/sha256 changes
+      # this binary and has to build it.
+      - 'projects/cuid/**'
+      - '!projects/cuid/docs/**'
+      - '!projects/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   push:
     branches: [develop]
@@ -26,6 +34,14 @@ on:
       - '!projects/amdsmi/docs/**'
       - '!projects/amdsmi/**/*.md'
       - '!projects/amdsmi/**/*.rst'
+      # libamdcuid is compiled into libamd_smi from the sibling directory when
+      # no installed amdcuid package is found, which is what every packaging
+      # channel does, so a change under projects/cuid or shared/sha256 changes
+      # this binary and has to build it.
+      - 'projects/cuid/**'
+      - '!projects/cuid/docs/**'
+      - '!projects/cuid/openspec/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   workflow_dispatch:
 
