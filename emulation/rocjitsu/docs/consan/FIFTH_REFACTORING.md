@@ -8659,3 +8659,67 @@ mode matrices, and every superseded authority is gone. Full architecture
 locality, remaining mode-local transformation ownership, wider coordinator
 confinement, material additional deletion, and the independent Section 14
 audit remain open, so the goal remains active.
+
+### 16.123 Convergence checkpoint 122: mode-owned access runtime mappings
+
+The access-application trace followed every instrumented MOI access from its
+mode-private placement plan through the shared byte transaction and into the
+runtime-facing static mapping retained by its lowering commit. Shared
+`consan_moi_access_apply.cpp` was not merely joining common attribution: it
+switched among Record/Replay, Sampled, and InlineShadow intent kinds,
+constructed all three mode-specific mapping payloads, and validated Sampled
+slot-window and InlineShadow compact-token fields. The mode callers therefore
+did not own the final semantic product of their own access lowering.
+
+`MoiAccessCommitPolicy` now states the one narrow interaction needed by common
+application: the mode's expected access intent and a factory that translates
+common original-program attribution plus committed patch facts into that
+mode's runtime mapping. Record/Replay owns its access-record mapping policy in
+`consan_moi_record_replay.cpp`; Sampled owns its slot-window, emitted-location,
+and scratch-register mapping in `consan_moi_sampled.cpp`; InlineShadow owns its
+optional compact-token mapping in `consan_moi_inline_shadow.cpp`. Both appended
+and in-place paths use the same policy in each mode. The shared transaction
+still owns byte replacement, descriptor growth, semantic-site attribution,
+patch geometry, transactional publication, and the common failure boundary;
+none of those mechanics was copied into a mode.
+
+The old three-way switch and every access to mode-specific patch fields are
+deleted from shared application. The architecture gate rejects mode intent
+names, runtime-mapping constructors, Sampled mapping fields, or InlineShadow
+compact fields in that common implementation, and requires each of the three
+mode translation units to retain its mapping factory and explicit commit
+policy. A future mode supplies one policy without adding another branch to
+common byte application, while a reader of one existing mode can now find the
+complete runtime mapping beside that mode's other policies.
+
+| Signal | Checkpoint 122 | Cumulative change | Slice change from checkpoint 121 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,862 | **-2,114** | +35 |
+| Nonblank production lines | 96,486 | **-2,598** | +27 |
+| Production implementation lines | 88,733 | **-2,717** | +22 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Shared access runtime-mapping mode branches | **0** | n/a | **-3** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `37196c73e79`. Validation includes a
+warning-clean `-j16` rebuild, focused architecture-boundary, runtime-mapping,
+and one-per-mode access-lowering tests **6/6**, and all **1,296/1,296**
+nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests. Those tests
+exercise appended and inline access lowering across the five target profiles,
+the three MOI runtime mapping variants, malformed mapping rejection, and
+transactional commit validation. No test was removed, renamed, disabled, or
+replaced, and no physical test was run.
+
+This slice spends twenty-two implementation lines on the explicit
+mode/common composition seam, principally the three local policy declarations
+and its enforced contract. It materially strengthens Sections 14.3, 14.4,
+14.5, and 14.6, but it is an architectural investment rather than harvested
+shrinkage. The next convergence work must use the newly local ownership to
+remove or consolidate superseded patch-state and validation paths instead of
+allowing this cost to stand as another permanent layer. Full architecture
+locality, wider coordinator confinement, material additional deletion, and
+the independent Section 14 audit remain open, so the goal remains active.
