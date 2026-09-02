@@ -41,8 +41,7 @@ rocprofiler_add_unit_test(
     TEST_PREFIX "aqlprofile.core."
     TEST_LIST aqlprofile_core_TESTS
     TIMEOUT 30
-    LABELS "unittests;aqlprofile"
-    SPM_TESTS
-    "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_NullCallback"
-    "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_InvalidAgent"
+    LABELS "unittests;aqlprofile" SPM_TESTS
+           "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_NullCallback"
+           "AqlProfileV2ApiTest.SpmQueryAgentConfigurations_InvalidAgent"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

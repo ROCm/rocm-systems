@@ -1151,7 +1151,10 @@ function(rocprofiler_add_unit_test)
     if(RAUT_SPM_TESTS)
         foreach(_TEST ${RAUT_SPM_TESTS})
             set(_spm_test "${RAUT_TEST_PREFIX}${_TEST}")
-            get_property(_labels TEST ${_spm_test} PROPERTY LABELS)
+            get_property(
+                _labels
+                TEST ${_spm_test}
+                PROPERTY LABELS)
             if(NOT "spm" IN_LIST _labels)
                 list(APPEND _labels "spm")
                 set_tests_properties(${_spm_test} PROPERTIES LABELS "${_labels}")

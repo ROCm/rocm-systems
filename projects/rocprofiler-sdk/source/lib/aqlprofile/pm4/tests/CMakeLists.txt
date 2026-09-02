@@ -47,9 +47,9 @@ rocprofiler_add_unit_test(
     TEST_LIST aqlprofile_pm4_TESTS DISABLE_TESTS "SqttBuilderTest.BufferStepCalculation"
     TIMEOUT 30
     LABELS "unittests;aqlprofile"
-    SPM_TESTS
-    "SpmBuilderTest.BeginWithValidParameters"
-    "SpmBuilderTest.EndWithValidParameters"
-    "SpmBuilderTest.BeginEndSequenceWithMock"
-    "SpmBuilderTest.NullParameterHandling"
+           SPM_TESTS
+           "SpmBuilderTest.BeginWithValidParameters"
+           "SpmBuilderTest.EndWithValidParameters"
+           "SpmBuilderTest.BeginEndSequenceWithMock"
+           "SpmBuilderTest.NullParameterHandling"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

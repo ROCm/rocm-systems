@@ -164,22 +164,30 @@ function(rocprofiler_sdk_get_spm_preflight_script OUT_VAR)
     set(_candidates "")
 
     # rocprofiler-sdk source/build tree.
-    list(APPEND _candidates "${CMAKE_CURRENT_LIST_DIR}/../../tests/spm_runner_preflight.py")
+    list(APPEND _candidates
+         "${CMAKE_CURRENT_LIST_DIR}/../../tests/spm_runner_preflight.py")
 
     # Installed rocprofiler-sdk package (find_package consumers and test installs).
     if(DEFINED PACKAGE_PREFIX_DIR)
-        list(APPEND _candidates
-             "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_DATADIR}/rocprofiler-sdk/tests/spm_runner_preflight.py")
+        list(
+            APPEND
+            _candidates
+            "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_DATADIR}/rocprofiler-sdk/tests/spm_runner_preflight.py"
+            )
     endif()
 
     foreach(_script IN LISTS _candidates)
         if(EXISTS "${_script}")
-            set(${OUT_VAR} "${_script}" PARENT_SCOPE)
+            set(${OUT_VAR}
+                "${_script}"
+                PARENT_SCOPE)
             return()
         endif()
     endforeach()
 
-    set(${OUT_VAR} "" PARENT_SCOPE)
+    set(${OUT_VAR}
+        ""
+        PARENT_SCOPE)
 endfunction()
 
 function(rocprofiler_sdk_load_spm_min_amdgpu_driver_version OUT_VAR)
@@ -187,21 +195,24 @@ function(rocprofiler_sdk_load_spm_min_amdgpu_driver_version OUT_VAR)
     if(_preflight STREQUAL "")
         message(
             FATAL_ERROR
-                "Cannot locate spm_runner_preflight.py to read SPM_MIN_AMDGPU_DRIVER_VERSION")
+                "Cannot locate spm_runner_preflight.py to read SPM_MIN_AMDGPU_DRIVER_VERSION"
+            )
     endif()
 
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(NOT Python3_Interpreter_FOUND)
         message(
             FATAL_ERROR
-                "Python3 interpreter required to load SPM min driver version from ${_preflight}")
+                "Python3 interpreter required to load SPM min driver version from ${_preflight}"
+            )
     endif()
 
     get_filename_component(_preflight_dir "${_preflight}" DIRECTORY)
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c
-                "import sys; sys.path.insert(0, sys.argv[1]); import spm_runner_preflight; print(spm_runner_preflight.SPM_MIN_AMDGPU_DRIVER_VERSION)"
-                "${_preflight_dir}"
+        COMMAND
+            ${Python3_EXECUTABLE} -c
+            "import sys; sys.path.insert(0, sys.argv[1]); import spm_runner_preflight; print(spm_runner_preflight.SPM_MIN_AMDGPU_DRIVER_VERSION)"
+            "${_preflight_dir}"
         OUTPUT_VARIABLE _version
         OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _ret
@@ -210,17 +221,23 @@ function(rocprofiler_sdk_load_spm_min_amdgpu_driver_version OUT_VAR)
     if(NOT _ret EQUAL 0 OR _version STREQUAL "")
         message(
             FATAL_ERROR
-                "Failed to read SPM_MIN_AMDGPU_DRIVER_VERSION from ${_preflight}: ${_err}")
+                "Failed to read SPM_MIN_AMDGPU_DRIVER_VERSION from ${_preflight}: ${_err}"
+            )
     endif()
 
-    set(${OUT_VAR} "${_version}" PARENT_SCOPE)
+    set(${OUT_VAR}
+        "${_version}"
+        PARENT_SCOPE)
 endfunction()
 
-rocprofiler_sdk_load_spm_min_amdgpu_driver_version(_rocprofiler_spm_min_amdgpu_driver_version)
+rocprofiler_sdk_load_spm_min_amdgpu_driver_version(
+    _rocprofiler_spm_min_amdgpu_driver_version)
 set(ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION
     "${_rocprofiler_spm_min_amdgpu_driver_version}"
-    CACHE STRING "Minimum /sys/module/amdgpu/version for SPM tests (from spm_runner_preflight.py)"
-    FORCE)
+    CACHE
+        STRING
+        "Minimum /sys/module/amdgpu/version for SPM tests (from spm_runner_preflight.py)"
+        FORCE)
 
 function(rocprofiler_sdk_read_amdgpu_driver_version OUT_VAR)
     set(_path "/sys/module/amdgpu/version")
@@ -230,7 +247,9 @@ function(rocprofiler_sdk_read_amdgpu_driver_version OUT_VAR)
     else()
         set(_ver "")
     endif()
-    set(${OUT_VAR} "${_ver}" PARENT_SCOPE)
+    set(${OUT_VAR}
+        "${_ver}"
+        PARENT_SCOPE)
 endfunction()
 
 function(rocprofiler_sdk_version_ge VERSION_A VERSION_B OUT_VAR)
@@ -239,17 +258,24 @@ function(rocprofiler_sdk_version_ge VERSION_A VERSION_B OUT_VAR)
     else()
         set(_result FALSE)
     endif()
-    set(${OUT_VAR} "${_result}" PARENT_SCOPE)
+    set(${OUT_VAR}
+        "${_result}"
+        PARENT_SCOPE)
 endfunction()
 
 function(rocprofiler_sdk_spm_driver_supported OUT_VAR)
     rocprofiler_sdk_read_amdgpu_driver_version(_current)
     if(_current STREQUAL "")
-        set(${OUT_VAR} FALSE PARENT_SCOPE)
+        set(${OUT_VAR}
+            FALSE
+            PARENT_SCOPE)
         return()
     endif()
-    rocprofiler_sdk_version_ge("${_current}" "${ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION}" _ok)
-    set(${OUT_VAR} "${_ok}" PARENT_SCOPE)
+    rocprofiler_sdk_version_ge("${_current}"
+                               "${ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION}" _ok)
+    set(${OUT_VAR}
+        "${_ok}"
+        PARENT_SCOPE)
 endfunction()
 
 # Combines arch and driver gates for SPM integration tests. Not wired into the
@@ -258,15 +284,19 @@ function(rocprofiler_sdk_spm_tests_disabled OUT_VAR)
     rocprofiler_sdk_spm_disabled(_arch_disabled)
     rocprofiler_sdk_spm_driver_supported(_driver_ok)
     if(_arch_disabled OR NOT _driver_ok)
-        set(${OUT_VAR} TRUE PARENT_SCOPE)
+        set(${OUT_VAR}
+            TRUE
+            PARENT_SCOPE)
         if(NOT _driver_ok)
             rocprofiler_sdk_read_amdgpu_driver_version(_current)
             message(
                 STATUS
                     "SPM tests disabled: amdgpu driver '${_current}' < ${ROCPROFILER_SPM_MIN_AMDGPU_DRIVER_VERSION}"
-            )
+                )
         endif()
     else()
-        set(${OUT_VAR} FALSE PARENT_SCOPE)
+        set(${OUT_VAR}
+            FALSE
+            PARENT_SCOPE)
     endif()
 endfunction()
