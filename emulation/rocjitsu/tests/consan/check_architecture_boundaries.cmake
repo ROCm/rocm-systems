@@ -2380,7 +2380,7 @@ foreach(
 endforeach()
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.cpp"
-    "CompactRecordReplayAccessRecords compact_record_replay_access_records"
+    "consan_moi_access_record_is_unpublished|CompactRecordReplayAccessRecords"
     "common report decoding must not reimplement Record/Replay compaction"
 )
 foreach(

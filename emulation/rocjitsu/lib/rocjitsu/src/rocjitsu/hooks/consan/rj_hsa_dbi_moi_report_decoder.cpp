@@ -61,11 +61,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const auto *records = reinterpret_cast<const ConSanMoiAccessRecord *>(
       bytes + expected_layout.access_records_offset);
   result.visible_access_slots.assign(records, records + visible_records);
-  CompactRecordReplayAccessRecords compact_access_records =
-      expected_engine == ConSanMoiEngine::RecordReplay
-          ? compact_record_replay_access_records(result.visible_access_slots, header->event_counter)
-          : CompactRecordReplayAccessRecords{};
-  const uint32_t committed_records = compact_access_records.committed_record_count;
 
   const auto *barriers = reinterpret_cast<const ConSanMoiBarrierRecord *>(
       bytes + expected_layout.barrier_records_offset);
@@ -81,7 +76,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       bytes + expected_layout.diagnostic_records_offset);
   result.diagnostics.assign(raw_diagnostics, raw_diagnostics + raw_visible_diagnostics);
 
-  summary.visible_access_record_count = committed_records;
   summary.visible_barrier_record_count = visible_barriers;
   summary.visible_atomic_record_count = visible_atomics;
   summary.visible_fence_record_count = visible_fences;
@@ -94,8 +88,8 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   result.header = *header;
   switch (expected_engine) {
   case ConSanMoiEngine::RecordReplay:
-    result.mode = AutoMoiRecordReplayDecodedReport{
-        .access_records = std::move(compact_access_records.replay_records)};
+    result.mode = decode_auto_moi_record_replay_report(result.visible_access_slots,
+                                                       header->event_counter, summary);
     break;
   case ConSanMoiEngine::InlineShadow: {
     AutoMoiInlineShadowDecodeResult inline_result = decode_auto_moi_inline_shadow_report(

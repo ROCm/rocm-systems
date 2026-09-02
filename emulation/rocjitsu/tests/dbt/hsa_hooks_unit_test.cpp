@@ -3818,13 +3818,15 @@ TEST(HsaHooksUnitTest, RecordReplaySparseCompactionScalesWithPublicationsNotCapa
   records.back().claim_token = 7;
   records.back().access_kind = static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Read);
 
-  const auto compact = rocjitsu::consan_hook::compact_record_replay_access_records(records, 2);
-  EXPECT_EQ(compact.committed_record_count, 2u);
-  ASSERT_EQ(compact.replay_records.size(), 2u);
-  EXPECT_LE(compact.replay_records.capacity(), 2u);
-  EXPECT_EQ(compact.replay_records.front().access_kind,
+  rocjitsu::consan_hook::AutoMoiReportSummary summary;
+  const auto decoded =
+      rocjitsu::consan_hook::decode_auto_moi_record_replay_report(records, 2, summary);
+  EXPECT_EQ(summary.visible_access_record_count, 2u);
+  ASSERT_EQ(decoded.access_records.size(), 2u);
+  EXPECT_LE(decoded.access_records.capacity(), 2u);
+  EXPECT_EQ(decoded.access_records.front().access_kind,
             static_cast<uint32_t>(rocjitsu::ConSanMoiShadowAccessKind::Write));
-  EXPECT_EQ(compact.replay_records.back().claim_token, 7u);
+  EXPECT_EQ(decoded.access_records.back().claim_token, 7u);
 }
 
 TEST(HsaHooksUnitTest, ConSanLegacySelectionRemainsActive) {
