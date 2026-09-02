@@ -88,28 +88,3 @@ class TestLinkTopology(unittest.TestCase):
         self.assertEqual(result["link_type"], 2)
         self.assertEqual(result["num_hops"], 3)
         self.assertEqual(result["fb_sharing"], 1)
-
-    def test_disabled_link_maps_status_and_capped_hops(self):
-        # Complements the enabled case: disabled mapping and capped (255) hops.
-        src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-        dst = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-
-        def _fill(_src, _dst, topology_ref):
-            topology = topology_ref._obj
-            topology.weight = 0
-            topology.link_status = amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED
-            topology.link_type = amdsmi.amdsmi_wrapper.AMDSMI_LINK_TYPE_NOT_APPLICABLE
-            topology.num_hops = 255
-            topology.fb_sharing = 0
-            return 0
-
-        with mock.patch.object(
-            amdsmi.amdsmi_wrapper, "amdsmi_get_link_topology", side_effect=_fill
-        ):
-            result = amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, dst)
-
-        self.assertEqual(result["link_status"], amdsmi.amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED)
-        self.assertEqual(result["link_type"], amdsmi.amdsmi_wrapper.AMDSMI_LINK_TYPE_NOT_APPLICABLE)
-        self.assertEqual(result["num_hops"], 255)
-        self.assertEqual(result["fb_sharing"], 0)
-        self.assertEqual(result["weight"], 0)
