@@ -309,11 +309,23 @@ interposition_fini();
  * @brief Wait, bounded, for in-flight completions to retire
  *
  * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
- * (context stop, code-object unload). Returns without waiting if the monitor is not
- * running. The wait is bounded in every case and warns on expiry rather than hanging.
+ * (context stop, code-object unload). Waits on the in-flight counter rather than the monitor
+ * state, since batches already handed to the record emitter outlive the monitor thread. The
+ * wait is bounded in every case and warns on expiry rather than hanging.
  */
 void
 interposition_sync();
+
+/**
+ * @brief Create the wake signal and launch the completion-monitor thread
+ *
+ * Does nothing if the monitor is already running, if interception was never installed, or once
+ * finalization has completed. Called from interposition_init and again whenever an HSA reference
+ * count rises from zero, since the monitor does not outlive an HSA teardown and every producer is
+ * turned away while it is stopped.
+ */
+void
+start_completion_monitor();
 
 /**
  * @brief Stop and join the completion-monitor thread, retiring any stragglers
@@ -321,27 +333,14 @@ interposition_sync();
  * Closes the producer admission gate, wakes the monitor, joins it, then retires what is left so
  * pooled signals and correlation-id references are released. Must run before the signal pool is
  * torn down, so those releases target a live pool. A batch whose completion signal never dropped
- * is released without a dispatch record, since its timestamps were never written. Waits a
- * bounded grace period for records already handed to the emitter -- that wait runs to its
- * deadline when called from a dispatch-complete callback. Producers still inside the doorbell
- * path are not waited on; they see the monitor stopped and dispose of their own batch.
+ * produces no dispatch record and keeps its pooled signal, since its timestamps were never
+ * written and the GPU may still write to that signal. Every caller returns with the monitor
+ * thread dead and every record delivered, waiting on the record emitter to do so. Producers still
+ * inside the doorbell path are not waited on; they see the monitor stopped and dispose of their
+ * own batch.
  */
 void
 stop_completion_monitor();
-
-/**
- * @brief Mark that global finalization has begun
- *
- * Moves the monitor to a finalizing state, distinct from the transient per-client finalizer
- * state. The monitor thread keeps running and keeps retiring completions already registered with
- * it. Drains switch to the short grace period, since at global shutdown an in-flight dependency
- * may never resolve and stop_completion_monitor's forced retirement is what finally clears the
- * backlog. The inline admission gate treats any state other than active as bypass, so dispatches
- * submitted from here on are not intercepted. Call before the finalize-path drain, and only on
- * the global-teardown path.
- */
-void
-mark_completion_monitor_finalizing();
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler
