@@ -340,3 +340,15 @@ Here is the general sequence of events when a code object is loaded and unloaded
     deleting the associated data.
 
 For a sample of code object tracing, see `samples/code_object_tracing <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/code_object_tracing>`_.
+
+Kernel replay (experimental)
+-----------------------------
+
+``ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY`` is an experimental callback tracing domain that
+re-executes a GPU dispatch several times with device memory restored between passes. Subscribe with
+``rocprofiler_configure_callback_tracing_service`` as for any other domain; there is no separate
+configure function. Cast ``record.payload`` to
+``rocprofiler_callback_tracing_kernel_replay_data_t*``.
+
+See :ref:`kernel-replay-sdk-api` for the tool-author walkthrough and
+:ref:`kernel-replay-callback-api` for pass-count semantics and localized context control.

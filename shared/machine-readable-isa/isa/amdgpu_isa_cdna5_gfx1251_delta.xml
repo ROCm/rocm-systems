@@ -1,0 +1,1372 @@
+<IsaAdditions Id="gfx1251-instructions" BaseArchitecture="AMD CDNA 5" BaseSchemaVersion="1.2.0">
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>59</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100001110110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>59</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100001110110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>60</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100001111000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>60</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100001111000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010010110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100010010110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100010011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>77</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010011010000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>77</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100010011010000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>78</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010011100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>78</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100010011100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>79</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010011110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>79</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100010011110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>126</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100011111100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP3P_INST_LITERAL</EncodingName><Opcode>126</Opcode>
+      <EncodingIdentifier Radix="2">000000000000000000000000000000000000000000000000000000000000000011001100011111100000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3P</EncodingName><Opcode>91</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011001100010110110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_FMA_F64</InstructionName>
+      <Description>Encoding model for v_pk_fma_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="10">has_lit_2</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="11">has_lit_0&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="12">has_lit_1&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="13">has_lit_0&amp;has_lit_1&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">59</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_MUL_F64</InstructionName>
+      <Description>Encoding model for v_pk_mul_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">60</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">60</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">60</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">60</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_ADD_F64</InstructionName>
+      <Description>Encoding model for v_pk_add_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_ADD_NC_U64</InstructionName>
+      <Description>Encoding model for v_pk_add_nc_u64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_SUB_NC_U64</InstructionName>
+      <Description>Encoding model for v_pk_sub_nc_u64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">77</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">77</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">77</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">77</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_MAX_NUM_F64</InstructionName>
+      <Description>Encoding model for v_pk_max_num_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">78</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">78</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">78</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">78</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_MIN_NUM_F64</InstructionName>
+      <Description>Encoding model for v_pk_min_num_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">79</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">79</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">79</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">79</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_F64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_PK_LSHL_ADD_U64</InstructionName>
+      <Description>Encoding model for v_pk_lshl_add_u64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="1">has_lit_0</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="2">has_lit_1</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="3">has_lit_0&amp;has_lit_1</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="10">has_lit_2</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="11">has_lit_0&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="12">has_lit_1&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP3P_INST_LITERAL</EncodingName>
+          <EncodingCondition Id="13">has_lit_0&amp;has_lit_1&amp;has_lit_2</EncodingCondition>
+          <Opcode Radix="10">126</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_PK2_U64</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_WMMA_F64_16X16X4_F64</InstructionName>
+      <Description>Encoding model for v_wmma_f64_16x16x4_f64, derived from LLVM gfx1251 instruction definitions.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3P</EncodingName>
+          <EncodingCondition Id="0">default</EncodingCondition>
+          <Opcode Radix="10">91</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_WMMA_DC_16X16_F64</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>512</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_WMMA_AB_16X4_F64</DataFormatName>
+              <OperandType>OPR_SRC_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SRC1</FieldName>
+              <DataFormatName>FMT_WMMA_AB_16X4_F64</DataFormatName>
+              <OperandType>OPR_SRC_VGPR</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="4">
+              <FieldName>SRC2</FieldName>
+              <DataFormatName>FMT_WMMA_DC_16X16_F64</DataFormatName>
+              <OperandType>OPR_SRC_VGPR_OR_INLINE</OperandType>
+              <OperandSize>512</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>WMMA</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>
