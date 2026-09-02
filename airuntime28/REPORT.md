@@ -40,10 +40,9 @@ and getting two different answers.
 
 ### Isolated streaming copy, 1 GiB
 
-Each row changes exactly one thing from the variant named in "measured against". That control
-is not always the production baseline `plain-128`, because several variants differ from it in
-two ways at once and comparing them to it would credit the effect to the wrong cause — see the
-`TH_STORE_NT_RT` and 64-bit rows below.
+Each row changes exactly one thing from the variant named in "measured against". Where that is
+not `plain-128`, it is because the variant differs from production in two ways at once and
+comparing it to production would credit the effect to the wrong one.
 
 | change | measured against | effect [95% CI] |
 |---|---|---|
@@ -62,11 +61,9 @@ magnitude. The middle rows use width-matched controls because `nt-store-64` read
 against `plain-128` but +0.23% against `plain-64` — the width did the work, not the hint. That
 is why PR 2616 looks like evidence against non-temporal stores when it is evidence about width.
 
-**The other hint, `TH_STORE_NT_RT`, was tried and rejected.** It has no builtin, so it would
-need hand-written gfx12 asm in a kernel that compiles for every target. Net of that
-hand-writing — worth -1.26% by itself — the hint measures -0.29%, noise. It leaves the line in
-GL2, so there is nothing for it to avoid. Full rows in `isolated_copy`;
-[CHANGELOG.md](CHANGELOG.md) has the earlier revision that credited it as a win.
+The other hint, `TH_STORE_NT_RT`, was tried and rejected: it needs hand-written gfx12 asm, and
+net of that hand-writing it measures -0.29%, noise. Rows in `isolated_copy`;
+[CHANGELOG.md](CHANGELOG.md) has the revision that once credited it.
 
 ### Where in the size range the hint does anything
 
