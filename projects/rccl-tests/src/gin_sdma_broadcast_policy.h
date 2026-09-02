@@ -24,8 +24,9 @@
 // no symbol is defined twice: the shared kGinPutMaxBytes / kGinSdmaSafeCopyBytes /
 // ginPutSegment* live in the put-policy header and are NOT redefined here.
 //
-// See ddai-artifacts/docs/gin-anvil-sdma-broadcast-design-plan.md for the
-// measured basis of each default.
+// Every default below carries the measurement it came from in the comment above
+// it (platform, date, and the numbers on both sides of the crossover), so the
+// basis for each threshold is readable here rather than in an external document.
 
 #ifndef GIN_SDMA_BROADCAST_POLICY_H_
 #define GIN_SDMA_BROADCAST_POLICY_H_
@@ -98,13 +99,22 @@ inline size_t parseSize(const char* v) {
   char* end = nullptr;
   unsigned long long val = strtoull(v, &end, 10);
   if (end == v) return kThresholdUnset;  // no digits consumed
+  // strtoull saturates at ULLONG_MAX on overflow instead of failing, and the
+  // suffix multiply below can wrap a merely-large value back down to a small
+  // one. Either way the caller would get a plausible-looking threshold that
+  // silently mis-tiers every message, so treat both as unparseable.
+  const unsigned long long kMaxU64 = (unsigned long long)-1;
+  if (val == kMaxU64) return kThresholdUnset;
   if (*end) {  // trailing suffix char (end is always set by strtoull)
+    unsigned long long mult = 1ULL;
     switch (*end) {
-      case 'k': case 'K': val *= 1024ULL; break;
-      case 'm': case 'M': val *= 1024ULL * 1024ULL; break;
-      case 'g': case 'G': val *= 1024ULL * 1024ULL * 1024ULL; break;
+      case 'k': case 'K': mult = 1024ULL; break;
+      case 'm': case 'M': mult = 1024ULL * 1024ULL; break;
+      case 'g': case 'G': mult = 1024ULL * 1024ULL * 1024ULL; break;
       default: break;  // unknown suffix ignored (matches common.h)
     }
+    if (mult > 1ULL && val > kMaxU64 / mult) return kThresholdUnset;
+    val *= mult;
   }
   return (size_t)val;
 }
@@ -130,16 +140,6 @@ GIN_SDMA_HD inline size_t resolveLLCap(size_t envVal, size_t unsetDefault,
   return (cap / 8) * 8;
 }
 
-// ------------------------------- alignment -------------------------------
-
-// The rccl-tests per-rank chunk count, aligned so a chunk is a whole number of
-// 16-byte lines: (count/nRanks) & -(16/eltSize). eltSize must divide 16.
-GIN_SDMA_HD inline size_t alignChunkCount(size_t count, int nRanks, size_t eltSize) {
-  if (nRanks <= 0 || eltSize == 0) return 0;
-  size_t mask = (size_t)0 - (16 / eltSize);   // e.g. eltSize 4 -> mask ~3
-  return (count / (size_t)nRanks) & mask;
-}
-
 // ------------------------------- Broadcast -------------------------------
 
 // Host gate: use the scatter+allgather large tier instead of the flat/LSA/LL
@@ -159,6 +159,23 @@ GIN_SDMA_HD inline bool bcastUseRing(size_t msgBytes, size_t count,
                                      int nRanks, size_t ringMin) {
   return ringMin != 0 && nRanks >= 2 && msgBytes >= ringMin &&
          count >= (size_t)nRanks;
+}
+
+enum class BcastLargeTier { None, Ring, ScatterAG };
+
+// Which large tier the host dispatch selects, as one decision rather than two
+// independent predicates. Under the shipped defaults (ring 32 MiB, SAG 2 MiB)
+// BOTH predicates are true for every message at or above the ring cutover, so the
+// tier that runs is fixed by this precedence -- ring first -- and nothing else.
+// Asserting the predicates one at a time is satisfied by "both true" and would
+// not catch the order being swapped; asserting this enum across the 1 MiB, 2 MiB
+// and 32 MiB boundaries does.
+GIN_SDMA_HD inline BcastLargeTier bcastLargeTier(size_t msgBytes, size_t count,
+                                                 int nRanks, size_t ringMin,
+                                                 size_t sagMin) {
+  if (bcastUseRing(msgBytes, count, nRanks, ringMin)) return BcastLargeTier::Ring;
+  if (bcastUseScatterAllgather(msgBytes, count, nRanks, sagMin)) return BcastLargeTier::ScatterAG;
+  return BcastLargeTier::None;
 }
 
 // Ring pipeline depth (chunks per CTA stripe). Env override (envChunks) wins when
@@ -285,6 +302,37 @@ GIN_SDMA_HD inline Chunk sagChunk(size_t totalCount, int nRanks, int rank) {
   c.count = (rank == nRanks - 1) ? tail : base;
   c.eltOffset = (size_t)rank * base;
   return c;
+}
+
+// ------------------------------ ring tiling ------------------------------
+// The default large tier is the SM ring, and its two-level split -- a CTA stripe
+// of the buffer, then a pipeline chunk of that stripe -- used to be open-coded at
+// every kernel that walks it. It lives here so the tiling that actually ships is
+// the tiling the host tests assert (sagChunk, which the tests did cover, is used
+// only by the scatter+allgather tier).
+
+// CTA stripe: block b owns [ (count*b)/nBlocks, (count*(b+1))/nBlocks ). Balanced
+// to within one element and, by construction, a partition of [0,count).
+GIN_SDMA_HD inline Chunk ringStripe(size_t count, int block, int nBlocks) {
+  Chunk c{0, 0};
+  if (nBlocks <= 0 || block < 0 || block >= nBlocks) return c;
+  const size_t base = (count * (size_t)block) / (size_t)nBlocks;
+  const size_t end = (count * (size_t)(block + 1)) / (size_t)nBlocks;
+  c.eltOffset = base;
+  c.count = end - base;
+  return c;
+}
+
+// Pipeline chunk c of C within a stripe: the same balanced split applied again,
+// offset to the stripe base. Partitions the stripe for c in [0,C).
+GIN_SDMA_HD inline Chunk ringChunk(size_t stripeBase, size_t stripeCount, int c, int C) {
+  Chunk k{0, 0};
+  if (C <= 0 || c < 0 || c >= C) return k;
+  const size_t s = (stripeCount * (size_t)c) / (size_t)C;
+  const size_t e = (stripeCount * (size_t)(c + 1)) / (size_t)C;
+  k.eltOffset = stripeBase + s;
+  k.count = e - s;
+  return k;
 }
 
 }  // namespace gin_sdma
