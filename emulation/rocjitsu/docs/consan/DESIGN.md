@@ -348,12 +348,15 @@ replacement bytes only after final validation.
 
 SCC-preserving indirect control flow uses one mechanism-level
 `ConSanIndirectJumpSgprs`: the jump-PC pair and saved-SCC scalar are selected,
-transported, and checked together. MOI borrowed branch-only entries retain that
-primitive as one exact effect. SuperCollider ordinary indirect bodies extend it
-with their VCC save and return location, while relay reservoirs retain one
-variant selecting either the Wave32-VCC or ordinary-scalar endpoint strategy.
-The seven former generic optional patch fields cannot represent partial or
-mixed routes anymore.
+transported, and checked together. A branch-only continuation retains exactly
+one entry strategy—ordinary relays, a borrowed indirect entry carrying that
+scalar primitive, or a composed kernel prologue—together with its return relay
+chain. Record/Replay, Sampled, Inline Shadow, and SuperCollider publish the same
+mechanism-level `ConSanBranchOnlyContinuation`; mutually exclusive entry
+strategies cannot be flattened into contradictory patch fields. SuperCollider
+ordinary indirect bodies separately extend the shared jump primitive with
+their VCC save and return location, while relay reservoirs retain one variant
+selecting either the Wave32-VCC or ordinary-scalar endpoint strategy.
 
 SuperCollider dense placement retains one mode-local
 `ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry

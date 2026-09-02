@@ -9561,3 +9561,78 @@ than checkpoint 133 and is not material Section 14.8 evidence. Full target and
 mode locality, remaining broad transaction and operating-point surfaces,
 larger legacy harvesting, final extension-proof revalidation, and the
 independent Section 14 audit remain open, so the goal remains active.
+
+### 16.137 Convergence checkpoint 136: one typed branch-only continuation route
+
+This checkpoint traced the branch-only continuation proof through direct relay
+reservoirs, MOI access and barrier placement, Record/Replay borrowed entries,
+owner/epoch prologue composition, SuperCollider FLAT and LDS lowering, relay
+inventory construction, and independent final validation. Seven flattened
+patch fields separately described whether a route existed, whether its entry
+borrowed an indirect scalar tuple, the backup VGPR and empty-EXEC continuation,
+entry and return relay vectors, and an optional superseding prologue. The
+separate `moi_borrowed_entry_jump` effect supplied an eighth piece. Although
+these values described one control-flow route, the representation admitted
+ordinary relays, a borrowed entry, and a prologue simultaneously and required
+patch-kind-dependent reconstruction in every consumer.
+
+The converged mechanism-level `ConSanBranchOnlyContinuation` retains the return
+relay chain and exactly one entry variant:
+
+- `ConSanBranchOnlyRelayEntry` owns an ordinary forward relay chain;
+- `ConSanBranchOnlyBorrowedEntry` owns the shared indirect-jump tuple, its
+  liveness-proven backup VGPR, and the optional empty-EXEC continuation; or
+- `ConSanBranchOnlyPrologueEntry` names the composed kernel-entry prologue.
+
+The branch-only router projects planning-private relay claims into that emitted
+effect. Record/Replay access and barrier lowering replace only the entry
+variant when borrowing an already placed indirect route. Prologue composition
+replaces it when the prologue takes ownership of hardware entry. Sampled,
+Inline Shadow, Record/Replay, SuperCollider, relay-reservoir validation, and
+final route validation all consume the same target- and mode-neutral product.
+The seven flattened fields and the separate MOI borrowed-jump effect are
+deleted, so their invalid mixed states are unrepresentable.
+
+The migration exposed two semantic edge cases and one test-harness defect.
+Backup VGPR zero is valid for a scalar barrier borrowed entry. A provisional
+Record/Replay reservoir may legitimately have no committed route when pruning
+rolls it back. A migrated multi-target test dereferenced an absent optional
+while inspecting an unrouted patch; it now predicates on route presence. The
+owning router test proves that planning projection preserves entry and return
+relays and that relay, borrowed, and prologue entries remain mutually
+exclusive. Final-validation corruption coverage rejects a malformed borrowed
+jump and a borrowed route attached to a nonborrowed patch role. Structural
+enforcement requires the typed contract and consumers and prohibits the eight
+retired declarations.
+
+| Signal | Checkpoint 136 | Cumulative change | Slice change from checkpoint 135 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | +1 shared contract |
+| Physical production lines | 102,766 | **-2,210** | +37 |
+| Nonblank production lines | 96,345 | **-2,739** | +25 |
+| Production implementation lines | 88,566 | **-2,884** | +27 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **269 / 51** | **-21 / 0** | 0 / 0 |
+| Flattened branch-only route/effect fields | **0** | n/a | **-8** |
+| Test inventory | **5,421** | **+76** | **+1** |
+
+The implementation is committed as `988b0198d0e`. Validation includes a
+successful `-j16` build, the architecture-boundary gate, all **89/89** focused
+branch-only router tests, all **1,301/1,301** nonphysical `ConSan.*` and
+`ConSanMoi.*` host/component tests, and all **2,918/2,918** simulator-device
+tests across Record/Replay, Sampled, InlineShadow, SuperCollider, gfx942,
+gfx950, gfx1100, gfx1201, and gfx1250. No test was removed, renamed, disabled,
+or replaced, and no physical test was run.
+
+This is an architectural investment rather than a deletion-bearing slice: the
+typed sum replaces invalid flattened states but costs 27 net implementation
+lines. The exact-route work across checkpoints 134 through 136 is therefore 49
+lines larger than checkpoint 133. Under the anti-circling rule, checkpoint 137
+must harvest adjacent routing adapters, duplicated validation, or another
+larger superseded production surface; another growth-only route wrapper is not
+acceptable. Full target and mode locality, remaining broad transaction and
+operating-point surfaces, material additional shrinkage, final extension-proof
+revalidation, and the independent Section 14 audit remain open, so the goal
+remains active.

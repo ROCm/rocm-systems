@@ -509,13 +509,16 @@ dense dispatchers, relay reservoirs, register selection, spill handling, and
 transactional ELF replacement.
 
 SCC-preserving indirect jumps have one mechanism-level scalar contract:
-`ConSanIndirectJumpSgprs` owns the jump-PC pair and saved-SCC register. An MOI
-borrowed branch-only entry retains that primitive as one exact effect.
-SuperCollider ordinary indirect bodies extend it with the VCC save and return
-location, while relay reservoirs retain one variant selecting the Wave32-VCC
-or ordinary-scalar endpoint strategy. These roles no longer encode a route in
-seven generic optionals whose partial combinations had to be interpreted from
-the patch kind.
+`ConSanIndirectJumpSgprs` owns the jump-PC pair and saved-SCC register. One
+mechanism-level `ConSanBranchOnlyContinuation` owns a branch-only body's return
+relay chain and exactly one entry strategy: ordinary relays, a borrowed entry
+that embeds the shared scalar primitive, or a composed kernel prologue.
+Record/Replay, Sampled, Inline Shadow, and SuperCollider publish that same
+route contract. SuperCollider ordinary indirect bodies separately extend the
+shared jump primitive with the VCC save and return location, while relay
+reservoirs retain one variant selecting the Wave32-VCC or ordinary-scalar
+endpoint strategy. These roles no longer encode routes in independent
+optionals whose partial combinations had to be interpreted from patch kind.
 
 Dense SuperCollider routing is likewise one exact mode-owned effect.
 Dispatcher and relocated-host patches retain the same dispatcher identity,
