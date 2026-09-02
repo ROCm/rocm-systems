@@ -17,6 +17,7 @@ add_subdirectory(rocprof-sys-sample)
 add_subdirectory(rocprof-sys-instrument)
 add_subdirectory(rocprof-sys-run)
 add_subdirectory(rocprof-sys-attach)
+add_subdirectory(rocprof-sys-exe)
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(common/tests)
