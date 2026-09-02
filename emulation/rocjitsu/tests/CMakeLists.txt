@@ -17,6 +17,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_vm_timing
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
@@ -436,6 +437,7 @@ add_executable(
     scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
+    timing/trace_source_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     decode_smoke_test.cpp
