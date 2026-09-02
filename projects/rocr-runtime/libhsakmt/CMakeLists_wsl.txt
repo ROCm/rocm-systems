@@ -207,6 +207,13 @@ install ( EXPORT ${ROCDXG_TARGET}Targets
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${ROCDXG_TARGET}
   COMPONENT dev )
 
+# Host-only PM4 frame scheduling test. BUILD_ROCDXG_TESTS is the existing
+# librocdxg test option and defaults OFF, so packaging builds remain unchanged.
+if(BUILD_ROCDXG_TESTS)
+  enable_testing()
+  add_subdirectory(tests/wddm)
+endif()
+
 # Adds the target alias rocdxg::rocdxg to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
 # hypothetical future in which the we might be included by add_subdirectory()
