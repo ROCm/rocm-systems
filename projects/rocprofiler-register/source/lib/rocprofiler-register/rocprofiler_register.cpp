@@ -31,6 +31,7 @@
 #include "details/scope_destructor.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <glog/logging.h>
 
 #include <algorithm>
@@ -56,7 +57,8 @@ using rocprofiler_register_library_api_table_func_t =
     decltype(::rocprofiler_register_library_api_table)*;
 }
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_attach
@@ -145,9 +147,9 @@ using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
 using rocp_set_api_table_data_t          = std::tuple<void*,
-                                             rocprofiler_set_api_table_t,
-                                             rocprofiler_attach_func_t,
-                                             rocprofiler_detach_func_t>;
+                                                      rocprofiler_set_api_table_t,
+                                                      rocprofiler_attach_func_t,
+                                                      rocprofiler_detach_func_t>;
 
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
@@ -196,36 +198,39 @@ enum class load_library_kind : uint8_t
 template <load_library_kind>
 struct load_library_trait;
 
+#define ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(                                   \
+    KIND, BASE_NAME, MIN_SOVERSION, MAX_SOVERSION, ENTRYPOINT)                            \
+    template <>                                                                           \
+    struct load_library_trait<load_library_kind::KIND>                                    \
+    {                                                                                     \
+        static constexpr auto        base_name           = std::string_view{ BASE_NAME }; \
+        static constexpr uint32_t    min_soversion       = MIN_SOVERSION;                 \
+        static constexpr uint32_t    max_soversion       = MAX_SOVERSION;                 \
+        static constexpr const char* required_entrypoint = ENTRYPOINT;                    \
+                                                                                          \
+        static_assert(min_soversion <= max_soversion);                                    \
+    }
+
 // These ranges enumerate known-compatible SONAME fallbacks. Libraries found through
 // weak symbols, RTLD_DEFAULT, or the unversioned name retain the existing symbol-based
 // compatibility behavior.
-template <>
-struct load_library_trait<load_library_kind::sdk>
-{
-    // rocprofiler_set_api_table has the same signature in SDK SOVERSIONs 0 and 1.
-    static constexpr auto        base_name     = std::string_view{ "rocprofiler-sdk" };
-    static constexpr uint32_t    min_soversion = 0;
-    static constexpr uint32_t    max_soversion = 1;
-    static constexpr const char* required_entrypoint = "rocprofiler_set_api_table";
-};
+// rocprofiler_set_api_table has the same signature in SDK SOVERSIONs 0 and 1.
+ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(sdk,
+                                               "rocprofiler-sdk",
+                                               0,
+                                               1,
+                                               "rocprofiler_set_api_table");
+// The attachment helper and its registration entry point were introduced in ABI 1.
+ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT(attach,
+                                               "rocprofiler-sdk-attach",
+                                               1,
+                                               1,
+                                               "rocprofiler_attach_set_api_table");
 
-template <>
-struct load_library_trait<load_library_kind::attach>
-{
-    // The attachment helper and its registration entry point were introduced in ABI 1.
-    static constexpr auto        base_name = std::string_view{ "rocprofiler-sdk-attach" };
-    static constexpr uint32_t    min_soversion       = 1;
-    static constexpr uint32_t    max_soversion       = 1;
-    static constexpr const char* required_entrypoint = "rocprofiler_attach_set_api_table";
-};
+#undef ROCPROFILER_REGISTER_DEFINE_LOAD_LIBRARY_TRAIT
 
 using rocprofiler_sdk_load_trait    = load_library_trait<load_library_kind::sdk>;
 using rocprofiler_attach_load_trait = load_library_trait<load_library_kind::attach>;
-
-static_assert(rocprofiler_sdk_load_trait::min_soversion <=
-              rocprofiler_sdk_load_trait::max_soversion);
-static_assert(rocprofiler_attach_load_trait::min_soversion <=
-              rocprofiler_attach_load_trait::max_soversion);
 
 template <typename TraitT>
 std::vector<std::string>
@@ -412,7 +417,8 @@ struct rocp_import
 };
 
 template <size_t... Idx>
-auto rocp_reg_get_imports(std::index_sequence<Idx...>)
+auto
+rocp_reg_get_imports(std::index_sequence<Idx...>)
 {
     auto _data        = std::vector<rocp_import>{};
     auto _import_scan = [&_data](auto _info) {
@@ -561,13 +567,7 @@ open_library_local(std::string_view _rocp_reg_lib)
 std::string
 format_library_candidates(const std::vector<std::string>& candidates)
 {
-    auto result = std::string{};
-    for(const auto& candidate : candidates)
-    {
-        if(!result.empty()) result += ", ";
-        result += candidate;
-    }
-    return result;
+    return fmt::format("{}", fmt::join(candidates.begin(), candidates.end(), ", "));
 }
 
 loaded_library
@@ -917,7 +917,8 @@ register_functor(const char*                                 common_name,
 };
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 common_name,
@@ -1020,12 +1021,11 @@ rocprofiler_register_library_api_table(
     if(!_activate_rocprofiler && _attachment_enabled &&
        _import_match->library_idx == ROCP_REG_HSA)
     {
-        auto attach_library =
+        auto loaded_attach_library =
             load_library(get_default_library_candidates<rocprofiler_attach_load_trait>(),
                          rocprofiler_attach_lib_register_entrypoint,
                          true);
-        auto* attachlibrary = attach_library.handle;
-        if(!attachlibrary)
+        if(!loaded_attach_library.handle)
         {
             LOG(ERROR)
                 << "Proxy queues for attachment are enabled, but the attach library "
@@ -1034,7 +1034,8 @@ rocprofiler_register_library_api_table(
             return ROCP_REG_NO_TOOLS;
         }
         rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn = nullptr;
-        *(void**) (&rocprofiler_attach_set_api_table_fn) = attach_library.entrypoint;
+        *(void**) (&rocprofiler_attach_set_api_table_fn) =
+            loaded_attach_library.entrypoint;
 
         if(!rocprofiler_attach_set_api_table_fn)
         {
