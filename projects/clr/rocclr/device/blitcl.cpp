@@ -137,9 +137,10 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
     //
     // Two deliberate choices here:
     //   * The access width stays ulong2 (128-bit). __builtin_nontemporal_store
-    //     accepts OpenCL vector types, so the hint costs no width. Dropping to
-    //     ulong to get the hint would halve bytes-in-flight per work item and
-    //     measured ~44% slower on gfx1250 for large copies.
+    //     takes a pointer to a scalar or to a native vector, and ulong2 is one,
+    //     so the hint costs no width. Narrowing to ulong to obtain the hint
+    //     halves bytes in flight per work item: measured +77% time, equivalently
+    //     -44% bandwidth, on a 1 GiB copy on gfx1250.
     //   * Only the store is non-temporal. The source may legitimately be reused
     //     by a following copy (one buffer broadcast to many), so it keeps
     //     ordinary caching.
