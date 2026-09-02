@@ -2663,6 +2663,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const bool claims_release_predecessor = consan_is_capability_arch(arch);
 
   std::vector<uint32_t> words;
+  InstructionSequence sequence(words);
   words.reserve(
       candidate.site.size / sizeof(uint32_t) + trailing_guest_words.size() + 96u +
       (spill ? spill->save_words.size() + spill->restore_words.size() : 0u) +
@@ -2710,14 +2711,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     const auto load_workgroup = instrumentation::build_private_load_b32(
         materialized_workgroup_key, private_state.workgroup_key_offset, arch);
     const auto wait_private = instrumentation::build_s_wait_private_load0(arch);
-    if (!load_epoch || !load_workgroup || !wait_private) {
+    if (!sequence.emit_all(load_epoch, load_workgroup, wait_private)) {
       errors.emplace_back(
           "ConSan MOI inline atomic patch could not load private epoch/workgroup state");
       return std::nullopt;
     }
-    words.insert(words.end(), load_epoch->begin(), load_epoch->end());
-    words.insert(words.end(), load_workgroup->begin(), load_workgroup->end());
-    words.push_back(*wait_private);
     if (private_state.workitem_owner) {
       const ConSanTargetProfile *target = consan_target_profile(arch);
       if (target == nullptr ||
@@ -2749,13 +2747,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         const auto restore_owner =
             instrumentation::build_v_readlane_b32(owner_sgpr, private_temporary, 0u, arch);
         const auto wait_owner = instrumentation::build_valu_to_salu_dependency_wait(arch);
-        if (!restore_owner || !wait_owner) {
+        if (!sequence.emit_all(restore_owner, wait_owner)) {
           errors.emplace_back(
               "ConSan MOI inline atomic patch could not restore borrowed owner state");
           return std::nullopt;
         }
-        words.insert(words.end(), restore_owner->begin(), restore_owner->end());
-        words.push_back(*wait_owner);
       }
     } else {
       errors.emplace_back("ConSan MOI inline atomic patch has no private owner derivation");
@@ -2774,19 +2770,13 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       const auto read_dispatch_high = instrumentation::build_v_readfirstlane_b32(
           static_cast<uint16_t>(dispatch_id_sgpr + 1u), materialized_workgroup_key, arch);
       const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
-      if (!load_dispatch_low || !load_dispatch_high || !wait_dispatch || !read_dispatch_low ||
-          !read_dispatch_high || !wait_scalar) {
+      if (!sequence.emit_all(load_dispatch_low, load_dispatch_high, wait_dispatch,
+                             read_dispatch_low, read_dispatch_high, wait_scalar)) {
         errors.emplace_back("ConSan MOI inline atomic patch could not reload private dispatch ID");
         return std::nullopt;
       }
-      words.insert(words.end(), load_dispatch_low->begin(), load_dispatch_low->end());
-      words.insert(words.end(), load_dispatch_high->begin(), load_dispatch_high->end());
-      words.push_back(*wait_dispatch);
-      words.push_back(*read_dispatch_low);
-      words.push_back(*read_dispatch_high);
-      words.push_back(*wait_scalar);
-      words.insert(words.end(), load_workgroup->begin(), load_workgroup->end());
-      words.push_back(*wait_private);
+      if (!sequence.emit_all(load_workgroup, wait_private))
+        return std::nullopt;
     }
   }
   if (candidate.event_kind == ConSanMoiAtomicEventKind::Release && !is_compare_exchange) {
@@ -2932,27 +2922,26 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
       errors.emplace_back("ConSan MOI inline acquire could not load its release version");
       return std::nullopt;
     }
-    const auto version_parity =
-        instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, version_before, arch);
-    const auto version_even = instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0),
-                                                                      temporary_vgpr, arch);
-    const auto decrement_retry = instrumentation::build_s_sub_u32(
-        version_retry_count, version_retry_count, scalar_positive_inline_u32(1), arch);
-    const auto retries_remain = instrumentation::build_s_cmp_lg_u32(
-        version_retry_count, scalar_positive_inline_u32(0), arch);
-    if (!version_parity || !version_even || !decrement_retry || !retries_remain) {
+    if (!sequence.emit_all(
+            instrumentation::build_v_and_b32_literal(temporary_vgpr, 1u, version_before, arch),
+            instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), temporary_vgpr,
+                                                    arch))) {
       errors.emplace_back("ConSan MOI inline acquire could not encode its version retry");
       return std::nullopt;
     }
-    words.insert(words.end(), version_parity->begin(), version_parity->end());
-    words.push_back(*version_even);
     const size_t version_even_exit = words.size();
-    words.push_back(*instrumentation::build_s_cbranch_vccnz(/*simm16=*/0, arch));
+    if (!sequence.emit(instrumentation::build_s_cbranch_vccnz(/*simm16=*/0, arch)))
+      return std::nullopt;
     words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
-    words.push_back(*decrement_retry);
-    words.push_back(*retries_remain);
+    if (!sequence.emit_all(
+            instrumentation::build_s_sub_u32(version_retry_count, version_retry_count,
+                                             scalar_positive_inline_u32(1), arch),
+            instrumentation::build_s_cmp_lg_u32(version_retry_count, scalar_positive_inline_u32(0),
+                                                arch)))
+      return std::nullopt;
     const size_t version_exhausted_exit = words.size();
-    words.push_back(*instrumentation::build_s_cbranch_scc0(/*simm16=*/0, arch));
+    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(/*simm16=*/0, arch)))
+      return std::nullopt;
     const size_t version_retry_branch = words.size();
     const int64_t retry_delta =
         static_cast<int64_t>(version_retry_begin) - static_cast<int64_t>(version_retry_branch + 1u);
