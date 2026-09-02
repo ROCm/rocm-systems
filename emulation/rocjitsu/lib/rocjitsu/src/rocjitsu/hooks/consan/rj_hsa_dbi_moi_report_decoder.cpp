@@ -61,20 +61,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
                                            ? header->diagnostic_count - raw_visible_diagnostics
                                            : 0;
   const auto *bytes = static_cast<const uint8_t *>(report_ptr);
-  const auto *exact_shadow = reinterpret_cast<const rocjitsu::ConSanMoiInlineExactShadowSlot *>(
-      bytes + expected_layout.exact_shadow_entries_offset);
-  const auto *inline_atomic_releases =
-      reinterpret_cast<const rocjitsu::ConSanMoiInlineAtomicReleaseSlot *>(
-          bytes + expected_layout.inline_atomic_release_slots_offset);
-  const uint32_t inline_atomic_release_capacity = expected_layout.inline_atomic_release_capacity;
-  const auto *inline_acquired_tokens =
-      reinterpret_cast<const volatile rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot *>(
-          bytes + expected_layout.inline_acquired_epoch_token_slots_offset);
-  const uint32_t inline_acquired_token_capacity =
-      expected_layout.inline_acquired_epoch_token_capacity;
-  const auto *inline_causal_snapshots =
-      reinterpret_cast<const rocjitsu::ConSanMoiInlineCausalSnapshot *>(
-          bytes + expected_layout.inline_causal_snapshots_offset);
   const auto *sampled_causal_windows =
       reinterpret_cast<const rocjitsu::ConSanMoiSampledCausalWindow *>(
           bytes + expected_layout.sampled_causal_windows_offset);
@@ -117,146 +103,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     view.version_after = pending.version;
     return view;
   };
-  using ExactShadowEntry = AutoMoiExactShadowEvidence;
-  std::vector<ExactShadowEntry> visible_exact_shadow;
-  for (uint32_t i = 0; i < header->exact_shadow_entry_capacity; ++i) {
-    const volatile auto &slot = exact_shadow[i];
-    const uint32_t version_before = slot.version;
-    const uint64_t packed_access = slot.packed_access;
-    const uint64_t dispatch_id = slot.dispatch_id;
-    const uint32_t byte_provenance = slot.byte_provenance;
-    const uint32_t version_after = slot.version;
-    const auto snapshot = rocjitsu::classify_consan_moi_inline_exact_snapshot(
-        {version_before, packed_access, dispatch_id, byte_provenance, version_after});
-    switch (snapshot.state) {
-    case rocjitsu::ConSanMoiInlineExactSnapshotState::Empty:
-      break;
-    case rocjitsu::ConSanMoiInlineExactSnapshotState::Stable:
-      visible_exact_shadow.push_back(
-          {i, snapshot.entry, snapshot.byte_provenance, snapshot.dispatch_id, snapshot.version});
-      break;
-    case rocjitsu::ConSanMoiInlineExactSnapshotState::Publishing:
-      ++summary.exact_incomplete_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineExactSnapshotState::ChangedDuringRead:
-      ++summary.exact_changed_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineExactSnapshotState::Malformed:
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ExactMalformed,
-           .index = i,
-           .words = {version_before, packed_access, dispatch_id, byte_provenance, version_after}});
-      ++summary.exact_malformed_snapshot_count;
-      break;
-    }
-  }
-  using InlineAtomicReleaseEntry = AutoMoiInlineAtomicReleaseEvidence;
-  std::vector<InlineAtomicReleaseEntry> visible_inline_atomic_releases;
-  for (uint32_t i = 0; i < inline_atomic_release_capacity; ++i) {
-    const volatile auto &slot = inline_atomic_releases[i];
-    const volatile auto &source_snapshot = inline_causal_snapshots[i];
-    rocjitsu::ConSanMoiInlineReleaseSnapshotWords words;
-    words.version_before = slot.version;
-    words.slot.version = words.version_before;
-    words.slot.owner_id = slot.owner_id;
-    words.slot.epoch_plus_one = slot.epoch_plus_one;
-    words.slot.workgroup_key = slot.workgroup_key;
-    words.slot.atomic_address = slot.atomic_address;
-    words.slot.dispatch_id = slot.dispatch_id;
-    words.snapshot.entry_count = source_snapshot.entry_count;
-    words.snapshot.flags = source_snapshot.flags;
-    const auto *source_entries =
-        reinterpret_cast<const volatile rocjitsu::ConSanMoiInlineCausalSnapshotEntry *>(
-            &source_snapshot.entries);
-    for (uint32_t entry_index = 0;
-         entry_index < rocjitsu::kConSanMoiInlineCausalSnapshotEntryCapacity; ++entry_index) {
-      words.snapshot.entries[entry_index].ancestor_owner_id =
-          source_entries[entry_index].ancestor_owner_id;
-      words.snapshot.entries[entry_index].ancestor_epoch_plus_one =
-          source_entries[entry_index].ancestor_epoch_plus_one;
-    }
-    words.version_after = slot.version;
-    const auto classified = rocjitsu::classify_consan_moi_inline_release_snapshot(words);
-    switch (classified.state) {
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::Empty:
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::Stable:
-      visible_inline_atomic_releases.push_back({i, words.slot, words.snapshot});
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::Publishing:
-      ++summary.release_incomplete_snapshot_count;
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::ReleasePublishing,
-           .index = i,
-           .words = {words.slot.version, words.slot.owner_id, words.slot.epoch_plus_one,
-                     words.slot.workgroup_key, words.slot.atomic_address, words.slot.dispatch_id}});
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::ChangedDuringRead:
-      ++summary.release_changed_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::CapacityOverflow:
-      ++summary.release_overflow_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::SourceIncomplete:
-      ++summary.release_source_incomplete_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineReleaseSnapshotState::Malformed:
-      ++summary.release_malformed_snapshot_count;
-      break;
-    }
-  }
-  using InlineAcquiredTokenEntry = AutoMoiInlineAcquiredTokenEvidence;
-  std::vector<InlineAcquiredTokenEntry> visible_inline_acquired_tokens;
-  std::vector<rocjitsu::ConSanMoiInlineAcquiredEpochTokenSlot> stable_inline_acquired_tokens;
-  for (uint32_t i = 0; i < inline_acquired_token_capacity; ++i) {
-    const volatile auto &slot = inline_acquired_tokens[i];
-    rocjitsu::ConSanMoiInlineAcquiredTokenSnapshot snapshot;
-    snapshot.version_before = slot.version;
-    snapshot.payload.version = snapshot.version_before;
-    snapshot.payload.consumer_owner_id = slot.consumer_owner_id;
-    snapshot.payload.producer_owner_id = slot.producer_owner_id;
-    snapshot.payload.producer_epoch_plus_one = slot.producer_epoch_plus_one;
-    snapshot.payload.workgroup_key = slot.workgroup_key;
-    snapshot.payload.kind = slot.kind;
-    snapshot.payload.dispatch_id = slot.dispatch_id;
-    snapshot.payload.source_release_address = slot.source_release_address;
-    snapshot.payload.source_release_version = slot.source_release_version;
-    snapshot.payload.consumer_epoch_plus_one = slot.consumer_epoch_plus_one;
-    snapshot.payload.reservation_version = slot.reservation_version;
-    snapshot.version_after = slot.version;
-    const auto classified = rocjitsu::consan_moi_inline_classify_acquired_token(snapshot);
-    switch (classified.state) {
-    case rocjitsu::ConSanMoiInlineAcquiredTokenState::Empty:
-      break;
-    case rocjitsu::ConSanMoiInlineAcquiredTokenState::Stable:
-      visible_inline_acquired_tokens.push_back({i, classified.token});
-      stable_inline_acquired_tokens.push_back(classified.token);
-      break;
-    case rocjitsu::ConSanMoiInlineAcquiredTokenState::Publishing:
-      ++summary.token_incomplete_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineAcquiredTokenState::Changed:
-      ++summary.token_changed_snapshot_count;
-      break;
-    case rocjitsu::ConSanMoiInlineAcquiredTokenState::Malformed:
-      ++summary.token_malformed_snapshot_count;
-      break;
-    }
-  }
-  const auto *raw_diagnostics = reinterpret_cast<const rocjitsu::ConSanMoiDiagnosticRecord *>(
-      bytes + expected_layout.diagnostic_records_offset);
-  const bool deferred_token_evidence_complete =
-      expected_engine == ConSanMoiEngine::InlineShadow &&
-      summary.token_incomplete_snapshot_count == 0 && summary.token_changed_snapshot_count == 0 &&
-      summary.token_malformed_snapshot_count == 0 && header->inline_overflow_count == 0 &&
-      header->inline_malformed_count == 0;
-  const auto deferred_filter = rocjitsu::consan_moi_filter_deferred_inline_diagnostics(
-      std::span<const rocjitsu::ConSanMoiDiagnosticRecord>(raw_diagnostics,
-                                                           raw_visible_diagnostics),
-      header->diagnostic_count, stable_inline_acquired_tokens, deferred_token_evidence_complete);
-  const auto &visible_diagnostic_indices = deferred_filter.visible_indices;
-  const uint32_t deferred_token_qualified_diagnostics = deferred_filter.qualified_count;
-  const uint32_t visible_diagnostics = static_cast<uint32_t>(visible_diagnostic_indices.size());
   const auto *sampled_metadata =
       input.static_metadata ? std::get_if<AutoMoiSampledStaticMetadata>(input.static_metadata)
                             : nullptr;
@@ -264,6 +110,7 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       sampled_metadata ? sampled_metadata->mappings
                        : std::span<const AutoMoiSampledStaticMapping>{};
   std::vector<AutoMoiSampledEvidence> visible_sampled;
+  std::vector<AutoMoiSampledEvidenceIssue> sampled_issues;
   const auto sampled_static_mapping_for_slot = [&](uint32_t slot) {
     const auto mapping = std::ranges::find_if(
         sampled_static_mappings, [&](const AutoMoiSampledStaticMapping &candidate) {
@@ -350,8 +197,8 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
         window_generation != header->generation ||
         window_epoch > rocjitsu::consan_moi_sampled_watchpoint::max_epoch ||
         window_first_entry != i || window_entry_count != 1) {
-      result.issues.push_back(
-          {.reason = AutoMoiReportEvidenceReason::SampledMalformedWindow,
+      sampled_issues.push_back(
+          {.reason = AutoMoiSampledEvidenceReason::MalformedWindow,
            .index = i,
            .words = {state_after, window_generation, header->generation, window_dispatch_id,
                      header->dispatch_id, window_epoch, window_first_entry, window_entry_count,
@@ -370,9 +217,9 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     }
     const bool has_watchpoint = snapshot.state != rocjitsu::ConSanMoiSampledSnapshotState::Empty;
     if (!has_watchpoint) {
-      result.issues.push_back({.reason = AutoMoiReportEvidenceReason::SampledEmptyWatchpoint,
-                               .index = i,
-                               .words = {static_cast<uint32_t>(snapshot.state)}});
+      sampled_issues.push_back({.reason = AutoMoiSampledEvidenceReason::EmptyWatchpoint,
+                                .index = i,
+                                .words = {static_cast<uint32_t>(snapshot.state)}});
       ++summary.sampled_malformed_snapshot_count;
       continue;
     }
@@ -390,9 +237,9 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     case rocjitsu::ConSanMoiSampledSnapshotState::Stable:
       if (snapshot.entry.epoch != window_epoch) {
         ++summary.sampled_malformed_snapshot_count;
-        result.issues.push_back({.reason = AutoMoiReportEvidenceReason::SampledMalformedWatchpoint,
-                                 .index = i,
-                                 .words = {low_after, high, window_epoch, snapshot.entry.epoch}});
+        sampled_issues.push_back({.reason = AutoMoiSampledEvidenceReason::MalformedWatchpoint,
+                                  .index = i,
+                                  .words = {low_after, high, window_epoch, snapshot.entry.epoch}});
         break;
       }
       visible_sampled.push_back(
@@ -411,9 +258,9 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       ++summary.sampled_changed_snapshot_count;
       break;
     case rocjitsu::ConSanMoiSampledSnapshotState::Malformed:
-      result.issues.push_back({.reason = AutoMoiReportEvidenceReason::SampledMalformedWatchpoint,
-                               .index = i,
-                               .words = {low_after, high, window_epoch}});
+      sampled_issues.push_back({.reason = AutoMoiSampledEvidenceReason::MalformedWatchpoint,
+                                .index = i,
+                                .words = {low_after, high, window_epoch}});
       ++summary.sampled_malformed_snapshot_count;
       break;
     }
@@ -579,79 +426,14 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       reinterpret_cast<const ConSanMoiFenceRecord *>(bytes + expected_layout.fence_records_offset);
   result.fence_records.assign(fences, fences + visible_fences);
 
-  result.diagnostics.reserve(visible_diagnostics);
-  for (uint32_t index : visible_diagnostic_indices)
-    result.diagnostics.push_back(raw_diagnostics[index]);
-  const auto *inline_metadata =
-      input.static_metadata ? std::get_if<AutoMoiInlineCompactStaticMetadata>(input.static_metadata)
-                            : nullptr;
-  const uint32_t compact_token_mapping_count =
-      inline_metadata ? inline_metadata->mapping_count : 0u;
-  if (!result.diagnostics.empty() && compact_token_mapping_count != 0u) {
-    const auto *mappings = reinterpret_cast<const ConSanMoiCompactDiagnosticTokenMapping *>(
-        bytes + input.layout.inline_compact_token_mappings_offset);
-    for (ConSanMoiDiagnosticRecord &diagnostic : result.diagnostics) {
-      const uint32_t tagged = diagnostic.first_instruction_offset;
-      constexpr uint32_t kTokenPayloadMask = consan_moi_exact_shadow::max_compact_token;
-      constexpr uint32_t kAllowedBits =
-          consan_moi_exact_shadow::compact_diagnostic_token_tag | kTokenPayloadMask;
-      if ((tagged & consan_moi_exact_shadow::compact_diagnostic_token_tag) == 0u)
-        continue;
-      const uint16_t token = static_cast<uint16_t>(tagged & kTokenPayloadMask);
-      const bool well_formed = token != 0u && (tagged & ~kAllowedBits) == 0u;
-      const ConSanMoiCompactDiagnosticTokenMapping *current = nullptr;
-      const ConSanMoiCompactDiagnosticTokenMapping *resolved = nullptr;
-      bool current_ambiguous = false;
-      bool prior_ambiguous = false;
-      if (well_formed) {
-        for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
-          const auto &mapping = mappings[index];
-          if (mapping.instruction_offset != diagnostic.second_instruction_offset)
-            continue;
-          if (current != nullptr &&
-              current->owner_descriptor_file_offset != mapping.owner_descriptor_file_offset) {
-            current_ambiguous = true;
-            break;
-          }
-          current = &mapping;
-        }
-        if (current != nullptr && !current_ambiguous) {
-          for (uint32_t index = 0; index < compact_token_mapping_count; ++index) {
-            const auto &mapping = mappings[index];
-            if (mapping.owner_descriptor_file_offset != current->owner_descriptor_file_offset ||
-                mapping.token != token)
-              continue;
-            if (resolved != nullptr && resolved->instruction_offset != mapping.instruction_offset) {
-              prior_ambiguous = true;
-              break;
-            }
-            resolved = &mapping;
-          }
-        }
-      }
-      if (!well_formed || current == nullptr || current_ambiguous || resolved == nullptr ||
-          prior_ambiguous) {
-        ++summary.inline_malformed_count;
-        result.issues.push_back(
-            {.reason = AutoMoiReportEvidenceReason::CompactDiagnosticTokenUnresolved,
-             .index = diagnostic.second_instruction_offset,
-             .words = {tagged, well_formed, current_ambiguous, prior_ambiguous}});
-        continue;
-      }
-      diagnostic.first_instruction_offset = resolved->instruction_offset;
-    }
-  }
+  const auto *raw_diagnostics = reinterpret_cast<const ConSanMoiDiagnosticRecord *>(
+      bytes + expected_layout.diagnostic_records_offset);
+  result.diagnostics.assign(raw_diagnostics, raw_diagnostics + raw_visible_diagnostics);
 
   summary.visible_access_record_count = committed_records;
   summary.visible_barrier_record_count = visible_barriers;
   summary.visible_atomic_record_count = visible_atomics;
   summary.visible_fence_record_count = visible_fences;
-  summary.visible_diagnostic_record_count = visible_diagnostics;
-  summary.visible_inline_publication_count =
-      expected_engine == ConSanMoiEngine::InlineShadow ? header->event_counter : 0;
-  summary.visible_exact_shadow_entry_count = visible_exact_shadow.size();
-  summary.visible_inline_atomic_release_count = visible_inline_atomic_releases.size();
-  summary.visible_inline_acquired_token_count = visible_inline_acquired_tokens.size();
   summary.visible_sampled_watchpoint_count = visible_sampled.size();
   summary.visible_sampled_sync_metadata_count = visible_sampled_sync_metadata;
   summary.dropped_access_record_count = dropped_records;
@@ -671,13 +453,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
       sampled_watchpoint_capacity != 0 ? header->sampled_unsupported_sync_count : 0;
   summary.sampled_malformed_sync_count +=
       sampled_watchpoint_capacity != 0 ? header->sampled_malformed_sync_count : 0;
-  if (expected_engine == ConSanMoiEngine::InlineShadow) {
-    summary.inline_undercoverage_count = header->inline_undercoverage_count;
-    summary.inline_overflow_count = header->inline_overflow_count;
-    summary.inline_unsupported_count = header->inline_unsupported_count;
-    summary.inline_malformed_count += header->inline_malformed_count;
-  }
-
   result.failure = AutoMoiReportDecodeFailure::None;
   result.header = *header;
   switch (expected_engine) {
@@ -685,23 +460,23 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
     result.mode = AutoMoiRecordReplayDecodedReport{
         .access_records = std::move(compact_access_records.replay_records)};
     break;
-  case ConSanMoiEngine::InlineShadow:
-    result.mode = AutoMoiInlineShadowDecodedReport{
-        .deferred_token_qualified_diagnostic_count = deferred_token_qualified_diagnostics,
-        .exact_shadow = std::move(visible_exact_shadow),
-        .atomic_releases = std::move(visible_inline_atomic_releases),
-        .acquired_tokens = std::move(visible_inline_acquired_tokens),
-    };
-    break;
+  case ConSanMoiEngine::InlineShadow: {
+    AutoMoiInlineShadowDecodeResult inline_result = decode_auto_moi_inline_shadow_report(
+        input, *header, snapshot.bytes, raw_visible_diagnostics, summary);
+    result.diagnostics = std::move(inline_result.diagnostics);
+    result.mode = std::move(inline_result.decoded);
+  } break;
   case ConSanMoiEngine::Sampled:
     result.mode = AutoMoiSampledDecodedReport{
         .watchpoint_slots_examined = sampled_watchpoint_slots_examined,
         .pending_release_slots_examined = sampled_pending_release_slots_examined,
         .synchronization_evidence_complete = sampled_sync_evidence_complete,
         .evidence = std::move(visible_sampled),
+        .issues = std::move(sampled_issues),
     };
     break;
   }
+  summary.visible_diagnostic_record_count = result.diagnostics.size();
   return result;
 }
 

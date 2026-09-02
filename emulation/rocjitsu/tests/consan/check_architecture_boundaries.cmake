@@ -2216,6 +2216,7 @@ set(
     rj_hsa_dbi_moi_report_analyzer.cpp
     rj_hsa_dbi_moi_report_analyzer.h
     rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
+    rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
     rj_hsa_dbi_moi_inline_shadow_report_decoder.h
     rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
     rj_hsa_dbi_moi_record_replay_report_analyzer.h
@@ -2323,6 +2324,11 @@ if(NOT _runtime_analysis_build MATCHES "rj_hsa_dbi_moi_record_replay_report_deco
         "ConSan Record/Replay report decoder lost its physical build owner"
     )
 endif()
+if(NOT _runtime_analysis_build MATCHES "rj_hsa_dbi_moi_inline_shadow_report_decoder[.]cpp")
+    message(FATAL_ERROR
+        "ConSan InlineShadow report decoder lost its physical build owner"
+    )
+endif()
 foreach(_decoder_contract IN ITEMS rj_hsa_dbi_moi_report_decoder.cpp rj_hsa_dbi_moi_report_decoder.h)
     _consan_assert_no_match(
         "${_hook_dir}/${_decoder_contract}"
@@ -2371,10 +2377,22 @@ _consan_assert_no_match(
     "CompactRecordReplayAccessRecords compact_record_replay_access_records"
     "common report decoding must not reimplement Record/Replay compaction"
 )
+foreach(
+    _inline_shadow_decoder
+    IN ITEMS
+        rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
+        rj_hsa_dbi_moi_inline_shadow_report_decoder.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_inline_shadow_decoder}"
+        "RecordReplay|Sampled"
+        "InlineShadow decoded evidence must not expose another mode"
+    )
+endforeach()
 _consan_assert_no_match(
-    "${_hook_dir}/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
-    "RecordReplay|Sampled"
-    "InlineShadow decoded evidence must not expose another mode"
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.cpp"
+    "classify_consan_moi_inline|consan_moi_inline_classify|consan_moi_filter_deferred_inline|ConSanMoiCompactDiagnosticTokenMapping"
+    "common report decoding must not reimplement InlineShadow evidence decoding"
 )
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_sampled_report_decoder.h"

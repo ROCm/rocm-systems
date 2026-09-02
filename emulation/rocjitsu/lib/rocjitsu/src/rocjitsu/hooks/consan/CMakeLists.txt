@@ -28,6 +28,7 @@ target_link_libraries(rocjitsu_consan_report_snapshot PRIVATE util)
 add_library(
     rocjitsu_consan_report_decoder
     STATIC
+        rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
         rj_hsa_dbi_moi_record_replay_report_decoder.cpp
         rj_hsa_dbi_moi_report_decoder.cpp
 )

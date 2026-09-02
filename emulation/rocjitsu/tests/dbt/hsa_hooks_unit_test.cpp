@@ -3778,16 +3778,17 @@ TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDia
             "header_size=7");
 
   rocjitsu::consan_hook::AutoMoiDecodedReport decoded;
+  input.layout.engine = rocjitsu::ConSanMoiEngine::InlineShadow;
   decoded.header.generation = 5;
-  decoded.issues.push_back({
-      .reason = rocjitsu::consan_hook::AutoMoiReportEvidenceReason::ExactMalformed,
+  rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport inline_decoded;
+  inline_decoded.issues.push_back({
+      .reason = rocjitsu::consan_hook::AutoMoiInlineShadowEvidenceReason::ExactMalformed,
       .index = 3,
       .words = {2, 0x11, 0x22, 0x33, 4},
   });
-  rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis replay_analysis;
-  replay_analysis.pressure.unavailable_reason =
-      rocjitsu::consan_hook::RecordReplayPressureTelemetry::UnavailableReason::NoDispatchDirectory;
-  rocjitsu::consan_hook::AutoMoiModeAnalysis mode_analysis = replay_analysis;
+  decoded.mode = std::move(inline_decoded);
+  rocjitsu::consan_hook::AutoMoiModeAnalysis mode_analysis =
+      rocjitsu::consan_hook::AutoMoiInlineShadowAnalysis{};
   const auto rendered = rocjitsu::consan_hook::render_auto_moi_report(
       {input, decoded, decoded.summary, &mode_analysis});
   ASSERT_GE(rendered.size(), 2u);

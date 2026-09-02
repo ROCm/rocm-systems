@@ -138,9 +138,9 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
                 inline_shadow_decoded.deferred_token_qualified_diagnostic_count);
   }
   bool rendered_first_exact_malformed = false;
-  for (const AutoMoiReportEvidenceIssue &issue : decoded.issues) {
+  for (const AutoMoiInlineShadowEvidenceIssue &issue : inline_shadow_decoded.issues) {
     switch (issue.reason) {
-    case AutoMoiReportEvidenceReason::ExactMalformed:
+    case AutoMoiInlineShadowEvidenceReason::ExactMalformed:
       if (!rendered_first_exact_malformed) {
         log_message(kLogEvidence,
                     "ConSan MOI first malformed exact snapshot reader=%llu index=%u "
@@ -154,7 +154,7 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
         rendered_first_exact_malformed = true;
       }
       break;
-    case AutoMoiReportEvidenceReason::ReleasePublishing:
+    case AutoMoiInlineShadowEvidenceReason::ReleasePublishing:
       log_message(kLogEvidence,
                   "ConSan MOI auto incomplete-inline-atomic-release reader=%llu index=%u "
                   "version=%u owner=%u epoch_plus_one=%u workgroup=%u address=0x%llx "
@@ -165,7 +165,20 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
                   static_cast<unsigned long long>(issue.words[4]),
                   static_cast<unsigned long long>(issue.words[5]));
       break;
-    case AutoMoiReportEvidenceReason::SampledMalformedWindow:
+    case AutoMoiInlineShadowEvidenceReason::CompactDiagnosticTokenUnresolved:
+      log_message(kLogEvidence,
+                  "ConSan MOI compact diagnostic token unresolved reader=%llu current=0x%x "
+                  "tagged=0x%x well_formed=%s current_ambiguous=%s "
+                  "prior_ambiguous=%s",
+                  static_cast<unsigned long long>(input.reader), issue.index,
+                  static_cast<uint32_t>(issue.words[0]), issue.words[1] != 0 ? "true" : "false",
+                  issue.words[2] != 0 ? "true" : "false", issue.words[3] != 0 ? "true" : "false");
+      break;
+    }
+  }
+  for (const AutoMoiSampledEvidenceIssue &issue : sampled_decoded.issues) {
+    switch (issue.reason) {
+    case AutoMoiSampledEvidenceReason::MalformedWindow:
       log_message(kLogEvidence,
                   "ConSan MOI sampled malformed window index=%u state=%u generation=%llu/%llu "
                   "dispatch=%llu/%llu epoch=%u first=%u entries=%u "
@@ -179,25 +192,16 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
                   static_cast<uint32_t>(issue.words[7]), static_cast<uint32_t>(issue.words[8]),
                   static_cast<uint32_t>(issue.words[9]));
       break;
-    case AutoMoiReportEvidenceReason::SampledEmptyWatchpoint:
+    case AutoMoiSampledEvidenceReason::EmptyWatchpoint:
       log_message(kLogEvidence, "ConSan MOI sampled malformed empty watchpoint index=%u state=%u",
                   issue.index, static_cast<uint32_t>(issue.words[0]));
       break;
-    case AutoMoiReportEvidenceReason::SampledMalformedWatchpoint:
+    case AutoMoiSampledEvidenceReason::MalformedWatchpoint:
       log_message(kLogEvidence,
                   "ConSan MOI sampled malformed packed watchpoint index=%u low=0x%08x "
                   "high=0x%08x epoch=%u",
                   issue.index, static_cast<uint32_t>(issue.words[0]),
                   static_cast<uint32_t>(issue.words[1]), static_cast<uint32_t>(issue.words[2]));
-      break;
-    case AutoMoiReportEvidenceReason::CompactDiagnosticTokenUnresolved:
-      log_message(kLogEvidence,
-                  "ConSan MOI compact diagnostic token unresolved reader=%llu current=0x%x "
-                  "tagged=0x%x well_formed=%s current_ambiguous=%s "
-                  "prior_ambiguous=%s",
-                  static_cast<unsigned long long>(input.reader), issue.index,
-                  static_cast<uint32_t>(issue.words[0]), issue.words[1] != 0 ? "true" : "false",
-                  issue.words[2] != 0 ? "true" : "false", issue.words[3] != 0 ? "true" : "false");
       break;
     }
   }
