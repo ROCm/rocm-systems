@@ -9891,3 +9891,72 @@ growth-only representation would violate the anti-circling rule. Full target
 and mode locality, remaining broad transaction and operating-point surfaces,
 larger whole-refactoring deletion, final extension-proof revalidation, and the
 independent Section 14 audit remain open, so the goal remains active.
+
+### 16.142 Convergence checkpoint 141: Record/Replay retains exact routing products
+
+The scalar-routing trace continued from the mode-planning boundary into
+Record/Replay event planning and fence lowering. Event plans retained a
+`ConSanMoiScalarRouterAllocation`, but native event emission used only its
+indirect-jump member. Fence lowering was the exception: it reopened the
+allocation, separately inspected a retained compact-spill boolean, and
+reconstructed dense dispatch-key and call-return registers either from the
+allocation or from fixed `exec_save + 5/+6` offsets. The event plan therefore
+carried a placement allocation and a spill discriminator while one downstream
+consumer independently rebuilt the already-resolved mode product.
+
+Record/Replay event resolution now retains the exact products that cross into
+emission: the optional indirect jump used by local islands and returns, and
+the optional `MoiDenseRouterPlan` selected from the already-retained scalar ABI
+and normalized target facts. Fence lowering consumes that dense plan directly.
+The compact-spill discriminator, synthetic scalar-router reconstruction,
+product-to-allocation compatibility accessor, and fixed-offset dense-register
+reconstruction are deleted. Barrier and prologue consumers likewise read the
+exact indirect-jump product rather than reopening a broader allocation.
+
+The owner-level regression test constructs both fixed and compact
+Record/Replay scalar layouts and proves that event resolution retains the
+selected indirect jump, dispatch key, and call-return pair unchanged.
+Structural enforcement requires both exact products in the event contract,
+rejects the retired allocation and spill discriminator there, and prohibits
+fence lowering from reopening scalar-router allocations or rebuilding fixed
+dense registers.
+
+The immediately preceding issue-fix commit added 18 implementation lines and
+two tests inside the measured state after checkpoint 140. The slice-local
+column below is therefore measured from that pre-slice state (`df13726b947`),
+while the cumulative column remains measured from the fifth-refactoring
+baseline.
+
+| Signal | Checkpoint 141 | Cumulative change | Refactoring slice change |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,728 | **-2,248** | **-19** |
+| Nonblank production lines | 96,311 | **-2,773** | **-18** |
+| Production implementation lines | 88,528 | **-2,922** | **-18** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| Record-event placement allocations / spill discriminators | **0** | n/a | **-2** |
+| Fence-local dense-register reconstruction paths | **0** | n/a | **-2** |
+| Test inventory | **5,424** | **+79** | **+1** |
+
+The implementation is committed as `6aefe277f53`. Validation includes a
+successful full `-j16` build, the architecture-boundary gate, all **27/27**
+focused mode-planning and fence-routing host tests, and the correct/incorrect
+Record/Replay fence-publication pair on all five simulated targets. The final
+convergence gate then passed all **4,789/4,789** nonphysical ConSan tests in
+213.74 seconds, including the complete currently registered **2,918/2,918**
+simulator-device matrix across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.
+No test was removed, renamed, disabled, or replaced, and no physical GPU test
+was run under the current infrequent-physical policy.
+
+This deletion-bearing slice repays the entire 11-line route investment
+outstanding at checkpoint 140 and leaves the checkpoint-133-through-141 route
+series seven implementation lines smaller than it began. It also removes a
+parallel semantic authority rather than compressing syntax: mode planning now
+chooses dense routing, Record/Replay event planning snapshots it, and native
+fence lowering only consumes it. Full target and mode locality, remaining
+broad transaction and operating-point surfaces, larger whole-refactoring
+deletion, final extension-proof revalidation, and the independent Section 14
+audit remain open, so the goal remains active.
