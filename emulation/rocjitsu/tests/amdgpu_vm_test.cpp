@@ -267,7 +267,7 @@ TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
   EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
 }
 
-TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
+TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
   amdgpu::GpuMemory memory("memory");
   amdgpu::L2Cache l2("l2");
   const amdgpu::ComputeUnitCore::Config config{
@@ -279,8 +279,9 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
       .lds_size_kb = 64,
   };
 
-  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
-               util::ConfigError);
+  auto compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2);
+  ASSERT_NE(compute_unit, nullptr);
+  EXPECT_EQ(compute_unit->arch(), ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {

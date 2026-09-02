@@ -437,7 +437,7 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   EXPECT_EQ(gfx1250_binding->gfx_target_version, 120500u);
   EXPECT_EQ(gfx1251_binding->gfx_target_version, 120501u);
   EXPECT_TRUE(gfx1250_binding->capabilities.execution_implemented);
-  EXPECT_FALSE(gfx1251_binding->capabilities.execution_implemented);
+  EXPECT_TRUE(gfx1251_binding->capabilities.execution_implemented);
   EXPECT_NE(gfx1250_binding->capabilities.instruction_features,
             gfx1251_binding->capabilities.instruction_features);
   EXPECT_EQ(registry.find_default_gpu_target(*gfx1250), gfx1250_binding);
