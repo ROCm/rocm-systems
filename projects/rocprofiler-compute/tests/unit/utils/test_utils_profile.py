@@ -328,19 +328,17 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     ) not in errors
 
 
-@pytest.mark.parametrize(
-    "captured_output",
-    [
-        "Option 'spirv-expand-step' registered more than once!",
-        "ROCPROFILER_REGISTER_LIBRARY is already set to librocprofiler-sdk.so",
-    ],
-)
-def test_run_prof_failure_prints_conflicting_rocm_message(
-    tmp_path, monkeypatch, captured_output
-):
+def test_run_prof_failure_prints_conflicting_rocm_message(tmp_path, monkeypatch):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
+    abort_line = "Option 'spirv-expand-step' registered more than once!"
+    captured_output = "\n".join([
+        "[rocprofiler-sdk] tool initialization ::     0.146483 sec",
+        "running vcopy",
+        abort_line,
+        "workload stderr",
+    ])
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -362,6 +360,7 @@ def test_run_prof_failure_prints_conflicting_rocm_message(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
 
+    assert (abort_line, False) in errors
     assert (
         utils_profile._CONFLICTING_ROCM_INSTALLATIONS_MESSAGE,
         False,
