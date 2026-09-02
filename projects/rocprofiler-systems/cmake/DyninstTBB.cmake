@@ -47,6 +47,20 @@ if(ROCPROFSYS_BUILD_TBB)
     set(TBB_ROOT_DIR "${TPL_STAGING_PREFIX}/tbb" CACHE PATH "TBB root directory" FORCE)
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/include" "${TBB_ROOT_DIR}/lib")
 
+    # oneTBB's tbbmalloc version script (src/tbbmalloc/def/lin64-tbbmalloc.def) hides
+    # libtbb/libirc symbols by exact name in its local: block, but libtbbmalloc defines
+    # none of them. lld reports that under --no-undefined-version, which is the upstream
+    # default, so opt this ExternalProject back out. Not forwarded from the parent scope:
+    # CONFIGURE_COMMAND passes an explicit flag list.
+    # Upstream: https://github.com/uxlfoundation/oneTBB/issues/1274 (open since 2023).
+    include(CheckLinkerFlag)
+    check_linker_flag(C "-Wl,--undefined-version" _tbb_have_undefined_version)
+    if(_tbb_have_undefined_version)
+        set(_tbb_shared_linker_flags "-Wl,--undefined-version")
+    else()
+        set(_tbb_shared_linker_flags "")
+    endif()
+
     # Build byproducts for Ninja dependency tracking.
     # SOVERSIONs from oneTBB 2022.3.0:
     #   libtbb:        __TBB_BINARY_VERSION  in include/oneapi/tbb/version.h  (= 12)
@@ -77,6 +91,7 @@ if(ROCPROFSYS_BUILD_TBB)
             -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DCMAKE_INSTALL_LIBDIR=lib
             -DCMAKE_BUILD_RPATH=\$ORIGIN -DCMAKE_INSTALL_RPATH=\$ORIGIN -DTBB_TEST=OFF
             -DTBB_STRICT=OFF -DTBB_DISABLE_HWLOC_AUTOMATIC_SEARCH=ON
+            "-DCMAKE_SHARED_LINKER_FLAGS=${_tbb_shared_linker_flags}"
         BUILD_COMMAND
             ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_tbb_bundled_build_type}
             --target tbb tbbmalloc tbbmalloc_proxy
