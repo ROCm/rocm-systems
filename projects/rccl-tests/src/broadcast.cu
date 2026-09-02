@@ -564,16 +564,29 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   const int ginContext = 0;
   const unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext };
+
+  // All GIN traffic on this path is confined to block 0, and so are the signal
+  // read and wait that bracket it. `bar` synchronizes same-index blocks across
+  // ranks, so it orders block n against block n of every peer and nothing else.
+  // With the read on every CTA, a non-root's block n could sample the signal
+  // AFTER the root's block 0 had already landed its put -- block 0 and block n
+  // share no barrier edge -- and would then wait for base+2, which nobody posts.
+  // Keeping the read, the puts and the wait all on block 0 puts them on the one
+  // edge that does order them. Other CTAs still run the grid-strided local copy.
+  const bool commCta = (blockIdx.x == 0);
+
   // ncclGin_SignalInc is a *remote* action: each put increments the receiving
   // peer's signal (confirmed vs AllGather/AlltoAll, where a rank receives N puts
   // and waits base+N). So the root -- which receives no puts -- must not wait on
   // its own signal; instead every non-root receives exactly one put and waits
   // base+1. flush() alone does not guarantee remote data has settled, so this
   // receiver-side waitSignal is what makes the payload visible on non-roots.
-  const uint64_t signalValue = gin.readSignal(signalIndex);
+  const uint64_t signalValue = commCta ? gin.readSignal(signalIndex) : 0;
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   // Entry barrier: every rank's recv buffer quiescent before root starts writing.
+  // Every CTA takes part -- this is a cross-rank barrier keyed by blockIdx.x, so
+  // dropping a block here would hang the matching block on every other rank.
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   if (devComm.rank == root) {
@@ -586,17 +599,21 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
 
     // Flat fan-out: one put per non-self peer; skip self. The backend segments
     // large messages internally (<=128 MiB copies, signal on the final one).
-    for (int r = tid; r < devComm.nRanks; r += nthreads) {
-      if (r == root) continue;
-      gin.put(ncclTeamWorld(devComm), r,
-          recvwin, recvoffset,
-          sendwin, sendoffset,
-          msgBytes, ncclGin_SignalInc{signalIndex});
-    }
+    // Strided by blockDim.x rather than grid-wide, so block 0 covers every rank
+    // even where nRanks exceeds one block's width.
+    if (commCta) {
+      for (int r = threadIdx.x; r < devComm.nRanks; r += blockDim.x) {
+        if (r == root) continue;
+        gin.put(ncclTeamWorld(devComm), r,
+            recvwin, recvoffset,
+            sendwin, sendoffset,
+            msgBytes, ncclGin_SignalInc{signalIndex});
+      }
 
-    // flush(): all source buffers safe to reuse once the puts are pushed.
-    gin.flush(ncclCoopCta());
-  } else {
+      // flush(): all source buffers safe to reuse once the puts are pushed.
+      gin.flush(ncclCoopCta());
+    }
+  } else if (commCta) {
     // Each non-root receives exactly one put from root; wait for it to settle.
     gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + 1);
   }
@@ -649,10 +666,18 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   ncclGin gin { devComm, /*context=*/0 };
   const unsigned int sigScatter = 0;
   const unsigned int sigGather = 1;
-  const uint64_t baseScatter = gin.readSignal(sigScatter);
-  const uint64_t baseGather = gin.readSignal(sigGather);
+
+  // Both phases put over ranks rather than over elements, so all GIN traffic
+  // here is block 0's, and both signal reads and both waits stay with it. `bar`
+  // only orders block n against block n of each peer, so a read on any other CTA
+  // could sample a signal an incoming put had already advanced and then wait for
+  // a value nobody posts. See the matching note in GinHybridBroadcastKernel.
+  const bool commCta = (blockIdx.x == 0);
+  const uint64_t baseScatter = commCta ? gin.readSignal(sigScatter) : 0;
+  const uint64_t baseGather = commCta ? gin.readSignal(sigGather) : 0;
 
   // Entry barrier: every rank's recvbuff quiescent before the root scatters.
+  // All CTAs participate; it is keyed by blockIdx.x across ranks.
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
@@ -668,22 +693,25 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
       const size_t myElt = (size_t)rank * baseCount;
       BroadcastLocalCopy<T>(ldst + myElt, lsrc + myElt, myCount, tid, nthreads);
     }
-    for (int r = tid; r < N; r += nthreads) {
-      if (r == root) continue;
-      const gin_sdma::Chunk rChunk = gin_sdma::sagChunk(count, N, r);
-      const size_t rOff = rChunk.eltOffset * sizeof(T);
-      // Backend segments large copies internally (<=128 MiB, 30-bit-safe).
-      gin.put(ncclTeamWorld(devComm), r,
-          recvwin, recvoffset + rOff,
-          sendwin, sendoffset + rOff,
-          rChunk.count * sizeof(T), ncclGin_SignalInc{sigScatter});
+    if (commCta) {
+      for (int r = threadIdx.x; r < N; r += blockDim.x) {
+        if (r == root) continue;
+        const gin_sdma::Chunk rChunk = gin_sdma::sagChunk(count, N, r);
+        const size_t rOff = rChunk.eltOffset * sizeof(T);
+        // Backend segments large copies internally (<=128 MiB, 30-bit-safe).
+        gin.put(ncclTeamWorld(devComm), r,
+            recvwin, recvoffset + rOff,
+            sendwin, sendoffset + rOff,
+            rChunk.count * sizeof(T), ncclGin_SignalInc{sigScatter});
+      }
     }
     // No intermediate flush: the scatter and allgather sources are both the
     // read-only sendwin, so there is no source-reuse hazard, and completion is
     // signal-based. Skipping it lets the scatter and allgather puts pipeline;
     // the single flush at the end drains all dirty queues.
-  } else {
+  } else if (commCta) {
     // Wait (CTA-wide) for my scatter slice before I forward it in the allgather.
+    // Only block 0 forwards, so only block 0 needs the scatter data visible.
     gin.waitSignal(ncclCoopCta(), sigScatter, baseScatter + 1);
   }
 
@@ -693,17 +721,20 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   // (made visible by the waitSignal above).
   ncclWindow_t myWin = (rank == root) ? sendwin : recvwin;
   const size_t myWinOff = (rank == root) ? (sendoffset + myByteOff) : (recvoffset + myByteOff);
-  for (int r = tid; r < N; r += nthreads) {
-    if (r == rank) continue;
-    // Backend segments large copies internally (<=128 MiB, 30-bit-safe).
-    gin.put(ncclTeamWorld(devComm), r,
-        recvwin, recvoffset + myByteOff,
-        myWin, myWinOff,
-        myBytes, ncclGin_SignalInc{sigGather});
+  if (commCta) {
+    for (int r = threadIdx.x; r < N; r += blockDim.x) {
+      if (r == rank) continue;
+      // Backend segments large copies internally (<=128 MiB, 30-bit-safe).
+      gin.put(ncclTeamWorld(devComm), r,
+          recvwin, recvoffset + myByteOff,
+          myWin, myWinOff,
+          myBytes, ncclGin_SignalInc{sigGather});
+    }
+    // Every rank (root included) receives exactly N-1 allgather puts. Block 0
+    // issued them all, so it is also the only CTA with queues left to drain.
+    gin.waitSignal(ncclCoopCta(), sigGather, baseGather + (uint64_t)(N - 1));
+    gin.flush(ncclCoopCta());
   }
-  // Every rank (root included) receives exactly N-1 allgather puts.
-  gin.waitSignal(ncclCoopCta(), sigGather, baseGather + (uint64_t)(N - 1));
-  gin.flush(ncclCoopCta());
 }
 
 // Large-message Broadcast via a device-side PIPELINED RING (the van de Geijn ring
