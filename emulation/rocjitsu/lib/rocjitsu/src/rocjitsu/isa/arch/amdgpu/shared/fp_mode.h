@@ -136,6 +136,22 @@ inline int compare_exact(ExactF64Sum sum, double value) {
   return sum.error < 0.0 ? -1 : sum.error > 0.0 ? 1 : 0;
 }
 
+/// @brief Convert F32 to BF16 using an AMDGPU MODE.FP_ROUND encoding.
+inline uint16_t f32_to_bf16_round(float value, uint32_t round_mode) {
+  uint32_t bits = std::bit_cast<uint32_t>(value);
+  if ((round_mode & 3u) == 0u || (bits & 0x7f800000u) == 0x7f800000u)
+    return util::f32_to_bf16_rne(value);
+
+  uint16_t result = static_cast<uint16_t>(bits >> 16);
+  if ((bits & 0xffffu) == 0u)
+    return result;
+
+  const bool negative = (bits & 0x80000000u) != 0u;
+  if (((round_mode & 3u) == 1u && !negative) || ((round_mode & 3u) == 2u && negative))
+    ++result;
+  return result;
+}
+
 inline uint16_t next_up_bf16(uint16_t value) {
   if ((value & 0x7fffu) > 0x7f80u || value == 0x7f80u)
     return value;
@@ -266,7 +282,7 @@ inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float mu
       else if (result > 1.0f)
         result = 1.0f;
     }
-    return util::f32_to_bf16_round(result, round_mode);
+    return detail::f32_to_bf16_round(result, round_mode);
   }
 
   const double product = static_cast<double>(multiplicand) * static_cast<double>(multiplier);
@@ -275,7 +291,7 @@ inline uint16_t fma_f32_to_bf16_nearest_environment(float multiplicand, float mu
     if (clamp)
       return 0;
     detail::ScopedFenv result_environment(round_mode);
-    return util::f32_to_bf16_round(std::fma(multiplicand, multiplier, addend), round_mode);
+    return detail::f32_to_bf16_round(std::fma(multiplicand, multiplier, addend), round_mode);
   }
   if (clamp) {
     if (detail::compare_exact(exact, 0.0) <= 0)

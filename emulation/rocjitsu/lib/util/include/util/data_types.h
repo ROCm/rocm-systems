@@ -293,23 +293,6 @@ inline uint16_t f32_to_bf16_rne(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
-/// @brief Convert F32 to BF16 using a MODE.FP_ROUND encoding.
-/// @param round_mode 0=nearest-even, 1=+infinity, 2=-infinity, 3=toward-zero.
-inline uint16_t f32_to_bf16_round(float val, uint32_t round_mode) {
-  uint32_t f = std::bit_cast<uint32_t>(val);
-  if ((round_mode & 3u) == 0u || (f & 0x7f800000u) == 0x7f800000u)
-    return f32_to_bf16_rne(val);
-
-  uint16_t result = static_cast<uint16_t>(f >> 16);
-  if ((f & 0xffffu) == 0u)
-    return result;
-
-  const bool negative = (f & 0x80000000u) != 0u;
-  if (((round_mode & 3u) == 1u && !negative) || ((round_mode & 3u) == 2u && negative))
-    ++result;
-  return result;
-}
-
 /// @brief Convert F32 to BF16 RNE with MODE.FP16_OVFL overflow handling.
 /// @details RDNA4 and CDNA4 data-conversion prose define FP16_OVFL for BF16
 /// destinations; use this for explicit F32-to-BF16 conversion results.
