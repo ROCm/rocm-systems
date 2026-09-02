@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/amd_kfd_lifecycle.h"
+#include "core/util/utils.h"
 
 namespace rocr {
 namespace AMD {
@@ -99,7 +100,15 @@ hsa_status_t KfdLifecycle::ShutDown() {
   }
 
   hsa_status_t status = HSA_STATUS_SUCCESS;
-  auto record = [&status](hsa_status_t err) {
+  // Say which stage failed. The caller often discards this status, and only
+  // the first error survives below, so without a diagnostic a failed release
+  // is indistinguishable from a clean shutdown. The names are lifecycle
+  // stages rather than thunk entry points because this class deliberately
+  // does not know which thunk call implements each one.
+  auto record = [&status](const char* stage, hsa_status_t err) {
+    if (err == HSA_STATUS_SUCCESS) return;
+
+    debug_print("KfdLifecycle::ShutDown() failed to %s: 0x%x\n", stage, static_cast<unsigned>(err));
     if (status == HSA_STATUS_SUCCESS) status = err;
   };
 
@@ -108,17 +117,17 @@ hsa_status_t KfdLifecycle::ShutDown() {
   // release a reference twice.
   if (owns_runtime_enable_) {
     owns_runtime_enable_ = false;
-    record(ops_.disable_runtime());
+    record("disable runtime", ops_.disable_runtime());
   }
 
   if (owns_snapshot_) {
     owns_snapshot_ = false;
-    record(ops_.release_snapshot());
+    record("release topology snapshot", ops_.release_snapshot());
   }
 
   // The close stage is Close(), which carries the same ownership discipline
   // and reports success when there is no open reference to give back.
-  record(Close());
+  record("close KFD", Close());
 
   return status;
 }
