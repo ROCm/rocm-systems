@@ -25,15 +25,26 @@ struct MoiRuntimeWorkgroupGatePlan {
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
 };
 
+/// Exact normalized facts supplied by a mode owner before shared gate
+/// eligibility and cache selection are resolved.
+struct MoiRuntimeWorkgroupGateInputs {
+  uint16_t exec_save_sgpr = 0;
+  uint32_t sample_stride = 1;
+  uint32_t sample_offset = 0;
+  MoiRuntimeWorkgroupGatePlan::Flavor flavor = MoiRuntimeWorkgroupGatePlan::Flavor::Sampled;
+  std::optional<uint16_t> dispatch_id_sgpr;
+  uint64_t literal_dispatch_id = 0;
+  ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+};
+
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSource> moi_runtime_workgroup_selection_source();
 
 [[nodiscard]] bool
 moi_has_probe_entry_runtime_workgroup_gate(const ConSanMoiWorkgroupSources &workgroup_sources);
 
-[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
-    MoiRuntimeWorkgroupGatePlan::Flavor flavor, rj_code_arch_t arch);
+[[nodiscard]] std::optional<MoiRuntimeWorkgroupGatePlan>
+plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
+                                const ConSanMoiWorkgroupSources &workgroup_sources);
 
 [[nodiscard]] uint64_t
 moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,

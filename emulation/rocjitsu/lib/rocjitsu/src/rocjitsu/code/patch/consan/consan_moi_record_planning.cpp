@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 
+#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
@@ -71,9 +72,17 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   }
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
   if (request.moi_runtime_sample_stride > 1u && !point.has_compact_moi_scalar_spill()) {
-    runtime_workgroup_gate =
-        plan_moi_runtime_workgroup_gate(request, bound_resources, point, *workgroup_sources,
-                                        MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch);
+    if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
+      runtime_workgroup_gate = plan_moi_runtime_workgroup_gate(
+          {.exec_save_sgpr = *point.moi_exec_save_sgpr,
+           .sample_stride = request.moi_runtime_sample_stride,
+           .sample_offset = request.moi_runtime_sample_offset,
+           .flavor = MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay,
+           .dispatch_id_sgpr = point.moi_dispatch_identity.sgpr(),
+           .literal_dispatch_id = bound_resources.moi_report_dispatch_id,
+           .direct_call_form = target->direct_call_form},
+          *workgroup_sources);
+    }
   }
   return MoiRecordEventEmissionPlan{
       .scratch_vgpr = scratch_vgpr,

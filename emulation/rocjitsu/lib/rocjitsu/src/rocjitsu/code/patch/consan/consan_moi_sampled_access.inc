@@ -389,9 +389,17 @@ void try_apply_direct_sampled_watchpoint_patch(
       continue;
     }
     const std::optional<MoiRuntimeWorkgroupGatePlan> eligible_runtime_fast_gate =
-        !candidate_point.has_compact_moi_scalar_spill() && !has_private_workgroup_sources
-            ? plan_moi_runtime_workgroup_gate(options, options, candidate_point, *workgroup_sources,
-                                              MoiRuntimeWorkgroupGatePlan::Flavor::Sampled, arch)
+        !candidate_point.has_compact_moi_scalar_spill() && !has_private_workgroup_sources &&
+                candidate_point.moi_exec_save_sgpr
+            ? plan_moi_runtime_workgroup_gate(
+                  {.exec_save_sgpr = *candidate_point.moi_exec_save_sgpr,
+                   .sample_stride = options.moi_runtime_sample_stride,
+                   .sample_offset = options.moi_runtime_sample_offset,
+                   .flavor = MoiRuntimeWorkgroupGatePlan::Flavor::Sampled,
+                   .dispatch_id_sgpr = candidate_point.moi_dispatch_identity.sgpr(),
+                   .literal_dispatch_id = options.moi_report_dispatch_id,
+                   .direct_call_form = target->direct_call_form},
+                  *workgroup_sources)
             : std::nullopt;
     const bool runtime_fast_gate = eligible_runtime_fast_gate && use_indirect_appended &&
                                    !use_dense_call && !uses_local_entry_island &&

@@ -594,10 +594,17 @@ void try_apply_first_light_access_record_patch(
             options.moi_engine, candidate_point,
             private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr);
     const std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate =
-        runtime_workgroup_sources && !candidate_point.has_compact_moi_scalar_spill()
+        runtime_workgroup_sources && !candidate_point.has_compact_moi_scalar_spill() &&
+                candidate_point.moi_exec_save_sgpr
             ? plan_moi_runtime_workgroup_gate(
-                  options, options, candidate_point, *runtime_workgroup_sources,
-                  MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay, arch)
+                  {.exec_save_sgpr = *candidate_point.moi_exec_save_sgpr,
+                   .sample_stride = options.moi_runtime_sample_stride,
+                   .sample_offset = options.moi_runtime_sample_offset,
+                   .flavor = MoiRuntimeWorkgroupGatePlan::Flavor::RecordReplay,
+                   .dispatch_id_sgpr = candidate_point.moi_dispatch_identity.sgpr(),
+                   .literal_dispatch_id = options.moi_report_dispatch_id,
+                   .direct_call_form = target.direct_call_form},
+                  *runtime_workgroup_sources)
             : std::nullopt;
     const bool needs_vgpr_spill =
         resources->source == ConSanRegisterAllocationSource::SpillRequired ||

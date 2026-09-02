@@ -4,7 +4,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
-#include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -35,25 +34,23 @@ bool moi_has_probe_entry_runtime_workgroup_gate(
   return moi_runtime_workgroup_selection_source().has_value() || register_backed_tuple;
 }
 
-std::optional<MoiRuntimeWorkgroupGatePlan> plan_moi_runtime_workgroup_gate(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiWorkgroupSources &workgroup_sources,
-    MoiRuntimeWorkgroupGatePlan::Flavor flavor, rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
+std::optional<MoiRuntimeWorkgroupGatePlan>
+plan_moi_runtime_workgroup_gate(const MoiRuntimeWorkgroupGateInputs &inputs,
+                                const ConSanMoiWorkgroupSources &workgroup_sources) {
   const auto cached_selection = moi_runtime_workgroup_selection_source();
-  if (!point.moi_exec_save_sgpr || request.moi_runtime_sample_stride <= 1u || target == nullptr ||
+  if (inputs.sample_stride <= 1u ||
       !moi_has_probe_entry_runtime_workgroup_gate(workgroup_sources)) {
     return std::nullopt;
   }
   return MoiRuntimeWorkgroupGatePlan{
-      .exec_save_sgpr = *point.moi_exec_save_sgpr,
-      .sample_stride = request.moi_runtime_sample_stride,
-      .sample_offset = request.moi_runtime_sample_offset,
-      .flavor = flavor,
+      .exec_save_sgpr = inputs.exec_save_sgpr,
+      .sample_stride = inputs.sample_stride,
+      .sample_offset = inputs.sample_offset,
+      .flavor = inputs.flavor,
       .cached_selection = cached_selection,
-      .dispatch_id_sgpr = point.moi_dispatch_identity.sgpr(),
-      .literal_dispatch_id = resources.moi_report_dispatch_id,
-      .direct_call_form = target->direct_call_form,
+      .dispatch_id_sgpr = inputs.dispatch_id_sgpr,
+      .literal_dispatch_id = inputs.literal_dispatch_id,
+      .direct_call_form = inputs.direct_call_form,
   };
 }
 

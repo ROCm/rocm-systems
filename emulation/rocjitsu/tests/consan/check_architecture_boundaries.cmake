@@ -1795,6 +1795,19 @@ _consan_assert_no_match(
     "ConSanMoiEngine"
     "the shared Record/Replay-Sampled runtime gate must consume its exact-subset flavor"
 )
+file(READ "${_consan_dir}/consan_moi_runtime_workgroup_gate.h" _moi_runtime_gate_contract)
+if(_moi_runtime_gate_contract MATCHES
+   "plan_moi_runtime_workgroup_gate[^;]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|rj_code_arch_t)")
+    message(
+        FATAL_ERROR
+        "ConSan runtime gate planning must consume one exact normalized plan candidate"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_runtime_workgroup_gate.cpp"
+    "consan_target_profile|consan_capability_contract[.]h"
+    "shared runtime gate planning must consume the caller's normalized call form"
+)
 file(READ "${_consan_dir}/consan_moi_record_replay.inc" _moi_record_replay_access_owner)
 string(
     REGEX MATCHALL
