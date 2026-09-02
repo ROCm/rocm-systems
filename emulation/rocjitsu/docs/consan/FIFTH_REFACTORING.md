@@ -12194,3 +12194,43 @@ used `-LE physical`; no physical GPU test was run.
 This checkpoint immediately reaps a deletion enabled by checkpoint 183: once
 the large mode body left shared lowering, the leftover policy wrapper was easy
 to identify as neither shared mechanism nor a reusable Record/Replay concept.
+
+### 16.186 Convergence checkpoint 185: Sampled private-state emission ownership
+
+`append_sampled_private_owner_epoch_load` was the next false-common operation
+exposed in shared lowering.  It validates Sampled's private owner/epoch plan,
+loads the two mode-specific fields, derives Sampled's workitem owner, and emits
+Sampled-specific diagnostics.  Its only callers are the Sampled barrier and
+atomic synchronization emitters; no common or other-mode consumer exists.
+
+The 32-line implementation now lives in `consan_moi_sampled.cpp`, and its
+declaration moved from the common `consan_moi_probe_contracts.h` interface to
+the compiled Sampled mode contract in `consan_moi_sampled.h`.  The separately
+compiled Sampled atomic emitter imports that mode contract explicitly.  Shared
+lowering and the common probe contract therefore no longer know that Sampled
+stores owner/epoch state privately.  Structural checks reject either common
+location regaining the operation and require the Sampled owner to retain it.
+
+| Signal | Checkpoint 185 | Cumulative change | Slice change from checkpoint 184 |
+| --- | ---: | ---: | ---: |
+| Production files | 310 | +81 | 0 |
+| Physical production lines | 102,167 | **-2,809** | +3 |
+| Nonblank production lines | 95,753 | **-3,331** | +2 |
+| Production implementation lines | 88,015 | **-3,435** | +2 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **245 / 53** | **-45 / +2** | 0 / 0 |
+| Sampled private-state emitter lines in shared lowering | **0** | n/a | **-32** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `5c89626de9e`.  Validation includes a
+successful full `-j16` build and **166/166** nonphysical Sampled-named and
+architecture-boundary tests.  The immediately preceding checkpoint also
+passed the complete **884/884** nonphysical MOI gate.  All invocations used
+`-LE physical`; no physical GPU test was run.
+
+The two counted implementation lines are explicit mode-header/import
+scaffolding.  There is no adapter or duplicate implementation left behind:
+Sampled's synchronization paths share one implementation within the Sampled
+component, while descriptor decoding remains the common mechanism beneath it.
