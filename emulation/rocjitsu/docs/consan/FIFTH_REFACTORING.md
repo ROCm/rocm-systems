@@ -8897,3 +8897,50 @@ single input to every common fence consumer. It strengthens Sections 14.1,
 architecture locality, remaining broad coordinator and patch-state paths,
 material additional whole-refactoring shrinkage, and the independent Section
 14 audit remain open, so the goal remains active.
+
+### 16.127 Convergence checkpoint 126: remove the patch coverage cache
+
+The Sampled synchronization trace found one remaining patch-telemetry replica
+of intent-bound semantic coverage. `ConSanPatchEvidenceEffect` carried
+`covered_sync_event_count`, and both direct and dense Sampled barrier emission
+copied a qualified sequence's member count into each generic patch record.
+Production never consumed that copy. Tests did, even though the authoritative
+`ConSanCommittedLowering` already retains the exact
+`original_semantic_sites` set selected by the intent-bound commit.
+
+The unused cardinality and both writes are deleted. Synchronization tests now
+locate the committed lowering by its semantic intent and emitted patch
+location, then inspect its original-site set. The dense composition regression
+counts the authoritative Sampled barrier commits with two sites rather than
+counting patch-cache values. With the generic coverage member gone, the
+surviving placement fields are named `ConSanPatchSampledAccessEffect` to make
+their actual mode ownership explicit. The architecture-boundary gate rejects
+restoration of the deleted cache anywhere in production.
+
+| Signal | Checkpoint 126 | Cumulative change | Slice change from checkpoint 125 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,803 | **-2,173** | **-6** |
+| Nonblank production lines | 96,434 | **-2,650** | **-6** |
+| Production implementation lines | 88,679 | **-2,771** | **-5** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Patch-telemetry synchronization coverage replicas | **0** | n/a | **-1** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `d7296e5efb4`. Validation includes a
+successful compiler-clean `-j16` rebuild, all Sampled host and architecture-
+boundary tests **160/160**, and all **1,296/1,296** nonphysical `ConSan.*` and
+`ConSanMoi.*` host/component tests. No test was removed, renamed, disabled, or
+replaced, and no simulator or physical-device test was run.
+
+This is a pure authority harvest: five implementation lines and a generic
+field disappear without a replacement production contract. Patch telemetry no
+longer shadows the semantic site set owned by the forward-only lowering
+ledger, and the remaining effect type advertises its genuinely mode-local
+purpose. The slice strengthens Sections 14.1, 14.3, 14.5, 14.6, 14.7, and
+14.8. Full architecture locality, remaining broad coordinator and patch-state
+paths, material additional whole-refactoring shrinkage, and the independent
+Section 14 audit remain open, so the goal remains active.

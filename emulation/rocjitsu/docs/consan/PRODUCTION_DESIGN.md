@@ -2929,6 +2929,11 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+The fifth-refactoring follow-through subsequently removed
+`covered_sync_event_count` as well. Intent-bound commits now carry the sole
+original-semantic-site set, and tests inspect that authoritative set rather
+than retaining synchronization cardinality in generic patch telemetry.
+
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 
 - **Authoritative allocation facts:** The selected owner and dispatch-ID
