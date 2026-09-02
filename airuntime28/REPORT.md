@@ -180,7 +180,7 @@ either way.
 
 ## The change
 
-Commit `81e65d6bbb` on `users/victzhan/AIRUNTIME-28-nt-blit`. 59 insertions, 4 deletions,
+Commits `81e65d6bbb` and `ac583d3369` on `users/victzhan/AIRUNTIME-28-nt-blit`. 59 insertions, 4 deletions,
 6 files. The branch tip may sit ahead of that commit — pressing "Update branch" on the PR adds
 a merge from `develop` — but the change itself is that one commit, and the PR diff stays these
 six files.

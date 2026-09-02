@@ -1,16 +1,16 @@
 # Generated from users/victzhan/AIRUNTIME-28-nt-blit by remote/clr_patch.sh.
 # Do not hand-edit: regenerate instead, or the branch and this file will drift.
 # base:   20b7fff0fd709826c82efbd6662c0e5045272a3b
-# tip:    3703847710f1f775a7363411ebc64f3faa157190
+# tip:    ac583d3369d0ce28748f5c37b351df35a8ec4b48
 #
 # The tip may be a merge of develop; the base is the merge-base with
 # develop, so this patch is what the PR adds and nothing else.
 #
 diff --git a/projects/clr/rocclr/device/blitcl.cpp b/projects/clr/rocclr/device/blitcl.cpp
-index 4db6780484..fd717925a2 100644
+index 4db6780484..b2afc156fd 100644
 --- a/projects/clr/rocclr/device/blitcl.cpp
 +++ b/projects/clr/rocclr/device/blitcl.cpp
-@@ -128,6 +128,51 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
+@@ -128,6 +128,52 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
        }
      }
  
@@ -23,9 +23,10 @@ index 4db6780484..fd717925a2 100644
 +    //
 +    // Two deliberate choices here:
 +    //   * The access width stays ulong2 (128-bit). __builtin_nontemporal_store
-+    //     accepts OpenCL vector types, so the hint costs no width. Dropping to
-+    //     ulong to get the hint would halve bytes-in-flight per work item and
-+    //     measured ~44% slower on gfx1250 for large copies.
++    //     takes a pointer to a scalar or to a native vector, and ulong2 is one,
++    //     so the hint costs no width. Narrowing to ulong to obtain the hint
++    //     halves bytes in flight per work item: measured +77% time, equivalently
++    //     -44% bandwidth, on a 1 GiB copy on gfx1250.
 +    //   * Only the store is non-temporal. The source may legitimately be reused
 +    //     by a following copy (one buffer broadcast to many), so it keeps
 +    //     ordinary caching.

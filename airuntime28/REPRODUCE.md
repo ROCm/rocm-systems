@@ -129,7 +129,7 @@ cannot drift from what ships:
 
 ## The parts that need a patched CLR
 
-The change is commit `81e65d6bbb` on `users/victzhan/AIRUNTIME-28-nt-blit`.
+The change is commits `81e65d6bbb` and `ac583d3369` on `users/victzhan/AIRUNTIME-28-nt-blit`.
 `clr_setup.sh` stands up a worktree on that branch, falling back to applying
 `airuntime28-nt-blit.patch` at the base commit if the branch is not present; `clr_build.sh`
 builds into `~/airuntime28-clr-install`.
