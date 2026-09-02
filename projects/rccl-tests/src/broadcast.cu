@@ -276,10 +276,15 @@ static inline int bcastRingCtas() {
 // fall back to the size-adaptive ladder.
 static inline size_t BroadcastParseCtasEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_BCAST_CTAS");
-  if (e == nullptr || e[0] == '\0') return gin_sdma::kBroadcastCtasUnset;
+  // strtoull() wraps a leading '-' into a huge unsigned value, and stops at the
+  // first non-digit without complaining, so "-1" and "8foo" would both pin a
+  // nonsense CTA count. Reject both, plus a literal value colliding with the
+  // sentinel. Mirrors gin_sdma_allgather::parseAllGatherCtasEnv().
+  if (e == nullptr || e[0] == '\0' || e[0] == '-') return gin_sdma::kBroadcastCtasUnset;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
-  if (end == e) return gin_sdma::kBroadcastCtasUnset;
+  if (end == e || *end != '\0') return gin_sdma::kBroadcastCtasUnset;
+  if ((size_t)v == gin_sdma::kBroadcastCtasUnset) return gin_sdma::kBroadcastCtasUnset;
   return (size_t)v;
 }
 
@@ -1466,7 +1471,7 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
 NCCL_WEAK struct testEngine ncclTestEngine = {
   .getBuffSize = BroadcastGetBuffSize,
   .runTest = BroadcastRunTest,
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
   .getDevCommRequirements = BroadcastGetDevCommRequirements
 #endif
 };
