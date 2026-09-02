@@ -10439,3 +10439,72 @@ transaction's redundant staging shape merely because that shape is now in a
 better-named file.  Further common-barrier narrowing, target/mode locality,
 compiled interface enforcement, extension proof, and the independent Section
 14 audit remain open.
+
+### 16.151 Convergence checkpoint 150: exact shared barrier reservations
+
+The next boundary trace found a mode peephole in the interface left by the
+Record/Replay barrier split.  Both the shared barrier transaction and its
+reservation resolver accepted the complete `MoiRecordReplayAccessOutput`, even
+though they read only its optional reserved-island layout.  The other output,
+generated branch-relay ranges, is policy and routing state used exclusively by
+the direct Record/Replay transaction.  This made a reader and future caller of
+the common mechanism depend on a mode aggregate whose second half it was not
+permitted to use.
+
+The shared seam now consumes exactly
+`std::optional<MoiBarrierIslandReservation>`.  The reservation product and its
+resolver have mode-neutral names and live in the shared barrier contract; the
+Record/Replay access output retains that product as one of its mode-owned
+results and explicitly projects it at the two shared-mechanism calls.  The
+Record/Replay barrier entry-point declaration moved out of the shared barrier
+header and into the Record/Replay header.  Thus the shared header and common
+implementation contain no reference to `MoiRecordReplayAccessOutput`, while
+the aggregate barrier translation unit directly includes the mode header
+because it deliberately compiles the mode-named implementation owner.
+
+Tracing that header cut exposed three stale dependencies.  The Record/Replay
+coordinator, Sampled engine, and MOI pipeline included the shared barrier
+header without consuming its interface; those includes are deleted rather
+than retained as accidental transitive providers.  The successful rebuild
+proves that each component already names its actual dependencies.
+
+The architecture-boundary gate requires the reservation contract to remain in
+the common barrier owner, the access aggregate and public Record/Replay
+barrier declaration to remain in the Record/Replay owner, and calls from the
+mode transaction to project `reserved_sync_islands`.  It rejects restoration
+of the historical resolver name, the full mode output in common barrier code,
+or the reverse shared-header-to-mode-header dependency.
+
+| Signal | Checkpoint 150 | Cumulative change | Slice change from checkpoint 149 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,708 | **-2,268** | **-4** |
+| Nonblank production lines | 96,285 | **-2,799** | **-4** |
+| Production implementation lines | 88,489 | **-2,961** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 32 | +11 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| Full Record/Replay access-output references in shared barrier contract/body | **0 / 0 files** | n/a | **-3 / -2 files** |
+| Stale shared-barrier includes outside barrier consumers | **0** | n/a | **-3** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `ce354cc8af1`.  Validation includes a
+successful full `-j16` build; the architecture-boundary gate and all **109/109**
+barrier-named host tests; and **40/40** correct/incorrect Record/Replay
+sparse-dense, dense branch-only, long-range full-pressure, and fence/barrier-
+publication cases across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.
+Checkpoint 148 supplies the recent complete **614/614** five-target
+Record/Replay simulator matrix, and checkpoint 141 remains the preceding
+complete all-mode **4,789/4,789** nonphysical gate.  No test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+This slice turns the prior physical split into a narrower semantic dependency
+and deletes four more implementation lines rather than introducing an adapter
+that preserves the broad mode bus.  The common barrier mechanism still uses
+historically Record/Replay-named island-size constants and both mode owners
+still compile inside one translation unit.  Those are candidates for the next
+trace, not evidence that the barrier boundary or the broader Section 14
+mandate is complete.  Further target/mode locality, broad transaction and
+operating-point reduction, extension-proof revalidation, and the independent
+completion audit remain open.
