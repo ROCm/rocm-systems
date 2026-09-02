@@ -69,8 +69,8 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -136,7 +136,7 @@ lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
     if(!_state && create_if_missing)
     {
         auto _created = create_queue_state(queue, true);
-        // F29: a queue discovered dynamically (never seen at hsa_queue_create) was
+        // A queue discovered dynamically (never seen at hsa_queue_create) was
         // never windowed, so first_owner can no longer be trusted anywhere -- the
         // documented "owner we never windowed" invariant. Disable signal-less
         // process-wide. Called with no hub/registry lock held (create returned).
@@ -1124,7 +1124,7 @@ write_interceptor(Queue*                                queue,
         // packets in a batch share one queue, hence one owner_window.
         auto            _signal_less_keys   = std::vector<std::optional<kfd::correlation_key>>{};
         kfd::window_ptr _signal_less_window = {};
-        // Non-const: D7 clears it on the register_batch refusal path so the post-loop
+        // Non-const: the register_batch refusal path clears it so the post-loop
         // signal-path block runs and builds the async waiter for the fallback.
         bool _signal_less_batch = signal_less_batch_eligible(queue,
                                                              _packets,
@@ -1137,7 +1137,7 @@ write_interceptor(Queue*                                queue,
         // Parallel to _info_session.packet_data: for each dispatch packet, the index
         // in transformed_packets of its SUBMITTED packet plus whether it is the ext
         // form. transformed_packets also holds pass-through and barrier/interrupt
-        // packets, so packet_data[k] != transformed_packets[k]; the D7 fallback needs
+        // packets, so packet_data[k] != transformed_packets[k]; the refusal fallback needs
         // both to write the replayed signal into the right submitted packet field.
         struct dispatch_pkt_ref
         {
@@ -1160,7 +1160,7 @@ write_interceptor(Queue*                                queue,
         };
 
         // The three signal-path steps, factored so the normal !_signal_less_batch
-        // branch and the D7 refusal fallback cannot drift: borrow a pooled signal if
+        // branch and the register_batch refusal fallback cannot drift: borrow a pooled signal if
         // the app supplied none, bump its value by 1, and record it on the packet.
         // Returns the completion signal written into pd.kernel_packet.
         auto apply_signal_path = [&create_signal](packet_data_t& pd, bool is_ext) -> hsa_signal_t {
@@ -1345,7 +1345,7 @@ write_interceptor(Queue*                                queue,
             // completed_cb_t)
 
             // emplace the kernel packet; record its submitted index (and ext-ness) so
-            // the D7 fallback can write a replayed signal into the right submitted slot.
+            // the refusal fallback can write a replayed signal into the right submitted slot.
             _dispatch_pkt_index.push_back(
                 dispatch_pkt_ref{transformed_packets.size(), is_ext_kernel_dispatch});
             transformed_packets.emplace_back(kernel_packet);
@@ -1379,8 +1379,8 @@ write_interceptor(Queue*                                queue,
         if(_signal_less_batch &&
            !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs), _evicted))
         {
-            // D7: reachable on a slot quarantined between eligibility and here, or the
-            // per-GPU cap exceeded with no eligible victim (D9). The batch skipped its
+            // Reachable on a slot quarantined between eligibility and here, or the
+            // per-GPU cap exceeded with no eligible victim. The batch skipped its
             // signal instrumentation, so replay exactly the !_signal_less_batch signal
             // path per dispatch and fall through to the normal signal-path completion.
             // No id retirement here: register_batch did not consume _signal_less_regs on
@@ -1470,17 +1470,17 @@ write_interceptor(Queue*                                queue,
 
 }  // namespace
 
-// Precondition (F1): caller holds state.drain_mu. gate_lock still orders the
+// Precondition: caller holds state.drain_mu. gate_lock still orders the
 // admission_closed store against the publishing critical sections.
 uint64_t
 close_admission_and_snapshot_locked(QueueState& state)
 {
     auto lk                = std::lock_guard<std::mutex>{state.gate_lock};
-    state.admission_closed = true;  // SW-2: no later batch can register
+    state.admission_closed = true;  // no later batch can register
     return state.next_submit_pos;   // snapshot, ordered by this same lock
 }
 
-// Precondition (F1): caller holds state.drain_mu, so real_rdid (which points into
+// Precondition: caller holds state.drain_mu, so real_rdid (which points into
 // the runtime's amd_queue_t) cannot be freed by a concurrent destroy under the load.
 bool
 wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t deadline_ns)
@@ -1516,7 +1516,7 @@ fence_all_queue_gates()
 void
 drain_all_queues_hw(uint64_t deadline_ns)
 {
-    // F1 teardown drain, race-free against concurrent hsa_queue_destroy. Snapshot
+    // Teardown drain, race-free against concurrent hsa_queue_destroy. Snapshot
     // the states under the registry lock, release it, then per state take drain_mu
     // and skip any queue destroy already invalidated (rdid_valid==false) -- that
     // queue ran its own drain. Lock order: registry lock -> (released) -> drain_mu.
@@ -1769,7 +1769,7 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
 
     // Get-or-create UNDER the final wlock: the pre-check above is a separate rlock, so
     // two concurrent dynamic-discovery lookups of the same queue could both miss and
-    // both publish, splitting D8's drain_mu across two live states (real_rdid UAF).
+    // both publish, splitting the queue's drain_mu across two live states (real_rdid UAF).
     // Re-checking here keeps exactly one live QueueState per queue; a loser discards
     // its just-built state harmlessly (refcount drops).
     return get_queue_registry().wlock([&](auto& map) {

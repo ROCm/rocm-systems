@@ -38,8 +38,8 @@ find_package(rocprofiler-sdk REQUIRED)
 
 # Workload geometry. Both steps read it from here: the execute step runs with it and the
 # validate step derives the minimum dispatch count it expects from it, so the two cannot
-# drift. The values are empirical, chosen to keep enough completions outstanding at once
-# for the concurrency this test is about. A healthy run finishes in a few seconds.
+# drift. The values are sized to keep enough completions outstanding at once for the
+# concurrency this test is about. A healthy run finishes in a few seconds.
 set(FORKJOIN_WIDTH 8)
 set(FORKJOIN_DEPTH 8)
 set(FORKJOIN_REPLAYS 30)
