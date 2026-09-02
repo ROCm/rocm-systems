@@ -54,15 +54,8 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
     } else {
       // Check for a Sysmem segment is only valid with cuMem based allocators, so a IS_LEGACY_CUDA_IPC check is required to ensure
       // that we're calling ncclCuMemGetAddressRange only when necessary.
-#if HIP_VERSION >= 71260540
       CUCHECK(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
                                     (CUdeviceptr)base));
-#else
-      // The ROCm 7.0.2.x VMM backport does not implement this pointer
-      // attribute. ncclMemAlloc uses the cuMem allocator when cuMem is enabled,
-      // so the allocation is not legacy IPC capable.
-      legacyIpcCap = 0;
-#endif
       if (!legacyIpcCap) {
         NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)data, size, (CUdeviceptr*)&base, &baseSize, &numSegments,
                                            &hasSysmemSegment));
