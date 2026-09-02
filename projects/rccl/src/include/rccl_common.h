@@ -305,6 +305,12 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 
+// Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
+// skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to
+// rcclDdaEnabled() so a collective whose VMM tier is tuned off (ddaVmmMax = 0)
+// can still reach its LL/LL128 tiers; each tier re-checks its own cap inside.
+size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func);
+
 // True when AllGather should run CE-registered rather than the symmetric kernel:
 // recv buffer registered, message above symMaxR2[AG] (the symk/CE crossover) and
 // within ceRegMax[AG]. symMaxR2[AG] = 0 keeps symk at every size. Shared by the
@@ -326,7 +332,7 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, nc
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 
 // Returns true when the DDA fast path should be attempted for this arch/size.
-// `threshold` is the per-collective cap from rcclDdaVmmThreshold(). 0 disables
+// `threshold` is the per-collective cap from rcclDdaEntryThreshold(). 0 disables
 // DDA for the call.
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold);
 

@@ -835,6 +835,21 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   return ddaThresholdFromTable(table->ddaVmmMax, func);
 }
 
+// Widest window any enabled DDA tier can serve for this collective. The entry
+// gate only decides whether the per-tier checks run, so a tier tuned off (0)
+// must not hide the tiers that are still on: gfx1250 ReduceScatter has
+// ddaVmmMax = 0 with non-zero LL/LL128 caps, and ddaLL128Max[AllReduce]
+// (32 MiB) sits above ddaVmmMax[AllReduce] (16 MiB). RCCL_DDA_LL /
+// RCCL_DDA_LL128 = 0 drop their tier so disabling one cannot widen the gate.
+// Each tier still applies its own cap at the call site, including the VMM/IPC
+// branch, which checks rcclDdaVmmThreshold() there.
+size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func) {
+  size_t cap = rcclDdaVmmThreshold(comm, func);
+  if (rcclParamDdaLL()) cap = std::max(cap, rcclDdaLLThreshold(comm, func));
+  if (rcclParamDdaLL128()) cap = std::max(cap, rcclDdaLL128Threshold(comm, func));
+  return cap;
+}
+
 size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
   size_t cap = 0;
   auto bump = [&](size_t v) {
@@ -1266,6 +1281,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // (3): symMaxR2 chooses between symk and CE-registered, it does not hand
   // registered operands to DDA.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  const size_t arDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
   if (rcclAllReduceShouldTakeDdaPath(comm, count, datatype, symkRequested, ceAllReduceAllowed)) {
     if (ddaFabricArch1250) {
       const size_t arDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
@@ -1286,13 +1302,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         decision->nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype);
         return ncclSuccess;
       }
-      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+          ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllReduceDdaFabricBlocks(comm, count, datatype);
         return ncclSuccess;
       }
     } else {
-      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+      if (arDdaVmmMax != 0 && msgBytes <= arDdaVmmMax &&
+          ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         decision->algo = RCCL_DDA_IPC;
         decision->nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
         return ncclSuccess;
@@ -1418,7 +1437,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
   // symk never reclaims it), mirroring rcclSelectAllReduce.
-  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncAllGather))) {
+  const size_t agDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncAllGather);
+  if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAllGather))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       const size_t agDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncAllGather);
       const size_t agDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncAllGather);
@@ -1436,12 +1456,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         decision->nMaxChannels = ncclAllGatherDdaFabricLL128Blocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
+          ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllGatherDdaFabricBlocks(comm, sendcount, datatype);
         return ncclSuccess;
       }
-    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+    } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
+               ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
       decision->algo = RCCL_DDA_IPC;
       decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
       return ncclSuccess;
@@ -1655,8 +1678,9 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
+  const size_t rsDdaVmmMax = rcclDdaVmmThreshold(comm, ncclFuncReduceScatter);
   if (!symEligible &&
-      rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter))) {
+      rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
       const size_t rsDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
       const size_t rsDdaLL128Max = rcclDdaLL128Threshold(comm, ncclFuncReduceScatter);
@@ -1672,11 +1696,15 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
         decision->protocol = NCCL_PROTO_LL128;
         return ncclSuccess;
       }
-      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      // ddaVmmMax[RS] = 0 on gfx1250 keeps this tier off while LL/LL128 run.
+      if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
+          ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         return ncclSuccess;
       }
-    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
+    } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
+               ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
       decision->algo = RCCL_DDA_IPC;
       return ncclSuccess;
     }
@@ -1817,7 +1845,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
   const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
-  if (rcclDdaEnabled(comm, totalBytes, a2aDdaMax)) {
+  if (rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       const size_t llThresh   = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
       const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
@@ -1835,12 +1863,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
         decision->nMaxChannels = ncclAllToAllDdaFabricLL128Blocks(comm, count, datatype);
         return ncclSuccess;
       }
-      if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
+      // The entry gate now admits the widest tier, so VMM re-checks its own cap.
+      if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
+          ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_VMM;
         decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);
         return ncclSuccess;
       }
-    } else if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
+               ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
       decision->algo = RCCL_DDA_IPC;
       decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
       return ncclSuccess;

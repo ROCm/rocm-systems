@@ -194,15 +194,15 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   const size_t msgBytes = count * ncclTypeSize(datatype);
   // !symEligible is required on every arch: gfx1250 fabric does not override it.
   // ddaFabricArch1250 only skips the CE yield -- fabric AR may still run when CE
-  // would also be eligible, bounded by rcclDdaEnabled (arch ddaVmmMax, else
-  // RCCL_DDA_THRESHOLD) and the per-tier thresholds. On other arches, yield to
+  // would also be eligible, bounded by rcclDdaEnabled (widest arch tier cap,
+  // else RCCL_DDA_THRESHOLD) and the per-tier thresholds. On other arches, yield to
   // DDA whenever CE will not service this call; yielding on message size alone
   // left comms without CE's prerequisites (e.g. gfx950 with symmetricSupport off)
   // with no DDA and no CE, falling back to the generic ring/tree kernel across
   // the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
   return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
-         rcclDdaEnabled(comm, msgBytes, rcclDdaVmmThreshold(comm, ncclFuncAllReduce));
+         rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
 }
 
 // Check if symmteric kernels is requested for this collective
