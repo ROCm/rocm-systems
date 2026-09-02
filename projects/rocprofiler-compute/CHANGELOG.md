@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
+* Added CLI and FAQ guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+
 ### Changed
 
 * gfx115x Memory Chart improvements.

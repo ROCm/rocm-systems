@@ -44,6 +44,29 @@ Hardware performance counters are collected across multiple profiling passes. Wh
 
 This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
 
+Why does the CLI memory chart look wrapped or garbled?
+=======================================================
+
+The visualized memory chart is a wide terminal diagram (at least 240 columns).
+If the terminal is narrower than the chart, or the terminal wraps long lines,
+boxes and arrows break onto the next line and the layout looks garbled.
+
+In a terminal, pipe the output to ``less -RS`` so you can scroll horizontally
+without wrapping, while keeping ANSI colors:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | less -RS
+
+In Visual Studio Code, if you do not need terminal colors, pipe the output into
+the editor:
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | code -
+
+See :ref:`cli-memory-chart-viewing` in the CLI analysis guide for more detail.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
