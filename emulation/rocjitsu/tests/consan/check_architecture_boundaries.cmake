@@ -823,6 +823,11 @@ _consan_assert_no_match(
     "moi_scalar_router_call|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
     "Sampled dense synchronization must consume the mode-owned router plan"
 )
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_barrier.inc"
+    "moi_scalar_router_call|spill_backed_(inline|record_replay)_router|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
+    "shared dense-barrier lowering must consume the mode-owned barrier router plan"
+)
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 if(NOT _moi_placement_contract MATCHES
        "moi_resource_owner_anchors_admit_scalar_router_ranges" OR

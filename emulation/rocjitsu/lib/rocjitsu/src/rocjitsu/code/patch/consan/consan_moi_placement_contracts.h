@@ -155,13 +155,23 @@ moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
   };
 }
 
-/// Resolved scalar ABI and mechanics for one mode's dense access router.
-/// Common placement and emission consume this product without inspecting the
-/// engine that produced it.
+/// Exact scalar tuple used by the shared dense-barrier relay. Modes own how
+/// this tuple relates to their access router and fixed or spill-backed ABI.
+struct MoiDenseBarrierRouterPlan {
+  ConSanIndirectJumpSgprs indirect_jump;
+  uint16_t dispatch_key_sgpr = 0;
+  uint16_t call_return_sgpr = 0;
+  bool derive_key_at_entry = false;
+};
+
+/// Resolved scalar ABI and mechanics for one mode's dense routers. Common
+/// placement and emission consume this product without inspecting the engine
+/// that produced it.
 struct MoiDenseRouterPlan {
   ConSanIndirectJumpSgprs indirect_jump;
   uint16_t dispatch_key_sgpr = 0;
   std::optional<uint16_t> call_return_sgpr;
+  MoiDenseBarrierRouterPlan barrier;
   uint32_t entry_island_words = 0;
   uint32_t relocated_entry_return_words = 0;
   bool explicit_key = false;

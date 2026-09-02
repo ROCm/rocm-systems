@@ -421,6 +421,10 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   EXPECT_TRUE(plan->restore_scc_before_route);
   EXPECT_FALSE(plan->requires_indirect_pc_wait);
   EXPECT_FALSE(plan->publish_entry_island_offset);
+  EXPECT_EQ(plan->barrier.indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  EXPECT_EQ(plan->barrier.dispatch_key_sgpr, 44u);
+  EXPECT_EQ(plan->barrier.call_return_sgpr, 40u);
+  EXPECT_TRUE(plan->barrier.derive_key_at_entry);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   plan = plan_moi_dense_router(request.moi_engine, moi_scalar_routing_state(point),
@@ -431,6 +435,10 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   EXPECT_EQ(plan->indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
   EXPECT_EQ(plan->dispatch_key_sgpr, 44u);
   EXPECT_EQ(plan->call_return_sgpr, 40u);
+  EXPECT_EQ(plan->barrier.indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  EXPECT_EQ(plan->barrier.dispatch_key_sgpr, 44u);
+  EXPECT_EQ(plan->barrier.call_return_sgpr, 40u);
+  EXPECT_TRUE(plan->barrier.derive_key_at_entry);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
@@ -445,6 +453,10 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   EXPECT_TRUE(plan->restore_scc_before_route);
   EXPECT_TRUE(plan->requires_indirect_pc_wait);
   EXPECT_TRUE(plan->publish_entry_island_offset);
+  EXPECT_EQ(plan->barrier.indirect_jump, (ConSanIndirectJumpSgprs{20u, 30u}));
+  EXPECT_EQ(plan->barrier.dispatch_key_sgpr, 25u);
+  EXPECT_EQ(plan->barrier.call_return_sgpr, 26u);
+  EXPECT_FALSE(plan->barrier.derive_key_at_entry);
 
   plan = plan_moi_dense_router(request.moi_engine, moi_scalar_routing_state(point),
                                ROCJITSU_CODE_ARCH_CDNA5);
@@ -452,6 +464,19 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   EXPECT_EQ(plan->dispatch_key_sgpr, plan->indirect_jump.pc_sgpr);
   EXPECT_EQ(plan->call_return_sgpr, 48u);
   EXPECT_FALSE(plan->explicit_key);
+
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
+  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
+      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+      .call = ConSanMoiRouterCallSgprs{44u, 46u},
+  };
+  plan = plan_moi_dense_router(request.moi_engine, moi_scalar_routing_state(point),
+                               ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(plan);
+  EXPECT_EQ(plan->barrier.indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  EXPECT_EQ(plan->barrier.dispatch_key_sgpr, 44u);
+  EXPECT_EQ(plan->barrier.call_return_sgpr, 40u);
+  EXPECT_TRUE(plan->barrier.derive_key_at_entry);
 }
 
 TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarRoutingProducts) {

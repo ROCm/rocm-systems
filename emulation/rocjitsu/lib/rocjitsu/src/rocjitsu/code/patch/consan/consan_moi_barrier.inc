@@ -1793,36 +1793,18 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         break;
       }
       const MoiScalarRoutingState routing_state = moi_scalar_routing_state(group_point);
-      const MoiScalarAbiPlan scalar_abi = plan_moi_scalar_abi(options.moi_engine, routing_state);
-      const auto inline_dense_abi = plan_moi_dense_router(options.moi_engine, routing_state, arch);
-      const ConSanMoiRouterCallSgprs *call_state =
-          moi_scalar_router_call(group_point.moi_scalar_router);
-      const bool spill_backed_inline_router = group_point.has_inline_moi_scalar_spill();
-      const bool spill_backed_record_replay_router = group_point.has_compact_moi_scalar_spill();
-      const bool spill_backed_router =
-          spill_backed_inline_router || spill_backed_record_replay_router;
-      if ((!spill_backed_router &&
-           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
-          !scalar_abi.indirect_jump || (spill_backed_inline_router && !inline_dense_abi) ||
-          (spill_backed_record_replay_router && !call_state)) {
+      const auto dense_router = plan_moi_dense_router(options.moi_engine, routing_state, arch);
+      if (!dense_router) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay requires scalar special-state storage");
         return;
       }
-      const uint16_t jump_pc_sgpr =
-          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      const uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
-                                                          : scalar_abi.special_state->scc_save_sgpr;
-      uint16_t key_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
-      uint16_t call_return_sgpr = static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
-      if (spill_backed_inline_router) {
-        key_sgpr = inline_dense_abi->dispatch_key_sgpr;
-        call_return_sgpr = jump_pc_sgpr;
-      } else if (spill_backed_record_replay_router) {
-        key_sgpr = call_state->dispatch_key_sgpr;
-        call_return_sgpr = call_state->call_return_sgpr;
-      }
-      const bool derive_key_at_entry = spill_backed_router;
+      const MoiDenseBarrierRouterPlan &barrier_router = dense_router->barrier;
+      const uint16_t jump_pc_sgpr = barrier_router.indirect_jump.pc_sgpr;
+      const uint16_t saved_scc_sgpr = barrier_router.indirect_jump.scc_save_sgpr;
+      const uint16_t key_sgpr = barrier_router.dispatch_key_sgpr;
+      const uint16_t call_return_sgpr = barrier_router.call_return_sgpr;
+      const bool derive_key_at_entry = barrier_router.derive_key_at_entry;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (target->direct_call_form == ConSanDirectCallForm::SCallI64)
@@ -1900,7 +1882,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         const uint64_t body_offset = new_text.size();
         std::optional<std::vector<uint32_t>> body_words = build_engine_barrier_body(
             planned, original_barrier_word, body_offset, site.text_offset + site.size,
-            spill_backed_router ? std::nullopt : std::optional<uint16_t>(call_return_sgpr),
+            derive_key_at_entry ? std::nullopt : std::optional<uint16_t>(call_return_sgpr),
             selectable_vgpr_bank_mode);
         if (!body_words)
           return;

@@ -342,6 +342,7 @@ plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
 
   uint16_t dispatch_key_sgpr = 0u;
   std::optional<uint16_t> call_return_sgpr;
+  MoiDenseBarrierRouterPlan barrier;
   if (routing_state.has_inline_spill()) {
     const ConSanMoiRouterCallSgprs *call_state =
         moi_scalar_router_call(routing_state.scalar_router);
@@ -350,8 +351,14 @@ plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
     dispatch_key_sgpr = call_state->dispatch_key_sgpr;
     if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
       call_return_sgpr = call_state->call_return_sgpr;
+    barrier = {
+        .indirect_jump = *scalar_abi.indirect_jump,
+        .dispatch_key_sgpr = dispatch_key_sgpr,
+        .call_return_sgpr = scalar_abi.indirect_jump->pc_sgpr,
+        .derive_key_at_entry = true,
+    };
   } else {
-    if (!routing_state.exec_save_sgpr)
+    if (!routing_state.exec_save_sgpr || !scalar_abi.special_state)
       return std::nullopt;
     const uint16_t base = *routing_state.exec_save_sgpr;
     dispatch_key_sgpr = target.direct_call_form == ConSanDirectCallForm::SCallI64
@@ -359,12 +366,18 @@ plan_inline_shadow_dense_router(const MoiScalarAbiPlan &scalar_abi,
                             : static_cast<uint16_t>(base + 28u);
     if (target.direct_call_form == ConSanDirectCallForm::SCallI64)
       call_return_sgpr = static_cast<uint16_t>(base + 28u);
+    barrier = {
+        .indirect_jump = {base, scalar_abi.special_state->scc_save_sgpr},
+        .dispatch_key_sgpr = static_cast<uint16_t>(base + 5u),
+        .call_return_sgpr = static_cast<uint16_t>(base + 6u),
+    };
   }
 
   return MoiDenseRouterPlan{
       .indirect_jump = *scalar_abi.indirect_jump,
       .dispatch_key_sgpr = dispatch_key_sgpr,
       .call_return_sgpr = call_return_sgpr,
+      .barrier = barrier,
       .entry_island_words = kMoiInlineShadowIndirectIslandWords,
       .relocated_entry_return_words = kMoiInlineShadowIndirectIslandWords,
       .explicit_key = !call_return_sgpr.has_value(),

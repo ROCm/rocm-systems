@@ -153,6 +153,13 @@ make_recording_moi_dense_router_plan(const MoiScalarAbiPlan &scalar_abi,
       .indirect_jump = *scalar_abi.indirect_jump,
       .dispatch_key_sgpr = dispatch_key_sgpr,
       .call_return_sgpr = call_return_sgpr,
+      .barrier =
+          {
+              .indirect_jump = *scalar_abi.indirect_jump,
+              .dispatch_key_sgpr = dispatch_key_sgpr,
+              .call_return_sgpr = call_return_sgpr,
+              .derive_key_at_entry = spill_backed,
+          },
       .entry_island_words = moi_record_replay_entry_island_words(spill_backed),
       .relocated_entry_return_words = kMoiRecordReplayIndirectIslandWords,
       .explicit_key = explicit_key,
