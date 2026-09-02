@@ -11,10 +11,6 @@
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] bool valid_engine(ConSanCapabilityEngine engine) {
-  return static_cast<uint8_t>(engine) < static_cast<uint8_t>(ConSanCapabilityEngine::Count);
-}
-
 [[nodiscard]] bool runtime_kernel(std::string_view name) {
   return name.starts_with("__amd_rocclr_");
 }
@@ -86,21 +82,6 @@ container_names(std::span<const ConSanSyncEvent *const> aliases) {
              : ConSanCapabilityForm::WorkgroupBarrier;
 }
 
-[[nodiscard]] ConSanProbeIntentKind barrier_intent_kind(ConSanCapabilityEngine engine) {
-  switch (engine) {
-  case ConSanCapabilityEngine::RecordReplay:
-    return ConSanProbeIntentKind::BarrierRecord;
-  case ConSanCapabilityEngine::Sampled:
-    return ConSanProbeIntentKind::SampledBarrierEpoch;
-  case ConSanCapabilityEngine::InlineShadow:
-    return ConSanProbeIntentKind::ExactBarrierEpoch;
-  case ConSanCapabilityEngine::SuperCollider:
-  case ConSanCapabilityEngine::Count:
-    break;
-  }
-  return ConSanProbeIntentKind::Count;
-}
-
 [[nodiscard]] const ConSanSyncEvent *
 completion_event(const ConSanSyncSequence &sequence,
                  const std::map<uint64_t, std::vector<const ConSanSyncEvent *>> &events_by_offset) {
@@ -140,7 +121,8 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
                                 const ConSanBarrierPolicyRequest &request) {
   ConSanBarrierPolicyResult result;
   result.plan.engine = request.engine;
-  if (!valid_engine(request.engine) || inventory.empty())
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
+  if (vocabulary == nullptr || inventory.empty())
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
@@ -293,7 +275,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
               .engine = request.engine,
               .physical_site = placement->semantic_id.physical,
               .covered_semantic_sites = std::move(covered),
-              .kind = barrier_intent_kind(request.engine),
+              .kind = vocabulary->barrier,
               .position = ConSanProbePosition::After,
               .synchronization_association = std::nullopt,
               .dynamic_result = ConSanDynamicResultRequirement::None,

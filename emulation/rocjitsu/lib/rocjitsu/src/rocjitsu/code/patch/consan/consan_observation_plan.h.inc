@@ -590,6 +590,48 @@ inline constexpr std::array<ConSanProbeIntentKind, 12> kConSanProbeIntentKinds =
     ConSanProbeIntentKind::FenceRecord,
 };
 
+/// One engine's target-neutral probe and report-facing evidence vocabulary.
+///
+/// Semantic policy publishes these probe kinds; report planning consumes the
+/// same row rather than reconstructing a parallel mode matrix. `Count` marks
+/// an operation that the engine does not support.
+struct ConSanEngineProbeVocabulary {
+  ConSanCapabilityEngine engine;
+  ConSanProbeIntentKind access;
+  ConSanProbeIntentKind barrier;
+  ConSanProbeIntentKind atomic;
+  ConSanProbeIntentKind fence;
+  bool sticky_access_evidence;
+  bool address_capture;
+  bool barrier_elements_per_semantic_site;
+};
+
+inline constexpr std::array<ConSanEngineProbeVocabulary,
+                            static_cast<size_t>(ConSanCapabilityEngine::Count)>
+    kConSanEngineProbeVocabularies = {{
+        {ConSanCapabilityEngine::SuperCollider, ConSanProbeIntentKind::RedundantAccessObservation,
+         ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count, ConSanProbeIntentKind::Count,
+         true, false, false},
+        {ConSanCapabilityEngine::RecordReplay, ConSanProbeIntentKind::AccessRecord,
+         ConSanProbeIntentKind::BarrierRecord, ConSanProbeIntentKind::AtomicRecord,
+         ConSanProbeIntentKind::FenceRecord, false, true, false},
+        {ConSanCapabilityEngine::Sampled, ConSanProbeIntentKind::SampledAccess,
+         ConSanProbeIntentKind::SampledBarrierEpoch, ConSanProbeIntentKind::SampledAtomicOrdering,
+         ConSanProbeIntentKind::Count, false, true, true},
+        {ConSanCapabilityEngine::InlineShadow, ConSanProbeIntentKind::ExactShadowAccess,
+         ConSanProbeIntentKind::ExactBarrierEpoch, ConSanProbeIntentKind::ExactAtomicOrdering,
+         ConSanProbeIntentKind::Count, false, true, true},
+    }};
+
+[[nodiscard]] constexpr const ConSanEngineProbeVocabulary *
+consan_engine_probe_vocabulary(ConSanCapabilityEngine engine) {
+  const size_t index = static_cast<size_t>(engine);
+  if (index >= kConSanEngineProbeVocabularies.size())
+    return nullptr;
+  const ConSanEngineProbeVocabulary &vocabulary = kConSanEngineProbeVocabularies[index];
+  return vocabulary.engine == engine ? &vocabulary : nullptr;
+}
+
 /// Return the stable diagnostic spelling of an access probe intent kind.
 [[nodiscard]] constexpr std::string_view consan_probe_intent_kind_name(ConSanProbeIntentKind kind) {
   switch (kind) {

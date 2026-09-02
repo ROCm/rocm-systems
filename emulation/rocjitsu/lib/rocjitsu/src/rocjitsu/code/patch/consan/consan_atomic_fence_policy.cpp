@@ -25,10 +25,6 @@ struct SequenceMembership {
 /// Read-only join from stable event identity to its sequence-membership fact.
 using SequenceMembershipIndex = std::unordered_map<std::string_view, SequenceMembership>;
 
-[[nodiscard]] bool valid_engine(ConSanCapabilityEngine engine) {
-  return static_cast<uint8_t>(engine) < static_cast<uint8_t>(ConSanCapabilityEngine::Count);
-}
-
 [[nodiscard]] SequenceMembershipIndex
 build_sequence_membership_index(std::span<const ConSanSyncSequence> sequences) {
   SequenceMembershipIndex result;
@@ -364,21 +360,6 @@ classify_atomic_semantics(const ConSanSyncEvent &event, const SequenceMembership
   return ConSanAtomicPolicyReason::None;
 }
 
-[[nodiscard]] ConSanProbeIntentKind atomic_evidence_kind(ConSanCapabilityEngine engine) {
-  switch (engine) {
-  case ConSanCapabilityEngine::RecordReplay:
-    return ConSanProbeIntentKind::AtomicRecord;
-  case ConSanCapabilityEngine::Sampled:
-    return ConSanProbeIntentKind::SampledAtomicOrdering;
-  case ConSanCapabilityEngine::InlineShadow:
-    return ConSanProbeIntentKind::ExactAtomicOrdering;
-  case ConSanCapabilityEngine::SuperCollider:
-  case ConSanCapabilityEngine::Count:
-    break;
-  }
-  return ConSanProbeIntentKind::Count;
-}
-
 [[nodiscard]] ConSanProbeIntentId
 add_intent(ConSanObservationPlan &plan, const PhysicalSiteId &physical_site,
            std::vector<SemanticSiteId> covered_sites, ConSanProbeIntentKind kind,
@@ -422,7 +403,8 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
                                      const ConSanAtomicFencePolicyRequest &request) {
   ConSanAtomicFencePolicyResult result;
   result.plan.engine = request.engine;
-  if (!valid_engine(request.engine) || inventory.empty())
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
+  if (vocabulary == nullptr || inventory.empty())
     return result;
 
   const SynchronizationInventoryView synchronization = inventory.sync();
@@ -548,9 +530,9 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
           event.kind == ConSanSyncEventKind::OrdinaryMemory &&
           has_qualified_fence_for(synchronization, event.semantic_id);
       if (!record_replay_fence_owns_ordinary) {
-        decision.intent_ids.push_back(add_intent(
-            result.plan, semantic_id.physical, {semantic_id}, atomic_evidence_kind(request.engine),
-            ConSanProbePosition::After, *decision.association, decision.dynamic_result));
+        decision.intent_ids.push_back(add_intent(result.plan, semantic_id.physical, {semantic_id},
+                                                 vocabulary->atomic, ConSanProbePosition::After,
+                                                 *decision.association, decision.dynamic_result));
       }
     }
     result.plan.atomic_site_decisions.push_back(std::move(decision));

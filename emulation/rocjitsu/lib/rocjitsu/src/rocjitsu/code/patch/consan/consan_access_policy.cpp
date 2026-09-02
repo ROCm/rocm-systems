@@ -11,10 +11,6 @@
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] bool valid_engine(ConSanCapabilityEngine engine) {
-  return static_cast<uint8_t>(engine) < static_cast<uint8_t>(ConSanCapabilityEngine::Count);
-}
-
 [[nodiscard]] bool valid_decision_kind(ConSanSiteDecisionKind kind) {
   return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanSiteDecisionKind::Count);
 }
@@ -154,22 +150,6 @@ classified_operation_reason(const ConSanAccessInventorySite &access,
   return access_classifier_reason(access.lowering.operation(operation).reason, access.origin);
 }
 
-[[nodiscard]] ConSanProbeIntentKind intent_kind(ConSanCapabilityEngine engine) {
-  switch (engine) {
-  case ConSanCapabilityEngine::SuperCollider:
-    return ConSanProbeIntentKind::RedundantAccessObservation;
-  case ConSanCapabilityEngine::RecordReplay:
-    return ConSanProbeIntentKind::AccessRecord;
-  case ConSanCapabilityEngine::Sampled:
-    return ConSanProbeIntentKind::SampledAccess;
-  case ConSanCapabilityEngine::InlineShadow:
-    return ConSanProbeIntentKind::ExactShadowAccess;
-  case ConSanCapabilityEngine::Count:
-    break;
-  }
-  return ConSanProbeIntentKind::Count;
-}
-
 [[nodiscard]] SemanticSiteId fallback_access_id(const ConSanAccessInventorySite &access) {
   return {
       .physical = access.physical_id,
@@ -211,7 +191,7 @@ const ConSanProbeIntent *ConSanObservationPlan::intent(ConSanProbeIntentId id) c
 }
 
 bool ConSanObservationPlan::valid() const {
-  if (!valid_engine(engine))
+  if (consan_engine_probe_vocabulary(engine) == nullptr)
     return false;
   for (size_t index = 0; index < probe_intents.size(); ++index) {
     const ConSanProbeIntent &probe = probe_intents[index];
@@ -701,7 +681,8 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
                                                         const ConSanAccessPolicyRequest &request) {
   ConSanAccessPolicyResult result;
   result.plan.engine = request.engine;
-  if (!valid_engine(request.engine) || inventory.empty())
+  const ConSanEngineProbeVocabulary *vocabulary = consan_engine_probe_vocabulary(request.engine);
+  if (vocabulary == nullptr || inventory.empty())
     return result;
 
   std::map<uint64_t, std::vector<const ConSanAccessInventorySite *>> aliases_by_offset;
@@ -781,7 +762,7 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
           .engine = request.engine,
           .physical_site = access.physical_id,
           .covered_semantic_sites = ids,
-          .kind = intent_kind(request.engine),
+          .kind = vocabulary->access,
           .position = ConSanProbePosition::Before,
           .synchronization_association = std::nullopt,
           .dynamic_result = ConSanDynamicResultRequirement::None,
