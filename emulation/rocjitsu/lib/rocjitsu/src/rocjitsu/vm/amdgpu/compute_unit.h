@@ -252,6 +252,9 @@ public:
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
 
+  /// @brief Register the CP wakeup used when a pool-driven CU becomes runnable.
+  void set_on_pool_ready(std::function<void()> cb) { on_pool_ready_ = std::move(cb); }
+
   struct TrapHandlerConfig {
     uint64_t tba = 0;
     uint64_t tma = 0;
@@ -968,6 +971,11 @@ protected:
       on_idle_();
   }
 
+  void notify_pool_ready() {
+    if (on_pool_ready_)
+      on_pool_ready_();
+  }
+
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
@@ -1040,7 +1048,8 @@ protected:
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
-  std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_idle_;       ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
   TrapCompletionHandler trap_completion_handler_;
@@ -1249,9 +1258,14 @@ private:
                                                     std::max<uint64_t>(1, last_quantum_executed_));
                              }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
-  // the CU partition and can safely update executing_ through schedule_work().
+  // the CU/CP partition and wakes whichever driver currently owns execution.
   simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                               [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
+                               [this](simdojo::Tick, simdojo::Message *) {
+                                 if (this->pool_driven())
+                                   this->notify_pool_ready();
+                                 else
+                                   schedule_work();
+                               }};
   uint64_t last_quantum_executed_ = 0;
   simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
   uintptr_t driver_generation_ = 0;

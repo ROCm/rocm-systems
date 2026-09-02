@@ -59,9 +59,9 @@ namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
-class SerialDispatchPolicyPlugin final : public rocjitsu::ExecutionPlugin {
+class SerializedHotHookPlugin final : public rocjitsu::ExecutionPlugin {
 public:
-  SerialDispatchPolicyPlugin() : rocjitsu::ExecutionPlugin("serial_dispatch_policy") {}
+  SerializedHotHookPlugin() : rocjitsu::ExecutionPlugin("serialized_hot_hook") {}
   bool requires_serial_hot_hooks() const override { return true; }
 };
 
@@ -287,19 +287,19 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
 }
 
-TEST(ConfigLoaderTest, SerialPluginRemovesSharedPoolAcrossProductionTopology) {
+TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
   auto loaded =
       config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
 
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(group->add(std::make_unique<SerialDispatchPolicyPlugin>()));
+  ASSERT_TRUE(group->add(std::make_unique<SerializedHotHookPlugin>()));
   soc->set_plugin_group(group);
 
-  EXPECT_EQ(soc->dispatch_threads(), 1u);
-  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 0u);
-  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 1u); });
+  EXPECT_EQ(soc->dispatch_threads(), 8u);
+  EXPECT_EQ(test::SoCTestAccess::dispatch_pool_threads(*soc), 8u);
+  soc->for_each_cp([](auto *cp) { EXPECT_EQ(cp->dispatch_threads(), 8u); });
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
