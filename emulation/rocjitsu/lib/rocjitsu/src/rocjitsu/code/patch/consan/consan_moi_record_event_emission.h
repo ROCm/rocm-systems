@@ -34,6 +34,7 @@ struct MoiRecordEventEmissionPlan {
   consan_detail::MoiSpecialStateSgprs special_state;
   consan_moi_detail::ConSanMoiReportDispatchIdSource dispatch_id_sources;
   std::optional<MoiRuntimeWorkgroupGatePlan> runtime_workgroup_gate;
+  std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> derived_owner;
   uint16_t required_sgpr_count = 0;
 };
 
@@ -58,9 +59,7 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
     size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset,
-    const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &derived_owner,
-    std::vector<std::string> &errors);
+    uint64_t return_text_offset, std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
     std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
@@ -68,7 +67,6 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
-    const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &derived_owner,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors);
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
@@ -78,7 +76,6 @@ append_moi_direct_or_indirect_return(std::vector<uint32_t> &words, uint64_t cave
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors);
 
 } // namespace rocjitsu::consan_moi_impl

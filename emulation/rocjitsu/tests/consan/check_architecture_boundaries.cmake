@@ -813,6 +813,17 @@ if(NOT _record_event_contract MATCHES
         "Record/Replay event emission must retain exact indirect and dense routing products"
     )
 endif()
+file(READ "${_consan_dir}/consan_moi_record_planning.h" _moi_record_planning_contract)
+if(NOT _record_event_contract MATCHES
+       "MoiRecordEventEmissionPlan[^}]*MoiWorkitemOwnerDerivationPlan[^}]*derived_owner" OR
+   _record_event_contract MATCHES
+       "build_(barrier|atomic|fence)_record_cave_words[^;]*derived_owner" OR
+   _moi_record_planning_contract MATCHES
+       "struct MoiPlannedRecordEvent[^}]*derived_owner")
+    message(FATAL_ERROR
+        "Record/Replay owner derivation must travel in the exact emission plan"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_record_fence.inc"
     "moi_scalar_router_call|automatic_moi_record_replay_sgpr_spill|moi_exec_save_sgpr[ \t]*[+]"
@@ -850,7 +861,7 @@ if(NOT _moi_barrier_planning MATCHES "moi_barrier_body_indirect_jump" OR
    NOT _moi_barrier_planning MATCHES "struct PlannedBarrierLowering" OR
    NOT _moi_barrier_planning MATCHES "uses_scalar_epoch[(][)] const" OR
    _moi_barrier_planning MATCHES
-       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|PlannedInlineEpochBarrier|plan_inline_barrier_patch_abi|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedBarrierLowering[^}]*std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets")
+       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|PlannedInlineEpochBarrier|plan_inline_barrier_patch_abi|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedBarrierLowering[^}]*(std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets|derived_owner)")
     message(FATAL_ERROR
         "planned barriers must derive routing, scalar-epoch, and owner facts from their retained products"
     )

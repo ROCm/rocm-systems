@@ -45,7 +45,6 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
 struct MoiPlannedRecordEvent : MoiPlannedProbeResources {
   MoiRecordEventEmissionPlan emission;
-  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
 };
 
 [[nodiscard]] std::optional<MoiPlannedRecordEvent> plan_moi_record_event(

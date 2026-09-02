@@ -344,7 +344,7 @@ void try_apply_record_replay_barrier_record_patch(
         active_bytes, candidate, emission, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, original_barrier_word,
-        cave_text_offset, cave_return_target, planned.derived_owner, result.errors);
+        cave_text_offset, cave_return_target, result.errors);
     if (!cave_words)
       return;
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;
@@ -658,7 +658,7 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   }
   const MoiScalarAbiPlan scalar_abi =
       plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
-  const auto record_emission = plan_record_replay_barrier_emission(
+  auto record_emission = plan_record_replay_barrier_emission(
       options, point, scalar_abi, resources->base, assignments, owners, arch,
       &private_state_layout);
   if (!record_emission) {
@@ -675,6 +675,7 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
         .wave_size_shift = *owner_shift,
     };
   }
+  record_emission->derived_owner = std::move(derived_owner);
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
   std::optional<VgprSpillSequence> spill;
   if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
@@ -703,7 +704,6 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
       required_private_bytes);
   return PlannedBarrierLowering{
       .candidate = candidate,
-      .derived_owner = derived_owner,
       .body = *record_emission,
       .spill = std::move(spill),
       .scalar_spill = std::move(scalar_spill),

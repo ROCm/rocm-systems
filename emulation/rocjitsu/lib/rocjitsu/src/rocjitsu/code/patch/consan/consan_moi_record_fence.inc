@@ -304,8 +304,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
-        return_text_offset, std::nullopt, displaced_tail_words, planned.derived_owner,
-        result.errors);
+        return_text_offset, std::nullopt, displaced_tail_words, result.errors);
     if (!cave_words)
       return;
     std::optional<DenseFenceRelay> dense_relay;
@@ -323,7 +322,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
             layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
             return_text_offset, dense_call_return,
-            /*displaced_tail_words=*/{}, planned.derived_owner, result.errors);
+            /*displaced_tail_words=*/{}, result.errors);
         if (!cave_words)
           return;
       }

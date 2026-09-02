@@ -203,7 +203,6 @@ using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
 
 struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
-  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   MoiBarrierBodyPlan body;
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
@@ -564,7 +563,6 @@ void try_apply_shared_barrier_patch(
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);
     planned_candidates.push_back(PlannedBarrierLowering{
         .candidate = candidate,
-        .derived_owner = std::nullopt,
         .body = std::move(*body),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -616,7 +614,7 @@ void try_apply_shared_barrier_patch(
           active_bytes, planned.candidate, *record, planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
-          original_barrier_word, body_offset, return_offset, planned.derived_owner, result.errors);
+          original_barrier_word, body_offset, return_offset, result.errors);
     }
     if (const auto *private_epoch =
             std::get_if<MoiInlinePrivateEpochBarrierEmissionPlan>(&planned.body);

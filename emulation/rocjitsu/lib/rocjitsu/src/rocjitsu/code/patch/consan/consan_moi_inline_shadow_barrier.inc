@@ -211,7 +211,6 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
       plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
   return PlannedBarrierLowering{
       .candidate = candidate,
-      .derived_owner = std::nullopt,
       .body =
           MoiInlinePrivateEpochBarrierEmissionPlan{
               .scratch_vgpr = *access_patch.scratch_vgpr,

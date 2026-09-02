@@ -108,6 +108,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
           {point, bound_resources,
            private_layout ? private_layout->dispatch_id_offset : std::nullopt}),
       .runtime_workgroup_gate = runtime_workgroup_gate,
+      .derived_owner = std::nullopt,
   };
 }
 
@@ -191,6 +192,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     if (!derived_owner)
       return std::nullopt;
   }
+  emission->derived_owner = std::move(derived_owner);
   auto probe = plan_moi_probe_resources(
       inventory, resources, request, bound_resources, event_point, mode_semantics, spill_managers,
       arch, std::move(private_layout), event_point.has_compact_moi_scalar_spill(), warnings,
@@ -207,7 +209,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     required_sgpr_count = std::max(required_sgpr_count, count);
   }
   emission->required_sgpr_count = required_sgpr_count;
-  return MoiPlannedRecordEvent{std::move(*probe), std::move(*emission), derived_owner};
+  return MoiPlannedRecordEvent{std::move(*probe), std::move(*emission)};
 }
 
 } // namespace rocjitsu::consan_moi_impl

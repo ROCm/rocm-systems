@@ -197,7 +197,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
-        return_text_offset, composed_access_patch != result.patches.end(), planned.derived_owner,
+        return_text_offset, composed_access_patch != result.patches.end(),
         guest_instruction_offset, result.errors);
     if (!cave_words)
       return;

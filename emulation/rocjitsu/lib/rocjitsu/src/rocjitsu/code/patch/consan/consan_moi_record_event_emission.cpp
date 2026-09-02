@@ -46,8 +46,7 @@ using consan_moi_detail::kFenceRecordLayout;
     const MoiRecordEventEmissionPlan &options, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, rj_code_arch_t arch, uint32_t barrier_record_capacity,
     size_t barrier_records_offset, uint32_t original_barrier_word, uint64_t cave_text_offset,
-    uint64_t return_text_offset, const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
-    std::vector<std::string> &errors) {
+    uint64_t return_text_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -72,12 +71,12 @@ using consan_moi_detail::kFenceRecordLayout;
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
-    if (!derived_owner) {
+    if (!options.derived_owner) {
       errors.emplace_back("ConSan MOI barrier record patch requires a planned owner derivation");
       return std::nullopt;
     }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner = build_moi_workitem_owner_derivation(*derived_owner, value_vgpr, arch,
+    const auto owner = build_moi_workitem_owner_derivation(*options.derived_owner, value_vgpr, arch,
                                                            "barrier record patch", errors);
     if (!owner)
       return std::nullopt;
@@ -265,7 +264,6 @@ using consan_moi_detail::kFenceRecordLayout;
     const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t record_index, uint32_t atomic_record_capacity, size_t atomic_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset, bool already_runtime_workgroup_gated,
-    const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
@@ -304,12 +302,12 @@ using consan_moi_detail::kFenceRecordLayout;
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
-    if (!derived_owner) {
+    if (!options.derived_owner) {
       errors.emplace_back("ConSan MOI atomic record patch requires a planned owner derivation");
       return std::nullopt;
     }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const auto owner = build_moi_workitem_owner_derivation(*derived_owner, value_vgpr, arch,
+    const auto owner = build_moi_workitem_owner_derivation(*options.derived_owner, value_vgpr, arch,
                                                            "atomic record patch", errors);
     if (!owner)
       return std::nullopt;
@@ -721,7 +719,6 @@ using consan_moi_detail::kFenceRecordLayout;
     uint32_t record_index, uint32_t record_capacity_or_count, size_t fence_records_offset,
     uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::span<const uint32_t> displaced_tail_words,
-    const std::optional<MoiWorkitemOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
   (void)record_index;
   if (!options.scratch_vgpr) {
@@ -764,12 +761,12 @@ using consan_moi_detail::kFenceRecordLayout;
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_epoch_vgprs.owner() && !options.moi_persistent_sgprs.owner()) {
-    if (!derived_owner) {
+    if (!options.derived_owner) {
       errors.emplace_back("ConSan MOI fence record patch requires a planned owner derivation");
       return std::nullopt;
     }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner = build_moi_workitem_owner_derivation(*derived_owner, value_vgpr, arch,
+    const auto owner = build_moi_workitem_owner_derivation(*options.derived_owner, value_vgpr, arch,
                                                            "fence record patch", errors);
     if (!owner)
       return std::nullopt;
