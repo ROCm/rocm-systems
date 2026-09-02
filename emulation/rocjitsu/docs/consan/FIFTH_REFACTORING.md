@@ -10136,3 +10136,54 @@ legacy-harvest criteria, but full target/mode locality, the remaining broad
 transaction and operating-point surfaces, larger deletion harvests,
 extension-proof revalidation, and the independent Section 14 audit remain
 open.
+
+### 16.146 Convergence checkpoint 145: InlineShadow owns private barrier emission
+
+The physical-locality pass over the shared barrier transaction next isolated
+its private-epoch body.  The body is an irreducibly InlineShadow operation: it
+loads, saturating-increments, and stores the mode's private epoch, preserves
+the selected scratch resources and selectable VGPR-bank state, and returns
+through the InlineShadow route retained by the body plan.  Nevertheless, all
+of that implementation still lived in the shared barrier fragment beside the
+cross-mode candidate transaction.
+
+The complete private-epoch emitter now lives in the mode-named
+`consan_moi_inline_shadow_private_barrier.inc` owner.  The shared transaction
+retains only its narrow declaration and calls it through the already-exclusive
+`MoiInlinePrivateEpochBarrierEmissionPlan` alternative.  No common mechanism
+was copied: the mode owner continues to use the shared spill, wait, return, and
+target-operation helpers from its single compiled barrier transaction.  The
+architecture-boundary gate registers the new implementation fragment, proves
+that it has exactly one textual owner, and requires the private body to remain
+in that mode-named owner.
+
+| Signal | Checkpoint 145 | Cumulative change | Slice change from checkpoint 144 |
+| --- | ---: | ---: | ---: |
+| Production files | 306 | +77 | +1 mode owner |
+| Physical production lines | 102,726 | **-2,250** | +14 |
+| Nonblank production lines | 96,305 | **-2,779** | +11 |
+| Production implementation lines | 88,512 | **-2,938** | +6 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| InlineShadow private-barrier body lines in the shared fragment | **0** | n/a | **-57** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `0968debd7dd`.  Validation includes a
+current successful full `-j16` build, the architecture-boundary gate, both
+focused private-epoch barrier host regressions, and all **10/10** correct and
+incorrect InlineShadow fence/barrier-publication simulator-device cases across
+gfx942, gfx950, gfx1100, gfx1201, and gfx1250.  Checkpoint 141 remains the
+immediately preceding complete **4,789/4,789** nonphysical gate.  No test was
+removed, renamed, disabled, or replaced, and no physical GPU test was run.
+
+The six-line implementation cost is the explicit cross-fragment declaration
+and ownership wiring.  It buys a mechanically enforced, skippable mode body,
+but it is deliberately only the first physical cut through the remaining
+InlineShadow barrier region.  The next barrier-locality checkpoint must use
+this seam to relocate and consolidate a larger InlineShadow planning/emission
+surface, or harvest more than this six-line investment; another movement-only
+barrier checkpoint would violate the anti-circling rule.  Full target/mode
+locality, broad transaction and operating-point reduction, extension-proof
+revalidation, and the independent Section 14 audit remain open.
