@@ -48,8 +48,10 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(rocjpeg QUIET)
 find_package(rocprofiler-register QUIET)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads QUIET)
 
-if(HIP_FOUND AND rocjpeg_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND rocjpeg_FOUND AND rocprofiler-register_FOUND AND Threads_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # rocJPEG
@@ -59,6 +61,8 @@ if(HIP_FOUND AND rocjpeg_FOUND AND rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
     # rocprofiler-register
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    # threads
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
 
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} jpegdecodeasync.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
@@ -74,5 +78,8 @@ else()
     endif()
     if (NOT rocprofiler-register_FOUND)
         message(FATAL_ERROR "-- ERROR!: rocprofiler-register Not Found!")
+    endif()
+    if (NOT Threads_FOUND)
+        message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
     endif()
 endif()

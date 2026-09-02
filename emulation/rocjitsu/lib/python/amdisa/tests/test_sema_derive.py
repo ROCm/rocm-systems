@@ -2493,6 +2493,14 @@ class TestDerivePacked:
         block = derive_sema_block(sem)
         assert block is not None
 
+    def test_pk_lshl_add_u64_has_distinct_packed_width_semantics(self):
+        sem = derive_semantics('V_PK_LSHL_ADD_U64', 'ENC_VOP3P')
+
+        assert sem is not None
+        assert sem.semantic_class == 'pk_lshl_add_u64'
+        assert sem.operation == 'lshl_add'
+        assert sem.data_type == 'u64'
+
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
