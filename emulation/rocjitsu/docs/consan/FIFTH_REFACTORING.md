@@ -11052,3 +11052,46 @@ The three callback-payback checkpoints have recovered 20 of the 55 interface
 lines while removing five duplicate, provisional, or diagnostic-only pieces
 of state.  Broad transform artifacts remain exposed to both planner seams;
 that is now the highest-leverage unresolved part of this same interaction.
+
+### 16.162 Convergence checkpoint 161: exact barrier-planner inputs
+
+Both mode-owned planner seams still accepted `ConSanTransformArtifacts` even
+though they neither staged nor published transform artifacts.  Across the four
+planner implementations, that bus was used only to reach the accepted register
+allocation, program inventory, warnings, and errors.  It exposed every patch,
+replacement image, failure cause, observation product, and unrelated transform
+field to mode-local body planning.
+
+The ordinary planner seam now receives its accepted allocation and diagnostics
+explicitly.  The private context receives inventory, accepted allocation, and
+warnings explicitly.  No planner can inspect or mutate the transform result;
+the common transaction remains the sole artifact owner.  The structural gate
+rejects `ConSanTransformArtifacts` in either planner contract.  This removes
+four broad-bus references, though spelling the narrower facts adds seven
+implementation lines and four operating-point type references.
+
+| Signal | Checkpoint 161 | Cumulative change | Slice change from checkpoint 160 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,637 | **-2,339** | +7 |
+| Nonblank production lines | 96,219 | **-2,865** | +7 |
+| Production implementation lines | 88,430 | **-3,020** | +7 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | **-4 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **265 / 52** | **-25 / +1** | **+4 / 0** |
+| Barrier planners accepting transform artifacts | **0 / 4** | n/a | **-4** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `aff4d4a58eb`.  Validation includes a
+successful full `-j16` build and **109/109** nonphysical architecture-boundary
+and barrier-named host tests.  All tests used `-LE physical`; no test was
+removed, renamed, disabled, or replaced, and no physical GPU test was run.
+
+This is an intentional interface trade: it removes a materially broader bus
+but increases explicit operating-point exposure and gives back seven of the
+recent deletion lines.  The next convergence work must project the accepted
+assignment facts actually needed by these planners or otherwise consolidate
+their repeated assignment/emission preparation; preserving both the new
+spelling cost and the broad allocation input would merely exchange one bus for
+another.
