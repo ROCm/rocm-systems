@@ -10082,3 +10082,57 @@ This closes another mode-locality violation but does not complete the fifth
 refactoring. Full target and mode locality, remaining broad transaction and
 operating-point surfaces, larger deletion harvests, extension-proof
 revalidation, and the independent Section 14 audit remain open.
+
+### 16.145 Convergence checkpoint 144: one planned barrier body
+
+The next shared-barrier trace found that candidate planning represented its
+mode-specific body with three independent optionals: Record/Replay record,
+InlineShadow scalar/VGPR epoch, and InlineShadow private epoch. Every accepted
+candidate populated exactly one, but the type allowed none or several. The
+body emitter consequently repeated mode selection by probing the optionals,
+carried missing-plan diagnostics for states that correct planning could never
+produce, and made later geometry code ask separately whether the private
+alternative had been selected.
+
+`PlannedInlineEpochBarrier` now retains one `MoiBarrierBodyPlan` variant. Each
+planning branch constructs its exact alternative before admitting the
+candidate. Body emission dispatches on that product, and the local-body
+optimization queries the same variant. The three optional fields and their
+invalid-state checks are deleted; no compatibility representation remains.
+Although the historical local struct name still mentions Inline, the product
+now states the actual shared Record/Replay-or-Inline body boundary explicitly.
+Renaming or physically splitting the surrounding shared mechanism remains a
+later locality decision rather than being mixed into this representation
+cutover.
+
+Structural enforcement requires the exclusive variant and rejects restoration
+of any of the three optional body fields.
+
+| Signal | Checkpoint 144 | Cumulative change | Slice change from checkpoint 143 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,712 | **-2,264** | **-7** |
+| Nonblank production lines | 96,294 | **-2,790** | **-7** |
+| Production implementation lines | 88,506 | **-2,944** | **-7** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | 0 / 0 |
+| Parallel optional barrier-body fields | **0** | n/a | **-3** |
+| Exact planned barrier-body variants | **1** | n/a | +1 |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `effe16a1434`. Validation includes a
+successful full `-j16` build, all **109/109** barrier-related host/component
+and architecture-boundary tests, and all **20/20** Record/Replay and
+InlineShadow fence/barrier publication simulator-device cases across gfx942,
+gfx950, gfx1100, gfx1201, and gfx1250. Checkpoint 141 remains the immediately
+preceding complete **4,789/4,789** nonphysical gate. No test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+This slice makes another planning-to-emission edge forward-only while also
+shrinking production. It strengthens the mode-interaction, narrow-product, and
+legacy-harvest criteria, but full target/mode locality, the remaining broad
+transaction and operating-point surfaces, larger deletion harvests,
+extension-proof revalidation, and the independent Section 14 audit remain
+open.
