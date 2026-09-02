@@ -40,6 +40,8 @@ inline uint64_t flush_f64(uint64_t value) {
   return value;
 }
 
+inline uint64_t quiet_nan_f64(uint64_t value) { return value | 0x0008000000000000ULL; }
+
 inline int host_round_mode(uint32_t round_mode) {
   switch (round_mode & 3u) {
   case 1:
@@ -206,10 +208,18 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
       case BinaryF64Op::Multiply:
         return lhs * rhs;
       case BinaryF64Op::MaximumNumber:
+        if (std::isnan(lhs))
+          return std::bit_cast<double>(std::isnan(rhs) ? detail::quiet_nan_f64(src0) : src1);
+        if (std::isnan(rhs))
+          return lhs;
         if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0)
           return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
         return std::fmax(lhs, rhs);
       case BinaryF64Op::MinimumNumber:
+        if (std::isnan(lhs))
+          return std::bit_cast<double>(std::isnan(rhs) ? detail::quiet_nan_f64(src0) : src1);
+        if (std::isnan(rhs))
+          return lhs;
         if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0)
           return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
         return std::fmin(lhs, rhs);
