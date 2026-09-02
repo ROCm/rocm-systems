@@ -1031,7 +1031,7 @@ __host__ uint16_t rocshmem_uint16_g(
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
@@ -1262,7 +1262,7 @@ __host__ void rocshmem_uint16_put_nbi(
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
@@ -1283,11 +1283,11 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
  * calling PE to \p dest on \p pe. The operation is not blocking. The caller
  * will return as soon as the request is posted. The caller must call
- * _host__ rocshmem_quiet() if completion notification is required.
+ * __host__ rocshmem_quiet() if completion notification is required.
  *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
-                      heap.
+ *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
