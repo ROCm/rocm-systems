@@ -587,7 +587,7 @@ gfx1201, and gfx1250 emulation. No physical-GPU tests were run. Macro-slice 3
 therefore closes as a qualified subsystem replacement rather than a retained
 cleanup experiment.
 
-### 10.4 Macro-slice 4 (active): decoded proofs instead of mirrored emitters
+### 10.4 Macro-slice 4 (abandoned): decoded proofs instead of mirrored emitters
 
 The post-vocabulary candidate comparison rejected three attractive but
 low-leverage representation changes. `ConSanTransformArtifacts` is the
@@ -645,3 +645,50 @@ validation will retain those tests and add decoder-proof cases for any
 previously unpinned opcode, operand, modifier, or branch-target distinction.
 The cutover gate remains the complete nonphysical RocJitsu matrix across all
 four modes and five emulated targets.
+
+The completed experimental cutover migrated the entire named family: indirect
+islands, entry scalar backups, dispatch prologues, branch-only continuations,
+dense routes, relay donors and reservoirs, exact-shadow publication, release
+transactions, mutation-generated control flow, perturbation delays, and
+appended padding. The final-validation translation unit no longer imported an
+instruction builder, and all 1,667 ConSan tests passed with the two expected
+benchmark-object skips. The semantic result was stronger: producer and proof
+no longer shared emitted instruction construction.
+
+The deletion thesis nevertheless failed decisively. The complete production
+source diff contained 1,324 additions and 707 deletions, a **617-line net
+physical increase** instead of the projected 600-line decrease. Direct decoded
+operand predicates and target normalization did not make the proof obligations
+disappear; they restated those obligations at comparable or greater volume.
+Meeting the 500-line abort floor would therefore have required finding more
+than 1,100 further deletable lines after every qualifying mirrored builder had
+already been removed. A generic pattern language could compress the spelling,
+but would violate this slice's explicit anti-DSL condition and obscure the
+machine behavior being proved.
+
+The experiment was reverted rather than retained as an independence-only
+improvement. No decoded-proof helper, target operation, builder-import change,
+or alternate validation path remains. One existing fail-closed bug discovered
+during the experiment is retained independently: corrupting every expected
+release-version compare-exchange previously dereferenced an empty position
+list. Final validation now reports the semantic failure, and the existing
+release-transaction adversarial test exercises that case. The architecture-
+local source filename created by the attempt remains only as an implementation-
+free tombstone because this work session may not delete files; it stays in the
+component manifest solely so the source-ownership gate remains exact.
+
+The post-abort production accounting is:
+
+| Signal | Macro-slice 3 | Post-abort result | Change |
+| --- | ---: | ---: | ---: |
+| ConSan production files | 311 | 312 | +1 empty tombstone |
+| Physical ConSan production lines | 99,966 | 99,978 | +12 |
+| Nonblank ConSan production lines | 93,515 | 93,526 | +11 |
+| ConSan implementation lines | 85,778 | 85,780 | **+2 bug fix** |
+
+The campaign therefore retains **2,235 net implementation lines of reduction**
+from the 88,015-line baseline. Macro-slice 4 contributes no claimed shrinkage,
+does not clear the 3,000-line review floor, and supplies evidence against
+revisiting mirrored final-validation construction unless a materially smaller
+proof representation is found. Candidate selection returns to the whole
+production codebase.
