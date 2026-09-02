@@ -1,9 +1,9 @@
 # Benchmark source attribution
 
-The rocjitsu adapters are original fixed workloads built on public HIP, Triton,
-and hipBLASLt interfaces. They do not load code objects or call `rj_vm`
-directly. Package versions are pinned in `requirements.txt`; generated kernels,
-caches, and HSCO files are build artifacts and must not be committed.
+The rocjitsu adapters are original fixed workloads built on public Triton and
+hipBLASLt interfaces. They do not load code objects or call `rj_vm` directly.
+Package versions are pinned in `requirements.txt`; generated kernels, caches,
+and HSCO files are build artifacts and must not be committed.
 
 ## Triton workloads
 

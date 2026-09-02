@@ -43,7 +43,7 @@ PACKAGE_NAMES = (
     "amd-torch-device-gfx950",
     "amd-torch-device-gfx1250",
 )
-CASE_ID = re.compile(r"^(hip|triton|tensile)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$")
+CASE_ID = re.compile(r"^(triton|tensile)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$")
 WORKLOAD_FIELDS = {"schema", "case", "target", "provider", "parameters", "timings_ns"}
 
 
@@ -84,7 +84,7 @@ class CaseMetadata:
     suite: str
     name: str
     operation: str
-    data_type: str | None
+    data_type: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,11 +94,6 @@ class TargetMetadata:
 
 
 CASE_METADATA = {
-    "hip.launch_noop": CaseMetadata("HIP", "Launch overhead", "Launch", None),
-    "hip.copy_fp32_32m": CaseMetadata("HIP", "32 MiB FP32 copy", "Copy", "fp32"),
-    "hip.vector_add_fp32_tail": CaseMetadata(
-        "HIP", "FP32 vector add with tail", "Vector add", "fp32"
-    ),
     "triton.softmax_fp16_aligned": CaseMetadata(
         "Triton", "Aligned FP16 softmax", "Softmax", "fp16"
     ),
@@ -226,9 +221,6 @@ def select_matrix(
 
 
 def _program(build_dir: Path, cell: Cell) -> tuple[str, ...]:
-    if cell.provider == "hip":
-        program = build_dir / "benchmarks" / f"rocjitsu-benchmark-native-{cell.target}"
-        return (str(program),)
     if cell.provider == "triton":
         return (sys.executable, "-m", "benchmarks.workloads.triton_workloads")
     return (str(build_dir / "benchmarks" / "rocjitsu-benchmark-hipblaslt"),)

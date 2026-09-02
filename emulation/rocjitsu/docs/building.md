@@ -30,8 +30,8 @@ cmake --build build
 | `RJ_BUILD_BENCHMARKS` | `OFF` | Build the optional gfx950/gfx1250 benchmark workloads |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 
-`RJ_BUILD_BENCHMARKS` requires a ROCm SDK whose compiler supports both
-`gfx950` and `gfx1250`. Install the pinned binary packages from
+`RJ_BUILD_BENCHMARKS` requires the pinned runtime and target-support packages
+for `gfx950` and `gfx1250`. Install the binary packages from
 `benchmarks/requirements.txt` into a Python 3.12 environment and pass the
 resulting SDK root as `ROCM_PATH`. The in-tree adapter links to the installed
 HIP and hipBLASLt packages; CMake does not fetch or build benchmark

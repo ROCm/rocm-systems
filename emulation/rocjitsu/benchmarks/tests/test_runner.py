@@ -32,8 +32,6 @@ class RunnerTest(unittest.TestCase):
         )
         for path in (
             self.build / "tools" / "rocjitsu" / "rocjitsu",
-            self.build / "benchmarks" / "rocjitsu-benchmark-native-gfx950",
-            self.build / "benchmarks" / "rocjitsu-benchmark-native-gfx1250",
             self.build / "benchmarks" / "rocjitsu-benchmark-hipblaslt",
         ):
             path.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -113,20 +111,29 @@ class RunnerTest(unittest.TestCase):
 
     def test_default_manifest_has_full_ordered_matrix(self) -> None:
         matrix = runner.select_matrix(self.suite)
-        self.assertEqual(len(matrix), 24)
+        self.assertEqual(len(matrix), 18)
         self.assertEqual(set(runner.CASE_METADATA), set(self.suite.cases))
         self.assertEqual(
             matrix[:4],
             (
-                runner.Cell("hip.launch_noop", "gfx950"),
-                runner.Cell("hip.launch_noop", "gfx1250"),
-                runner.Cell("hip.copy_fp32_32m", "gfx950"),
-                runner.Cell("hip.copy_fp32_32m", "gfx1250"),
+                runner.Cell("triton.softmax_fp16_aligned", "gfx950"),
+                runner.Cell("triton.softmax_fp16_aligned", "gfx1250"),
+                runner.Cell("triton.softmax_fp16_boundary", "gfx950"),
+                runner.Cell("triton.softmax_fp16_boundary", "gfx1250"),
             ),
         )
         self.assertEqual(self.suite.warmups, 3)
         self.assertEqual(self.suite.samples, 21)
         self.assertEqual(self.suite.timeout_seconds, 300)
+
+    def test_smoke_manifest_has_single_triton_case(self) -> None:
+        smoke = runner.load_manifest(runner.BENCHMARK_ROOT / "suites" / "smoke.toml")
+        self.assertEqual(smoke.name, "smoke")
+        self.assertEqual(smoke.targets, ("gfx950",))
+        self.assertEqual(smoke.cases, ("triton.rmsnorm_bf16",))
+        self.assertEqual(smoke.warmups, 1)
+        self.assertEqual(smoke.samples, 3)
+        self.assertEqual(smoke.timeout_seconds, 60)
 
     def test_manifest_rejects_extra_fields(self) -> None:
         manifest = self.root / "suite.toml"
@@ -138,7 +145,7 @@ class RunnerTest(unittest.TestCase):
     def test_manifest_rejects_case_path_traversal(self) -> None:
         manifest = self.root / "suite.toml"
         text = runner.DEFAULT_MANIFEST.read_text(encoding="utf-8").replace(
-            '"hip.launch_noop"', '"hip./../../../escaped"'
+            '"triton.softmax_fp16_aligned"', '"triton./../../../escaped"'
         )
         manifest.write_text(text, encoding="utf-8")
         with self.assertRaisesRegex(runner.RunnerError, "invalid benchmark case ID"):
@@ -153,25 +160,24 @@ class RunnerTest(unittest.TestCase):
     def test_subsets_keep_manifest_order_and_reject_unknowns(self) -> None:
         matrix = runner.select_matrix(
             self.suite,
-            cases=("tensile.gemm_fp16", "hip.launch_noop"),
+            cases=("tensile.gemm_fp16", "triton.rmsnorm_bf16"),
             targets=("gfx1250",),
         )
         self.assertEqual(
             matrix,
             (
-                runner.Cell("hip.launch_noop", "gfx1250"),
+                runner.Cell("triton.rmsnorm_bf16", "gfx1250"),
                 runner.Cell("tensile.gemm_fp16", "gfx1250"),
             ),
         )
         with self.assertRaisesRegex(runner.RunnerError, "not in the suite"):
-            runner.select_matrix(self.suite, cases=("hip.unknown",))
+            runner.select_matrix(self.suite, cases=("triton.unknown",))
         with self.assertRaisesRegex(runner.RunnerError, "not in the suite"):
             runner.select_matrix(self.suite, targets=("gfx9999",))
 
     def test_commands_are_derived_for_all_providers(self) -> None:
         output = self.root / "out"
         expected_programs = {
-            "hip.launch_noop": "rocjitsu-benchmark-native-gfx950",
             "triton.rmsnorm_bf16": "-m",
             "tensile.gemm_fp16": "rocjitsu-benchmark-hipblaslt",
         }
@@ -209,7 +215,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_validate_and_aggregate_workload(self) -> None:
         path = self.root / "workload.json"
-        cell = runner.Cell("hip.launch_noop", "gfx950")
+        cell = runner.Cell("triton.rmsnorm_bf16", "gfx950")
         payload = self._payload(cell, [30, 10, 20])
         payload["parameters"] = {
             "threads_per_block": 64,
@@ -260,7 +266,7 @@ class RunnerTest(unittest.TestCase):
                     runner._dashboard_value(parameters)
 
     def test_success_writes_compact_artifacts(self) -> None:
-        matrix = self._matrix("hip.launch_noop")
+        matrix = self._matrix("triton.rmsnorm_bf16")
         output, result = self._run(matrix, "success", samples=3)
         self.assertEqual(
             set(result),
@@ -338,12 +344,12 @@ class RunnerTest(unittest.TestCase):
                 "artifacts",
             },
         )
-        self.assertEqual(test["testId"], "gfx950:hip.launch_noop")
-        self.assertEqual(test["logicalTestId"], "hip.launch_noop")
-        self.assertEqual(test["suite"], "HIP")
-        self.assertEqual(test["name"], "Launch overhead")
-        self.assertEqual(test["operation"], "Launch")
-        self.assertIsNone(test["dataType"])
+        self.assertEqual(test["testId"], "gfx950:triton.rmsnorm_bf16")
+        self.assertEqual(test["logicalTestId"], "triton.rmsnorm_bf16")
+        self.assertEqual(test["suite"], "Triton")
+        self.assertEqual(test["name"], "BF16 RMSNorm")
+        self.assertEqual(test["operation"], "RMSNorm")
+        self.assertEqual(test["dataType"], "bf16")
         self.assertEqual(test["problem"], {"fixture": True})
         self.assertEqual(test["execMode"], "functional")
         self.assertEqual(test["numThreads"], 1)
@@ -368,7 +374,7 @@ class RunnerTest(unittest.TestCase):
             json.loads((output / "run.json").read_text(encoding="utf-8")), result
         )
         self.assertEqual(
-            (output / "cases/hip.launch_noop/gfx950/stdout.txt").read_text(),
+            (output / "cases/triton.rmsnorm_bf16/gfx950/stdout.txt").read_text(),
             "out",
         )
 
@@ -382,7 +388,7 @@ class RunnerTest(unittest.TestCase):
             return self._successful_process(argv, **kwargs)
 
         self._run(
-            self._matrix("hip.launch_noop"),
+            self._matrix("triton.rmsnorm_bf16"),
             "running-checkpoint",
             process=inspect_checkpoint,
             samples=1,
@@ -398,7 +404,7 @@ class RunnerTest(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 7, "partial out", "failure text")
 
         output, result = self._run(
-            self._matrix("hip.launch_noop"), "nonzero", process=fail
+            self._matrix("triton.rmsnorm_bf16"), "nonzero", process=fail
         )
         self.assertEqual(result["status"], "failed")
         test = result["tests"][0]
@@ -420,7 +426,7 @@ class RunnerTest(unittest.TestCase):
         )
         self.assertIsNone(test["artifacts"]["workload"])
         self.assertEqual(
-            (output / "cases/hip.launch_noop/gfx950/stderr.txt").read_text(),
+            (output / "cases/triton.rmsnorm_bf16/gfx950/stderr.txt").read_text(),
             "failure text",
         )
 
@@ -431,7 +437,7 @@ class RunnerTest(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(runner.RunnerError, "belongs to"):
-            runner.validate_build(self.build, self._matrix("hip.launch_noop"))
+            runner.validate_build(self.build, self._matrix("triton.rmsnorm_bf16"))
 
     def test_target_metadata_is_read_from_selected_configuration(self) -> None:
         configuration = self.root / "target.json"
@@ -444,7 +450,9 @@ class RunnerTest(unittest.TestCase):
         ):
             metadata = runner._target_metadata("gfx950")
             _, result = self._run(
-                self._matrix("hip.launch_noop"), "target-metadata", samples=1
+                self._matrix("triton.rmsnorm_bf16"),
+                "target-metadata",
+                samples=1,
             )
         self.assertEqual(metadata, runner.TargetMetadata("parallel", 8))
         self.assertEqual(result["tests"][0]["execMode"], "parallel")
@@ -550,7 +558,7 @@ class RunnerTest(unittest.TestCase):
             )
 
         output, result = self._run(
-            self._matrix("hip.launch_noop"), "timeout", process=timeout
+            self._matrix("triton.rmsnorm_bf16"), "timeout", process=timeout
         )
         test = result["tests"][0]
         self.assertEqual(result["status"], "failed")
@@ -561,7 +569,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(test["problem"])
         self.assertIsNone(test["durationSeconds"])
         self.assertEqual(
-            (output / "cases/hip.launch_noop/gfx950/stdout.txt").read_text(),
+            (output / "cases/triton.rmsnorm_bf16/gfx950/stdout.txt").read_text(),
             "partial out",
         )
 
@@ -570,7 +578,9 @@ class RunnerTest(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         _, result = self._run(
-            self._matrix("hip.launch_noop"), "missing-workload", process=missing
+            self._matrix("triton.rmsnorm_bf16"),
+            "missing-workload",
+            process=missing,
         )
         test = result["tests"][0]
         self.assertEqual(test["status"], "failed")
@@ -590,7 +600,7 @@ class RunnerTest(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         _, result = self._run(
-            self._matrix("hip.launch_noop"),
+            self._matrix("triton.rmsnorm_bf16"),
             "malformed",
             process=malformed,
             samples=2,
@@ -611,7 +621,7 @@ class RunnerTest(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         output, result = self._run(
-            self._matrix("hip.launch_noop"),
+            self._matrix("triton.rmsnorm_bf16"),
             "nonfinite",
             process=nonfinite,
             samples=1,
@@ -680,7 +690,7 @@ class RunnerTest(unittest.TestCase):
             with self.assertRaisesRegex(runner.RunnerError, "already exists"):
                 runner.run_suite(
                     self.suite,
-                    self._matrix("hip.launch_noop"),
+                    self._matrix("triton.rmsnorm_bf16"),
                     build_dir=self.build,
                     output=output,
                 )
@@ -697,7 +707,7 @@ class RunnerTest(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 9, "first", "failed")
             return self._successful_process(argv, **kwargs)
 
-        matrix = self._matrix("hip.launch_noop", "hip.copy_fp32_32m")
+        matrix = self._matrix("triton.rmsnorm_bf16", "triton.gemm_bf16_aligned")
         output, result = self._run(matrix, "partial", process=one_failure, samples=2)
         self.assertEqual(
             [item["status"] for item in result["tests"]],
@@ -715,10 +725,16 @@ class RunnerTest(unittest.TestCase):
             contextlib.redirect_stdout(stdout),
         ):
             status = runner.main(
-                ["--list", "--case", "hip.launch_noop", "--target", "gfx950"]
+                [
+                    "--list",
+                    "--case",
+                    "triton.rmsnorm_bf16",
+                    "--target",
+                    "gfx950",
+                ]
             )
         self.assertEqual(status, 0)
-        self.assertEqual(stdout.getvalue(), "hip.launch_noop\tgfx950\n")
+        self.assertEqual(stdout.getvalue(), "triton.rmsnorm_bf16\tgfx950\n")
 
 
 if __name__ == "__main__":

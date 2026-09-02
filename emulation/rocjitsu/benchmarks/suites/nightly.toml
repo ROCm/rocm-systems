@@ -1,9 +1,6 @@
 name = "nightly"
 targets = ["gfx950", "gfx1250"]
 cases = [
-  "hip.launch_noop",
-  "hip.copy_fp32_32m",
-  "hip.vector_add_fp32_tail",
   "triton.softmax_fp16_aligned",
   "triton.softmax_fp16_boundary",
   "triton.rmsnorm_bf16",

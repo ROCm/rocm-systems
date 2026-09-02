@@ -33,15 +33,6 @@ if(NOT RJ_BUILD_BENCHMARKS)
     return()
 endif()
 
-include(rj_find_amdcxx)
-rj_find_amdcxx(RJ_BENCHMARK_AMDCXX)
-if(NOT RJ_BENCHMARK_AMDCXX)
-    message(
-        FATAL_ERROR
-        "RJ_BUILD_BENCHMARKS requires amdclang++ under ROCM_PATH='${ROCM_PATH}'."
-    )
-endif()
-
 foreach(_package IN ITEMS hip hipblas-common hipblaslt)
     # ROCM_PATH is the authoritative SDK for benchmark builds. Discard stale
     # package-cache entries so a reused build tree cannot mix ROCm installs.
@@ -77,38 +68,10 @@ set_target_properties(
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-set(_rj_benchmark_targets gfx950 gfx1250)
-set(_rj_native_source "${CMAKE_CURRENT_SOURCE_DIR}/src/native_workloads.hip")
-set(_rj_native_outputs)
-
-foreach(_target IN LISTS _rj_benchmark_targets)
-    set(_output "${CMAKE_CURRENT_BINARY_DIR}/rocjitsu-benchmark-native-${_target}")
-    add_custom_command(
-        OUTPUT "${_output}"
-        COMMAND
-            "${RJ_BENCHMARK_AMDCXX}" -x hip --offload-arch=${_target}
-            --rocm-path=${ROCM_PATH} -std=c++20 -O3 -DNDEBUG
-            -DROCJITSU_BENCHMARK_BUILD_TARGET=\"${_target}\" -Wall -Wextra
-            -Wpedantic "${_rj_native_source}" -o "${_output}"
-        DEPENDS
-            "${_rj_native_source}"
-        COMMENT "Building native rocjitsu benchmark workloads (${_target})"
-        VERBATIM
-    )
-    list(APPEND _rj_native_outputs "${_output}")
-endforeach()
-
-add_custom_target(
-    rocjitsu_benchmark_workloads ALL
-    DEPENDS ${_rj_native_outputs}
-)
+add_custom_target(rocjitsu_benchmark_workloads ALL)
 add_dependencies(
     rocjitsu_benchmark_workloads
     rocjitsu_benchmark_hipblaslt
     rocjitsu_bin
     rocjitsu_shared
 )
-
-unset(_rj_benchmark_targets)
-unset(_rj_native_outputs)
-unset(_rj_native_source)
