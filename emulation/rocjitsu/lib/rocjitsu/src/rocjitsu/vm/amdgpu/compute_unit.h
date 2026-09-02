@@ -325,6 +325,7 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_memory_routing_ = plugin_group_->observes_memory_routing();
   }
 
   /// @brief Return the execution plugin group.
@@ -1023,6 +1024,7 @@ protected:
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
+  bool observes_memory_routing_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;

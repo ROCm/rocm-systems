@@ -26,6 +26,7 @@ event loop via the `Functional<Base>` CRTP mixin.
 | `simulation.cpp` | Engine run loop, event dispatch, LBTS computation (multi-threaded) |
 | `components/memory_interface.h` | MemoryInterface - abstract byte-addressed memory controller |
 | `components/cache.h` | Cache\<NumSets, Assoc, LineSizeBits\> - set-associative cache template |
+| `components/tag_array.h` | TagArray - run-time-configured set-associative tag array, no data |
 | `components/sparse_memory.h` | SparseMemory - page-allocated flat address space |
 | `components/register_file.h` | RegisterFile - typed register storage with read/write interface |
 | `components/vector_reg.h` | VectorReg\<N, T\> - SIMD-width vector register type |

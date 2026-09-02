@@ -569,7 +569,7 @@ TEST(TransposeLoadTest, WmmaTrB8Wave64UsesFirst32AddressesAndOneVgpr) {
     for (uint32_t byte = 0; byte < 8; ++byte)
       state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
 
-  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state), 0xFFFF'FFFFULL);
+  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, state.wf_size), 0xFFFF'FFFFULL);
   amdgpu::transpose_response(state);
 
   ASSERT_EQ(state.num_elems, 1u);
@@ -7314,7 +7314,7 @@ TEST(Rdna4GlobalLoadTransposeTest, Wave64B128ReadsLowHalfAndWritesTwoVgprs) {
     }
   }
 
-  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state), 0xFFFFFFFFULL);
+  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state, state.wf_size), 0xFFFFFFFFULL);
   amdgpu::transpose_response(state);
 
   ASSERT_EQ(state.num_elems, 2u);
