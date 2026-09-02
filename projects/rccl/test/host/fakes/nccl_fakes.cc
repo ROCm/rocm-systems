@@ -75,16 +75,6 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-void ncclLoadParam(char const* /*env*/,
-                   int64_t     /*deftVal*/,
-                   int64_t     /*uninitialized*/,
-                   int64_t*    /*cache*/)
-{
-    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
-    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
-}
-
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.
 static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
@@ -93,6 +83,20 @@ static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
 }
 
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
+int64_t ncclLoadParam(char const* env,
+                      int64_t     deftVal,
+                      int64_t     /*uninitialized*/,
+                      int64_t*    cache,
+                      int8_t*     noCache)
+{
+    // Route through the controllable seam so tests can override per-env
+    // values; populate cache/noCache with the resolved value.
+    int64_t const val = g_loadParam(env, deftVal);
+    if (cache)   *cache   = val;
+    if (noCache) *noCache = 0;
+    return val;
+}
 
 // ---------------------------------------------------------------------------
 // Seams worth controlling from tests (return failure by default)
@@ -372,6 +376,21 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*co
 // `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
 // keeps the single-segment path the microtests exercise.
 int64_t ncclParamMultiSegmentRegister() { return 0; }
+
+// ---------------------------------------------------------------------------
+// Generic stubs.
+// ---------------------------------------------------------------------------
+
+// Error string. (ncclGetErrorString is the public NCCL accessor.)
+const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
+
+// NOTE: the bootstrap / arg-check / comm-registration / group-state-machine
+// stubs that used to live here are DevRuntime-only floor -- they now live in
+// devr_fakes.cc. rccl-UnitTestsMicro gets the real group state machine from
+// group.cc (#included by group-test.cc), and rccl-UnitTestsMicroInit provides
+// its own (bootstrap_stubs.cc / nccl_stubs.cc / init_fakes.cc, plus the real
+// init.cc and argcheck.cc), so keeping these in this shared TU produced
+// duplicate-symbol link errors in both binaries.
 
 // ---------------------------------------------------------------------------
 // Reset

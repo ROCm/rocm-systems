@@ -115,6 +115,7 @@ do_host_tests() {
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsDevRuntime:$SCRIPT_DIR/host_tests_devruntime.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
   )

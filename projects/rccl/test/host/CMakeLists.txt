@@ -1,21 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(RCCL_MICRO_TEST_SOURCES
-  p2p-test.cc
-  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
-  group-test.cc
-  devcomm-test.cc
-  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
-  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
-  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
-  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
-  fakes/devcomm_fakes.cc
-  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
-  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
-  ../common/ProcessIsolatedTestRunner.cpp
-)
-
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -31,6 +15,150 @@ set(RCCL_MICRO_TEST_SOURCES
 # not defined, so we fall through to the standalone project that builds
 # rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
 # =====================================================================
+
+# --- Source lists shared by both modes --------------------------------
+# The in-RCCL-build path and the standalone project build the same two
+# host-only micro binaries; only the toolchain/link plumbing differs. Keep the
+# file lists in one place so a source added/removed here applies to both. Paths
+# are relative to this directory (CMAKE_CURRENT_SOURCE_DIR), valid in either
+# mode. RCCL_MICRO_COMMON_SOURCES is the shared fakes + gtest main + isolation
+# runner; the *_UNIT_SOURCES vars are the per-binary unit-specific files.
+set(RCCL_MICRO_COMMON_SOURCES
+  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+  ../common/ProcessIsolatedTestRunner.cpp
+)
+set(RCCL_MICRO_UNIT_SOURCES
+  p2p-test.cc
+  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  group-test.cc
+  devcomm-test.cc                      # devcomm version-compat shim microtests
+  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
+  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
+  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
+  fakes/devcomm_fakes.cc               # devcomm test doubles
+)
+set(RCCL_DEVR_UNIT_SOURCES
+  DevRuntimeTests.cpp
+  fakes/devr_fakes.cc                  # devr / gin / rma / team / shadow-pool stubs
+)
+
+# apply_hip_compile_only(<target>)
+#
+# Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
+# compile defs, options) to <target> WITHOUT linking the HIP runtime.
+# $<COMPILE_ONLY:hip::host> would express this in one line but requires
+# CMake >= 3.27; pulling the interface properties directly keeps this valid at
+# the project's declared minimum (3.16). Used by the host-only binaries in the
+# in-RCCL-build path, which must not bind libamdhip64.so.
+function(apply_hip_compile_only tgt)
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(${tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+endfunction()
+
+# apply_host_only_coverage_asan(<target>)
+#
+# Apply the shared host-only build model used by the in-RCCL-build micro/devr
+# binaries:
+#  * --offload-host-only + -no-hip-rt: no amdgcn device pass and no HIP runtime
+#    link. Host-only keeps llvm coverage instrumentation off the device pass,
+#    where it would pull in profiling-runtime symbols that do not exist on
+#    device and make amdgcn-link fail.
+#  * llvm source-based coverage (-fprofile-instr-generate -fcoverage-mapping).
+#  * AddressSanitizer when BUILD_ADDRESS_SANITIZER is set, with an rpath to
+#    ASAN_RUNTIME_DIR when provided.
+function(apply_host_only_coverage_asan tgt)
+  target_compile_options(${tgt} PRIVATE --offload-host-only)
+  target_link_options(${tgt} PRIVATE -no-hip-rt)
+
+  target_compile_options(${tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(${tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(${tgt} PRIVATE -fsanitize=address)
+    target_link_options(${tgt} PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(${tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+endfunction()
+
+# register_test_categories(<target> <yaml_name>)
+#
+# Register <target> with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures
+# do: via RCCL's shared category mechanism (no bare add_test, matching the rest
+# of test/CMakeLists.txt). <yaml_name> is the category file's basename under
+# test/ (e.g. test_categories_micro.yaml). apply_test_category_labels is defined
+# by shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
+# include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
+# likewise set by the parent. Guard on COMMAND so a non-monorepo configure
+# (shared/ctest absent) still succeeds -- there the target is built but not
+# category-registered.
+function(register_test_categories tgt yaml_name)
+  if(NOT COMMAND apply_test_category_labels)
+    return()
+  endif()
+  set(_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../${yaml_name}")
+  if(EXISTS "${_categories_yaml}")
+    message(STATUS "Applying test categories for ${tgt}")
+    apply_test_category_labels(
+      ${tgt}
+      "${_categories_yaml}"
+      "${PROJECT_BINARY_DIR}"
+      "${INSTALL_TEST_FILE}"
+    )
+  else()
+    message(WARNING "Skipping test categories for ${tgt}: missing ${_categories_yaml}")
+  endif()
+endfunction()
+
+# add_host_micro_test(<name> SOURCES ... [INCLUDES ...] [DEFINES ...])
+#
+# Create a standalone host-only micro-test binary. All of these binaries share
+# the same model as rccl-HostUnitTests (hipcc --offload-host-only, -no-hip-rt),
+# are built from the hipified snapshot, and satisfy every HIP/nccl symbol from
+# fakes/ rather than librccl.so or the HIP runtime. SOURCES are the
+# unit-specific files; the common gtest main, process-isolation runner and
+# shared fakes are added automatically. INCLUDES / DEFINES are appended to the
+# shared include dirs / RCCL_HOST_TEST_DEFS for that binary.
+#
+# -no-pie: the RCCL-vendored libgtest.a used by this standalone path is built
+# without -fPIC, so a PIE link fails with "relocation R_X86_64_32 cannot be
+# used against local symbol". Called only from the standalone project below, so
+# RCCL_INCLUDE_DIRS / RCCL_HOST_TEST_DEFS / RCCL_TEST_DIR are set by call time.
+function(add_host_micro_test name)
+  cmake_parse_arguments(ARG "" "" "SOURCES;INCLUDES;DEFINES" ${ARGN})
+  add_executable(${name}
+    ${ARG_SOURCES}
+    ${RCCL_MICRO_COMMON_SOURCES}
+  )
+  target_include_directories(${name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_INCLUDE_DIRS}
+    ${ARG_INCLUDES}
+  )
+  target_compile_definitions(${name} PRIVATE
+    ${RCCL_HOST_TEST_DEFS}
+    ${ARG_DEFINES}
+  )
+  target_link_options(${name} PRIVATE -no-hip-rt -no-pie)
+  target_link_libraries(${name} PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -38,7 +166,9 @@ if(BUILD_TESTS)
   # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
-  add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+  add_executable(rccl-UnitTestsMicro
+    ${RCCL_MICRO_UNIT_SOURCES}
+    ${RCCL_MICRO_COMMON_SOURCES})
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -46,20 +176,7 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
-  # Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
-  # compile defs) WITHOUT linking the HIP runtime. $<COMPILE_ONLY:hip::host> would
-  # express this in one line but requires CMake >= 3.27; pulling the interface
-  # properties directly keeps this valid at the project's declared minimum (3.16).
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(rccl-UnitTestsMicro PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
-    endif()
-  endforeach()
+  apply_hip_compile_only(rccl-UnitTestsMicro)
 
   target_link_libraries(rccl-UnitTestsMicro PRIVATE ${MICRO_TEST_LINK_LIBS})
 
@@ -86,49 +203,21 @@ if(BUILD_TESTS)
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
-
+  # The unit-under-test production .cc pulled in here trips these warnings on
+  # code paths the test does not exercise; silence them (matches the standalone
+  # build's global add_compile_options below).
   target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
+    -Wno-unused-parameter -Wno-unused-variable)
 
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicro PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  apply_host_only_coverage_asan(rccl-UnitTestsMicro)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
-  # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
+  # RCCL_MICRO_UNIT_SOURCES (or RCCL_MICRO_COMMON_SOURCES) at the top of this
+  # file as new units come under test -- both build modes pick them up.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
-  # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
-  # via RCCL's shared category mechanism (no bare add_test, matching the rest of
-  # test/CMakeLists.txt). apply_test_category_labels is defined by
-  # shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
-  # include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
-  # likewise set by the parent. Guard on COMMAND so a non-monorepo configure
-  # (shared/ctest absent) still succeeds -- there, as with the other binaries,
-  # the target is built but not category-registered.
-  if(COMMAND apply_test_category_labels)
-    set(_micro_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-    if(EXISTS "${_micro_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicro")
-      apply_test_category_labels(
-        rccl-UnitTestsMicro
-        "${_micro_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
-    endif()
-  endif()
+  register_test_categories(rccl-UnitTestsMicro test_categories_micro.yaml)
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc
@@ -230,6 +319,48 @@ if(BUILD_TESTS)
     endif()
   endforeach()
 
+  # rccl-UnitTestsDevRuntime: sibling host-only binary that #includes the
+  # hipified src/dev_runtime.cc directly to reach its file-static symMemory*
+  # helpers. It is a separate binary rather than folded into rccl-UnitTestsMicro
+  # because the two would each #include a whole production .cc (p2p_tmp.cc vs
+  # dev_runtime.cc) into the same link, risking duplicate-symbol/ODR clashes;
+  # keeping them apart also keeps devr_fakes.cc off the p2p link. Same host-only
+  # model: no librccl.so, no HIP runtime, all deps from fakes/.
+  # dev_runtime.cc (symmetric memory) only exists on ROCm >= 6.4.
+  if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+  add_executable(rccl-UnitTestsDevRuntime
+    ${RCCL_DEVR_UNIT_SOURCES}
+    ${RCCL_MICRO_COMMON_SOURCES})
+
+  target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes         # hip_fakes.h / devr_fakes.h / nccl_fakes.h
+    ${RCCL_COMMON_INCLUDE_DIRS}
+    ${PROJECT_BINARY_DIR}/hipify/src/device)   # dev_runtime.cc device-side headers
+  target_compile_definitions(rccl-UnitTestsDevRuntime PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
+
+  apply_hip_compile_only(rccl-UnitTestsDevRuntime)
+
+  target_link_libraries(rccl-UnitTestsDevRuntime PRIVATE ${MICRO_TEST_LINK_LIBS})
+
+  target_compile_definitions(rccl-UnitTestsDevRuntime PRIVATE
+    DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc")
+
+  # The included source and its headers live in the hipify-staged tree.
+  add_dependencies(rccl-UnitTestsDevRuntime
+    hipify_all copy_nccl_device_headers
+    net_ib_header_symlinks rma_header_symlinks)
+
+  # Host-only compile (see rccl-UnitTestsMicro above) + llvm coverage.
+  target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable)
+  apply_host_only_coverage_asan(rccl-UnitTestsDevRuntime)
+
+  rocm_install(TARGETS rccl-UnitTestsDevRuntime COMPONENT tests)
+
+  register_test_categories(rccl-UnitTestsDevRuntime test_categories_devruntime.yaml)
+  endif() # ROCM_VERSION >= 60400
+
   return()
 endif()
 
@@ -272,7 +403,14 @@ project(rccl-HostUnitTests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-Wno-tautological-constant-out-of-range-compare)
+# Applied to every target in this standalone project (the in-RCCL-build path
+# above returns before reaching here and sets these per-target instead). The
+# -Wno-unused-* pair covers production .cc files #included by the micro/devr
+# binaries whose unexercised paths would otherwise warn.
+add_compile_options(
+  -Wno-tautological-constant-out-of-range-compare
+  -Wno-unused-parameter
+  -Wno-unused-variable)
 
 find_package(Threads REQUIRED)
 include(FetchContent)
@@ -392,6 +530,21 @@ else()
   set(HIP_FABRIC_API OFF)
 endif()
 
+# --- Common compile definitions shared by every host-only binary ---
+# The five defines below are identical across rccl-source-wrappers,
+# rccl-HostUnitTests, rccl-UnitTestsMicro and rccl-UnitTestsDevRuntime.
+# AMDSMI_FABRIC_DIRECT / HIP_FABRIC_API guard fallback-vs-runtime type and
+# enumerator conflicts on newer HIP/amdsmi (e.g. ROCm 7.14+). Per-target
+# defines (RCCL_EXPOSE_STATIC, P2P_CC_PATH, DEV_RUNTIME_CC_PATH, ...) are
+# still added alongside this variable at each target below.
+set(RCCL_HOST_TEST_DEFS
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+)
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -413,13 +566,7 @@ add_library(rccl-source-wrappers STATIC
   wrapper_link_stubs.cpp
 )
 target_include_directories(rccl-source-wrappers PRIVATE ${RCCL_INCLUDE_DIRS})
-target_compile_definitions(rccl-source-wrappers PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
+target_compile_definitions(rccl-source-wrappers PRIVATE ${RCCL_HOST_TEST_DEFS})
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
   fmt::fmt-header-only
@@ -449,13 +596,9 @@ add_executable(rccl-HostUnitTests
 target_include_directories(rccl-HostUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})
 
 target_compile_definitions(rccl-HostUnitTests PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
@@ -471,12 +614,14 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
 # binary through that static library, so instrumenting only the executable
 # silently drops it from the report -- the profile still looks healthy, it just
 # has no record of that file at all.
-option(HOST_UT_COVERAGE "Build rccl-HostUnitTests with llvm source-based coverage" ON)
+# The single switch for host-only coverage across every binary this file
+# builds (rccl-HostUnitTests, rccl-source-wrappers, rccl-UnitTestsMicro,
+# rccl-UnitTestsDevRuntime). The compile/link flags are applied in one place
+# at the end of the file, once all those targets exist; only the
+# host-specific RCCL_TEST_CODE_COVERAGE define is set here.
+option(HOST_UT_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
 if(HOST_UT_COVERAGE)
-  target_compile_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_compile_definitions(rccl-HostUnitTests PRIVATE RCCL_TEST_CODE_COVERAGE=1)
-  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
@@ -495,58 +640,53 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
   -Wl,--no-whole-archive
 )
 
-# --- Standalone micro-test binary ---------------------------------------
-# rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
-# --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
-# #includes each unit-under-test production .cc directly (via P2P_CC_PATH,
-# RMA_PROXY_PROGRESS_CC_PATH, GROUP_CC_PATH, DEVCOMM_V22902_CC_PATH,
-# DEVCOMM_V22907_CC_PATH) and
-# satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
-# HIP runtime.
-add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
-
-target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
-
-target_include_directories(rccl-UnitTestsMicro PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${RCCL_HIPIFY_DIR}/src/devcomm      # devcomm_v22902.h, included unqualified
-  ${RCCL_INCLUDE_DIRS}
+# --- Standalone micro-test binaries -------------------------------------
+# rccl-UnitTestsMicro #includes the unit-under-test production .cc directly
+# (via P2P_CC_PATH). rccl-UnitTestsDevRuntime is a sibling that #includes the
+# hipified src/dev_runtime.cc (via DEV_RUNTIME_CC_PATH). They are kept as
+# separate binaries rather than folded together: both would #include a whole
+# production .cc into one link (p2p_tmp.cc vs dev_runtime.cc), risking
+# duplicate-symbol/ODR clashes, and this keeps devr_fakes.cc off the p2p link.
+add_host_micro_test(rccl-UnitTestsMicro
+  SOURCES
+    ${RCCL_MICRO_UNIT_SOURCES}
+  INCLUDES
+    ${RCCL_HIPIFY_DIR}/src/devcomm         # devcomm_v22902.h, included unqualified
+  DEFINES
+    P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
+    GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
+    DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
+    DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+    # Same fallback-vs-runtime conflicts the host target guards against: without
+    # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
+    # enumerators on ROCm 7.14+, and the standalone build fails.
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
-  RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
-  GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
-  DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
-  DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
-  # Same fallback-vs-runtime conflicts the host target guards against: without
-  # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
-  # enumerators on ROCm 7.14+, and the standalone build fails.
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
-
-# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
-# libgtest.a used by this standalone path is built without -fPIC, so a PIE
-# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
-target_link_libraries(rccl-UnitTestsMicro PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
+add_host_micro_test(rccl-UnitTestsDevRuntime
+  SOURCES
+    ${RCCL_DEVR_UNIT_SOURCES}
+  INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${RCCL_HIPIFY_DIR}/src/include/nccl_device
+    ${RCCL_HIPIFY_DIR}/src/device
+  DEFINES
+    DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
 # because --offload-host-only never runs the amdgcn device pass).
-# On by default; disable with -DMICRO_COVERAGE=OFF.
-option(MICRO_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" ON)
-if(MICRO_COVERAGE)
-  target_compile_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+# On by default; disable with -DHOST_UT_COVERAGE=OFF. The option is declared
+# earlier (next to rccl-HostUnitTests, where the RCCL_TEST_CODE_COVERAGE define
+# is also set); the instrumentation flags are applied here, after every target
+# exists, so a single switch covers all host-only binaries.
+if(HOST_UT_COVERAGE)
+  foreach(_cov_tgt rccl-UnitTestsMicro rccl-UnitTestsDevRuntime rccl-HostUnitTests rccl-source-wrappers)
+    target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  endforeach()
 endif()
 
 # --- Standalone init micro-test binaries --------------------------------
