@@ -6201,16 +6201,19 @@ for nominal line-count reductions.
   `MoiPlannedAccessPatch`. Record/Replay, Sampled, and Inline Shadow no longer
   carry independent maximum-offset loops.
 - **One emitted-patch projection:** `note_moi_access_patch_info` publishes
-  common scratch, descriptor owners, private epoch/owner state, fixed and
-  dynamic spill extent, and branch-only routing. The replay-plan overload adds
-  only the private workgroup tuple and is shared by Record/Replay and Sampled.
-- **Plan, not reconstruction:** Persistent private-state end moves from the
-  replay-only subtype into the common access plan. Inline Shadow records the
-  private layout's end during planning instead of rebuilding it from four
-  offsets in one emission path; dense and direct emission therefore publish
-  the same planned fact. `MoiPrivateEpochLayout` now names both the exact
-  durable-state end and the potentially larger target-normalized temporary
-  spill base. Three CDNA4 tests caught and now guard this distinction.
+  common scratch, descriptor owners, the complete private-state layout, fixed
+  and dynamic spill extent, and branch-only routing. Subsequent fifth-
+  refactoring convergence removed the replay-plan overload and its parallel
+  private-workgroup field: all three engines now publish the same typed layout
+  through this one boundary.
+- **Plan, not reconstruction:** `ConSanMoiPrivateStateLayout` retains epoch,
+  owner, compact-workgroup, dispatch, and exact Record/Replay workgroup ranges
+  from planning through prologue and probe emission, patch proof, barrier
+  composition, and independent validation. It owns both the exact durable-
+  state end and the potentially larger target-normalized temporary spill base.
+  No consumer reconstructs either boundary from flattened patch fields. Three
+  CDNA4 tests guard the distinction, including an 8-byte persistent end with a
+  16-byte normalized ephemeral base.
 - **Explicit non-responsibilities:** Engine evidence indices, sampling windows,
   local workgroup-shadow layout, borrowed-entry state, relocated guest
   position, and semantic patch kind remain with their owning emitters. No

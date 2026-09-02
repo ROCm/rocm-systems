@@ -9188,3 +9188,79 @@ It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target
 and mode locality, remaining broad transaction and operating-point surfaces,
 final extension-proof revalidation, and the independent Section 14 audit
 remain open, so the goal remains active.
+
+### 16.132 Convergence checkpoint 131: one typed private-state layout
+
+The next patch-ABI trace followed owner-local persistent private state from
+layout construction through access and synchronization planning, prologue and
+probe emission, patch publication, descriptor accounting, and independent
+validation. Planning had one complete `MoiPrivateEpochLayout`, but the access
+plan copied only four facets, committed patch proof split it into six mutable
+fields, the Record/Replay and Sampled replay subtype carried an additional
+workgroup tuple, and the prologue reconstructed five layout fields plus a
+derived end. Final validation then repeated part of the range and overlap
+proof from those flattened values.
+
+The flattened representation also overloaded one boundary. Record/Replay and
+Sampled published the target-normalized ephemeral allocation base as
+`persistent_private_state_end`, while Inline Shadow published the exact end of
+durable state. On CDNA4 a layout containing the epoch and compact workgroup key
+occupies bytes `[0, 8)`, but target allocation normalization starts ephemeral
+state at byte 16, so the same patch field meant either 8 or 16 depending on its
+engine.
+
+The converged path now retains one `ConSanMoiPrivateStateLayout` from shared
+construction through every common planner and committed patch. Its narrow
+contract owns the epoch, optional owner and compact-workgroup key, optional
+64-bit dispatch identity, complete Record/Replay workgroup tuple, exact
+persistent end, and target-normalized ephemeral base. Its structural proof
+checks alignment, bounds, non-overlap, an exact maximum persistent end, and an
+aligned ephemeral base no smaller than that end. Prologue planning binds that
+already committed layout; barrier composition copies it as one value; and
+final validation reuses its structural invariant before independently proving
+that descriptor growth covers the ephemeral base. Mode-specific native
+emission contracts project only the ranges they consume and do not become
+owners of the full common layout.
+
+The six flattened patch fields, four-field access replica, five-field
+prologue replica, replay-only private-workgroup field, replay-only telemetry
+publisher, validator reconstruction, and old private layout type are deleted.
+The canonical builder and cache use private-state rather than epoch-only names.
+Structural checks require the narrow contract and typed patch/planner fields,
+reject every deleted flattened spelling at the migrated boundaries, prevent
+the old type and builder name from returning, and keep the layout independent
+of mode and report policy. The new
+`PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries` test directly
+exercises the valid full layout, overlap, misalignment, undersized persistent
+end, and ephemeral-before-persistent cases. Existing CDNA4 tests now assert
+both the 8-byte durable end and 16-byte normalized allocation base.
+
+| Signal | Checkpoint 131 | Cumulative change | Slice change from checkpoint 130 |
+| --- | ---: | ---: | ---: |
+| Production files | 299 | +70 | +1 narrow contract |
+| Physical production lines | 102,613 | **-2,363** | **-95** |
+| Nonblank production lines | 96,237 | **-2,847** | **-91** |
+| Production implementation lines | 88,475 | **-2,975** | **-84** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Flattened private-state patch fields | **0** | n/a | **-6** |
+| Test inventory | **5,415** | **+70** | **+1** |
+
+The implementation is committed as `540e91fe567`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), the architecture-boundary gate, all
+**1,298/1,298** nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests,
+and all **1,706/1,706** Record/Replay, Sampled, and InlineShadow simulator-
+device tests across gfx942, gfx950, gfx1100, gfx1201, and gfx1250. No test was
+removed, renamed, disabled, or replaced, and no physical test was run.
+
+This slice removes a cross-engine patch-schema replica and the downstream
+reconstruction it required rather than adding a compatibility wrapper. The
+narrow invariant and regression test cost less than the deleted publication,
+planning, and validation machinery, producing a net deletion of 84 production
+implementation lines. It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8,
+and 14.9. Full target and mode locality, remaining broad transaction and
+operating-point surfaces, final extension-proof revalidation, and the
+independent Section 14 audit remain open, so the goal remains active.

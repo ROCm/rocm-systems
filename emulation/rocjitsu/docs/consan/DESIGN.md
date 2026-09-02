@@ -721,10 +721,11 @@ route, displaced guest words, scratch and spill resources, private owner/epoch
 state, and branch-only route shared by Record/Replay, Sampled, and Inline
 Shadow. `MoiPlannedReplayAccessPatch` adds only the mechanics shared by the two
 engines that replay a relocated guest access: island sizing, CDNA5 high-bank
-state, private workgroup identity, relocated-guest position, and operand
-overlap state. Each engine extends those types only with its evidence-specific
-indices, sampling gates, or shadow layout. Target instruction encoding remains
-outside these plan types.
+state, relocated-guest position, and operand overlap state. The complete
+owner-local private-state layout remains on the common access plan rather than
+being split between that base and its replay subtype. Each engine extends
+those types only with its evidence-specific indices, sampling gates, or shadow
+layout. Target instruction encoding remains outside these plan types.
 
 These are private lowering contracts, not another public pipeline layer. They
 contain no selection algorithm of their own, so their meaningful test surface
@@ -748,13 +749,18 @@ transactionality, not those policies.
 The access contracts also own their derived descriptor and patch facts.
 `note_moi_access_private_requirements` grows each owning kernel to the plan's
 fixed private extent. After successful placement, `note_moi_access_patch_info`
-publishes common scratch, owner, epoch, spill, dynamic-stack, and branch-route
-telemetry; `note_moi_replay_access_patch_info` adds the private workgroup tuple
-for Record/Replay and Sampled. The persistent private-state end is itself a
-plan fact, so Inline Shadow no longer reconstructs it from individual offsets
-at emission. `MoiPrivateEpochLayout` distinguishes that exact durable-state end
-from the possibly larger target-normalized base of temporary spill storage;
-padding is therefore never reported as persistent identity. Evidence indices,
+publishes common scratch, the complete private-state layout, spill,
+dynamic-stack, and branch-route telemetry. There is no replay-only telemetry
+publisher: Record/Replay, Sampled, and Inline Shadow retain the same
+`ConSanMoiPrivateStateLayout` from planning through patch proof. That contract
+owns epoch, owner, compact-workgroup, dispatch, and exact Record/Replay
+workgroup ranges together, proves their alignment, bounds, non-overlap, and
+exact durable-state end, and separately records the possibly larger
+target-normalized base of temporary spill storage. Prologue emission and final
+validation therefore consume the committed value instead of reconstructing a
+layout from individual patch fields, and target padding is never reported as
+persistent identity. Mode-specific emission plans project only the offsets
+needed by their native instruction builders. Evidence indices,
 workgroup-shadow layout, borrowed-entry state, and relocated guest position
 remain with the relevant engine.
 
