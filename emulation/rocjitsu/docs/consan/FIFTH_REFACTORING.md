@@ -10795,3 +10795,68 @@ staging rather than stopping at physical relocation.  Common placement and
 publication remain the single mechanisms.  Full target/mode locality, broad
 transaction and operating-point reduction, extension-proof revalidation, and
 the independent Section 14 audit remain open.
+
+### 16.157 Convergence checkpoint 156: mode-owned ordinary barrier bodies
+
+The new planning facet made the ordinary candidate switch separable from the
+common placement transaction.  That transaction previously knew that a
+Record/Replay fallback must possess scratch storage, apply the captured entry-
+workgroup assignment, construct a record-event plan, and issue three mode-
+specific diagnostics.  Its alternate branch directly invoked the InlineShadow
+epoch planner and interpreted failure differently.  These were mode policies,
+not placement mechanics.
+
+The common owner now defines one `MoiBarrierBodyPlanner` seam and invokes the
+selected planner after shared owner/resource/spill and scalar-ABI preparation.
+The Record/Replay barrier owner implements its exact capture and record-plan
+transaction; the InlineShadow owner adapts its epoch plan into the shared body
+sum type.  Each mode entry point supplies its planner alongside the evidence
+operation established at checkpoint 155.  Common code retains the single
+candidate traversal, ABI-effects product, typed body storage, routing, mutation,
+and publication path.  No placement implementation was copied.
+
+The boundary gate requires the function seam and its single common invocation,
+requires each mode-named planner in its owner, and requires each entry point to
+supply the matching planner.  Thus adding another consumer of this exact
+placement mechanism has a visible mode-owned planning hook rather than another
+branch inside the common function.
+
+An exact reference recount at this checkpoint found that the recent ledger had
+understated `ConSanMoiOperatingPoint` by ten references since checkpoint 151;
+the correct checkpoint-155 value was 258 references, and moving planning into a
+new facet at that checkpoint also raised its file count from 51 to 52.  This
+checkpoint adds three operating-point and three transform-artifact references
+in explicit planner signatures.  The table resets those two live counts rather
+than carrying the stale absolute value forward.
+
+| Signal | Checkpoint 156 | Cumulative change | Slice change from checkpoint 155 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,614 | **-2,362** | +19 |
+| Nonblank production lines | 96,196 | **-2,888** | +19 |
+| Production implementation lines | 88,407 | **-3,043** | +19 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **123 / 49** | **-153 / -8** | +3 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **261 / 52** | **-29 / +1** | +3 / 0 |
+| Ordinary mode-selection branches in common candidate planning | **0** | n/a | **-1 two-arm switch** |
+| Mode-owned ordinary barrier planners | **2 / 2** | n/a | **+2** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `c4f348c6518`.  Validation includes a
+successful full `-j16` build; **111/111** nonphysical architecture-boundary and
+barrier-named host tests; and **40/40** focused Record/Replay and InlineShadow
+simulator cases across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.  All test
+commands used `-LE physical`.  No test was removed, renamed, disabled, or
+replaced, and no physical GPU test was run.
+
+The 19 implementation lines are a bounded interface investment, not size
+convergence: they buy removal of the ordinary central mode switch but add broad
+planner parameters.  The private-epoch planning branch remains centralized and
+is now the only body-construction switch in the common transaction.  The next
+work must either use the same seam to remove that switch and then consolidate
+the two planning contexts, or reject this callback shape and replace it with a
+smaller exact product; leaving both the interface overhead and the legacy
+private branch would violate the anti-circling rule.  Full target/mode locality,
+broad transaction and operating-point reduction, extension-proof revalidation,
+and the independent Section 14 audit remain open.
