@@ -90,8 +90,13 @@ public:
   void set_timestamp(Tick ts) { header_.timestamp = ts; }
 
   /// @brief Compute the simulation tick at which this message arrives.
-  /// @returns timestamp + latency.
-  Tick arrival_tick() const { return header_.timestamp + header_.latency; }
+  ///
+  /// @details Saturates rather than wrapping. A wrapped sum is not a large
+  /// wrong answer but a tiny one: the message sorts ahead of everything real
+  /// and is delivered at once, which is the opposite of the late departure
+  /// that produced it.
+  /// @returns timestamp + latency, saturating at TICK_MAX.
+  Tick arrival_tick() const { return saturating_add(header_.timestamp, header_.latency); }
 
   /// @brief Order by arrival tick (for min-heap via std::greater).
   bool operator>(const Message &other) const { return arrival_tick() > other.arrival_tick(); }
