@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Thread
+from typing import Set
 from unittest.mock import Mock
 
 from utils import csv_compression, schema
@@ -214,3 +215,16 @@ def patch_console(monkeypatch, module, *names, **overrides):
         monkeypatch.setattr(f"{module}.console_{name}", mock)
         mocks[name] = mock
     return mocks
+
+
+_KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
+
+
+def normalize_kernel_name(name: str) -> str:
+    """Return ``name`` without trailing ``.kd`` or ``[clone ...]`` suffixes."""
+    return _KERNEL_SUFFIX_RE.sub("", name).strip()
+
+
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Return the normalized form of each name in ``names``."""
+    return {normalize_kernel_name(name) for name in names}

@@ -15,7 +15,7 @@ import threading
 from collections.abc import Iterable
 from importlib.machinery import PathFinder
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable
 
 
 def _missing_range_push(_label: str) -> None:
@@ -189,18 +189,15 @@ def _pop_scope() -> None:
             context_stack.pop()
 
 
-def install_global_wraps(backends: Union[str, Iterable[str]] = "") -> None:
-    """Install ROCTX instrumentation for each backend in backends.
+def install_global_wraps(backends: Iterable[str] = ()) -> None:
+    """Install ROCTX instrumentation for each named backend.
 
+    ``backends`` is an iterable of framework names (e.g. ``["torch"]``).
     Empty input is a no-op.
     """
     from .registry import install_many
 
-    if isinstance(backends, str):
-        names = [n.strip() for n in backends.split(",") if n.strip()]
-    else:
-        names = [str(n).strip() for n in backends if str(n).strip()]
-
+    names = [str(n).strip() for n in backends if str(n).strip()]
     if not names:
         return
     install_many(names)
