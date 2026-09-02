@@ -23,6 +23,83 @@ namespace {
   return true;
 }
 
+constexpr auto kConSanFlavors =
+    make_consan_enum_vocabulary("unknown", consan_enum(ConSanFlavor::None, "none"),
+                                consan_enum(ConSanFlavor::SuperCollider, "supercollider"),
+                                consan_enum(ConSanFlavor::Moi, "moi"));
+
+constexpr auto kConSanMoiEngines = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanMoiEngine::RecordReplay, "record_replay"),
+    consan_enum(ConSanMoiEngine::InlineShadow, "inline_shadow"),
+    consan_enum(ConSanMoiEngine::Sampled, "sampled"));
+
+constexpr auto kConSanTransformOutcomes = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanTransformOutcome::Unchanged, "unchanged"),
+    consan_enum(ConSanTransformOutcome::ModifiedValid, "modified-valid"),
+    consan_enum(ConSanTransformOutcome::Unsupported, "unsupported"),
+    consan_enum(ConSanTransformOutcome::Invalid, "invalid"));
+
+constexpr auto kConSanResourceSiteKinds =
+    make_consan_enum_vocabulary("unknown", consan_enum(ConSanResourceSiteKind::Access, "access"),
+                                consan_enum(ConSanResourceSiteKind::Barrier, "barrier"),
+                                consan_enum(ConSanResourceSiteKind::Atomic, "atomic"),
+                                consan_enum(ConSanResourceSiteKind::Fence, "fence"));
+
+constexpr auto kConSanRegisterAllocationSources = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanRegisterAllocationSource::Unsupported, "unsupported"),
+    consan_enum(ConSanRegisterAllocationSource::Explicit, "explicit"),
+    consan_enum(ConSanRegisterAllocationSource::LivenessDead, "dead"),
+    consan_enum(ConSanRegisterAllocationSource::DescriptorGrowth, "descriptor-growth"),
+    consan_enum(ConSanRegisterAllocationSource::SpillRequired, "spill"));
+
+constexpr auto kConSanDelayModes =
+    make_consan_enum_vocabulary("unknown", consan_enum(ConSanDelayMode::Nop, "nop"),
+                                consan_enum(ConSanDelayMode::Sleep, "sleep"),
+                                consan_enum(ConSanDelayMode::SleepVar, "sleep_var"));
+
+constexpr auto kConSanBarrierOperandSources = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanBarrierSite::OperandSource::Unknown, "unknown"),
+    consan_enum(ConSanBarrierSite::OperandSource::Immediate, "immediate"),
+    consan_enum(ConSanBarrierSite::OperandSource::DynamicM0, "dynamic-m0"),
+    consan_enum(ConSanBarrierSite::OperandSource::StaticM0Literal32, "static-m0-literal32"),
+    consan_enum(ConSanBarrierSite::OperandSource::Literal32, "literal32"),
+    consan_enum(ConSanBarrierSite::OperandSource::Literal64, "literal64"));
+
+constexpr auto kConSanBarrierScopes = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanBarrierSite::Scope::Unknown, "unknown"),
+    consan_enum(ConSanBarrierSite::Scope::Workgroup, "workgroup"),
+    consan_enum(ConSanBarrierSite::Scope::Cluster, "cluster"));
+
+constexpr auto kConSanRegisterPlanReasons = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanRegisterPlanReason::None, "none"),
+    consan_enum(ConSanRegisterPlanReason::InvalidRequest, "invalid_request"),
+    consan_enum(ConSanRegisterPlanReason::ExplicitMisaligned, "explicit_misaligned"),
+    consan_enum(ConSanRegisterPlanReason::ExplicitOutOfRange, "explicit_out_of_range"),
+    consan_enum(ConSanRegisterPlanReason::ExplicitLive, "explicit_live"),
+    consan_enum(ConSanRegisterPlanReason::ForbiddenOverlap, "forbidden_overlap"),
+    consan_enum(ConSanRegisterPlanReason::MissingInstruction, "missing_instruction"),
+    consan_enum(ConSanRegisterPlanReason::MissingOwner, "missing_owner"),
+    consan_enum(ConSanRegisterPlanReason::AmbiguousOwners, "ambiguous_owners"),
+    consan_enum(ConSanRegisterPlanReason::InvalidDescriptor, "invalid_descriptor"),
+    consan_enum(ConSanRegisterPlanReason::NoLegalWindow, "no_legal_window"),
+    consan_enum(ConSanRegisterPlanReason::DynamicStack, "dynamic_stack"));
+
+constexpr auto kConSanResourcePlanAlternativeKinds = make_consan_enum_vocabulary(
+    "unknown",
+    consan_enum(ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill,
+                "guest_operand_overlap_spill"),
+    consan_enum(ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
+                "spill_backed_operand_recovery"),
+    consan_enum(ConSanResourcePlanAlternativeKind::EmptyAccumulatorDescriptorGrowth,
+                "empty_accumulator_descriptor_growth"));
+
+constexpr auto kConSanResourcePlanAlternativeOutcomes = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanResourcePlanAlternativeOutcome::Selected, "selected"),
+    consan_enum(ConSanResourcePlanAlternativeOutcome::Rejected, "rejected"),
+    consan_enum(ConSanResourcePlanAlternativeOutcome::Superseded, "superseded"),
+    consan_enum(ConSanResourcePlanAlternativeOutcome::Contributed, "contributed"),
+    consan_enum(ConSanResourcePlanAlternativeOutcome::Vetoed, "vetoed"));
+
 } // namespace
 
 std::string consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
@@ -209,144 +286,38 @@ bool ConSanFaultMutationPlan::well_formed() const {
   return false;
 }
 
-const char *consan_flavor_name(ConSanFlavor flavor) {
-  switch (flavor) {
-  case ConSanFlavor::None:
-    return "none";
-  case ConSanFlavor::SuperCollider:
-    return "supercollider";
-  case ConSanFlavor::Moi:
-    return "moi";
-  }
-  return "unknown";
-}
+const char *consan_flavor_name(ConSanFlavor flavor) { return kConSanFlavors.name(flavor).data(); }
 
 const char *consan_moi_engine_name(ConSanMoiEngine engine) {
-  switch (engine) {
-  case ConSanMoiEngine::RecordReplay:
-    return "record_replay";
-  case ConSanMoiEngine::InlineShadow:
-    return "inline_shadow";
-  case ConSanMoiEngine::Sampled:
-    return "sampled";
-  }
-  return "unknown";
+  return kConSanMoiEngines.name(engine).data();
 }
 
 const char *consan_transform_outcome_name(ConSanTransformOutcome outcome) {
-  switch (outcome) {
-  case ConSanTransformOutcome::Unchanged:
-    return "unchanged";
-  case ConSanTransformOutcome::ModifiedValid:
-    return "modified-valid";
-  case ConSanTransformOutcome::Unsupported:
-    return "unsupported";
-  case ConSanTransformOutcome::Invalid:
-    return "invalid";
-  }
-  return "unknown";
+  return kConSanTransformOutcomes.name(outcome).data();
 }
 
 const char *consan_resource_site_kind_name(ConSanResourceSiteKind kind) {
-  switch (kind) {
-  case ConSanResourceSiteKind::Access:
-    return "access";
-  case ConSanResourceSiteKind::Barrier:
-    return "barrier";
-  case ConSanResourceSiteKind::Atomic:
-    return "atomic";
-  case ConSanResourceSiteKind::Fence:
-    return "fence";
-  }
-  return "unknown";
+  return kConSanResourceSiteKinds.name(kind).data();
 }
 
 const char *consan_register_allocation_source_name(ConSanRegisterAllocationSource source) {
-  switch (source) {
-  case ConSanRegisterAllocationSource::Unsupported:
-    return "unsupported";
-  case ConSanRegisterAllocationSource::Explicit:
-    return "explicit";
-  case ConSanRegisterAllocationSource::LivenessDead:
-    return "dead";
-  case ConSanRegisterAllocationSource::DescriptorGrowth:
-    return "descriptor-growth";
-  case ConSanRegisterAllocationSource::SpillRequired:
-    return "spill";
-  }
-  return "unknown";
+  return kConSanRegisterAllocationSources.name(source).data();
 }
 
 const char *consan_delay_mode_name(ConSanDelayMode mode) {
-  switch (mode) {
-  case ConSanDelayMode::Nop:
-    return "nop";
-  case ConSanDelayMode::Sleep:
-    return "sleep";
-  case ConSanDelayMode::SleepVar:
-    return "sleep_var";
-  }
-  return "unknown";
+  return kConSanDelayModes.name(mode).data();
 }
 
 const char *consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source) {
-  switch (source) {
-  case ConSanBarrierSite::OperandSource::Unknown:
-    return "unknown";
-  case ConSanBarrierSite::OperandSource::Immediate:
-    return "immediate";
-  case ConSanBarrierSite::OperandSource::DynamicM0:
-    return "dynamic-m0";
-  case ConSanBarrierSite::OperandSource::StaticM0Literal32:
-    return "static-m0-literal32";
-  case ConSanBarrierSite::OperandSource::Literal32:
-    return "literal32";
-  case ConSanBarrierSite::OperandSource::Literal64:
-    return "literal64";
-  }
-  return "unknown";
+  return kConSanBarrierOperandSources.name(source).data();
 }
 
 const char *consan_barrier_scope_name(ConSanBarrierSite::Scope scope) {
-  switch (scope) {
-  case ConSanBarrierSite::Scope::Unknown:
-    return "unknown";
-  case ConSanBarrierSite::Scope::Workgroup:
-    return "workgroup";
-  case ConSanBarrierSite::Scope::Cluster:
-    return "cluster";
-  }
-  return "unknown";
+  return kConSanBarrierScopes.name(scope).data();
 }
 
 const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason) {
-  switch (reason) {
-  case ConSanRegisterPlanReason::None:
-    return "none";
-  case ConSanRegisterPlanReason::InvalidRequest:
-    return "invalid_request";
-  case ConSanRegisterPlanReason::ExplicitMisaligned:
-    return "explicit_misaligned";
-  case ConSanRegisterPlanReason::ExplicitOutOfRange:
-    return "explicit_out_of_range";
-  case ConSanRegisterPlanReason::ExplicitLive:
-    return "explicit_live";
-  case ConSanRegisterPlanReason::ForbiddenOverlap:
-    return "forbidden_overlap";
-  case ConSanRegisterPlanReason::MissingInstruction:
-    return "missing_instruction";
-  case ConSanRegisterPlanReason::MissingOwner:
-    return "missing_owner";
-  case ConSanRegisterPlanReason::AmbiguousOwners:
-    return "ambiguous_owners";
-  case ConSanRegisterPlanReason::InvalidDescriptor:
-    return "invalid_descriptor";
-  case ConSanRegisterPlanReason::NoLegalWindow:
-    return "no_legal_window";
-  case ConSanRegisterPlanReason::DynamicStack:
-    return "dynamic_stack";
-  }
-  return "unknown";
+  return kConSanRegisterPlanReasons.name(reason).data();
 }
 
 ConSanResourcePlanAlternativeOutcome
@@ -359,50 +330,30 @@ consan_resource_plan_alternative_outcome(const ConSanCandidateResourcePlan &plan
 }
 
 const char *consan_resource_plan_alternative_kind_name(ConSanResourcePlanAlternativeKind kind) {
-  switch (kind) {
-  case ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill:
-    return "guest_operand_overlap_spill";
-  case ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery:
-    return "spill_backed_operand_recovery";
-  case ConSanResourcePlanAlternativeKind::EmptyAccumulatorDescriptorGrowth:
-    return "empty_accumulator_descriptor_growth";
-  }
-  return "unknown";
+  return kConSanResourcePlanAlternativeKinds.name(kind).data();
 }
 
 const char *
 consan_resource_plan_alternative_outcome_name(ConSanResourcePlanAlternativeOutcome outcome) {
-  switch (outcome) {
-  case ConSanResourcePlanAlternativeOutcome::Selected:
-    return "selected";
-  case ConSanResourcePlanAlternativeOutcome::Rejected:
-    return "rejected";
-  case ConSanResourcePlanAlternativeOutcome::Superseded:
-    return "superseded";
-  case ConSanResourcePlanAlternativeOutcome::Contributed:
-    return "contributed";
-  case ConSanResourcePlanAlternativeOutcome::Vetoed:
-    return "vetoed";
-  }
-  return "unknown";
+  return kConSanResourcePlanAlternativeOutcomes.name(outcome).data();
 }
 
 std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value) {
-  if (ascii_iequals(value, "supercollider"))
-    return ConSanFlavor::SuperCollider;
-  if (ascii_iequals(value, "moi"))
-    return ConSanFlavor::Moi;
+  for (ConSanFlavor flavor : kConSanFlavors)
+    if (flavor != ConSanFlavor::None && ascii_iequals(value, kConSanFlavors.name(flavor)))
+      return flavor;
   return std::nullopt;
 }
 
 std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value) {
-  if (ascii_iequals(value, "record_replay") || ascii_iequals(value, "record-replay") ||
-      ascii_iequals(value, "context"))
+  for (ConSanMoiEngine engine : kConSanMoiEngines)
+    if (ascii_iequals(value, kConSanMoiEngines.name(engine)))
+      return engine;
+  if (ascii_iequals(value, "record-replay") || ascii_iequals(value, "context"))
     return ConSanMoiEngine::RecordReplay;
-  if (ascii_iequals(value, "inline_shadow") || ascii_iequals(value, "inline-shadow"))
+  if (ascii_iequals(value, "inline-shadow"))
     return ConSanMoiEngine::InlineShadow;
-  if (ascii_iequals(value, "sampled_watchpoint") || ascii_iequals(value, "sampled-watchpoint") ||
-      ascii_iequals(value, "sampled"))
+  if (ascii_iequals(value, "sampled_watchpoint") || ascii_iequals(value, "sampled-watchpoint"))
     return ConSanMoiEngine::Sampled;
   return std::nullopt;
 }

@@ -91,227 +91,160 @@ struct HookConfig : rocjitsu::ConSanRequest,
 
 constexpr std::string_view kMoiStandardProfile = "standard-v1";
 
+inline constexpr auto kFaultSiteKinds = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanFaultSiteKind::Barrier, "barrier"),
+    consan_enum(ConSanFaultSiteKind::Atomic, "atomic"),
+    consan_enum(ConSanFaultSiteKind::LdsAccess, "lds-access"),
+    consan_enum(ConSanFaultSiteKind::OrdinaryMemory, "ordinary-memory"));
+
 [[nodiscard]] inline const char *fault_site_kind_name(rocjitsu::ConSanFaultSiteKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanFaultSiteKind::Barrier:
-    return "barrier";
-  case rocjitsu::ConSanFaultSiteKind::Atomic:
-    return "atomic";
-  case rocjitsu::ConSanFaultSiteKind::LdsAccess:
-    return "lds-access";
-  case rocjitsu::ConSanFaultSiteKind::OrdinaryMemory:
-    return "ordinary-memory";
-  }
-  return "unknown";
+  return kFaultSiteKinds.name(kind).data();
 }
+
+inline constexpr auto kOrdinaryMemorySupportReasons = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanOrdinaryMemorySupportReason::NotApplicable, "not-applicable"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::Supported, "supported"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly,
+                "supported-synchronization-only"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture,
+                "unsupported-architecture"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize,
+                "unsupported-encoding-size"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::MalformedEncoding, "malformed-encoding"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::MissingAddressVgpr, "missing-address-vgpr"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr,
+                "missing-destination-vgpr"),
+    consan_enum(ConSanOrdinaryMemorySupportReason::MissingValueVgpr, "missing-value-vgpr"));
 
 [[nodiscard]] inline const char *
 ordinary_memory_support_reason_name(rocjitsu::ConSanOrdinaryMemorySupportReason reason) {
-  switch (reason) {
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::NotApplicable:
-    return "not-applicable";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::Supported:
-    return "supported";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly:
-    return "supported-synchronization-only";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::UnsupportedArchitecture:
-    return "unsupported-architecture";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize:
-    return "unsupported-encoding-size";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::MalformedEncoding:
-    return "malformed-encoding";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::MissingAddressVgpr:
-    return "missing-address-vgpr";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::MissingDestinationVgpr:
-    return "missing-destination-vgpr";
-  case rocjitsu::ConSanOrdinaryMemorySupportReason::MissingValueVgpr:
-    return "missing-value-vgpr";
-  }
-  return "unknown";
+  return kOrdinaryMemorySupportReasons.name(reason).data();
 }
 
+inline constexpr auto kFaultMutationKinds = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanFaultMutationKind::DropBarrier, "drop-barrier"),
+    consan_enum(ConSanFaultMutationKind::MoveBarrierPair, "move-barrier-pair"),
+    consan_enum(ConSanFaultMutationKind::BarrierIdScope, "barrier-id-scope"),
+    consan_enum(ConSanFaultMutationKind::BarrierParticipantCount, "barrier-participant-count"),
+    consan_enum(ConSanFaultMutationKind::AtomicWrongAddress, "atomic-wrong-address"),
+    consan_enum(ConSanFaultMutationKind::AtomicWeakenOrder, "atomic-weaken-order"),
+    consan_enum(ConSanFaultMutationKind::AtomicWeakenScope, "atomic-weaken-scope"),
+    consan_enum(ConSanFaultMutationKind::LdsWrongAddress, "lds-wrong-address"),
+    consan_enum(ConSanFaultMutationKind::OrdinaryWeakenOrder, "ordinary-weaken-order"),
+    consan_enum(ConSanFaultMutationKind::OrdinaryWrongAddress, "ordinary-wrong-address"),
+    consan_enum(ConSanFaultMutationKind::OrdinaryWeakenScope, "ordinary-weaken-scope"));
+
 [[nodiscard]] inline const char *fault_mutation_kind_name(rocjitsu::ConSanFaultMutationKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanFaultMutationKind::DropBarrier:
-    return "drop-barrier";
-  case rocjitsu::ConSanFaultMutationKind::MoveBarrierPair:
-    return "move-barrier-pair";
-  case rocjitsu::ConSanFaultMutationKind::BarrierIdScope:
-    return "barrier-id-scope";
-  case rocjitsu::ConSanFaultMutationKind::BarrierParticipantCount:
-    return "barrier-participant-count";
-  case rocjitsu::ConSanFaultMutationKind::AtomicWrongAddress:
-    return "atomic-wrong-address";
-  case rocjitsu::ConSanFaultMutationKind::AtomicWeakenOrder:
-    return "atomic-weaken-order";
-  case rocjitsu::ConSanFaultMutationKind::AtomicWeakenScope:
-    return "atomic-weaken-scope";
-  case rocjitsu::ConSanFaultMutationKind::LdsWrongAddress:
-    return "lds-wrong-address";
-  case rocjitsu::ConSanFaultMutationKind::OrdinaryWeakenOrder:
-    return "ordinary-weaken-order";
-  case rocjitsu::ConSanFaultMutationKind::OrdinaryWrongAddress:
-    return "ordinary-wrong-address";
-  case rocjitsu::ConSanFaultMutationKind::OrdinaryWeakenScope:
-    return "ordinary-weaken-scope";
-  }
-  return "unknown";
+  return kFaultMutationKinds.name(kind).data();
 }
+
+inline constexpr auto kBarrierMoveDirections = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanBarrierMoveDirection::LegacyMarker, "legacy-marker"),
+    consan_enum(ConSanBarrierMoveDirection::Earlier, "earlier"),
+    consan_enum(ConSanBarrierMoveDirection::Later, "later"));
 
 [[nodiscard]] inline const char *
 barrier_move_direction_name(rocjitsu::ConSanBarrierMoveDirection direction) {
-  switch (direction) {
-  case rocjitsu::ConSanBarrierMoveDirection::LegacyMarker:
-    return "legacy-marker";
-  case rocjitsu::ConSanBarrierMoveDirection::Earlier:
-    return "earlier";
-  case rocjitsu::ConSanBarrierMoveDirection::Later:
-    return "later";
-  }
-  return "unknown";
+  return kBarrierMoveDirections.name(direction).data();
 }
+
+inline constexpr auto kBarrierMoveCfgContracts = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanBarrierMoveCfgContract::SameBlock, "same-block"),
+    consan_enum(ConSanBarrierMoveCfgContract::CompletingStructuredDiamond,
+                "completing-structured-diamond"),
+    consan_enum(ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond,
+                "destructive-structured-exec-diamond"));
 
 [[nodiscard]] inline const char *
 barrier_move_cfg_contract_name(rocjitsu::ConSanBarrierMoveCfgContract contract) {
-  switch (contract) {
-  case rocjitsu::ConSanBarrierMoveCfgContract::SameBlock:
-    return "same-block";
-  case rocjitsu::ConSanBarrierMoveCfgContract::CompletingStructuredDiamond:
-    return "completing-structured-diamond";
-  case rocjitsu::ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
-    return "destructive-structured-exec-diamond";
-  }
-  return "unknown";
+  return kBarrierMoveCfgContracts.name(contract).data();
 }
+
+inline constexpr auto kSyncSequenceKinds = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanSyncSequenceKind::Barrier, "barrier"),
+    consan_enum(ConSanSyncSequenceKind::Fence, "fence"),
+    consan_enum(ConSanSyncSequenceKind::Atomic, "atomic"),
+    consan_enum(ConSanSyncSequenceKind::OrdinaryMemory, "ordinary-memory"));
 
 [[nodiscard]] inline const char *sync_sequence_kind_name(rocjitsu::ConSanSyncSequenceKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanSyncSequenceKind::Barrier:
-    return "barrier";
-  case rocjitsu::ConSanSyncSequenceKind::Fence:
-    return "fence";
-  case rocjitsu::ConSanSyncSequenceKind::Atomic:
-    return "atomic";
-  case rocjitsu::ConSanSyncSequenceKind::OrdinaryMemory:
-    return "ordinary-memory";
-  }
-  return "unknown";
+  return kSyncSequenceKinds.name(kind).data();
 }
 
+inline constexpr auto kSyncOperations = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanSyncOperation::Unknown, "unknown"),
+    consan_enum(ConSanSyncOperation::BarrierSignal, "barrier-signal"),
+    consan_enum(ConSanSyncOperation::BarrierWait, "barrier-wait"),
+    consan_enum(ConSanSyncOperation::BarrierFull, "barrier-full"),
+    consan_enum(ConSanSyncOperation::BarrierInit, "barrier-init"),
+    consan_enum(ConSanSyncOperation::BarrierJoin, "barrier-join"),
+    consan_enum(ConSanSyncOperation::BarrierLeave, "barrier-leave"),
+    consan_enum(ConSanSyncOperation::BarrierWakeup, "barrier-wakeup"),
+    consan_enum(ConSanSyncOperation::BarrierStateQuery, "barrier-state-query"),
+    consan_enum(ConSanSyncOperation::Fence, "fence"),
+    consan_enum(ConSanSyncOperation::AtomicRmw, "atomic-rmw"),
+    consan_enum(ConSanSyncOperation::AtomicCompareExchange, "atomic-compare-exchange"),
+    consan_enum(ConSanSyncOperation::OrdinaryLoad, "ordinary-load"),
+    consan_enum(ConSanSyncOperation::OrdinaryStore, "ordinary-store"));
+
 [[nodiscard]] inline const char *sync_operation_name(rocjitsu::ConSanSyncOperation operation) {
-  switch (operation) {
-  case rocjitsu::ConSanSyncOperation::Unknown:
-    return "unknown";
-  case rocjitsu::ConSanSyncOperation::BarrierSignal:
-    return "barrier-signal";
-  case rocjitsu::ConSanSyncOperation::BarrierWait:
-    return "barrier-wait";
-  case rocjitsu::ConSanSyncOperation::BarrierFull:
-    return "barrier-full";
-  case rocjitsu::ConSanSyncOperation::BarrierInit:
-    return "barrier-init";
-  case rocjitsu::ConSanSyncOperation::BarrierJoin:
-    return "barrier-join";
-  case rocjitsu::ConSanSyncOperation::BarrierLeave:
-    return "barrier-leave";
-  case rocjitsu::ConSanSyncOperation::BarrierWakeup:
-    return "barrier-wakeup";
-  case rocjitsu::ConSanSyncOperation::BarrierStateQuery:
-    return "barrier-state-query";
-  case rocjitsu::ConSanSyncOperation::Fence:
-    return "fence";
-  case rocjitsu::ConSanSyncOperation::AtomicRmw:
-    return "atomic-rmw";
-  case rocjitsu::ConSanSyncOperation::AtomicCompareExchange:
-    return "atomic-compare-exchange";
-  case rocjitsu::ConSanSyncOperation::OrdinaryLoad:
-    return "ordinary-load";
-  case rocjitsu::ConSanSyncOperation::OrdinaryStore:
-    return "ordinary-store";
-  }
-  return "unknown";
+  return kSyncOperations.name(operation).data();
 }
+
+inline constexpr auto kSyncAddressSources = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanSyncAddressSource::NotApplicable, "not-applicable"),
+    consan_enum(ConSanSyncAddressSource::Unknown, "unknown"),
+    consan_enum(ConSanSyncAddressSource::LdsVector, "lds-vector"),
+    consan_enum(ConSanSyncAddressSource::FlatVector, "flat-vector"),
+    consan_enum(ConSanSyncAddressSource::GlobalScalarVector, "global-scalar-vector"),
+    consan_enum(ConSanSyncAddressSource::BufferResource, "buffer-resource"),
+    consan_enum(ConSanSyncAddressSource::ScratchVector, "scratch-vector"));
 
 [[nodiscard]] inline const char *
 sync_address_source_name(rocjitsu::ConSanSyncAddressSource source) {
-  switch (source) {
-  case rocjitsu::ConSanSyncAddressSource::NotApplicable:
-    return "not-applicable";
-  case rocjitsu::ConSanSyncAddressSource::Unknown:
-    return "unknown";
-  case rocjitsu::ConSanSyncAddressSource::LdsVector:
-    return "lds-vector";
-  case rocjitsu::ConSanSyncAddressSource::FlatVector:
-    return "flat-vector";
-  case rocjitsu::ConSanSyncAddressSource::GlobalScalarVector:
-    return "global-scalar-vector";
-  case rocjitsu::ConSanSyncAddressSource::BufferResource:
-    return "buffer-resource";
-  case rocjitsu::ConSanSyncAddressSource::ScratchVector:
-    return "scratch-vector";
-  }
-  return "unknown";
+  return kSyncAddressSources.name(source).data();
 }
+
+inline constexpr auto kSyncMemoryRoles = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanSyncMemoryRole::Unknown, "unknown"),
+    consan_enum(ConSanSyncMemoryRole::None, "none"),
+    consan_enum(ConSanSyncMemoryRole::Acquire, "acquire"),
+    consan_enum(ConSanSyncMemoryRole::Release, "release"),
+    consan_enum(ConSanSyncMemoryRole::AcquireRelease, "acquire-release"),
+    consan_enum(ConSanSyncMemoryRole::SequentiallyConsistent, "sequentially-consistent"));
 
 [[nodiscard]] inline const char *sync_memory_role_name(rocjitsu::ConSanSyncMemoryRole role) {
-  switch (role) {
-  case rocjitsu::ConSanSyncMemoryRole::Unknown:
-    return "unknown";
-  case rocjitsu::ConSanSyncMemoryRole::None:
-    return "none";
-  case rocjitsu::ConSanSyncMemoryRole::Acquire:
-    return "acquire";
-  case rocjitsu::ConSanSyncMemoryRole::Release:
-    return "release";
-  case rocjitsu::ConSanSyncMemoryRole::AcquireRelease:
-    return "acquire-release";
-  case rocjitsu::ConSanSyncMemoryRole::SequentiallyConsistent:
-    return "sequentially-consistent";
-  }
-  return "unknown";
+  return kSyncMemoryRoles.name(role).data();
 }
 
+inline constexpr auto kSyncRmwOutcomes = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanSyncRmwOutcome::NotApplicable, "not-applicable"),
+    consan_enum(ConSanSyncRmwOutcome::Unknown, "unknown"),
+    consan_enum(ConSanSyncRmwOutcome::NoReturn, "no-return"),
+    consan_enum(ConSanSyncRmwOutcome::ReturnsOldValue, "returns-old-value"),
+    consan_enum(ConSanSyncRmwOutcome::CompareExchange, "compare-exchange"));
+
 [[nodiscard]] inline const char *sync_rmw_outcome_name(rocjitsu::ConSanSyncRmwOutcome outcome) {
-  switch (outcome) {
-  case rocjitsu::ConSanSyncRmwOutcome::NotApplicable:
-    return "not-applicable";
-  case rocjitsu::ConSanSyncRmwOutcome::Unknown:
-    return "unknown";
-  case rocjitsu::ConSanSyncRmwOutcome::NoReturn:
-    return "no-return";
-  case rocjitsu::ConSanSyncRmwOutcome::ReturnsOldValue:
-    return "returns-old-value";
-  case rocjitsu::ConSanSyncRmwOutcome::CompareExchange:
-    return "compare-exchange";
-  }
-  return "unknown";
+  return kSyncRmwOutcomes.name(outcome).data();
 }
+
+inline constexpr auto kSyncConfidences =
+    make_consan_enum_vocabulary("unknown", consan_enum(ConSanSemanticConfidence::Exact, "exact"),
+                                consan_enum(ConSanSemanticConfidence::Conservative, "conservative"),
+                                consan_enum(ConSanSemanticConfidence::Ambiguous, "ambiguous"),
+                                consan_enum(ConSanSemanticConfidence::Unsupported, "unsupported"));
 
 [[nodiscard]] inline const char *
 sync_confidence_name(rocjitsu::ConSanSemanticConfidence confidence) {
-  switch (confidence) {
-  case rocjitsu::ConSanSemanticConfidence::Exact:
-    return "exact";
-  case rocjitsu::ConSanSemanticConfidence::Conservative:
-    return "conservative";
-  case rocjitsu::ConSanSemanticConfidence::Ambiguous:
-    return "ambiguous";
-  case rocjitsu::ConSanSemanticConfidence::Unsupported:
-    return "unsupported";
-  }
-  return "unknown";
+  return kSyncConfidences.name(confidence).data();
 }
 
+inline constexpr auto kOwnerProofs = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanOwnerProofKind::KernelLocal, "kernel-local"),
+    consan_enum(ConSanOwnerProofKind::DirectCall, "direct-call"),
+    consan_enum(ConSanOwnerProofKind::RecoveredIndirectCall, "recovered-indirect-call"));
+
 [[nodiscard]] inline const char *owner_proof_name(rocjitsu::ConSanOwnerProofKind proof) {
-  switch (proof) {
-  case rocjitsu::ConSanOwnerProofKind::KernelLocal:
-    return "kernel-local";
-  case rocjitsu::ConSanOwnerProofKind::DirectCall:
-    return "direct-call";
-  case rocjitsu::ConSanOwnerProofKind::RecoveredIndirectCall:
-    return "recovered-indirect-call";
-  }
-  return "unknown";
+  return kOwnerProofs.name(proof).data();
 }
 
 struct OwnerLogFields {
@@ -342,15 +275,13 @@ owner_log_fields(std::span<const rocjitsu::ConSanExecutionOwner> owners,
   return fields;
 }
 
+inline constexpr auto kPatchedImageGrowthLimitKinds = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanPatchedImageGrowthLimitKind::AbsoluteBytes, "absolute-bytes"),
+    consan_enum(ConSanPatchedImageGrowthLimitKind::InputPercent, "input-percent"));
+
 [[nodiscard]] inline const char *
 patched_image_growth_limit_kind_name(rocjitsu::ConSanPatchedImageGrowthLimitKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanPatchedImageGrowthLimitKind::AbsoluteBytes:
-    return "absolute-bytes";
-  case rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent:
-    return "input-percent";
-  }
-  return "unknown";
+  return kPatchedImageGrowthLimitKinds.name(kind).data();
 }
 
 [[nodiscard]] inline uint64_t
@@ -360,39 +291,30 @@ patched_image_growth_limit_value(const rocjitsu::ConSanPatchedImageGrowthLimit &
              : limit.absolute_bytes;
 }
 
+inline constexpr auto kOwnerSources = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanMoiOwnerSource::Automatic, "automatic"),
+    consan_enum(ConSanMoiOwnerSource::WorkitemId, "workitem_id"),
+    consan_enum(ConSanMoiOwnerSource::HwId, "hw_id"));
+
 [[nodiscard]] inline const char *owner_source_name(rocjitsu::ConSanMoiOwnerSource source) {
-  switch (source) {
-  case rocjitsu::ConSanMoiOwnerSource::Automatic:
-    return "automatic";
-  case rocjitsu::ConSanMoiOwnerSource::WorkitemId:
-    return "workitem_id";
-  case rocjitsu::ConSanMoiOwnerSource::HwId:
-    return "hw_id";
-  }
-  return "unknown";
+  return kOwnerSources.name(source).data();
 }
+
+inline constexpr auto kFlatProvenanceModes =
+    make_consan_enum_vocabulary("unknown", consan_enum(ConSanFlatProvenanceMode::Likely, "likely"),
+                                consan_enum(ConSanFlatProvenanceMode::Strict, "strict"));
 
 [[nodiscard]] inline const char *
 flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
-  switch (mode) {
-  case rocjitsu::ConSanFlatProvenanceMode::Likely:
-    return "likely";
-  case rocjitsu::ConSanFlatProvenanceMode::Strict:
-    return "strict";
-  }
-  return "unknown";
+  return kFlatProvenanceModes.name(mode).data();
 }
 
+inline constexpr auto kCheckTrapModes = make_consan_enum_vocabulary(
+    "unknown", consan_enum(CheckTrapMode::All, "all"), consan_enum(CheckTrapMode::Lds, "lds"),
+    consan_enum(CheckTrapMode::Flat, "flat"));
+
 [[nodiscard]] inline const char *check_trap_mode_name(CheckTrapMode mode) {
-  switch (mode) {
-  case CheckTrapMode::All:
-    return "all";
-  case CheckTrapMode::Lds:
-    return "lds";
-  case CheckTrapMode::Flat:
-    return "flat";
-  }
-  return "unknown";
+  return kCheckTrapModes.name(mode).data();
 }
 
 [[nodiscard]] inline const char *sc_report_mode_name(ScReportMode mode) {

@@ -48,15 +48,12 @@ struct ConSanTransformReservationEstimate {
 
 [[nodiscard]] inline constexpr const char *
 consan_transform_ownership_phase_name(ConSanTransformOwnershipPhase phase) {
-  switch (phase) {
-  case ConSanTransformOwnershipPhase::IncrementalPatch:
-    return "incremental-patch";
-  case ConSanTransformOwnershipPhase::CompositeIncrementalPatch:
-    return "composite-incremental-patch";
-  case ConSanTransformOwnershipPhase::FinalValidation:
-    return "final-validation";
-  }
-  return "unknown";
+  using E = ConSanTransformOwnershipPhase;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::IncrementalPatch, "incremental-patch"),
+      consan_enum(E::CompositeIncrementalPatch, "composite-incremental-patch"),
+      consan_enum(E::FinalValidation, "final-validation"));
+  return vocabulary.name(phase).data();
 }
 
 /// Major-image ownership at each supported transform peak.

@@ -491,6 +491,15 @@ using consan_detail::append_moi_workitem_owner_derivation;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::MoiSpecialStateSgprs;
 
+constexpr auto kMoiSpilledVgprReloadResults = make_consan_enum_vocabulary(
+    "unknown", consan_enum(consan_detail::MoiSpilledVgprReloadResult::Appended, "appended"),
+    consan_enum(consan_detail::MoiSpilledVgprReloadResult::SourceOutsideWindow,
+                "source_outside_window"),
+    consan_enum(consan_detail::MoiSpilledVgprReloadResult::IncompleteSlotMetadata,
+                "incomplete_slot_metadata"),
+    consan_enum(consan_detail::MoiSpilledVgprReloadResult::UnsupportedEncoding,
+                "unsupported_encoding"));
+
 [[nodiscard]] std::optional<uint16_t>
 scalar_owner_cdna_physical_vcc_base(uint32_t decoded_sgpr_count) {
   constexpr uint32_t kSgprGranularity = 8u;
@@ -569,17 +578,7 @@ bool consan_detail::validate_scalar_state_temporaries(
 }
 
 const char *consan_detail::moi_spilled_vgpr_reload_result_name(MoiSpilledVgprReloadResult result) {
-  switch (result) {
-  case MoiSpilledVgprReloadResult::Appended:
-    return "appended";
-  case MoiSpilledVgprReloadResult::SourceOutsideWindow:
-    return "source_outside_window";
-  case MoiSpilledVgprReloadResult::IncompleteSlotMetadata:
-    return "incomplete_slot_metadata";
-  case MoiSpilledVgprReloadResult::UnsupportedEncoding:
-    return "unsupported_encoding";
-  }
-  return "unknown";
+  return kMoiSpilledVgprReloadResults.name(result).data();
 }
 
 consan_detail::MoiSpilledVgprReloadResult

@@ -17,36 +17,29 @@
 
 namespace rocjitsu {
 
+namespace {
+
+constexpr auto kConSanMoiAtomicAddressSupports = make_consan_enum_vocabulary(
+    "unknown", consan_enum(ConSanMoiAtomicAddressSupport::Supported, "supported"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture, "unsupported-architecture"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedAddressKind, "unsupported-address-kind"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedWidth, "unsupported-width"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedEncoding, "unsupported-encoding"),
+    consan_enum(ConSanMoiAtomicAddressSupport::MissingAddressOperands, "missing-address-operands"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedInputWidth, "unsupported-input-width"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedOffset, "unsupported-offset"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedScope, "unsupported-scope"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan,
+                "unsupported-resource-plan"),
+    consan_enum(ConSanMoiAtomicAddressSupport::UnsupportedScratchShape,
+                "unsupported-scratch-shape"),
+    consan_enum(ConSanMoiAtomicAddressSupport::ResultAddressAlias, "result-address-alias"),
+    consan_enum(ConSanMoiAtomicAddressSupport::ScratchOperandAlias, "scratch-operand-alias"));
+
+} // namespace
+
 std::string_view consan_moi_atomic_address_support_name(ConSanMoiAtomicAddressSupport support) {
-  switch (support) {
-  case ConSanMoiAtomicAddressSupport::Supported:
-    return "supported";
-  case ConSanMoiAtomicAddressSupport::UnsupportedArchitecture:
-    return "unsupported-architecture";
-  case ConSanMoiAtomicAddressSupport::UnsupportedAddressKind:
-    return "unsupported-address-kind";
-  case ConSanMoiAtomicAddressSupport::UnsupportedWidth:
-    return "unsupported-width";
-  case ConSanMoiAtomicAddressSupport::UnsupportedEncoding:
-    return "unsupported-encoding";
-  case ConSanMoiAtomicAddressSupport::MissingAddressOperands:
-    return "missing-address-operands";
-  case ConSanMoiAtomicAddressSupport::UnsupportedInputWidth:
-    return "unsupported-input-width";
-  case ConSanMoiAtomicAddressSupport::UnsupportedOffset:
-    return "unsupported-offset";
-  case ConSanMoiAtomicAddressSupport::UnsupportedScope:
-    return "unsupported-scope";
-  case ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan:
-    return "unsupported-resource-plan";
-  case ConSanMoiAtomicAddressSupport::UnsupportedScratchShape:
-    return "unsupported-scratch-shape";
-  case ConSanMoiAtomicAddressSupport::ResultAddressAlias:
-    return "result-address-alias";
-  case ConSanMoiAtomicAddressSupport::ScratchOperandAlias:
-    return "scratch-operand-alias";
-  }
-  return "unknown";
+  return kConSanMoiAtomicAddressSupports.name(support);
 }
 
 ConSanMoiAtomicAddressPlan plan_consan_moi_atomic_address(

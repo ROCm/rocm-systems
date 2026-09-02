@@ -721,17 +721,13 @@ void record_process_fault_reservation_outcome(ProcessFaultApplicationState &stat
 
 [[nodiscard]] constexpr std::string_view
 process_fault_reservation_outcome_name(ProcessFaultReservationOutcome outcome) {
-  switch (outcome) {
-  case ProcessFaultReservationOutcome::Reserved:
-    return "reserved";
-  case ProcessFaultReservationOutcome::MutationAlreadyInstalled:
-    return "mutation-already-installed";
-  case ProcessFaultReservationOutcome::ContentionTimeout:
-    return "contention-timeout";
-  case ProcessFaultReservationOutcome::ReentrantContention:
-    return "reentrant-contention";
-  }
-  return "unknown";
+  using E = ProcessFaultReservationOutcome;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::Reserved, "reserved"),
+      consan_enum(E::MutationAlreadyInstalled, "mutation-already-installed"),
+      consan_enum(E::ContentionTimeout, "contention-timeout"),
+      consan_enum(E::ReentrantContention, "reentrant-contention"));
+  return vocabulary.name(outcome);
 }
 
 class ProcessFaultApplicationReservation {

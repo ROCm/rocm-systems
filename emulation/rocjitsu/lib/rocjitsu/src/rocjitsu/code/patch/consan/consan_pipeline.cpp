@@ -31,107 +31,60 @@ namespace {
 }
 
 [[nodiscard]] constexpr const char *patch_diagnostic_kind_name(ConSanPatchKind kind) {
-  switch (kind) {
-  case ConSanPatchKind::InlineNopRewrite:
-    return "inline-nop-rewrite";
-  case ConSanPatchKind::InlineEndpgmRewrite:
-    return "inline-endpgm-rewrite";
-  case ConSanPatchKind::InlineLdsEndpgmRewrite:
-    return "inline-lds-endpgm-rewrite";
-  case ConSanPatchKind::InlineLdsLoadCheckTrap:
-    return "inline-lds-load-check-trap";
-  case ConSanPatchKind::InlineLdsStoreCheckTrap:
-    return "inline-lds-store-check-trap";
-  case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
-    return "local-cave-lds-load-check-trap";
-  case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
-    return "local-cave-lds-store-check-trap";
-  case ConSanPatchKind::InlineFlatLoadCheckTrap:
-    return "inline-flat-load-check-trap";
-  case ConSanPatchKind::InlineFlatStoreCheckTrap:
-    return "inline-flat-store-check-trap";
-  case ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
-    return "local-cave-flat-load-check-trap";
-  case ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
-    return "local-cave-flat-store-check-trap";
-  case ConSanPatchKind::InlineFlatTrapRewrite:
-    return "inline-flat-trap-rewrite";
-  case ConSanPatchKind::InlineBarrierNopRewrite:
-    return "inline-barrier-nop-rewrite";
-  case ConSanPatchKind::InlineBarrierIdScopeRewrite:
-    return "inline-barrier-id-scope-rewrite";
-  case ConSanPatchKind::InlineBarrierParticipantCountRewrite:
-    return "inline-barrier-participant-count-rewrite";
-  case ConSanPatchKind::InlineBarrierMoveSourceRewrite:
-    return "inline-barrier-move-source-rewrite";
-  case ConSanPatchKind::InlineBarrierMoveTargetRewrite:
-    return "inline-barrier-move-target-rewrite";
-  case ConSanPatchKind::InlineAtomicAddressRewrite:
-    return "inline-atomic-address-rewrite";
-  case ConSanPatchKind::InlineAtomicOrderRewrite:
-    return "inline-atomic-order-rewrite";
-  case ConSanPatchKind::InlineAtomicScopeRewrite:
-    return "inline-atomic-scope-rewrite";
-  case ConSanPatchKind::InlineLdsAddressRewrite:
-    return "inline-lds-address-rewrite";
-  case ConSanPatchKind::InlineOrdinaryOrderRewrite:
-    return "inline-ordinary-order-rewrite";
-  case ConSanPatchKind::InlineOrdinaryAddressRewrite:
-    return "inline-ordinary-address-rewrite";
-  case ConSanPatchKind::InlineOrdinaryScopeRewrite:
-    return "inline-ordinary-scope-rewrite";
-  case ConSanPatchKind::InlineMoiAccessRecordStore:
-    return "inline-moi-access-record-store";
-  case ConSanPatchKind::TrampolineMoiAccessRecordStore:
-    return "trampoline-moi-access-record-store";
-  case ConSanPatchKind::InlineMoiExactShadowStore:
-    return "inline-moi-exact-shadow-store";
-  case ConSanPatchKind::TrampolineMoiExactShadowStore:
-    return "trampoline-moi-exact-shadow-store";
-  case ConSanPatchKind::InlineMoiSampledWatchpointStore:
-    return "inline-moi-sampled-watchpoint-store";
-  case ConSanPatchKind::TrampolineMoiSampledWatchpointStore:
-    return "trampoline-moi-sampled-watchpoint-store";
-  case ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue:
-    return "kernel-entry-moi-owner-epoch-prologue";
-  case ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue:
-    return "kernel-entry-moi-private-epoch-prologue";
-  case ConSanPatchKind::TrampolineMoiBarrierRecord:
-    return "trampoline-moi-barrier-record";
-  case ConSanPatchKind::TrampolineMoiInlineEpochBarrier:
-    return "trampoline-moi-inline-epoch-barrier";
-  case ConSanPatchKind::TrampolineMoiInlineAtomicOrdering:
-    return "trampoline-moi-inline-atomic-ordering";
-  case ConSanPatchKind::TrampolineMoiAtomicRecord:
-    return "trampoline-moi-atomic-record";
-  case ConSanPatchKind::TrampolineMoiSampledSyncMetadata:
-    return "trampoline-moi-sampled-sync-metadata";
-  case ConSanPatchKind::TrampolineMoiFenceRecord:
-    return "trampoline-moi-fence-record";
-  case ConSanPatchKind::InlineMalformedBarrierAbort:
-    return "inline-malformed-barrier-abort";
-  case ConSanPatchKind::TrampolineScPerturbation:
-    return "trampoline-sc-perturbation";
-  case ConSanPatchKind::TrampolineScIndirectBranchIsland:
-    return "trampoline-sc-indirect-branch-island";
-  case ConSanPatchKind::TrampolineScDenseCallDispatcher:
-    return "trampoline-sc-dense-call-dispatcher";
-  case ConSanPatchKind::TrampolineScDenseEntryHost:
-    return "trampoline-sc-dense-entry-host";
-  case ConSanPatchKind::TrampolineScBranchRelayDonor:
-    return "trampoline-sc-branch-relay-donor";
-  case ConSanPatchKind::TrampolineBranchRelayReservoir:
-    return "trampoline-branch-relay-reservoir";
-  case ConSanPatchKind::TrampolineNopBranchRelay:
-    return "trampoline-nop-branch-relay";
-  case ConSanPatchKind::InlineScalarClauseNopRewrite:
-    return "inline-scalar-clause-nop-rewrite";
-  case ConSanPatchKind::TrampolineMoiIndirectBranchIsland:
-    return "trampoline-moi-indirect-branch-island";
-  case ConSanPatchKind::TrampolineNop:
-    return "trampoline-nop";
-  }
-  return "unknown";
+  using E = ConSanPatchKind;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::InlineNopRewrite, "inline-nop-rewrite"),
+      consan_enum(E::InlineEndpgmRewrite, "inline-endpgm-rewrite"),
+      consan_enum(E::InlineLdsEndpgmRewrite, "inline-lds-endpgm-rewrite"),
+      consan_enum(E::InlineLdsLoadCheckTrap, "inline-lds-load-check-trap"),
+      consan_enum(E::InlineLdsStoreCheckTrap, "inline-lds-store-check-trap"),
+      consan_enum(E::LocalCaveLdsLoadCheckTrap, "local-cave-lds-load-check-trap"),
+      consan_enum(E::LocalCaveLdsStoreCheckTrap, "local-cave-lds-store-check-trap"),
+      consan_enum(E::InlineFlatLoadCheckTrap, "inline-flat-load-check-trap"),
+      consan_enum(E::InlineFlatStoreCheckTrap, "inline-flat-store-check-trap"),
+      consan_enum(E::LocalCaveFlatLoadCheckTrap, "local-cave-flat-load-check-trap"),
+      consan_enum(E::LocalCaveFlatStoreCheckTrap, "local-cave-flat-store-check-trap"),
+      consan_enum(E::InlineFlatTrapRewrite, "inline-flat-trap-rewrite"),
+      consan_enum(E::InlineBarrierNopRewrite, "inline-barrier-nop-rewrite"),
+      consan_enum(E::InlineBarrierIdScopeRewrite, "inline-barrier-id-scope-rewrite"),
+      consan_enum(E::InlineBarrierParticipantCountRewrite,
+                  "inline-barrier-participant-count-rewrite"),
+      consan_enum(E::InlineBarrierMoveSourceRewrite, "inline-barrier-move-source-rewrite"),
+      consan_enum(E::InlineBarrierMoveTargetRewrite, "inline-barrier-move-target-rewrite"),
+      consan_enum(E::InlineAtomicAddressRewrite, "inline-atomic-address-rewrite"),
+      consan_enum(E::InlineAtomicOrderRewrite, "inline-atomic-order-rewrite"),
+      consan_enum(E::InlineAtomicScopeRewrite, "inline-atomic-scope-rewrite"),
+      consan_enum(E::InlineLdsAddressRewrite, "inline-lds-address-rewrite"),
+      consan_enum(E::InlineOrdinaryOrderRewrite, "inline-ordinary-order-rewrite"),
+      consan_enum(E::InlineOrdinaryAddressRewrite, "inline-ordinary-address-rewrite"),
+      consan_enum(E::InlineOrdinaryScopeRewrite, "inline-ordinary-scope-rewrite"),
+      consan_enum(E::InlineMoiAccessRecordStore, "inline-moi-access-record-store"),
+      consan_enum(E::TrampolineMoiAccessRecordStore, "trampoline-moi-access-record-store"),
+      consan_enum(E::InlineMoiExactShadowStore, "inline-moi-exact-shadow-store"),
+      consan_enum(E::TrampolineMoiExactShadowStore, "trampoline-moi-exact-shadow-store"),
+      consan_enum(E::InlineMoiSampledWatchpointStore, "inline-moi-sampled-watchpoint-store"),
+      consan_enum(E::TrampolineMoiSampledWatchpointStore,
+                  "trampoline-moi-sampled-watchpoint-store"),
+      consan_enum(E::KernelEntryMoiOwnerEpochPrologue, "kernel-entry-moi-owner-epoch-prologue"),
+      consan_enum(E::KernelEntryMoiPrivateEpochPrologue, "kernel-entry-moi-private-epoch-prologue"),
+      consan_enum(E::TrampolineMoiBarrierRecord, "trampoline-moi-barrier-record"),
+      consan_enum(E::TrampolineMoiInlineEpochBarrier, "trampoline-moi-inline-epoch-barrier"),
+      consan_enum(E::TrampolineMoiInlineAtomicOrdering, "trampoline-moi-inline-atomic-ordering"),
+      consan_enum(E::TrampolineMoiAtomicRecord, "trampoline-moi-atomic-record"),
+      consan_enum(E::TrampolineMoiSampledSyncMetadata, "trampoline-moi-sampled-sync-metadata"),
+      consan_enum(E::TrampolineMoiFenceRecord, "trampoline-moi-fence-record"),
+      consan_enum(E::InlineMalformedBarrierAbort, "inline-malformed-barrier-abort"),
+      consan_enum(E::TrampolineScPerturbation, "trampoline-sc-perturbation"),
+      consan_enum(E::TrampolineScIndirectBranchIsland, "trampoline-sc-indirect-branch-island"),
+      consan_enum(E::TrampolineScDenseCallDispatcher, "trampoline-sc-dense-call-dispatcher"),
+      consan_enum(E::TrampolineScDenseEntryHost, "trampoline-sc-dense-entry-host"),
+      consan_enum(E::TrampolineScBranchRelayDonor, "trampoline-sc-branch-relay-donor"),
+      consan_enum(E::TrampolineBranchRelayReservoir, "trampoline-branch-relay-reservoir"),
+      consan_enum(E::TrampolineNopBranchRelay, "trampoline-nop-branch-relay"),
+      consan_enum(E::InlineScalarClauseNopRewrite, "inline-scalar-clause-nop-rewrite"),
+      consan_enum(E::TrampolineMoiIndirectBranchIsland, "trampoline-moi-indirect-branch-island"),
+      consan_enum(E::TrampolineNop, "trampoline-nop"));
+  return vocabulary.name(kind).data();
 }
 
 [[nodiscard]] ConSanPipelineStageStatus terminal_stage_status(ConSanTransformOutcome outcome) {

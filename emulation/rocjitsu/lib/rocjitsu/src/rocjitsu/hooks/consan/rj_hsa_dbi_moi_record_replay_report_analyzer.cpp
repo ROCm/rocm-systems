@@ -17,17 +17,12 @@ uint64_t record_replay_bank_saturation_count(const ConSanMoiReportHeader &header
 std::string_view record_replay_pressure_unavailable_reason_name(
     RecordReplayPressureTelemetry::UnavailableReason reason) {
   using Reason = RecordReplayPressureTelemetry::UnavailableReason;
-  switch (reason) {
-  case Reason::None:
-    return "none";
-  case Reason::NoDispatchDirectory:
-    return "no_dispatch_directory";
-  case Reason::NoAccessTable:
-    return "no_access_table";
-  case Reason::NoLogicalAccessRanges:
-    return "no_logical_access_ranges";
-  }
-  return "unknown";
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(Reason::None, "none"),
+      consan_enum(Reason::NoDispatchDirectory, "no_dispatch_directory"),
+      consan_enum(Reason::NoAccessTable, "no_access_table"),
+      consan_enum(Reason::NoLogicalAccessRanges, "no_logical_access_ranges"));
+  return vocabulary.name(reason);
 }
 
 RecordReplayPressureTelemetry record_replay_pressure_telemetry(

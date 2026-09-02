@@ -219,27 +219,18 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
 
 [[nodiscard]] constexpr std::string_view
 consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport support) {
-  switch (support) {
-  case ConSanMoiInlineAtomicSupport::Supported:
-    return "supported";
-  case ConSanMoiInlineAtomicSupport::NonFlatAddress:
-    return "non-flat-address";
-  case ConSanMoiInlineAtomicSupport::NonzeroOffset:
-    return "nonzero-offset";
-  case ConSanMoiInlineAtomicSupport::UnsupportedScope:
-    return "unsupported-scope";
-  case ConSanMoiInlineAtomicSupport::UnsupportedWidth:
-    return "unsupported-width";
-  case ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable:
-    return "compare-exchange-outcome-unavailable";
-  case ConSanMoiInlineAtomicSupport::UnsupportedEncoding:
-    return "unsupported-encoding";
-  case ConSanMoiInlineAtomicSupport::MissingOperands:
-    return "missing-operands";
-  case ConSanMoiInlineAtomicSupport::MissingOrderingMetadata:
-    return "missing-ordering-metadata";
-  }
-  return "unknown";
+  using E = ConSanMoiInlineAtomicSupport;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::Supported, "supported"),
+      consan_enum(E::NonFlatAddress, "non-flat-address"),
+      consan_enum(E::NonzeroOffset, "nonzero-offset"),
+      consan_enum(E::UnsupportedScope, "unsupported-scope"),
+      consan_enum(E::UnsupportedWidth, "unsupported-width"),
+      consan_enum(E::CompareExchangeOutcomeUnavailable, "compare-exchange-outcome-unavailable"),
+      consan_enum(E::UnsupportedEncoding, "unsupported-encoding"),
+      consan_enum(E::MissingOperands, "missing-operands"),
+      consan_enum(E::MissingOrderingMetadata, "missing-ordering-metadata"));
+  return vocabulary.name(support);
 }
 
 /// Shared ordinary per-buffer safety bound used by Sampled and InlineShadow.
