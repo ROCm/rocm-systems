@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
