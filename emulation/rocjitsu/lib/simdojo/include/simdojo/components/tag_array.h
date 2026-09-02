@@ -59,11 +59,10 @@ public:
 
   /// @brief Move, leaving the source with no geometry rather than a stale one.
   ///
-  /// @details The default move would take entries_ and leave sets_, ways_ and
-  /// the line size behind, so the moved-from array would report configured()
-  /// false while sets() and line_bytes() still answered with the geometry it
-  /// no longer has -- a plausible non-zero answer from an object every
-  /// operation throws on. Every field moves together instead.
+  /// @details The default move takes entries_ and leaves the geometry behind,
+  /// so the source would report configured() false while sets() and
+  /// line_bytes() still answered with a geometry it no longer has. Every field
+  /// moves together instead.
   TagArray(TagArray &&other) noexcept { *this = std::move(other); }
   TagArray &operator=(TagArray &&other) noexcept;
 
@@ -80,10 +79,9 @@ public:
   /// @brief Largest cache, in bytes, a tag array may model.
   ///
   /// @details kMaxEntries bounds what the array costs the host; this bounds
-  /// what it claims to be, and the two catch different mistakes. Without it a
-  /// line size is the one dimension nothing checks: sets * ways stays small
-  /// while a line size given in the wrong units -- bits, or a stray shift --
-  /// collapses every address in a normal virtual range onto one or two lines,
+  /// what it claims to be, and the two catch different mistakes. Without it,
+  /// sets * ways stays small while a line size given in the wrong units -- bits,
+  /// or a stray shift -- collapses a normal address range onto one or two lines,
   /// so the array reports a hit for nearly everything and throws nothing. Four
   /// gigabytes is larger than any cache being modelled.
   static constexpr uint64_t kMaxCapacityBytes = 1ULL << 32;
@@ -144,8 +142,7 @@ public:
   /// operation. It is sixty-four bits and nothing needs it to be small,
   /// whereas a reset while any line remained resident -- which invalidate()
   /// leaves and this does not -- would make that line look newer than every
-  /// line filled afterwards and invert the replacement order. Keeping the one
-  /// rule for both means neither has to be reasoned about separately.
+  /// line filled afterwards and invert the replacement order.
   /// @throws std::logic_error if the array has no geometry yet.
   void invalidate_all();
 
@@ -182,10 +179,7 @@ private:
 
   /// @brief Index of way zero of the set @p line indexes into.
   std::size_t set_base(uint64_t line) const {
-    // sets_ - 1 is the index mask, so a zero set count would mask nothing off
-    // and index past the array. configure() is the only writer of both fields
-    // and rejects a zero, and the move above keeps them in step.
-    assert(sets_ != 0);
+    assert(sets_ != 0); // sets_ - 1 is the index mask; zero would mask nothing off.
     return static_cast<std::size_t>((line & (sets_ - 1)) * ways_);
   }
 
@@ -220,10 +214,9 @@ private:
   std::vector<Entry> entries_;
 };
 
-// Defined inline, like every other simdojo component: access() is called once
-// per simulated memory access, LTO is off by default, and simdojo_headers is
-// an INTERFACE target that several binaries link without the object library --
-// an out-of-line definition would hand the first of them a link error.
+// Defined inline, like every other simdojo component: simdojo_headers is an
+// INTERFACE target that several binaries link without the object library, and
+// access() is a per-memory-access hot path in an LTO-off default build.
 
 inline void TagArray::configure(uint64_t sets, uint64_t ways, uint64_t line_bytes) {
   if (sets == 0 || ways == 0 || line_bytes == 0)
@@ -284,13 +277,9 @@ inline bool TagArray::access(uint64_t byte_address, uint32_t vmid) {
   const auto [line, base] = locate(byte_address);
 
   // One pass over the set: a miss has to look at every way anyway, so it picks
-  // its victim on the way past rather than walking the set a second time.
-  //
-  // The victim is simply the oldest stamp. That needs no separate rule for a
-  // free way, because a free way's stamp is zero and a resident way's is a
-  // positive value of clock_, so a free way is always the older. No two
-  // resident ways share a stamp, so the only ties are between free ways, and
-  // which of those is taken is not observable through this interface.
+  // its victim on the way past rather than walking the set a second time. Ties
+  // are only ever between free ways, whose stamps are all zero, and which of
+  // those is taken is not observable through this interface.
   std::size_t victim = base;
   uint64_t oldest = entries_[base].stamp;
   for (uint64_t way = 0; way < ways_; ++way) {
