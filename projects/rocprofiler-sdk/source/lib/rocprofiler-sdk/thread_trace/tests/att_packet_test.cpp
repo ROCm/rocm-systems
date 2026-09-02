@@ -166,10 +166,7 @@ recording_pool_allocate(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags,
 }
 
 hsa_status_t
-recording_staging_pool_allocate(hsa_amd_memory_pool_t pool,
-                                size_t                size,
-                                uint32_t              flags,
-                                void**                ptr)
+recording_staging_pool_allocate(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
 {
     recorded_staging_allocations.push_back(size);
     return get_ext_table().hsa_amd_memory_pool_allocate_fn(pool, size, flags, ptr);

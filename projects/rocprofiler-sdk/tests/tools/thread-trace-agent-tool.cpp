@@ -35,9 +35,9 @@ namespace ATTTest
 {
 namespace Agent
 {
-rocprofiler_client_id_t* client_id   = nullptr;
-rocprofiler_context_id_t agent_ctx   = {};
-rocprofiler_context_id_t tracing_ctx = {};
+rocprofiler_client_id_t*              client_id   = nullptr;
+rocprofiler_context_id_t              agent_ctx   = {};
+rocprofiler_context_id_t              tracing_ctx = {};
 std::vector<rocprofiler_context_id_t> extra_contexts{};
 
 size_t

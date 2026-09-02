@@ -75,8 +75,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED})
 
 # Configure hundreds of contexts before HSA initialization, then run one trace to validate
-# data collection. Per-context buffers and queues would exhaust memory or the HSA queue limit
-# while the shared implementation creates one resource set per agent.
+# data collection. Per-context buffers and queues would exhaust memory or the HSA queue
+# limit while the shared implementation creates one resource set per agent.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-many-contexts-test
     TARGET thread-trace-test-app
