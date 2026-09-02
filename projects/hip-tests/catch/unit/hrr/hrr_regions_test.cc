@@ -829,7 +829,7 @@ inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
 
 }  // namespace
 
-TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_memcpy.hrr");
   auto [hsa_base, hsa_size] =
       hrr_capture_direct_hsa("Unit_HRR_Regions_MemcpyDirect", cap.path);
