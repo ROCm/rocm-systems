@@ -70,3 +70,16 @@ if(NOT _run_result EQUAL 0)
         "Filtered test '${TEST_FILTER}' exited with status ${_run_result}"
     )
 endif()
+
+# GoogleTest exits 0 when a test calls GTEST_SKIP(). That is the right outcome
+# for a registration whose prerequisite may genuinely be absent, but not for one
+# that runs against a simulated agent the launcher is configured to supply: there
+# a skip means the config, interposer, or launcher regressed. FAIL_ON_SKIP turns
+# that into a hard failure so it cannot report green.
+if(FAIL_ON_SKIP AND _run_output MATCHES "\\[  SKIPPED \\]")
+    message(
+        FATAL_ERROR
+        "Filtered test '${TEST_FILTER}' was SKIPPED, but this registration "
+        "requires it to run"
+    )
+endif()

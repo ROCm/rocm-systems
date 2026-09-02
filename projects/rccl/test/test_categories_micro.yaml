@@ -10,7 +10,7 @@
 
 test_categories:
   quick: &micro_quick
-    description: "Smoke — host-only micro-tests (p2p ipcRegisterBuffer seams, RAS client), sub-second."
+    description: "Smoke — host-only micro-tests, sub-second."
     # gtest's '*' does not match across the literal '.', so every suite name in the
     # binary needs its own pattern here or it never runs under CTest.
     test_patterns:
@@ -20,6 +20,9 @@ test_categories:
       - "RasClientMicrotest.*"
       - "RasClientMicrotestDeathTest.*"
       - "RasClientMicrotestGetStatus.*"
+      - "RmaProxyProgressTest.*"
+      - "GroupEndInternalTest.*"
+      - "Devcomm*"
     exclude_windows:
       - "*"
     labels:
