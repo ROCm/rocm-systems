@@ -411,7 +411,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (!vcc_save) {
       (void)publish_sc_access_rejection(
-          result.coverage_ledger, result.errors, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site.physical_id,
+          ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no safe VCC-save scalar pair");
       return;
     }
@@ -473,7 +474,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (!scratch) {
       (void)publish_sc_access_rejection(
-          result.coverage_ledger, result.errors, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site.physical_id,
+          ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no encodable scratch or spill plan");
       return;
     }
@@ -749,7 +751,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (!complete_context || !common_allocated_vgpr_count || !common_allocated_sgpr_count) {
       (void)publish_sc_access_rejection(
-          result.coverage_ledger, result.errors, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site.physical_id,
+          ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no complete planning context");
       continue;
     }
@@ -1191,9 +1194,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedFlatCheckTrapPatch planned;
     planned.site = &site;
-    planned.intent_ids =
-        result.coverage_ledger.pending_intent_ids(
-            ConSanProbeIntentKind::RedundantAccessObservation, site.physical_id);
+    planned.intent_ids = result.coverage_ledger.pending_intent_ids(
+        ConSanProbeIntentKind::RedundantAccessObservation, site.physical_id);
     if (planned.intent_ids.empty()) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof selected a site without a pending semantic intent");
@@ -1227,41 +1229,38 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           candidate.dynamic_stack_spill->dynamic_frame_bytes;
     }
     planned.words.reserve(static_cast<size_t>(candidate.requested_words));
-    const auto save_vcc =
-        instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kAmdGpuVccLo, arch);
+    InstructionSequence sequence(planned.words);
     const auto restore_vcc =
         instrumentation::build_s_mov_b64(kAmdGpuVccLo, candidate.vcc_save_sgpr, arch);
-    if (!save_vcc || !restore_vcc) {
+    if (!sequence.emit(
+            instrumentation::build_s_mov_b64(candidate.vcc_save_sgpr, kAmdGpuVccLo, arch)) ||
+        !restore_vcc) {
       result.errors.emplace_back("ConSan flat check/trap proof could not preserve VCC");
       return;
     }
-    planned.words.push_back(*save_vcc);
-    planned.words.insert(planned.words.end(), original_access.begin(),
-                         original_access.begin() + access_words);
+    (void)sequence.emit(std::span(original_access).first(access_words));
     if (!consan_sc_append_delay_words(planned.words, arch, options, result.errors,
                                       "ConSan flat check/trap proof"))
       return;
     const bool needs_runtime_group_gate =
         target.requires_sc_runtime_flat_group_gate &&
         site.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
-    std::optional<size_t> runtime_group_gate_branch_index;
+    std::optional<InstructionSequence::Label> runtime_group_gate_done;
     if (needs_runtime_group_gate) {
       constexpr uint16_t kScalarInlineMinusOne = 0xC1;
-      const auto group_aperture_high = instrumentation::build_v_cmp_eq_u32_vcc(
-          kScalarInlineMinusOne, static_cast<uint16_t>(*site.lowering.form->address_vgpr + 1u),
-          arch);
-      if (!group_aperture_high) {
+      runtime_group_gate_done = sequence.make_label();
+      if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+              kScalarInlineMinusOne, static_cast<uint16_t>(*site.lowering.form->address_vgpr + 1u),
+              arch)) ||
+          !sequence.emit_branch(*runtime_group_gate_done,
+                                InstructionSequence::BranchKind::VccZero)) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof could not encode runtime group gate");
         return;
       }
-      planned.words.push_back(*group_aperture_high);
-      runtime_group_gate_branch_index = planned.words.size();
-      planned.words.push_back(build_s_nop(0, arch));
     }
-    planned.words.insert(planned.words.end(), duplicate_load->begin(),
-                         duplicate_load->begin() + access_words);
-    planned.words.push_back(*wait_flat);
+    (void)sequence.emit(std::span(*duplicate_load).first(access_words));
+    (void)sequence.emit(*wait_flat);
     const ConSanAccessLoweringForm &form = *site.lowering.form;
     const bool subword = form.element_width_bits < 32u;
     const bool compare_high_load =
@@ -1278,45 +1277,25 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         options, target, report_scratch_vgpr, result.errors, "ConSan flat check/trap proof");
     if (!mismatch_action)
       return;
-    if (mismatch_action->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-      result.errors.emplace_back("ConSan flat check/trap proof mismatch action is too "
-                                 "large");
-      return;
-    }
     if (*required_vgprs > 1u) {
-      std::vector<size_t> mismatch_branch_indices;
-      mismatch_branch_indices.reserve(*required_vgprs);
+      const InstructionSequence::Label mismatch_action_label = sequence.make_label();
+      const InstructionSequence::Label mismatch_done = sequence.make_label();
       for (uint16_t i = 0; i < *required_vgprs; ++i) {
-        const auto chunk_cmp_ne =
-            consan_sc_build_v_cmp_ne_u32(static_cast<uint16_t>(*compare_vgpr + i),
-                                         static_cast<uint16_t>(candidate.scratch_vgpr + i), arch);
-        if (!chunk_cmp_ne) {
+        if (!sequence.emit(consan_sc_build_v_cmp_ne_u32(
+                static_cast<uint16_t>(*compare_vgpr + i),
+                static_cast<uint16_t>(candidate.scratch_vgpr + i), arch)) ||
+            !sequence.emit_branch(mismatch_action_label,
+                                  InstructionSequence::BranchKind::VccNonzero)) {
           result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
           return;
         }
-        planned.words.push_back(*chunk_cmp_ne);
-        mismatch_branch_indices.push_back(planned.words.size());
-        planned.words.push_back(build_s_nop(0, arch));
       }
-      const auto skip_action = build_s_branch(static_cast<int16_t>(mismatch_action->size()), arch);
-      planned.words.push_back(skip_action);
-      const size_t action_index = planned.words.size();
-      planned.words.insert(planned.words.end(), mismatch_action->begin(), mismatch_action->end());
-      for (size_t branch_index : mismatch_branch_indices) {
-        const size_t distance = action_index - (branch_index + 1u);
-        if (distance > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof shared mismatch branch is out of range");
-          return;
-        }
-        const auto branch =
-            instrumentation::build_s_cbranch_vccnz(static_cast<int16_t>(distance), arch);
-        if (!branch) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof could not encode shared mismatch branch");
-          return;
-        }
-        planned.words[branch_index] = *branch;
+      if (!sequence.emit_branch(mismatch_done, InstructionSequence::BranchKind::Unconditional) ||
+          !sequence.bind(mismatch_action_label) || !sequence.emit(*mismatch_action) ||
+          !sequence.bind(mismatch_done)) {
+        result.errors.emplace_back(
+            "ConSan flat check/trap proof could not encode shared mismatch action");
+        return;
       }
     } else {
       uint16_t compare_lhs_vgpr = *compare_vgpr;
@@ -1362,42 +1341,21 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           compare_lhs_vgpr = comparison_scratch_vgpr;
         }
       }
-      const auto skip_action = instrumentation::build_s_cbranch_vccz(
-          static_cast<int16_t>(mismatch_action->size()), arch);
-      if (!skip_action) {
-        result.errors.emplace_back("ConSan flat check/trap proof could not encode "
-                                   "mismatch-action branch");
-        return;
-      }
       const auto chunk_cmp_ne =
           subword ? consan_sc_build_v_cmp_ne_u16(compare_lhs_vgpr, compare_rhs_vgpr, arch)
                   : consan_sc_build_v_cmp_ne_u32(compare_lhs_vgpr, compare_rhs_vgpr, arch);
-      if (!chunk_cmp_ne) {
+      const InstructionSequence::Label mismatch_done = sequence.make_label();
+      if (!sequence.emit(chunk_cmp_ne) ||
+          !sequence.emit_branch(mismatch_done, InstructionSequence::BranchKind::VccZero) ||
+          !sequence.emit(*mismatch_action) || !sequence.bind(mismatch_done)) {
         result.errors.emplace_back("ConSan flat check/trap proof could not encode chunk compare");
         return;
       }
-      planned.words.push_back(*chunk_cmp_ne);
-      planned.words.push_back(*skip_action);
-      planned.words.insert(planned.words.end(), mismatch_action->begin(), mismatch_action->end());
     }
-    const size_t runtime_group_gate_target_index = planned.words.size();
-    planned.words.push_back(*restore_vcc);
-    if (runtime_group_gate_branch_index) {
-      const size_t distance =
-          runtime_group_gate_target_index - (*runtime_group_gate_branch_index + 1u);
-      if (distance > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-        result.errors.emplace_back(
-            "ConSan flat check/trap proof runtime group gate is out of range");
-        return;
-      }
-      const auto skip_probe =
-          instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(distance), arch);
-      if (!skip_probe) {
-        result.errors.emplace_back(
-            "ConSan flat check/trap proof could not encode runtime group branch");
-        return;
-      }
-      planned.words[*runtime_group_gate_branch_index] = *skip_probe;
+    if ((runtime_group_gate_done && !sequence.bind(*runtime_group_gate_done)) ||
+        !sequence.emit(restore_vcc) || !sequence.resolve_branches(arch)) {
+      result.errors.emplace_back("ConSan flat check/trap proof could not resolve local branches");
+      return;
     }
     if (candidate.vgpr_spill || candidate.dynamic_stack_spill) {
       if (candidate.dynamic_stack_spill) {
@@ -1408,29 +1366,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
               "ConSan flat check/trap proof lost its dynamic scalar spill window");
           return;
         }
-        const size_t guarded_words = candidate.dynamic_stack_spill->save_words.size() +
-                                     planned.words.size() +
-                                     candidate.dynamic_stack_spill->restore_words.size();
-        if (guarded_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof dynamic spill guard exceeds s_cbranch_execz range");
-          return;
-        }
-        const auto skip_empty_wave =
-            instrumentation::build_s_cbranch_execz(static_cast<int16_t>(guarded_words), arch);
-        if (!skip_empty_wave) {
+        std::vector<uint32_t> wrapped;
+        InstructionSequence wrapped_sequence(wrapped);
+        const InstructionSequence::Label spill_done = wrapped_sequence.make_label();
+        if (!wrapped_sequence.emit_branch(spill_done, InstructionSequence::BranchKind::ExecZero) ||
+            !wrapped_sequence.emit(candidate.dynamic_stack_spill->save_words) ||
+            !wrapped_sequence.emit(planned.words) ||
+            !wrapped_sequence.emit(candidate.dynamic_stack_spill->restore_words) ||
+            !wrapped_sequence.bind(spill_done) || !wrapped_sequence.resolve_branches(arch)) {
           result.errors.emplace_back(
               "ConSan flat check/trap proof could not encode its dynamic empty-wave spill guard");
           return;
         }
-        std::vector<uint32_t> wrapped;
-        wrapped.reserve(1u + guarded_words);
-        wrapped.push_back(*skip_empty_wave);
-        wrapped.insert(wrapped.end(), candidate.dynamic_stack_spill->save_words.begin(),
-                       candidate.dynamic_stack_spill->save_words.end());
-        wrapped.insert(wrapped.end(), planned.words.begin(), planned.words.end());
-        wrapped.insert(wrapped.end(), candidate.dynamic_stack_spill->restore_words.begin(),
-                       candidate.dynamic_stack_spill->restore_words.end());
         planned.words = std::move(wrapped);
       } else {
         const bool spills_scalar_pair = candidate.scalar_vcc_spill.has_value();
