@@ -55,6 +55,7 @@ The documentation is structured as follows:
       * :ref:`using-thread-trace`
       * :ref:`using-spm`
       * :ref:`using-kernel-replay`
+      * :ref:`using-kernel-replay-rocprofv3`
       * :doc:`Samples <how-to/samples>`
 
    .. grid-item-card:: API reference

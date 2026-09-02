@@ -47,13 +47,15 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
 
 Because replay is a callback tracing service rather than a counter-collection mode, it is not tied to
 hardware counters. A tool decides what each pass is for and, through localized context control, which
-of its services are active on which pass. A custom tool can collect every counter group in one run,
-or use the same domain for timing, PC sampling, or thread trace. `rocprofv3` exposes a narrower
-slice of this through its own command-line option.
+of its services are active on which pass. `rocprofv3` uses that to collect every `--pmc` group in one
+run (`--replay-mode kernel --kernel-replay-beta-enabled`; {ref}`using-kernel-replay-rocprofv3`). A custom tool can use the
+same domain for timing, PC sampling, or thread trace.
 
 ## Documentation in this section
 
 **Tool authors:** start with {ref}`using-kernel-replay`.
+
+**rocprofv3 users:** start with {ref}`using-kernel-replay-rocprofv3`.
 
 **SDK / tool developers:**
 

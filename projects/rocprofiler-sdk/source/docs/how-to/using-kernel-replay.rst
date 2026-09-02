@@ -19,7 +19,7 @@ thread trace, or any other per-pass work.
 This page is the SDK how-to: it covers subscribing to the replay domain from a custom tool.
 Conceptual and API detail live under :ref:`kernel-replay-conceptual` and
 :ref:`kernel-replay-sdk-api`. For the ``rocprofv3`` command-line option
-(``--kernel-replay-beta-enabled``), see the rocprofv3 how-to guide.
+(``--replay-mode kernel --kernel-replay-beta-enabled``), see the rocprofv3 how-to guide (:ref:`using-kernel-replay-rocprofv3`).
 
 .. warning::
 

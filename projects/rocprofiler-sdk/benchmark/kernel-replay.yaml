@@ -32,6 +32,8 @@ defaults:
     # number.
     replay_4_groups:
       [
+        --replay-mode,
+        kernel,
         --kernel-replay-beta-enabled,
         --pmc,
         SQ_WAVES,
@@ -48,10 +50,21 @@ defaults:
     # Pass-count sweep at fixed footprint and dispatch count. Wall time should grow roughly
     # linearly in the number of groups; super-linear growth means per-pass fixed cost, which the
     # cost model does not account for and which would be a regression.
-    replay_1_group: [--kernel-replay-beta-enabled, --pmc, SQ_WAVES]
-    replay_2_groups: [--kernel-replay-beta-enabled, --pmc, SQ_WAVES, --pmc, GRBM_COUNT]
+    replay_1_group: [--replay-mode, kernel, --kernel-replay-beta-enabled, --pmc, SQ_WAVES]
+    replay_2_groups:
+      [
+        --replay-mode,
+        kernel,
+        --kernel-replay-beta-enabled,
+        --pmc,
+        SQ_WAVES,
+        --pmc,
+        GRBM_COUNT,
+      ]
     replay_8_groups:
       [
+        --replay-mode,
+        kernel,
         --kernel-replay-beta-enabled,
         --pmc,
         SQ_WAVES,
@@ -93,9 +106,19 @@ jobs:
     group: [kernel-replay, pass-sweep]
     command: [transpose, 1, 100, 10, 2048, 2048]
     rocprofv3:
-      - [--kernel-replay-beta-enabled, --pmc, SQ_WAVES]
-      - [--kernel-replay-beta-enabled, --pmc, SQ_WAVES, --pmc, GRBM_COUNT]
+      - [--replay-mode, kernel, --kernel-replay-beta-enabled, --pmc, SQ_WAVES]
       - [
+          --replay-mode,
+          kernel,
+          --kernel-replay-beta-enabled,
+          --pmc,
+          SQ_WAVES,
+          --pmc,
+          GRBM_COUNT,
+        ]
+      - [
+          --replay-mode,
+          kernel,
           --kernel-replay-beta-enabled,
           --pmc,
           SQ_WAVES,

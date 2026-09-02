@@ -15,8 +15,10 @@ device memory between those executions so each pass observes identical inputs. I
 
    This API is experimental. The public header is
    ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain and payload are expected
-   to change before a stable release. See :ref:`kernel-replay-limitations` and
-   :ref:`kernel-replay-memory-snapshot`.
+   to change before a stable release. A failed device-memory restore aborts the process.
+   Replay is limited to single-packet, single-dispatch submissions; see
+   :ref:`kernel-replay-limitations` and :ref:`kernel-replay-memory-snapshot`. Command-line
+   ``rocprofv3`` usage is :ref:`using-kernel-replay-rocprofv3`.
 
    Known failure behavior:
 
@@ -153,6 +155,7 @@ See also
 --------
 
 * :ref:`using-kernel-replay` — configure, ``replay_pass_count``, local context
+* :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --replay-mode kernel --kernel-replay-beta-enabled``
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do

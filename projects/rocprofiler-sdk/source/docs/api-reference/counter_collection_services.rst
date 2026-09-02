@@ -19,9 +19,9 @@ When a tool needs more counters than fit in one hardware pass, it can collect gr
 successive application runs, rotate groups across successive dispatches, or **replay each dispatch**
 in-process with device memory restored between passes. Kernel replay is a callback tracing domain
 (:ref:`kernel-replay-sdk-api`), not a third counting mode: dispatch counting still supplies the
-counter records; replay decides how many times the dispatch runs. Custom tools subscribe to the
-domain directly (:ref:`using-kernel-replay`); ``rocprofv3`` exposes a narrower slice of it through
-its own command-line option.
+counter records; replay decides how many times the dispatch runs. Custom tools subscribe
+to the domain directly (:ref:`using-kernel-replay`). ``rocprofv3`` exposes that as
+``--replay-mode kernel --kernel-replay-beta-enabled`` (:ref:`using-kernel-replay-rocprofv3`).
 
 Definitions
 -----------
