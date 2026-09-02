@@ -3428,6 +3428,10 @@ template <typename Inst, typename MadOp, typename WriteResult>
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  if constexpr (requires { inst.inst_.clamp; }) {
+    if (inst.inst_.clamp)
+      return false;
+  }
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);

@@ -1792,6 +1792,10 @@ def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
     assert 'if (inst_.clamp)' in signed
     assert signed.index('carry |= 1ULL << lane') < signed.index('if (inst_.clamp)')
 
+    policy = Cdna4Profile().integer_clamp_dtypes
+    assert policy['V_MAD_U64_U32'] == 'u64'
+    assert policy['V_MAD_I64_I32'] == 'i64'
+
 
 def test_vector_cmp_class_writes_explicit_sdst_mask():
     body = gen_vector_cmp_class(

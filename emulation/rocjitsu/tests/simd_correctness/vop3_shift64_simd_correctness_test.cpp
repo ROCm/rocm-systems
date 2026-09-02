@@ -60,8 +60,10 @@ constexpr void vop3_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t s
 
 // VOP3_SDST_ENC: word0 also carries sdst[14:8].
 constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, uint32_t src0,
-                                   uint32_t src1, uint32_t src2, uint32_t words[2]) {
-  words[0] = (vdst & 0xFF) | ((sdst & 0x7F) << 8) | ((op & 0x3FF) << 16) | (0x34u << 26);
+                                   uint32_t src1, uint32_t src2, uint32_t words[2],
+                                   uint32_t clamp = 0) {
+  words[0] = (vdst & 0xFF) | ((sdst & 0x7F) << 8) | ((clamp & 0x1) << 15) | ((op & 0x3FF) << 16) |
+             (0x34u << 26);
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
@@ -314,6 +316,45 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64) {
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, ~0ULL);
   check_mad64("v_mad_u64_u32_vop3", 488, /*is_signed=*/false, 0xA5A5'F0F0'1234'8001ULL);
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, 0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
+  ForceScalarGuard gate_guard;
+  for (bool is_signed : {false, true}) {
+    for (bool force_scalar : {false, true}) {
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx;
+      ASSERT_NE(fx.cu, nullptr);
+      ASSERT_NE(fx.wf, nullptr);
+      const uint32_t sb = fx.wf->sgpr_alloc().base;
+      ASSERT_EQ(sb % 2u, 0u);
+      const uint32_t opcode = is_signed ? 489u : 488u;
+      uint32_t words[2] = {0u, 0u};
+      vop3_sdstenc_encode(opcode, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words,
+                          /*clamp=*/1);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+      ASSERT_NE(inst, nullptr);
+      const uint32_t vb = fx.wf->vgpr_alloc().base;
+      if (is_signed) {
+        fx.cu->write_vgpr(vb, 0, static_cast<uint32_t>(INT32_MIN));
+        fx.cu->write_vgpr(vb + 2, 0, static_cast<uint32_t>(INT32_MAX));
+        fx.write64(vb + 4, 0, static_cast<uint64_t>(INT64_MIN));
+      } else {
+        fx.cu->write_vgpr(vb, 0, UINT32_MAX);
+        fx.cu->write_vgpr(vb + 2, 0, UINT32_MAX);
+        fx.write64(vb + 4, 0, UINT64_MAX);
+      }
+      fx.write64(vb + kDstVgpr, 0, 0u);
+      fx.write_sgpr64(sb, 0u);
+      fx.wf->set_exec(1u);
+      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_EQ(fx.read64(vb + kDstVgpr, 0),
+                is_signed ? static_cast<uint64_t>(INT64_MIN) : UINT64_MAX)
+          << "signed " << is_signed << " scalar " << force_scalar;
+      EXPECT_EQ(fx.read_sgpr64(sb) & 1u, 1u)
+          << "signed " << is_signed << " scalar " << force_scalar;
+    }
+  }
 }
 
 TEST(Vop3Shift64SimdCorrectness, RevShiftsFullExec) {

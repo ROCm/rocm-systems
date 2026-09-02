@@ -13382,6 +13382,12 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
     uint64_t result = static_cast<uint64_t>(wide);
     if (wide < std::numeric_limits<int64_t>::min() || wide > std::numeric_limits<int64_t>::max())
       carry |= 1ULL << lane;
+    if (inst.inst_.clamp) {
+      if (wide < std::numeric_limits<int64_t>::min())
+        result = std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min());
+      else if (wide > std::numeric_limits<int64_t>::max())
+        result = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    }
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
   commit_result(carry);
@@ -13644,6 +13650,8 @@ inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
     uint64_t result = static_cast<uint64_t>(wide);
     if (wide > std::numeric_limits<uint64_t>::max())
       carry |= 1ULL << lane;
+    if (inst.inst_.clamp && wide > std::numeric_limits<uint64_t>::max())
+      result = std::numeric_limits<uint64_t>::max();
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
   commit_result(carry);
