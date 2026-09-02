@@ -85,8 +85,9 @@ Ensure ROCm is installed and follow the steps:
 .. _same-rocm-as-workload:
 
 3. The profiler and the workload must use the same ROCm. A pip package can
-   install a second ROCm. TheRock torch from pip is one example. See
-   `TheRock releases <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`__.
+   install a second ROCm. TheRock torch from pip is one example. See the
+   `torch packages warning
+   <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-pytorch-python-packages>`__.
 
 4. Check the installation dependencies. These are required for analyze mode
    only; profile mode uses the standard library and needs no extra packages.
