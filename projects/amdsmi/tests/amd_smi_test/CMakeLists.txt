@@ -63,7 +63,7 @@ file(GLOB_RECURSE functSources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fun
 # fwupd_carveout.cc directly, whose amd::smi::fwupd_* symbols are hidden in the
 # shared library. Keep it out of the main amdsmitst target so shared-only builds
 # do not fail with undefined references.
-list(FILTER unitSources EXCLUDE REGEX "/unit/fwupd_carveout_test\\.cc$")
+list(FILTER unitSources EXCLUDE REGEX "/fwupd_carveout_test\\.cc$")
 if(NOT ENABLE_WSL_BACKEND)
     list(FILTER unitSources EXCLUDE REGEX "/unit/wsl/")
     list(FILTER functSources EXCLUDE REGEX "/functional/wsl/")
@@ -151,7 +151,7 @@ install(
 # sweep above does not pull it into ${TEST}.
 add_executable(
     fwupd_carveout_test
-    ${CMAKE_CURRENT_SOURCE_DIR}/unit/fwupd_carveout_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/fwupd_carveout_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi/fwupd_carveout.cc
 )
 target_include_directories(

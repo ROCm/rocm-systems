@@ -1,23 +1,5 @@
-/*
- * Copyright (C) Advanced Micro Devices. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of
- * this software and associated documentation files (the "Software"), to deal in
- * the Software without restriction, including without limitation the rights to
- * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
- * the Software, and to permit persons to whom the Software is furnished to do so,
- * subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
- * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
- * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "fwupd_carveout.h"
 
@@ -30,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "fwupd_carveout_internal.h"
+
 // The UMA "carveout" BIOS setting is owned by the fwupd system daemon. amd-smi
 // reads and writes it over the daemon's stable D-Bus interface, loading the
 // reference D-Bus client (libdbus-1) lazily with dlopen() at runtime. As a
@@ -41,6 +25,8 @@
 //   org.freedesktop.fwupd  /  org.freedesktop.fwupd
 //     GetBiosSettings() -> aa{sv}   (options + current value)
 //     SetBiosSettings(a{ss})        (write; PolicyKit-brokered)
+
+using amd::smi::detail::BiosSetting;
 
 namespace {
 
@@ -81,11 +67,6 @@ constexpr const char* kKeyName = "Name";
 constexpr const char* kKeyCurrent = "BiosSettingCurrentValue";
 constexpr const char* kKeyReadOnly = "BiosSettingReadOnly";
 constexpr const char* kKeyValues = "BiosSettingPossibleValues";
-
-// The carveout setting id, most specific first: AMD's canonical attribute, then
-// HP's UEFI-HII naming.
-const char* const kCarveoutIds[] = {"com.amd-gpu.uma_carveout",
-                                    "com.hp-bioscfg.Dedicated_Graphics_Memory"};
 
 // Resolved libdbus-1 entry points.
 struct Dbus {
@@ -149,14 +130,6 @@ const Dbus* LoadDbus() {
   }();
   return ok ? &dbus : nullptr;
 }
-
-struct BiosSetting {
-  std::string id;
-  std::string name;
-  std::string current;
-  bool read_only = false;
-  std::vector<std::string> values;
-};
 
 void ReadVariant(const Dbus& d, DbusIter* kv, BiosSetting* s, const char* key) {
   DbusIter var;
@@ -226,15 +199,6 @@ bool GetSettings(const Dbus& d, DBusConnection* conn, std::vector<BiosSetting>* 
   return true;
 }
 
-const BiosSetting* FindCarveout(const std::vector<BiosSetting>& v) {
-  for (const char* want : kCarveoutIds) {
-    for (const auto& s : v) {
-      if (strcasecmp(s.id.c_str(), want) == 0) return &s;
-    }
-  }
-  return nullptr;
-}
-
 bool DryRun() {
   const char* v = std::getenv("AMDSMI_DRY_RUN");
   return v != nullptr && std::strcmp(v, "1") == 0;
@@ -264,6 +228,44 @@ void CloseBus(const Dbus& d, DBusConnection* conn) {
 
 namespace amd {
 namespace smi {
+namespace detail {
+
+// Select the carveout setting from a parsed list, preferring AMD's canonical
+// attribute id over HP's UEFI-HII naming.
+const BiosSetting* FindCarveout(const std::vector<BiosSetting>& settings) {
+  static const char* const kCarveoutIds[] = {"com.amd-gpu.uma_carveout",
+                                             "com.hp-bioscfg.Dedicated_Graphics_Memory"};
+  for (const char* want : kCarveoutIds) {
+    for (const auto& s : settings) {
+      if (strcasecmp(s.id.c_str(), want) == 0) return &s;
+    }
+  }
+  return nullptr;
+}
+
+// Map a resolved carveout setting into the public info struct: index the option
+// descriptions (truncated to fit), clamp the count to the array bound, and set
+// current_index to the matching option or to num_options ("unknown") when the
+// current value is empty (e.g. redacted for an unprivileged reader).
+amdsmi_status_t PopulateCarveoutInfo(const BiosSetting& setting, amdsmi_uma_carveout_info_t* info) {
+  if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  if (setting.values.empty()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  uint32_t count = static_cast<uint32_t>(setting.values.size());
+  if (count > AMDSMI_MAX_CARVEOUT_OPTIONS) count = AMDSMI_MAX_CARVEOUT_OPTIONS;
+  uint32_t current = count;  // sentinel: "unknown" == num_options
+  for (uint32_t i = 0; i < count; ++i) {
+    info->options[i].index = i;
+    std::strncpy(info->options[i].description, setting.values[i].c_str(),
+                 AMDSMI_MAX_STRING_LENGTH - 1);
+    info->options[i].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    if (!setting.current.empty() && setting.current == setting.values[i]) current = i;
+  }
+  info->num_options = count;
+  info->current_index = current;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+}  // namespace detail
 
 amdsmi_status_t fwupd_get_carveout_info(amdsmi_uma_carveout_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
@@ -277,21 +279,9 @@ amdsmi_status_t fwupd_get_carveout_info(amdsmi_uma_carveout_info_t* info) {
   CloseBus(*d, conn);
   if (!ok) return AMDSMI_STATUS_NOT_SUPPORTED;
 
-  const BiosSetting* c = FindCarveout(settings);
-  if (c == nullptr || c->values.empty()) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-  uint32_t count = static_cast<uint32_t>(c->values.size());
-  if (count > AMDSMI_MAX_CARVEOUT_OPTIONS) count = AMDSMI_MAX_CARVEOUT_OPTIONS;
-  uint32_t current = count;  // sentinel: "unknown" == num_options
-  for (uint32_t i = 0; i < count; ++i) {
-    info->options[i].index = i;
-    std::strncpy(info->options[i].description, c->values[i].c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
-    info->options[i].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-    if (!c->current.empty() && c->current == c->values[i]) current = i;
-  }
-  info->num_options = count;
-  info->current_index = current;
-  return AMDSMI_STATUS_SUCCESS;
+  const BiosSetting* c = detail::FindCarveout(settings);
+  if (c == nullptr) return AMDSMI_STATUS_NOT_SUPPORTED;
+  return detail::PopulateCarveoutInfo(*c, info);
 }
 
 amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
@@ -305,7 +295,7 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
     CloseBus(*d, conn);
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  const BiosSetting* c = FindCarveout(settings);
+  const BiosSetting* c = detail::FindCarveout(settings);
   if (c == nullptr) {
     CloseBus(*d, conn);
     return AMDSMI_STATUS_NOT_SUPPORTED;
