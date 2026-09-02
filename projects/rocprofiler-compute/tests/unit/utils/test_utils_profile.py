@@ -358,7 +358,7 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(
     workload_dir = str(tmp_path / "workload")
     abort_line = "Option 'spirv-expand-step' registered more than once!"
     captured_output = "\n".join([
-        "[rocprofiler-sdk] tool initialization ::     0.146483 sec",
+        f"[{rocprof_cmd}] tool initialization ::     0.146483 sec",
         "running vcopy",
         abort_line,
         "workload stderr",
