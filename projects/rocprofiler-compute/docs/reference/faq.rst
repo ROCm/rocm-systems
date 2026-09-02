@@ -9,19 +9,6 @@ FAQ
 
 Frequently asked questions and troubleshooting tips.
 
-python ast error: 'Constant' object has no attribute 'kind'
-===========================================================
-
-This error arises from a bug in the default ``astunparse 1.6.3`` with
-``python 3.8``. The error doesn't seem to occur with Python 3.7 or 3.9.
-
-Workaround:
-
-.. code-block:: shell
-
-   $ pip3 uninstall astunparse
-   $ pip3 astunparse
-
 Why does VALU utilization exceed the theoretical peak?
 ======================================================
 

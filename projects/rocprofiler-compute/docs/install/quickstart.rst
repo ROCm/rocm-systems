@@ -73,23 +73,34 @@ Ensure ROCm is installed and follow the steps:
       :widths: 40 60
 
       * - Component
-        - Python requirement
+        - Supported Python versions
       * - Profile mode (standard library only)
-        - 3.8 or newer
-      * - Analyze mode (numpy, pandas, dash, textual)
-        - 3.9 or newer
+        - 3.8 through 3.14
+      * - Analyze mode (numpy, pandas, dash, textual, etc.)
+        - 3.9 through 3.14
 
    Analyze mode aborts with a clear message if launched on Python older
    than 3.9.
 
-3. Check the installation dependencies. These are required for analyze mode
-   only; profile mode uses the standard library and needs no extra packages.
+3. Install the analyze mode dependencies. Profile mode uses the standard
+   library and needs no extra packages, so this step is only for analyze mode.
+
+   Install them into a virtual environment that is separate from the one your
+   profiled application uses. Analyze mode pins versions of packages such as
+   ``numpy`` and ``pandas``, and installing them alongside a workload that has
+   its own versions of ``torch``, ``numpy``, or similar packages can break
+   either side.
 
    .. code-block:: shell-session
 
+      python3 -m venv ~/.venvs/rocprof-compute-analyze
+      source ~/.venvs/rocprof-compute-analyze/bin/activate
       pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
 
    **Note:** Replace ``<ROCM_PATH>`` with the ROCm installation path (e.g., ``/opt/rocm`` or ``/opt/rocm-7.3.0``).
+
+   Profile your application with its own Python environment, then activate this
+   environment to run analyze mode on the results.
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
