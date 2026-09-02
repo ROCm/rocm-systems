@@ -16,7 +16,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
 
-* Added CLI and FAQ guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+* Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`), with an FAQ pointer to that section.
 
 ### Changed
 
