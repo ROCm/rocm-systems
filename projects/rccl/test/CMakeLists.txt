@@ -180,7 +180,6 @@ if(BUILD_TESTS)
     hip::host hip::device hsa-runtime64::hsa-runtime64
     Threads::Threads
     dl
-    fmt::fmt-header-only
   )
 
   # Link libs for the host-only micro-test binary (test/host). Deliberately no
@@ -193,7 +192,6 @@ if(BUILD_TESTS)
     ${GTEST_BOTH_LIBRARIES}
     Threads::Threads
     dl
-    fmt::fmt-header-only
   )
   if(OPENMP_TESTS_ENABLED)
     list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")

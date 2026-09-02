@@ -34,6 +34,8 @@
 #include "profiler.h"
 #include "mnnvl.h"
 #include <fcntl.h>
+#include <iomanip>
+#include <sstream>
 #include <unistd.h>
 #include <hip/hip_runtime.h>
 #include <string.h>
@@ -1040,8 +1042,12 @@ static void showVersion() {
   std::string extendedInfo = VERSION_STRING_EXTENDED;
 #endif
 
-  std::string versionInfo = fmt::format("{}-{}\n{}\n{:<12} : {}\n{:>12} : {}", VERSION_STRING, rcclGitHash,
-                                        extendedInfo, "Hostname", hostInfo, "Librccl path", libPathInfo);
+  std::ostringstream versionStream;
+  versionStream << VERSION_STRING << "-" << rcclGitHash << "\n"
+                << extendedInfo << "\n"
+                << std::left << std::setw(12) << "Hostname" << " : " << hostInfo << "\n"
+                << std::right << std::setw(12) << "Librccl path" << " : " << libPathInfo;
+  std::string versionInfo = versionStream.str();
 
   if (ncclDebugLevel == NCCL_LOG_VERSION || ncclDebugLevel == NCCL_LOG_WARN) {
     VERSION("%s", versionInfo.c_str());

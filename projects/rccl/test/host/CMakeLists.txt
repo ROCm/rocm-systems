@@ -310,18 +310,6 @@ if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
   add_library(GTest::GTest ALIAS GTest::gtest)
 endif()
 
-# --- Resolve fmt: system -> FetchContent fallback ---
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-  message(STATUS "Downloading fmt via FetchContent")
-  FetchContent_Declare(fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG        10.2.1
-    GIT_SHALLOW    TRUE
-  )
-  FetchContent_MakeAvailable(fmt)
-endif()
-
 # --- Resolve RCCL build directory ---
 set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
     "RCCL build directory (auto-detects release/debug subdirs)")
@@ -422,7 +410,6 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
-  fmt::fmt-header-only
 )
 
 # --- Main test executable ---
@@ -484,7 +471,6 @@ target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
   Threads::Threads
-  fmt::fmt-header-only
   # RCCL_TEST_CODE_COVERAGE compiles a dlsym() call in
   # ProcessIsolatedTestRunner.cpp; the in-tree test build links dl for the same
   # runner. Empty on platforms where libdl is folded into libc (glibc >= 2.34),
@@ -537,7 +523,6 @@ target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
-  fmt::fmt-header-only
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed

@@ -424,7 +424,7 @@ compiles just the tests + fakes + the hipified unit-under-test sources.
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
 against the **real ROCm headers**. There is no CPU-only / g++ path and no stubbed
-`<hip/*>` / `<hsa/*>` / `<cuda*>` headers. It links **gtest + fmt only** and
+`<hip/*>` / `<hsa/*>` / `<cuda*>` headers. It links **gtest only** and
 passes `-no-hip-rt`, so it links **neither `librccl.so` nor the HIP runtime** —
 every HIP symbol the tests reach is provided by `fakes/`.
 
