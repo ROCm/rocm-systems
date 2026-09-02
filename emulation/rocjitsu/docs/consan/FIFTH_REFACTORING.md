@@ -9830,3 +9830,64 @@ decision point, and no request-level field peepholes. Full target and mode
 locality, remaining broad transaction and operating-point surfaces, larger
 whole-refactoring deletion, final extension-proof revalidation, and the
 independent Section 14 audit remain open; the goal remains active.
+
+### 16.141 Convergence checkpoint 140: exact scalar-routing planner inputs
+
+The retained scalar-ABI work exposed one remaining mismatch at the public
+mode-planning boundary. Mode callbacks already consumed the narrow
+`MoiScalarRoutingState`, but the two public planners still accepted a complete
+`ConSanRequest` and `ConSanMoiOperatingPoint` and privately projected the
+fields they needed. This left every access, barrier, atomic, spill, and
+Record/Replay consumer coupled to two broad aggregates even though the mode
+decision depends only on the selected engine and scalar-routing snapshot.
+
+`plan_moi_scalar_abi` now accepts exactly a `ConSanMoiEngine` and
+`MoiScalarRoutingState`. `plan_moi_dense_router` accepts those same inputs plus
+the target identity it normalizes into target facts. Every production consumer
+projects the routing state after its final applicable owner-local assignment;
+the two paired scalar/dense consumers reuse one snapshot. Sampled access
+planning already retained the snapshot and now derives its retained ABI from
+that value rather than projecting the operating point independently. The
+projection helper's noun name reflects that it constructs the typed fact
+product rather than performing a separate policy decision.
+
+Structural enforcement requires both public planner declarations to cross the
+mode boundary with `ConSanMoiEngine` and `MoiScalarRoutingState`, rejects either
+`ConSanRequest` or `ConSanMoiOperatingPoint` in those declarations, and retains
+the callback-level checks that prohibit broad operating-point and target-profile
+inputs. Focused mode-planning tests call the exact interface directly across
+all engines and target families.
+
+| Signal | Checkpoint 140 | Cumulative change | Slice change from checkpoint 139 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,729 | **-2,247** | +22 |
+| Nonblank production lines | 96,311 | **-2,773** | +22 |
+| Production implementation lines | 88,528 | **-2,922** | +22 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **250 / 50** | **-40 / -1** | **-4 / 0** |
+| Broad scalar-planner aggregate parameters | **0** | n/a | **-4** |
+| Test inventory | **5,421** | **+76** | 0 |
+
+The implementation is committed as `f33b4631870`. Validation includes a
+successful full `-j16` build, the architecture-boundary gate, all
+**1,303/1,303** nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests,
+and **40/40** focused simulator-device cases across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250. The simulator slice covers Record/Replay spill pressure
+and fence/barrier publication, Sampled independent scalar proofs, and
+InlineShadow dynamic-stack routing in both correct and incorrect workloads.
+Checkpoint 138 remains the immediately preceding complete **2,888/2,888**
+simulator matrix. No test registration or device-test source changed, and no
+physical GPU test was run under the current infrequent-physical policy.
+
+This is a 22-line boundary investment: it makes projection and ownership
+explicit at consumers rather than hiding them behind broad convenience APIs.
+The route series from checkpoint 133 through 140 is therefore 11 implementation
+lines larger than it began. The next checkpoint must harvest at least that
+route investment or delete a larger adjacent transaction surface; another
+growth-only representation would violate the anti-circling rule. Full target
+and mode locality, remaining broad transaction and operating-point surfaces,
+larger whole-refactoring deletion, final extension-proof revalidation, and the
+independent Section 14 audit remain open, so the goal remains active.

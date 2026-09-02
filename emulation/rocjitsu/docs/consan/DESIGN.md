@@ -378,6 +378,15 @@ accepts the selected ABI explicitly; it does not reopen the mode registry, and
 its mandatory special state remains mandatory in native emission instead of
 being converted back into an optional compatibility view.
 
+The public scalar-ABI and dense-router planners accept only the selected
+`ConSanMoiEngine` and an immutable `MoiScalarRoutingState`; the dense planner
+additionally accepts the target identity it must normalize. They cannot inspect
+the complete request or operating point. Consumers project the routing state
+after their last owner-local assignment, paired ABI/router consumers reuse one
+snapshot, and a retained mode plan derives its ABI from its retained routing
+state. This makes the mode-registry crossing exact even where attempt-local
+lowering still owns the broader mutable point.
+
 SuperCollider dense placement retains one mode-local
 `ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry
 host, and served body. The value names its dispatcher, shared indirect-jump
