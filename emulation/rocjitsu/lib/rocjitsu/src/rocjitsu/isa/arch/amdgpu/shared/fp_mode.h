@@ -56,11 +56,25 @@ inline int host_round_mode(uint32_t round_mode) {
   }
 }
 
+#if defined(__aarch64__)
+inline uint64_t read_fpcr() {
+  uint64_t value;
+  __asm__ volatile("mrs %0, fpcr" : "=r"(value) : : "memory");
+  return value;
+}
+
+inline void write_fpcr(uint64_t value) {
+  __asm__ volatile("msr fpcr, %0" : : "r"(value) : "memory");
+}
+#endif
+
 class ScopedFenv {
 public:
   explicit ScopedFenv(uint32_t round_mode) {
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
     saved_mxcsr_ = _mm_getcsr();
+#elif defined(__aarch64__)
+    saved_fpcr_ = read_fpcr();
 #endif
     saved_ = std::feholdexcept(&environment_) == 0;
     if (saved_)
@@ -69,6 +83,10 @@ public:
     constexpr uint32_t kDazMask = 1u << 6;
     constexpr uint32_t kFtzMask = 1u << 15;
     _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
+#elif defined(__aarch64__)
+    constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
+    constexpr uint64_t kFzMask = uint64_t{1} << 24;
+    write_fpcr(read_fpcr() & ~(kFzMask | kFz16Mask));
 #endif
   }
 
@@ -80,6 +98,8 @@ public:
       std::fesetenv(&environment_);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
     _mm_setcsr(saved_mxcsr_);
+#elif defined(__aarch64__)
+    write_fpcr(saved_fpcr_);
 #endif
   }
 
@@ -88,6 +108,8 @@ private:
   bool saved_ = false;
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
   uint32_t saved_mxcsr_ = 0;
+#elif defined(__aarch64__)
+  uint64_t saved_fpcr_ = 0;
 #endif
 };
 

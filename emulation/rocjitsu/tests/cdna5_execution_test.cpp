@@ -82,6 +82,15 @@ public:
 private:
   uint32_t saved_;
 };
+#elif defined(__aarch64__)
+class HostFpcrGuard {
+public:
+  HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
+  ~HostFpcrGuard() { amdgpu::fp_mode::detail::write_fpcr(saved_); }
+
+private:
+  uint64_t saved_;
+};
 #endif
 
 TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
@@ -209,6 +218,20 @@ TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
   const float subnormal = std::bit_cast<float>(0x00018000u);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
   EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
+}
+#elif defined(__aarch64__)
+TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
+  HostFpcrGuard environment_guard;
+  constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
+  constexpr uint64_t kFzMask = uint64_t{1} << 24;
+  constexpr uint64_t kFlushMask = kFzMask | kFz16Mask;
+  amdgpu::fp_mode::detail::write_fpcr(amdgpu::fp_mode::detail::read_fpcr() | kFlushMask);
+  const uint64_t enabled_flush_modes = amdgpu::fp_mode::detail::read_fpcr() & kFlushMask;
+  ASSERT_NE(enabled_flush_modes & kFzMask, 0u);
+
+  const float subnormal = std::bit_cast<float>(0x00018000u);
+  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
+  EXPECT_EQ(amdgpu::fp_mode::detail::read_fpcr() & kFlushMask, enabled_flush_modes);
 }
 #endif
 
