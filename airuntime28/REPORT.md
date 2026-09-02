@@ -39,43 +39,43 @@ up — which matters, because width turns out to dominate everything else measur
 
 ## Results
 
-All numbers below come from one result set, `results/20260828_062133`, on
-`heliosr-1b114-a07-4`: gfx1250 (MI450 A0 engineering sample, `REV_ID 0x00`), 256 CU, 432 GiB
-HBM, SPX / NPS1, at a **1100 MHz clock ceiling**. Superseded numbers from earlier revisions are
-in [CHANGELOG.md](CHANGELOG.md), not here. Negative is faster throughout.
-
-The machine has since been reconfigured to a 2400 MHz ceiling. A spot check there puts the
-1 GiB copy at 6193 GB/s against 4088 here, and the 64-bit width penalty at +62% against +77%,
-so re-measure before quoting any of these figures against current hardware. That set also
-predates the `(ns)` to `(noise)` rename, so its files still carry the old marker.
+All numbers below come fromon
+`heliosr-1b114-a07-4`.Negative is faster throughout.
 
 `(noise)` marks a result too small to tell apart from the rig measuring the same kernel twice
-and getting two different answers; the size of that jitter is the **resolution limit** printed
-beside each table. [METHOD.md](METHOD.md) has the exact test.
+and getting two different answers.
 
 ### Isolated streaming copy, 1 GiB
 
-Each row compares one variant against the control that differs from it in exactly one
-respect, which is not always the production baseline.
+Each row changes exactly one thing from the variant named in "measured against". That control
+is not always the production baseline `plain-128`, because several variants differ from it in
+two ways at once and comparing them to it would credit the effect to the wrong cause — see the
+`TH_STORE_NT_RT` and 64-bit rows below.
 
-| question | effect [95% CI] |
-|---|---|
-| NT store hint, 128-bit (**the shipped change**) | -0.47% [-0.83, -0.11] (noise) |
-| also hinting the load, 128-bit | +0.58% [+0.16, +0.71] (noise) |
-| hand-written store carrying the *default* hint (codegen only) | **-1.26% [-1.71, -0.95]** |
-| `TH_STORE_NT_RT` hint, net of that codegen effect | -0.29% [-0.59, +0.05] (noise) |
-| NT store hint at 64-bit width | +0.23% [-0.04, +0.65] (noise) |
-| NT store hint at 32-bit width | -0.18% [-0.34, +1.30] (noise) |
-| 64-bit instead of 128-bit (width only) | **+77.26% [+76.75, +77.69]** |
-| 32-bit instead of 128-bit (width only) | **+220.10% [+218.77, +220.62]** |
+| change | measured against | effect [95% CI] |
+|---|---|---|
+| NT store hint, 128-bit (**the shipped change**) | `plain-128` | -0.47% [-0.83, -0.11] (noise) |
+| also hinting the load | `nt-store-128` | +0.58% [+0.16, +0.71] (noise) |
+| hand-written store, *default* hint | `plain-128` | **-1.26% [-1.71, -0.95]** |
+| `TH_STORE_NT_RT` hint | `asm-plain-128` | -0.29% [-0.59, +0.05] (noise) |
+| NT store hint at 64-bit width | `plain-64` | +0.23% [-0.04, +0.65] (noise) |
+| NT store hint at 32-bit width | `plain-32` | -0.18% [-0.34, +1.30] (noise) |
+| 64-bit instead of 128-bit | `plain-128` | **+77.26% [+76.75, +77.69]** |
+| 32-bit instead of 128-bit | `plain-128` | **+220.10% [+218.77, +220.62]** |
 
 Resolution limit for this run: 0.74 pp. Baseline 0.5253 ms, 4088 GB/s read+write.
 
 Three things to take from this. No temporal hint is separable from noise on an isolated 1 GiB
 copy. Access width dominates by two orders of magnitude. And the largest sub-1% effect in the
-table belongs to *hand-writing the store* rather than to any temporal hint — which is why the
-`TH_STORE_NT_RT` variant, which looked like a 1.1% win against the production baseline, is
-worth nothing once compared against its own codegen control.
+table belongs to *hand-writing the store* rather than to any temporal hint.
+
+That last one is why the controls are picked this way. Measured against `plain-128`,
+`TH_STORE_NT_RT` reads **-1.56%** and looks like a real win; measured against `asm-plain-128`,
+which is the same hand-written store carrying the *default* hint, the hint is worth -0.29% and
+does not clear the noise floor. The same trap runs the other way at 64-bit: `nt-store-64` is
++77.55% against `plain-128`, which would read as non-temporal stores being catastrophic, but
++0.23% against `plain-64`. In both cases the variant differs from production in two respects,
+and only the one-respect control says which of them did the work.
 
 ### Where in the size range the hint does anything
 

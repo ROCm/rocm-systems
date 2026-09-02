@@ -102,24 +102,24 @@ int main(int argc, char** argv) {
     int against;
   };
   const Comparison comparisons[] = {
-      {"NT store hint, 128-bit (the shipped change)", CopyNtStore128, CopyPlain128},
-      {"also hinting the load, 128-bit", CopyNtBoth128, CopyNtStore128},
-      {"hand-written store, default hint (codegen only)", CopyAsmPlain128, CopyPlain128},
-      {"NT_RT hint, net of that codegen effect", CopyNtRtStore128, CopyAsmPlain128},
+      {"NT store hint, 128-bit (shipped)", CopyNtStore128, CopyPlain128},
+      {"also hinting the load", CopyNtBoth128, CopyNtStore128},
+      {"hand-written store, default hint", CopyAsmPlain128, CopyPlain128},
+      {"TH_STORE_NT_RT hint", CopyNtRtStore128, CopyAsmPlain128},
       {"NT store hint at 64-bit width", CopyNtStore64, CopyPlain64},
       {"NT store hint at 32-bit width", CopyPr2616Actual32, CopyPlain32},
-      {"64-bit instead of 128-bit (width only)", CopyPlain64, CopyPlain128},
-      {"32-bit instead of 128-bit (width only)", CopyPlain32, CopyPlain128},
+      {"64-bit instead of 128-bit", CopyPlain64, CopyPlain128},
+      {"32-bit instead of 128-bit", CopyPlain32, CopyPlain128},
   };
 
-  std::printf("\n  Controlled comparisons: each against the arm differing in one respect only\n");
-  std::printf("  %-48s %-30s\n", "question", "effect [95% CI]");
-  std::printf("  %s\n", std::string(78, '-').c_str());
+  std::printf("\n  Controlled comparisons: each row changes exactly one thing from its control\n");
+  std::printf("  %-34s %-18s %-30s\n", "change", "measured against", "effect [95% CI]");
+  std::printf("  %s\n", std::string(84, '-').c_str());
   for (const Comparison& c : comparisons) {
     const Delta d = r.effect(c.arm, c.against);
     char cell[80];
     formatDelta(cell, sizeof(cell), d, r.isSignificant(d));
-    std::printf("  %-48s %-30s\n", c.question, cell);
+    std::printf("  %-34s %-18s %-30s\n", c.question, kVariants[c.against].name, cell);
     char extra[96];
     std::snprintf(extra, sizeof(extra), "vs=%s sig=%d", kVariants[c.against].name,
                   static_cast<int>(r.isSignificant(d)));
