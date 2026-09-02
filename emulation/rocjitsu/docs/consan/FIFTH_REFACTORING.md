@@ -11095,3 +11095,47 @@ assignment facts actually needed by these planners or otherwise consolidate
 their repeated assignment/emission preparation; preserving both the new
 spelling cost and the broad allocation input would merely exchange one bus for
 another.
+
+### 16.163 Convergence checkpoint 162: owner-assignment projection
+
+The accepted operating point passed to barrier planners was not used as an
+operating point.  Its consumers searched only the persistent-VGPR and
+transient-SGPR assignment vectors.  The same mismatch existed in the shared
+assignment lookup/application helpers and scratch-plan resolution, causing a
+large union-shaped policy object to cross every owner-assignment boundary.
+
+`MoiOwnerAssignments` is now the exact read-only projection of those two
+vectors.  Assignment lookup, transient and persistent application,
+branch-only classification, scratch resolution, and Record/Replay entry-capture
+restoration consume this view.  An accepted operating point converts directly
+to the non-owning view at a call boundary; no old overload or parallel
+authority remains.  Both barrier planner seams now expose the projection
+rather than the union-shaped allocation.  The structural gate requires the
+view at these contracts and rejects restoring allocation parameters.
+
+| Signal | Checkpoint 162 | Cumulative change | Slice change from checkpoint 161 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,649 | **-2,327** | +12 |
+| Nonblank production lines | 96,230 | **-2,854** | +11 |
+| Production implementation lines | 88,438 | **-3,012** | +8 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **246 / 52** | **-44 / +1** | **-19 / 0** |
+| Assignment-consuming contracts taking the full accepted allocation | **0** | n/a | **-9** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `552cd0ac323`.  Validation includes a
+successful full `-j16` build; **109/109** nonphysical architecture-boundary and
+barrier-named host tests; and the complete **2,921/2,921** `consan`-labeled
+nonphysical simulator-device matrix across all four modes and all five target
+architectures.  All invocations used `-LE physical`; no test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+The projection costs eight implementation lines but more than pays for the
+temporary operating-point regression at checkpoint 161 and removes 19 broad
+type references across a reusable allocation boundary.  The callback sequence
+still has duplicated per-mode assignment and Record/Replay emission staging;
+the next local direction is deletion and consolidation on those now-exact
+inputs, not another projection layer.
