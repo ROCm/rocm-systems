@@ -189,3 +189,24 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
     std::filesystem::remove(fake_path);
   }
 }
+
+TEST(GpuUnit, GPUMetricUnsupportedFormatRevisionReportsNotSupported) {
+  PRINT_VERBOSITY();
+  // Raphael iGPU (gfx1036, 0x164e) reports gpu_metrics v2.1 (format_revision=2,
+  // content_revision=1), which the translation table does not recognize since it
+  // only maps 1.0-1.9, 2.4, and 3.0. This must classify as unsupported rather
+  // than falling through to a generic "unexpected data" error.
+  const bool is_partition_metrics = false;
+  const auto header = amd::smi::AMDGpuMetricsHeader_v1_t{
+      .m_structure_size = 120,
+      .m_format_revision = 2,
+      .m_content_revision = 1,
+  };
+
+  const auto flag =
+      amd::smi::translate_header_to_flag_version(header, is_partition_metrics, "");
+  EXPECT_EQ(flag, amd::smi::AMDGpuMetricVersionFlags_t::kGpuMetricNone)
+      << "gpu_metrics v2.1 is not in the version translation table and must be "
+         "treated as unsupported, so setup_gpu_metrics_reading() reports "
+         "RSMI_STATUS_NOT_SUPPORTED instead of UNEXPECTED_DATA";
+}
