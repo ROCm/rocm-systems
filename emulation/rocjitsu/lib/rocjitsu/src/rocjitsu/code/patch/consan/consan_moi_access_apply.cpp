@@ -18,11 +18,10 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_moi_detail::append_word_bytes;
 
-[[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
-                                const ConSanMoiCandidate &candidate,
-                                const ConSanPatchLoweringProduct &patch) {
-  if (patch.original_size == 0u)
+[[nodiscard]] std::optional<ConSanCommittedLowering> make_moi_access_lowering_commit(
+    const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
+    const ConSanPatchLoweringProduct &patch, const MoiAccessCommitPolicy &policy) {
+  if (patch.original_size == 0u || policy.make_runtime_mapping == nullptr)
     return std::nullopt;
   ConSanStaticAccessAttribution access{
       .intent_ids = candidate.intent_ids,
@@ -35,12 +34,10 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
   access.execution_owner_descriptor_file_offsets.erase(
       std::ranges::unique(access.execution_owner_descriptor_file_offsets).begin(),
       access.execution_owner_descriptor_file_offsets.end());
-  std::optional<ConSanProbeIntentKind> intent_kind;
   for (ConSanProbeIntentId id : candidate.intent_ids) {
     const ConSanProbeIntent *intent = observation.intent(id);
-    if (intent == nullptr || (intent_kind && *intent_kind != intent->kind))
+    if (intent == nullptr || intent->kind != policy.expected_intent)
       return std::nullopt;
-    intent_kind = intent->kind;
     for (const SemanticSiteId &site : intent->covered_semantic_sites) {
       if (std::ranges::find(access.original_semantic_sites, site) ==
           access.original_semantic_sites.end()) {
@@ -48,40 +45,14 @@ make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
       }
     }
   }
-  if (!intent_kind)
+  if (candidate.intent_ids.empty())
     return std::nullopt;
 
-  ConSanRuntimeStaticMapping runtime_mapping;
-  switch (*intent_kind) {
-  case ConSanProbeIntentKind::AccessRecord:
-    runtime_mapping = ConSanRuntimeStaticMapping::record_replay({.access = std::move(access)});
-    break;
-  case ConSanProbeIntentKind::SampledAccess:
-    if (patch.sampled_access_range_count == 0u || patch.sampled_window_bank_count == 0u)
-      return std::nullopt;
-    runtime_mapping = ConSanRuntimeStaticMapping::sampled({
-        .access = std::move(access),
-        .first_slot = patch.sampled_first_slot,
-        .range_count = patch.sampled_access_range_count,
-        .bank_count = patch.sampled_window_bank_count,
-        .emitted_probe_text_offset = patch.trampoline_offset,
-        .relocated_guest_text_offset = patch.relocated_guest_instruction_offset,
-        .scratch_vgpr = patch.scratch_vgpr,
-    });
-    break;
-  case ConSanProbeIntentKind::ExactShadowAccess:
-    if (patch.workgroup_shadow_compact) {
-      runtime_mapping = ConSanRuntimeStaticMapping::inline_compact({
-          .access = std::move(access),
-          .token = patch.workgroup_shadow_compact_token,
-      });
-    }
-    break;
-  default:
+  auto runtime_mapping = policy.make_runtime_mapping(std::move(access), patch);
+  if (!runtime_mapping)
     return std::nullopt;
-  }
   return make_consan_instrumented_patch_lowering(observation, candidate.intent_ids, patch,
-                                                 std::move(runtime_mapping));
+                                                 std::move(*runtime_mapping));
 }
 
 /// Apply the descriptor growth shared by every appended MOI access engine.

@@ -971,7 +971,8 @@ void try_apply_direct_sampled_watchpoint_patch(
         info.relocated_guest_instruction_offset =
             candidate.anchor() + planned_patch.probe_guest_instruction_offset;
       }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info);
+      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info,
+                                                    kSampledAccessCommitPolicy);
       if (!commit) {
         result.errors.emplace_back(
             "ConSan MOI sampled probe produced an invalid intent-bound lowering");
@@ -1052,6 +1053,6 @@ void try_apply_direct_sampled_watchpoint_patch(
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
             return info;
           },
-          result))
+          kSampledAccessCommitPolicy, result))
     return;
 }

@@ -34,10 +34,22 @@ using consan_moi_detail::append_moi_scc_preserving_indirect_jump;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::append_words_bytes;
 
-[[nodiscard]] std::optional<ConSanCommittedLowering>
-make_moi_access_lowering_commit(const ConSanObservationPlan &observation,
-                                const ConSanMoiCandidate &candidate,
-                                const ConSanPatchLoweringProduct &patch);
+using MoiAccessRuntimeMappingFactory = std::optional<ConSanRuntimeStaticMapping> (*)(
+    ConSanStaticAccessAttribution, const ConSanPatchLoweringProduct &);
+
+struct MoiAccessCommitPolicy {
+  ConSanProbeIntentKind expected_intent;
+  MoiAccessRuntimeMappingFactory make_runtime_mapping;
+};
+
+/// Bind common original-program attribution to one mode-owned runtime map.
+///
+/// Shared access application owns the intent/semantic-site join and committed
+/// patch geometry. Each mode supplies the expected access intent and the small
+/// factory for its own runtime evidence representation.
+[[nodiscard]] std::optional<ConSanCommittedLowering> make_moi_access_lowering_commit(
+    const ConSanObservationPlan &observation, const ConSanMoiCandidate &candidate,
+    const ConSanPatchLoweringProduct &patch, const MoiAccessCommitPolicy &policy);
 
 template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
 [[nodiscard]] bool apply_inline_moi_access_patches(
@@ -47,7 +59,8 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
     const MoiDescriptorPrivateRequirements &private_requirements,
     const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
     std::string_view probe_name, rj_code_arch_t arch, BuildWords build_words,
-    MakePatchInfo make_patch_info, ConSanTransformArtifacts &result) {
+    MakePatchInfo make_patch_info, const MoiAccessCommitPolicy &commit_policy,
+    ConSanTransformArtifacts &result) {
   std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
@@ -83,8 +96,8 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo>
   lowering_commits.reserve(planned_patches.size());
   for (const PlannedPatch &planned_patch : planned_patches) {
     ConSanPatchInfo patch = make_patch_info(planned_patch);
-    auto commit =
-        make_moi_access_lowering_commit(result.observation_plan(), *planned_patch.candidate, patch);
+    auto commit = make_moi_access_lowering_commit(result.observation_plan(),
+                                                  *planned_patch.candidate, patch, commit_policy);
     if (!commit) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " produced an invalid intent-bound lowering");

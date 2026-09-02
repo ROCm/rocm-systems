@@ -1697,6 +1697,24 @@ _consan_assert_no_match(
     "shared access mechanics must consume exact inventory and diagnostic products"
 )
 _consan_assert_no_match(
+    "${_consan_dir}/consan_moi_access_apply.cpp"
+    "AccessRecord|SampledAccess|ExactShadowAccess|ConSanRuntimeStaticMapping::|sampled_(first_slot|access_range_count|window_bank_count)|workgroup_shadow_compact"
+    "shared access mechanics must not construct mode-owned runtime mappings"
+)
+foreach(_access_mapping_owner IN ITEMS
+    consan_moi_record_replay.cpp
+    consan_moi_sampled.cpp
+    consan_moi_inline_shadow.cpp
+)
+    file(READ "${_consan_dir}/${_access_mapping_owner}" _access_mapping_text)
+    if(NOT _access_mapping_text MATCHES "access_runtime_mapping" OR
+       NOT _access_mapping_text MATCHES "AccessCommitPolicy")
+        message(FATAL_ERROR
+            "ConSan mode owner ${_access_mapping_owner} lost its access runtime mapping"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "ROCJITSU_CODE_ARCH_"
     "common placement must consume typed target facts"
