@@ -9761,3 +9761,72 @@ continue harvesting that investment or delete a larger adjacent transaction
 surface. Full target and mode locality, remaining broad transaction and
 operating-point surfaces, final extension-proof revalidation, and the
 independent Section 14 audit remain open; the goal remains active.
+
+### 16.140 Convergence checkpoint 139: one retained scalar ABI decision
+
+The scalar-router trace next followed mode projection from an accepted
+operating point into access, barrier, atomic, spill, and Record/Replay event
+planning. Two public field helpers independently asked the selected mode for
+special-state and indirect-jump registers. Paired callers therefore projected
+the same complete scalar ABI twice, while long Record/Replay and shared-access
+paths repeatedly reopened the mode registry for an unchanged point. A separate
+request/operating-point return-emission overload had no callers and survived
+only as a forwarding compatibility path.
+
+Consumers now retain one `MoiScalarAbiPlan` after the last applicable
+owner-local scalar assignment and project both facets from that snapshot.
+Sampled's call-anchor-safe route search is the one reviewed mutation path: when
+it replaces a router assignment, it refreshes the complete ABI exactly once.
+Record/Replay event resolution receives the already-selected plan explicitly,
+so it cannot independently choose a different mode projection. The two public
+field helpers, their declarations in unrelated probe and relocation contracts,
+and the dead request-level return overload are deleted.
+
+The deep migration also exposed one impossible compatibility state in native
+Record/Replay emission. `MoiRecordEventEmissionPlan::special_state` is
+mandatory, but a forwarding accessor converted it back into an engaged
+optional and atomic/fence emitters checked whether it was absent. Emission now
+uses the mandatory value directly, and those dead checks are deleted. The
+genuinely optional jump projection is named `record_event_indirect_jump`,
+making its product ownership explicit rather than resembling the retired
+request-level API.
+
+Structural enforcement rejects both retired scalar-ABI field-helper names
+throughout production and requires Record/Replay event resolution to accept a
+`MoiScalarAbiPlan`. The one-argument Record-event jump projection remains
+product-local and cannot reopen request or operating-point policy.
+
+| Signal | Checkpoint 139 | Cumulative change | Slice change from checkpoint 138 |
+| --- | ---: | ---: | ---: |
+| Production files | 305 | +76 | 0 |
+| Physical production lines | 102,707 | **-2,269** | **-41** |
+| Nonblank production lines | 96,289 | **-2,795** | **-35** |
+| Production implementation lines | 88,506 | **-2,944** | **-35** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **254 / 50** | **-36 / -1** | **-6 / -1** |
+| Request/operating-point scalar-ABI field helper APIs | **0** | n/a | **-2** |
+| Dead request-level return-emission overloads | **0** | n/a | **-1** |
+| Test inventory | **5,421** | **+76** | 0 |
+
+The implementation is committed as `6d191273f83`. Validation includes a
+successful full `-j16` build, the architecture-boundary gate, all
+**1,303/1,303** nonphysical `ConSan.*` and `ConSanMoi.*` host/component tests,
+and **40/40** focused simulator-device cases across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250. The simulator slice covers Record/Replay spill pressure
+and fence/barrier publication, Sampled independent scalar proofs, and
+InlineShadow dynamic-stack routing in both correct and incorrect workloads.
+Checkpoint 138 already supplied the immediately preceding complete
+**2,888/2,888** simulator matrix; no test registration or device-test source
+changed here. No physical GPU test was run under the current infrequent-physical
+policy.
+
+This slice removes 35 implementation lines and fully repays the 24-line route
+investment still outstanding at checkpoint 138. The route series from
+checkpoint 133 through 139 now ends 11 lines smaller than it began, with one
+aggregate allocation, one owner-context safety proof, one ABI projection per
+decision point, and no request-level field peepholes. Full target and mode
+locality, remaining broad transaction and operating-point surfaces, larger
+whole-refactoring deletion, final extension-proof revalidation, and the
+independent Section 14 audit remain open; the goal remains active.

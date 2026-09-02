@@ -368,6 +368,16 @@ the complete allocation rather than flattening its members. Scalar-range
 enumeration and owner/anchor admission therefore inspect one allocation and one
 liveness/physical-VCC proof instead of parallel per-field authorities.
 
+Mode selection projects that allocation and any fixed scalar window once as a
+complete `MoiScalarAbiPlan`. Access, synchronization, spill, and Record/Replay
+event planners retain that product at their decision point and take its
+special-state and indirect-jump facets from the same snapshot. A planner that
+reassigns an owner-local scalar route refreshes the complete product rather
+than updating field projections independently. Record/Replay event resolution
+accepts the selected ABI explicitly; it does not reopen the mode registry, and
+its mandatory special state remains mandatory in native emission instead of
+being converted back into an optional compatibility view.
+
 SuperCollider dense placement retains one mode-local
 `ConSanSuperColliderDenseRouteEffect` across each dispatcher, relocated entry
 host, and served body. The value names its dispatcher, shared indirect-jump
