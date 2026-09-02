@@ -4126,6 +4126,32 @@ def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
     assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
 
 
+def test_rdna4_generator_wires_add3_clamp_from_encoded_vop3_field():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
+    parser = Parser(str(isa_xml), Rdna4Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    enc = next(enc for enc in spec.inst_encodings if enc.enc_name == 'ENC_VOP3')
+    generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+    generator._current_enc = enc
+
+    def generated_body(name: str) -> str:
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        return generator._gen_execute_body(
+            inst, semantics.instructions[name], enc.enc_name
+        )
+
+    add3 = generated_body('V_ADD3_U32')
+    assert 'vop3_integer_add3<uint32_t>' in add3
+    assert 'inst_.clamp' in add3
+
+    or3 = generated_body('V_OR3_B32')
+    assert 'vop3_integer_add3' not in or3
+    assert 'inst_.clamp' not in or3
+
+
 def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):
     encodings_h = (amdgpu_generated_root / 'rdna4' / 'encodings.h').read_text()
 

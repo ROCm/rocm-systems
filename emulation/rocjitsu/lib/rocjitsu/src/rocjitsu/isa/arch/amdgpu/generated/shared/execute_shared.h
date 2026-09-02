@@ -2884,10 +2884,12 @@ inline void execute_v_add3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<false>(inst, wf, inst.vdst, lane,
-                            (amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane) +
-                             amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
+    sdwa::write_lane<false>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::vop3_integer_add3<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
+                                            amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane),
+                                            amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane),
+                                            inst.inst_.clamp));
   }
 }
 

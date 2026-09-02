@@ -1606,6 +1606,20 @@ class TestDeriveVectorBinop:
         assert 'inst_.clamp' in cpp
         assert expected in cpp
 
+    def test_vop3_integer_add3_clamps_the_full_unsigned_sum(self):
+        sem = _FakeSem('V_ADD3_U32', 'vector_ternary', 'add3', 'u32')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(
+            block,
+            LoweringContext(
+                exec_model=block.pragma,
+                integer_saturation_dtype='u32',
+            ),
+        )
+
+        assert 'vop3_integer_add3<uint32_t>' in cpp
+        assert 'inst_.clamp' in cpp
+
     def test_lshlrev(self):
         sem = _FakeSem('V_LSHLREV_B32', 'vector_binop', 'lshlrev', 'b32')
         block = derive_sema_block(sem)

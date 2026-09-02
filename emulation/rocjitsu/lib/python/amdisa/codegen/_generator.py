@@ -6159,6 +6159,7 @@ class CodeGenerator:
                             and dtype in ('i16', 'u16', 'i32', 'u32', 'u64')
                         )
                         or (cls == 'vector_add_co' and dtype == 'u32')
+                        or (cls == 'vector_ternary' and op == 'add3' and dtype == 'u32')
                     )
                 ):
                     lctx.integer_saturation_dtype = dtype

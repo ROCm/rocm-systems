@@ -119,6 +119,15 @@ inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
   }
 }
 
+/// @brief Execute unsigned VOP3 integer three-input addition, saturating when CLAMP is set.
+template <typename T>
+inline std::make_unsigned_t<T> vop3_integer_add3(std::make_unsigned_t<T> lhs,
+                                                 std::make_unsigned_t<T> rhs,
+                                                 std::make_unsigned_t<T> addend, bool clamp) {
+  static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>);
+  return vop3_integer_add<T>(vop3_integer_add<T>(lhs, rhs, clamp), addend, clamp);
+}
+
 /// @brief Execute VOP3 integer subtraction, saturating when CLAMP is set.
 template <typename T>
 inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
@@ -2279,16 +2288,17 @@ template <bool True16, typename Inst, typename UnOp>
 
 /// VOP3 integer/bitwise ternary SIMD fast path. Reads `src0`/`src1`/`src2`,
 /// runs `tern_op(a, b, c)`, and masked-stores the result. The generated scalar
-/// bodies for these ternary integer ops apply no source/result modifiers (abs/
-/// neg/omod are float-only; clamp is unused on integer 3-source ops), so the
-/// plain functor is bit-identical to the scalar body. T is a 32-bit integer
-/// lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop as the
-/// binary VOP3 path.
+/// bodies for these ternary integer ops apply no source/result modifiers except
+/// integer CLAMP. Saturating arithmetic falls back to the scalar body; the plain
+/// functor is bit-identical to that body when CLAMP is clear. T is a 32-bit
+/// integer lane type (typically uint32_t). Same SIMD-capable / EXEC-chunk loop
+/// as the binary VOP3 path.
 template <typename T, typename Inst, typename TernOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &inst, Wavefront &wf, TernOp tern_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));

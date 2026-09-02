@@ -1751,6 +1751,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    if ctx.integer_saturation_dtype == 'u32' and callee == 'add3':
+        return f'amdgpu::vop3_integer_add3<uint32_t>({args_str}, inst_.clamp)'
+
     if ctx.integer_saturation_dtype == 'u32' and callee in (
         'add_co',
         'sub_co',
