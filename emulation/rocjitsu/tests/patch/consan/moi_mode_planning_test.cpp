@@ -46,6 +46,10 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   operations.plan = plan_hypothetical_mode;
   operations.operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
                                      ConSanProbeIntentKind::SampledAtomicOrdering, false};
+  operations.barrier_scratch_vgpr_count =
+      [](const consan_moi_impl::MoiBarrierScratchFacts &facts) -> uint16_t {
+    return facts.has_report_buffer ? 4u : 2u;
+  };
   operations.dynamic_stack_frame_save_sgpr_offset = 1u;
   operations.exec_save_sgpr_count = hypothetical_exec_save_sgpr_count;
   operations.prologue.one_based_owner_ids = true;
@@ -62,6 +66,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_FALSE(plan.track_atomics);
   EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
   EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
+  EXPECT_EQ(selected->barrier_scratch_vgpr_count({.has_report_buffer = true}), 4u);
   EXPECT_EQ(selected->exec_save_sgpr_count({.has_report_buffer = true},
                                            {.direct_call_form = ConSanDirectCallForm::SCallI64}),
             3u);

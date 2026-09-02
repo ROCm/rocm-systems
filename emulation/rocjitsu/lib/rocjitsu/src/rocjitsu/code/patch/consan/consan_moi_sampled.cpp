@@ -194,6 +194,10 @@ uint16_t sampled_access_scratch_vgpr_count(const ConSanRequest &request,
   return direct_sampled_scratch_count(request, resource_facts);
 }
 
+uint16_t sampled_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &facts) {
+  return facts.automatic_private_epoch || facts.persistent_scalar_state_complete ? 9u : 7u;
+}
+
 MoiPersistentStateDemand plan_sampled_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
@@ -309,6 +313,7 @@ const MoiModeOperations kSampledModeOperations = {
     .access_scratch_vgpr_count = sampled_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::SampledBarrierEpoch,
                              ConSanProbeIntentKind::SampledAtomicOrdering, false},
+    .barrier_scratch_vgpr_count = sampled_barrier_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 8u,
     .exec_save_sgpr_count = sampled_exec_save_sgpr_count,
     .prologue = {},

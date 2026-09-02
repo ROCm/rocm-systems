@@ -174,23 +174,6 @@ private:
       persistent_access_patches_by_owner_;
 };
 
-[[nodiscard]] std::optional<uint16_t> operational_barrier_scratch_count(
-    ConSanProbeIntentKind evidence, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &semantics) {
-  if (evidence == ConSanProbeIntentKind::BarrierRecord)
-    return 6u;
-  if (evidence == ConSanProbeIntentKind::SampledBarrierEpoch)
-    return point.automatic_moi_private_epoch || point.moi_persistent_sgprs.complete() ? 9u : 7u;
-  if (evidence != ConSanProbeIntentKind::ExactBarrierEpoch)
-    return std::nullopt;
-  // An object with no Inline access probes has no other way to prove that its
-  // epoch-only barrier probe executed. Reserve a result/rank VGPR plus an
-  // address pair for one aggregate event-counter publication. Ordinary
-  // access-bearing objects publish through their access probes and retain the
-  // single-register epoch-only barrier plan.
-  return resources.moi_report_buffer_address && !semantics.inline_access_present ? 3u : 1u;
-}
-
 void note_relocated_barrier_instruction(ConSanPatchInfo &patch,
                                         std::span<const uint32_t> body_words,
                                         uint32_t original_barrier_word, uint64_t body_offset,
@@ -858,8 +841,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     return;
   }
 
-  const ConSanProbeIntentKind evidence_kind =
-      moi_mode_operations(options.moi_engine).operational_evidence.barrier;
+  const MoiModeOperations &mode = moi_mode_operations(options.moi_engine);
+  const ConSanProbeIntentKind evidence_kind = mode.operational_evidence.barrier;
   const bool emits_barrier_record = evidence_kind == ConSanProbeIntentKind::BarrierRecord;
   const bool updates_exact_epoch = evidence_kind == ConSanProbeIntentKind::ExactBarrierEpoch;
   if (!emits_barrier_record && !updates_exact_epoch) {
@@ -1163,18 +1146,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     std::optional<SgprSpillSequence> scalar_spill;
     std::optional<MoiRecordEventEmissionPlan> record_emission;
     uint32_t required_private_bytes = 0u;
-    const std::optional<uint16_t> scratch_count =
-        operational_barrier_scratch_count(evidence_kind, options, candidate_point, semantics);
-    if (!scratch_count) {
-      result.errors.emplace_back(
-          "ConSan MOI exact barrier lowering lost its evidence resource contract");
-      return;
-    }
+    const uint16_t scratch_count = mode.barrier_scratch_vgpr_count(
+        project_moi_barrier_scratch_facts(options, candidate_point, semantics));
     const bool needs_record_replay_scalar_spill = candidate_point.has_compact_moi_scalar_spill();
     const bool needs_scalar_spill =
         needs_record_replay_scalar_spill ||
-        (*scratch_count > 1u && candidate_point.has_inline_moi_scalar_spill());
-    if (*scratch_count > 1u || needs_scalar_spill) {
+        (scratch_count > 1u && candidate_point.has_inline_moi_scalar_spill());
+    if (scratch_count > 1u || needs_scalar_spill) {
       if (plan == nullptr) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no resource plan in " +
@@ -1182,7 +1160,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         continue;
       }
       const auto resources = resolve_moi_scratch_plan(*plan, candidate_point,
-                                                      result.moi_operating_point, *scratch_count);
+                                                      result.moi_operating_point, scratch_count);
       if (!resources) {
         result.warnings.emplace_back(
             "ConSan MOI inline barrier visible evidence has no usable resource plan in " +
@@ -1193,7 +1171,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       // spill transfer register. It is not Inline visible-evidence scratch:
       // passing it as such would select Inline's much wider +12/+14 SGPR
       // layout and reject an otherwise valid compact Record/Replay probe.
-      if (*scratch_count > 1u)
+      if (scratch_count > 1u)
         scratch_vgpr = resources->base;
       owners = resources->owner_descriptor_file_offsets;
       if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||

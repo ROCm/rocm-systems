@@ -148,6 +148,8 @@ uint16_t record_replay_access_scratch_vgpr_count(const ConSanRequest &request,
       resource_facts.address_scratch_vgpr_count + resource_facts.two_address_replay_vgpr_count);
 }
 
+uint16_t record_replay_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &) { return 6u; }
+
 MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
@@ -240,6 +242,7 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .access_scratch_vgpr_count = record_replay_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
                              ConSanProbeIntentKind::AtomicRecord, true},
+    .barrier_scratch_vgpr_count = record_replay_barrier_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 5u,
     .exec_save_sgpr_count = record_replay_exec_save_sgpr_count,
     .prologue = {.backup_compact_spill_for_runtime_sampling = true},

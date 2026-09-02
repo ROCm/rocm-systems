@@ -532,6 +532,32 @@ if(NOT _target_extension_test MATCHES
        "HypotheticalModeRegistersWithoutConcreteTargetChanges")
     message(FATAL_ERROR "ConSan extension-axis exercises are missing")
 endif()
+if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count")
+    message(FATAL_ERROR "ConSan hypothetical mode must publish barrier scratch demand")
+endif()
+foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
+    file(
+        READ "${_consan_dir}/consan_moi_${_barrier_scratch_mode}.cpp"
+        _barrier_scratch_mode_owner
+    )
+    if(NOT _barrier_scratch_mode_owner MATCHES
+       "[.]barrier_scratch_vgpr_count[ ]*=")
+        message(
+            FATAL_ERROR
+            "ConSan ${_barrier_scratch_mode} must own its barrier scratch demand"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_pipeline.inc"
+    "ConSanProbeIntentKind::(BarrierRecord|SampledBarrierEpoch|ExactBarrierEpoch)|operational_barrier_scratch_count"
+    "common MOI resource solving must consume mode-owned barrier scratch demand"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_barrier.inc"
+    "operational_barrier_scratch_count"
+    "exact-subset barrier lowering must consume the mode-owned scratch contract"
+)
 
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from

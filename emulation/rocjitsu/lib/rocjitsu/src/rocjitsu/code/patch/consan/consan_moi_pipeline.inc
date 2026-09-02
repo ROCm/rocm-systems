@@ -22,8 +22,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &bound_resources = problem.resources();
   const MoiObjectModeSemantics &mode_semantics = problem.mode_semantics();
-  const MoiOperationalEvidenceKinds &evidence =
-      moi_mode_operations(request.moi_engine).operational_evidence;
+  const MoiModeOperations &mode = moi_mode_operations(request.moi_engine);
+  const MoiOperationalEvidenceKinds &evidence = mode.operational_evidence;
   if (request.moi_track_barriers) {
     std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), evidence.barrier, errors);
@@ -32,31 +32,23 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     for (size_t index = 0; index < candidates.size(); ++index) {
       const MoiBarrierEvidenceSitePlan &candidate = candidates[index];
       const auto scratch_count_for = [&](const ConSanMoiOperatingPoint &site_point) {
-        return operational_barrier_scratch_count(evidence.barrier, bound_resources, site_point,
-                                                 mode_semantics);
+        return mode.barrier_scratch_vgpr_count(
+            project_moi_barrier_scratch_facts(bound_resources, site_point, mode_semantics));
       };
       ConSanMoiOperatingPoint site_point = point;
-      const std::optional<uint16_t> scratch_count = scratch_count_for(site_point);
-      if (!scratch_count) {
-        errors.emplace_back("ConSan MOI mode selected an invalid barrier evidence operation");
-        return;
-      }
+      const uint16_t scratch_count = scratch_count_for(site_point);
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
           state, request, debug, site_point, ConSanResourceSiteKind::Barrier, index,
-          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, *scratch_count);
+          candidate.site.text_offset, candidate.kernel_descriptor_file_offset, scratch_count);
       ConSanMoiOperatingPoint owner_point = site_point;
       if (apply_moi_persistent_vgpr_assignment(owner_point, point,
                                                plan.owner_descriptor_file_offsets)) {
-        const std::optional<uint16_t> owner_scratch_count = scratch_count_for(owner_point);
-        if (!owner_scratch_count) {
-          errors.emplace_back("ConSan MOI mode selected an invalid barrier evidence operation");
-          return;
-        }
-        if (*owner_scratch_count != *scratch_count) {
+        const uint16_t owner_scratch_count = scratch_count_for(owner_point);
+        if (owner_scratch_count != scratch_count) {
           plan = plan_moi_resource_site(
               state, request, debug, owner_point, ConSanResourceSiteKind::Barrier, index,
               candidate.site.text_offset, candidate.kernel_descriptor_file_offset,
-              *owner_scratch_count);
+              owner_scratch_count);
         }
       }
       plan.intent_ids = {candidate.evidence_intent};

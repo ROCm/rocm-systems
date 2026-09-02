@@ -4,7 +4,7 @@
 #include "consan_test_support.h"
 #include "transform_result_test_access.h"
 
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
+#include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
@@ -123,36 +123,29 @@ static_assert(IsMoiLoweringSummaryInventory<std::span<const ConSanPatchKind>>);
 static_assert(!IsMoiLoweringSummaryInventory<std::span<const ConSanPatchInfo>>);
 static_assert(!IsMoiLoweringSummaryInventory<const ConSanTransformArtifacts &>);
 
-TEST(ConSanPipeline, BarrierScratchSizingFollowsRegisteredEvidenceOperation) {
+TEST(ConSanPipeline, BarrierScratchSizingIsModeOwned) {
   BoundRuntimeResources resources;
   ConSanMoiOperatingPoint point;
   consan_moi_impl::MoiObjectModeSemantics mode_semantics;
+  const auto scratch_count = [&](ConSanMoiEngine engine) {
+    return consan_moi_impl::moi_mode_operations(engine).barrier_scratch_vgpr_count(
+        consan_moi_impl::project_moi_barrier_scratch_facts(resources, point, mode_semantics));
+  };
 
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(ConSanProbeIntentKind::BarrierRecord,
-                                                               resources, point, mode_semantics),
-            6u);
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
-                ConSanProbeIntentKind::SampledBarrierEpoch, resources, point, mode_semantics),
-            7u);
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
-                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point, mode_semantics),
-            1u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::RecordReplay), 6u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::Sampled), 7u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::InlineShadow), 1u);
 
   resources.moi_report_buffer_address = 0x123456780000ull;
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
-                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point, mode_semantics),
-            3u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::InlineShadow), 3u);
   mode_semantics.inline_access_present = true;
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
-                ConSanProbeIntentKind::ExactBarrierEpoch, resources, point, mode_semantics),
-            1u);
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::InlineShadow), 1u);
 
   point.moi_persistent_sgprs.set_owner_epoch(20u, 21u);
-  EXPECT_EQ(consan_moi_impl::operational_barrier_scratch_count(
-                ConSanProbeIntentKind::SampledBarrierEpoch, resources, point, mode_semantics),
-            9u);
-  EXPECT_FALSE(consan_moi_impl::operational_barrier_scratch_count(
-      ConSanProbeIntentKind::Count, resources, point, mode_semantics));
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::Sampled), 9u);
+  point.moi_persistent_sgprs = {};
+  point.automatic_moi_private_epoch = true;
+  EXPECT_EQ(scratch_count(ConSanMoiEngine::Sampled), 9u);
 }
 
 TEST(ConSanPipeline, MoiLoweringSummaryConsumesOnlyTypedPatchKindInventory) {

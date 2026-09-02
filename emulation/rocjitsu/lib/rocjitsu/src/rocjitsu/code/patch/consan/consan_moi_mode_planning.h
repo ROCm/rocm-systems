@@ -197,6 +197,23 @@ struct MoiOperationalEvidenceKinds {
   bool fence = false;
 };
 
+/// Exact target-neutral facts used by a mode to size one barrier probe. The
+/// common resource solver projects these facts but does not interpret them.
+struct MoiBarrierScratchFacts {
+  bool has_report_buffer = false;
+  bool inline_access_present = false;
+  bool automatic_private_epoch = false;
+  bool persistent_scalar_state_complete = false;
+};
+
+[[nodiscard]] inline MoiBarrierScratchFacts
+project_moi_barrier_scratch_facts(const BoundRuntimeResources &resources,
+                                  const ConSanMoiOperatingPoint &point,
+                                  const MoiObjectModeSemantics &semantics) {
+  return {resources.moi_report_buffer_address.has_value(), semantics.inline_access_present,
+          point.automatic_moi_private_epoch, point.moi_persistent_sgprs.complete()};
+}
+
 /// Narrow target facts that affect a mode's transient scalar ABI and dense
 /// routing. Modes see the semantic facility, not an architecture identity or
 /// complete capability profile; adding a target therefore does not require
@@ -288,6 +305,7 @@ struct MoiModeOperations {
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
   MoiOperationalEvidenceKinds operational_evidence;
+  uint16_t (*barrier_scratch_vgpr_count)(const MoiBarrierScratchFacts &);
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;
   uint16_t (*exec_save_sgpr_count)(const MoiExecSaveRequirement &, const MoiScalarTargetFacts &);
   MoiPrologueModePolicy prologue;

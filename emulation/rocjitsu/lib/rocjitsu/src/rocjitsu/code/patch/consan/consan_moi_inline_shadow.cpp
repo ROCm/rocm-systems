@@ -248,6 +248,10 @@ uint16_t inline_shadow_access_scratch_vgpr_count(const ConSanRequest &request,
   return inline_shadow_scratch_count(request.moi_track_atomics, resource_facts, candidate);
 }
 
+uint16_t inline_shadow_barrier_scratch_vgpr_count(const MoiBarrierScratchFacts &facts) {
+  return facts.has_report_buffer && !facts.inline_access_present ? 3u : 1u;
+}
+
 MoiPersistentStateDemand
 plan_inline_shadow_persistent_state_demand(const ConSanRequest &, const BoundRuntimeResources &,
                                            const ConSanMoiOperatingPoint &point,
@@ -368,6 +372,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .access_scratch_vgpr_count = inline_shadow_access_scratch_vgpr_count,
     .operational_evidence = {ConSanProbeIntentKind::ExactBarrierEpoch,
                              ConSanProbeIntentKind::ExactAtomicOrdering, false},
+    .barrier_scratch_vgpr_count = inline_shadow_barrier_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 24u,
     .exec_save_sgpr_count = inline_shadow_exec_save_sgpr_count,
     .prologue =
