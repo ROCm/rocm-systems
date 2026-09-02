@@ -65,7 +65,9 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
 // vecElementAdd<T> (which handles the per-type packing), then recombined.
 template <typename T>
 __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
   const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
   const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
   return ((uint64_t)hi << 32) | (uint64_t)lo;
 }
