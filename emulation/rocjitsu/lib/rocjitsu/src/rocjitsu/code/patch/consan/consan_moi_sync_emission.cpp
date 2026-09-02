@@ -2728,13 +2728,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     } else if (private_state.resident_wave_owner) {
       const uint16_t owner_sgpr = private_state.resident_wave_owner->destination_sgpr;
       if (private_state.resident_wave_owner_is_borrowed) {
-        const auto save_owner =
-            instrumentation::build_v_writelane_b32(private_temporary, owner_sgpr, 0u, arch);
-        if (!save_owner) {
+        if (!sequence.emit(
+                instrumentation::build_v_writelane_b32(private_temporary, owner_sgpr, 0u, arch))) {
           errors.emplace_back("ConSan MOI inline atomic patch could not save borrowed owner state");
           return std::nullopt;
         }
-        words.insert(words.end(), save_owner->begin(), save_owner->end());
       }
       const ConSanTargetProfile *target = consan_target_profile(arch);
       if (target == nullptr || !consan_detail::append_moi_resident_wave_owner(
@@ -3044,13 +3042,11 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     return words;
   }
 
-  const auto restore_original_exec = instrumentation::build_s_mov_b64(
-      kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch);
-  if (!restore_original_exec) {
+  if (!sequence.emit(instrumentation::build_s_mov_b64(
+          kAmdGpuExecLo, static_cast<uint16_t>(plan.exec_save_sgpr + 12u), arch))) {
     errors.emplace_back("ConSan MOI inline atomic patch could not restore original EXEC");
     return std::nullopt;
   }
-  words.push_back(*restore_original_exec);
 
   if (!append_restore_moi_special_state(words, plan.special_state, arch)) {
     errors.emplace_back("ConSan MOI inline atomic patch could not restore VCC/SCC");
