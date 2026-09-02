@@ -1707,8 +1707,8 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     import re
 
     m = re.match(
-        r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|BF16F32|I32|FP8|BF8)_'
-        r'(\d+)X(\d+)X(\d+)_?(F32|F16|BF16|IU8|IU4|FP8|BF8'
+        r'V_(?:S?WMMA[C]?)_(F32|F64|F16|BF16|BF16F32|I32|FP8|BF8)_'
+        r'(\d+)X(\d+)X(\d+)_?(F32|F64|F16|BF16|IU8|IU4|FP8|BF8'
         r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
         r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8|F8F6F4|F4)?$',
         name,

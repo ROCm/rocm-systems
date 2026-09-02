@@ -24,6 +24,7 @@
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
@@ -32,6 +33,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -245,7 +247,7 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
 
 inline void require_wmma_wave32(const auto &cu) {
   if (cu.wf_size() != WMMA_WAVE32)
-    throw util::ConfigError("gfx1250 WMMA requires wave32");
+    throw util::ConfigError("CDNA5 WMMA requires wave32");
 }
 
 inline void require_gfx11_wmma_wave_size(uint32_t wave_size) {
@@ -258,7 +260,7 @@ inline void require_gfx12_wmma_wave_size(uint32_t wave_size) {
     throw util::ConfigError("gfx12 WMMA requires wave32 or wave64");
 }
 
-// gfx1250 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
+// CDNA5 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
 // dimension across the two lane groups in two register blocks.
 inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                uint32_t data_bits) {
@@ -442,6 +444,17 @@ inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32
   uint32_t lane = (row / elems_per_lane) * N + col;
   uint32_t reg = row % elems_per_lane;
   return {reg, lane};
+}
+
+/// Map one logical F64 CDNA5 WMMA output to its pair of consecutive VGPRs.
+///
+/// The public CDNA5 ISA reference, section 7.12.2, maps the eight logical
+/// 16x16 C/D components per lane with the same row/lane ordering represented
+/// by wmma_output_loc_32(). The checked-in FMT_WMMA_DC_16X16_F64 data format
+/// then maps each logical F64 component to two consecutive 32-bit VGPRs.
+inline OutputLoc wmma_output_loc_64(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
+  const auto logical = wmma_output_loc_32(M, N, row, col);
+  return {2u * logical.reg, logical.lane};
 }
 
 inline OutputLoc gfx12_wmma_output_loc_32(uint32_t wave_size, uint32_t M, uint32_t N, uint32_t row,
@@ -3742,6 +3755,86 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
                                uint32_t const_acc = ACC_FROM_VGPR) {
   exec_swmmac_i32(cu, M, N, K, 8, dst, s0, s1, acc_base, index_base, index_entries, index_key,
                   extract_i8, extract_i8, false, const_acc);
+}
+
+/// Execute gfx1251 wave32 V_WMMA_F64_16X16X4_F64.
+///
+/// Public evidence for the logical matrix operation, vector widths, modifiers,
+/// and register tuple sizes comes from LLVM's F64_F64X4_WMMA_w32 profile and
+/// gfx1251_asm_wmma_w32.s. The physical mapping combines section 7.12.2 of the
+/// public CDNA5 ISA reference with the checked-in FMT_WMMA_AB_16X4_F64 and
+/// FMT_WMMA_DC_16X16_F64 component layouts:
+///   A[row][k] / B[col][k]: lane = row-or-col + 16*(k/2), VGPR = 2*(k%2)
+///   C/D[row][col]: lane = col + 16*(row/8), VGPR = 2*(row%8)
+///
+/// Matrix reuse bits are scheduling hints and therefore do not enter this
+/// functional helper. All source and accumulator values are staged before any
+/// destination write so overlapping C/D and A/B tuples preserve read-before-
+/// write behavior.
+inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                                      uint32_t const_acc, uint32_t neg, uint32_t neg_hi,
+                                      uint32_t round_mode, uint32_t denorm_mode,
+                                      uint64_t exec_mask) {
+  // TODO(hanchung): Validate gfx1251 F64 WMMA lane/register mapping and FP-mode
+  // behavior against a physical gfx1251 KFD/ROCm execution capture.
+  constexpr uint32_t M = 16;
+  constexpr uint32_t N = 16;
+  constexpr uint32_t K = 4;
+  require_wmma_wave32(cu);
+
+  auto toggle_sign = [](uint64_t value, bool toggle) {
+    return toggle ? value ^ (uint64_t{1} << 63) : value;
+  };
+  auto modify_acc = [](uint64_t value, uint32_t modifier) {
+    if (modifier & 0x2u)
+      value &= ~(uint64_t{1} << 63);
+    if (modifier & 0x1u)
+      value ^= uint64_t{1} << 63;
+    return value;
+  };
+
+  std::array<uint64_t, M * K> a{};
+  std::array<uint64_t, K * N> b{};
+  std::array<uint64_t, M * N> result{};
+  {
+    auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, /*data_bits=*/64,
+                                             /*acc_bits=*/64, const_acc, WMMA_WAVE32);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        const auto loc = wmma_input_loc(M, K, row, k, /*data_bits=*/64);
+        a[row * K + k] = toggle_sign(reads.a.lane64(loc.vgpr_offset, loc.lane), (neg & 0x1u) != 0);
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto loc = wmma_input_loc(N, K, col, k, /*data_bits=*/64);
+        b[k * N + col] = toggle_sign(reads.b.lane64(loc.vgpr_offset, loc.lane), (neg & 0x2u) != 0);
+      }
+
+    const uint32_t c_modifier = wmma_c_modifier(neg, neg_hi);
+    const uint64_t constant_bits =
+        std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(const_acc)));
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto out = wmma_output_loc_64(M, N, row, col);
+        uint64_t acc =
+            const_acc == ACC_FROM_VGPR ? reads.acc->lane64(out.reg, out.lane) : constant_bits;
+        acc = modify_acc(acc, c_modifier);
+        for (uint32_t k = 0; k < K; ++k)
+          acc = fp_mode::fma_f64(a[row * K + k], b[k * N + col], acc, round_mode, denorm_mode);
+        result[row * N + col] = acc;
+      }
+  }
+
+  RegisterAccess regs(cu);
+  auto writes =
+      regs.write_vgpr_region(dst, /*reg_count=*/16, exec_mask & mfma_full_lane_mask(WMMA_WAVE32));
+  for (uint32_t row = 0; row < M; ++row)
+    for (uint32_t col = 0; col < N; ++col) {
+      const auto out = wmma_output_loc_64(M, N, row, col);
+      const uint64_t value = result[row * N + col];
+      writes.set_lane(out.reg, out.lane, static_cast<uint32_t>(value));
+      writes.set_lane(out.reg + 1, out.lane, static_cast<uint32_t>(value >> 32));
+    }
 }
 
 /// MFMA execute for f64 output with f64 input: D = C + A x B.

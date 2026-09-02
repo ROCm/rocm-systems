@@ -3224,6 +3224,30 @@ void VPkLshlAddU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
+void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
+                                                 vdst.vgpr_msb_role());
+  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
+                                                       src0.vgpr_msb_role());
+  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
+                                                       src1.vgpr_msb_role());
+  uint32_t const_acc;
+  auto src2_off =
+      Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
+  uint32_t s2 = dst;
+  if (src2_off) {
+    const_acc = amdgpu::ACC_FROM_VGPR;
+    s2 = vb + *src2_off;
+  } else {
+    const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
+  }
+  amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst, src0_base, src1_base, s2, const_acc, inst_.neg,
+                                    inst_.neg_hi, wf.fp_round_mode_f16_f64(),
+                                    wf.fp_denorm_mode_f16_f64(), wf.exec());
+}
+
 void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;

@@ -414,7 +414,19 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     'wf, vb, s2, amdgpu::VgprMsbRole::Src2);'
                 )
 
-    if result_type == 'F64':
+    if (
+        arch == 'cdna5'
+        and is_dense_wmma
+        and result_type == 'F64'
+        and input_type == 'F64'
+        and (M, N, K) == (16, 16, 4)
+    ):
+        L.append(f'  amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,')
+        L.append(f'      src0_base, src1_base, s2, const_acc, inst_.neg, inst_.neg_hi,')
+        L.append(
+            f'      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.exec());'
+        )
+    elif result_type == 'F64':
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
         L.append(f'                 {src0_base_expr},')
         L.append(f'                 {src1_base_expr},')
