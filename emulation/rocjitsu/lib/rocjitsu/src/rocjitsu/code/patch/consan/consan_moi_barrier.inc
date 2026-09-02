@@ -236,21 +236,14 @@ struct MoiInlinePrivateEpochBarrierEmissionPlan {
 struct MoiInlineBarrierCandidateRoutePlan {
   std::optional<ConSanMoiIndirectJumpSgprs> indirect_jump;
   bool branch_only_spill = false;
-  bool spill_backed_dense_router = false;
-  bool has_exec_save = false;
 };
 
 [[nodiscard]] MoiInlineBarrierCandidateRoutePlan
 plan_inline_barrier_candidate_route(const ConSanRequest &request,
-                                    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch) {
-  const auto indirect_jump = moi_indirect_jump_sgprs(request, point);
+                                    const ConSanMoiOperatingPoint &point) {
   return {
-      .indirect_jump = indirect_jump,
+      .indirect_jump = moi_indirect_jump_sgprs(request, point),
       .branch_only_spill = point.moi_branch_only_spill.has_value(),
-      .spill_backed_dense_router =
-          (point.has_inline_moi_scalar_spill() && plan_moi_dense_router(request, point, arch)) ||
-          (point.has_compact_moi_scalar_spill() && indirect_jump && point.moi_router_call),
-      .has_exec_save = point.moi_exec_save_sgpr.has_value(),
   };
 }
 
@@ -288,7 +281,7 @@ plan_inline_shadow_barrier_epoch_emission(const ConSanRequest &request,
       .persistent_epoch_sgpr = point.moi_persistent_sgprs.epoch(),
       .epoch_vgpr = point.moi_owner_epoch_vgprs.epoch(),
       .visible_evidence = std::nullopt,
-      .special_state = std::nullopt,
+      .special_state = moi_special_state_sgprs(request, point),
       .indirect_jump = moi_indirect_jump_sgprs(request, point),
   };
   if (visible_evidence_scratch_vgpr) {
@@ -304,16 +297,8 @@ plan_inline_shadow_barrier_epoch_emission(const ConSanRequest &request,
         .exec_save_sgpr = *point.moi_exec_save_sgpr,
     };
   }
-  if (plan.persistent_epoch_sgpr || plan.visible_evidence) {
-    plan.special_state = moi_special_state_sgprs(request, point);
-    if (!plan.special_state) {
-      errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
-      return std::nullopt;
-    }
-  }
-  if (!plan.persistent_epoch_sgpr && !plan.epoch_vgpr) {
-    errors.emplace_back(
-        "ConSan MOI inline-shadow barrier epoch patch requires RJ_CONSAN_MOI_EPOCH_VGPR");
+  if ((plan.persistent_epoch_sgpr || plan.visible_evidence) && !plan.special_state) {
+    errors.emplace_back("ConSan MOI scalar inline barrier requires scalar special-state storage");
     return std::nullopt;
   }
   return plan;
@@ -1068,7 +1053,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             .record_emission = record_emission,
             .inline_epoch_emission = std::nullopt,
             .private_epoch_emission = std::nullopt,
-            .route = plan_inline_barrier_candidate_route(options, candidate_point, arch),
+            .route = plan_inline_barrier_candidate_route(options, candidate_point),
             .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
             .spill = std::move(spill),
             .scalar_spill = std::move(scalar_spill),
@@ -1116,7 +1101,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
                   .epoch_offset = *access_patch->persistent_epoch_private_offset,
                   .indirect_jump = moi_indirect_jump_sgprs(options, owner_point),
               },
-          .route = plan_inline_barrier_candidate_route(options, owner_point, arch),
+          .route = plan_inline_barrier_candidate_route(options, owner_point),
           .uses_scalar_epoch = false,
           .spill = std::move(spill),
           .scalar_spill = std::nullopt,
@@ -1277,7 +1262,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         .record_emission = std::move(record_emission),
         .inline_epoch_emission = std::move(inline_epoch_emission),
         .private_epoch_emission = std::nullopt,
-        .route = plan_inline_barrier_candidate_route(options, candidate_point, arch),
+        .route = plan_inline_barrier_candidate_route(options, candidate_point),
         .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -1460,8 +1445,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             (consan_is_capability_arch(arch) &&
              ((updates_exact_epoch && !consan_uses_gfx11_encoding(arch)) ||
               (emits_barrier_record && semantics.dense_barrier_router)));
-        if (has_dense_router &&
-            (planned.route.has_exec_save || planned.route.spill_backed_dense_router) &&
+        if (has_dense_router && planned.route.indirect_jump &&
             !planned.owner_descriptor_file_offsets.empty()) {
           dense_fallback_indices.push_back(planned_index);
         } else {
