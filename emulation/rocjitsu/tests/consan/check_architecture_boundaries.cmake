@@ -2218,18 +2218,25 @@ set(
     rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
     rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
     rj_hsa_dbi_moi_inline_shadow_report_decoder.h
+    rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+    rj_hsa_dbi_moi_inline_shadow_report_renderer.h
     rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
     rj_hsa_dbi_moi_record_replay_report_analyzer.h
     rj_hsa_dbi_moi_record_replay_report_decoder.cpp
     rj_hsa_dbi_moi_record_replay_report_decoder.h
+    rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+    rj_hsa_dbi_moi_record_replay_report_renderer.h
     rj_hsa_dbi_moi_report_decoder.cpp
     rj_hsa_dbi_moi_report_decoder.h
     rj_hsa_dbi_moi_report_pipeline.cpp
     rj_hsa_dbi_moi_report_pipeline.h
+    rj_hsa_dbi_moi_report_rendering.h
     rj_hsa_dbi_moi_sampled_report_analyzer.cpp
     rj_hsa_dbi_moi_sampled_report_analyzer.h
     rj_hsa_dbi_moi_sampled_report_decoder.cpp
     rj_hsa_dbi_moi_sampled_report_decoder.h
+    rj_hsa_dbi_moi_sampled_report_renderer.cpp
+    rj_hsa_dbi_moi_sampled_report_renderer.h
 )
 foreach(_source IN LISTS _runtime_analysis_sources)
     _consan_assert_no_match(
@@ -2421,6 +2428,65 @@ _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.cpp"
     "default:"
     "every typed runtime evidence issue must have an explicit renderer case"
+)
+foreach(
+    _mode_renderer_source
+    IN ITEMS
+        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        rj_hsa_dbi_moi_sampled_report_renderer.cpp
+)
+    if(NOT _runtime_analysis_build MATCHES "${_mode_renderer_source}")
+        message(FATAL_ERROR
+            "ConSan mode report renderer lost its physical build owner: ${_mode_renderer_source}"
+        )
+    endif()
+    _consan_assert_no_match(
+        "${_hook_dir}/${_mode_renderer_source}"
+        "default:"
+        "every mode-owned runtime evidence issue must have an explicit renderer case"
+    )
+endforeach()
+foreach(
+    _record_replay_renderer
+    IN ITEMS
+        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        rj_hsa_dbi_moi_record_replay_report_renderer.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_record_replay_renderer}"
+        "InlineShadow|Sampled"
+        "Record/Replay rendering must not expose another mode"
+    )
+endforeach()
+foreach(
+    _inline_shadow_renderer
+    IN ITEMS
+        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        rj_hsa_dbi_moi_inline_shadow_report_renderer.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_inline_shadow_renderer}"
+        "RecordReplay|Sampled"
+        "InlineShadow rendering must not expose another mode"
+    )
+endforeach()
+foreach(
+    _sampled_renderer
+    IN ITEMS
+        rj_hsa_dbi_moi_sampled_report_renderer.cpp
+        rj_hsa_dbi_moi_sampled_report_renderer.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_sampled_renderer}"
+        "RecordReplay|InlineShadow"
+        "Sampled rendering must not expose another mode"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.cpp"
+    "kNoRecordReplay|kNoInlineShadow|kNoSampled|record_replay_pressure|AutoMoiSampledEvidence|AutoMoiExactShadowEvidence|AutoMoiInlineAtomicReleaseEvidence"
+    "common report rendering must compose active mode output rather than inspect mode policy"
 )
 
 # Every active implementation fragment has one reviewed textual owner. No

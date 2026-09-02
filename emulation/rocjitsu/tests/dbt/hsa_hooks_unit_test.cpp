@@ -3805,6 +3805,50 @@ TEST(HsaHooksUnitTest, AutoReportRendererConsumesOnlyTypedResultsAndPreservesDia
   }));
 }
 
+TEST(HsaHooksUnitTest, AutoReportRendererEmitsOnlySelectedModeSummary) {
+  rocjitsu::consan_hook::AutoMoiReportPipelineInput input;
+  input.reader = 17;
+  input.input_fingerprint = "mode-local-renderer";
+  rocjitsu::consan_hook::AutoMoiDecodedReport decoded;
+
+  const auto render_summary = [&](rocjitsu::ConSanMoiEngine engine,
+                                  rocjitsu::consan_hook::AutoMoiModeDecodedReport mode,
+                                  rocjitsu::consan_hook::AutoMoiModeAnalysis analysis) {
+    input.layout.engine = engine;
+    decoded.mode = std::move(mode);
+    const auto rendered =
+        rocjitsu::consan_hook::render_auto_moi_report({input, decoded, decoded.summary, &analysis});
+    const auto summary = std::ranges::find_if(rendered, [](const auto &diagnostic) {
+      return diagnostic.kind == rocjitsu::consan_hook::AutoMoiReportDiagnosticKind::Summary;
+    });
+    EXPECT_NE(summary, rendered.end());
+    return summary != rendered.end() ? summary->text : std::string{};
+  };
+
+  const std::string replay =
+      render_summary(rocjitsu::ConSanMoiEngine::RecordReplay,
+                     rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport{},
+                     rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis{});
+  EXPECT_NE(replay.find("record_replay_flags="), std::string::npos);
+  EXPECT_EQ(replay.find("visible_inline_publications="), std::string::npos);
+  EXPECT_EQ(replay.find("sampled_watchpoints="), std::string::npos);
+
+  const std::string inline_shadow =
+      render_summary(rocjitsu::ConSanMoiEngine::InlineShadow,
+                     rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport{},
+                     rocjitsu::consan_hook::AutoMoiInlineShadowAnalysis{});
+  EXPECT_EQ(inline_shadow.find("record_replay_flags="), std::string::npos);
+  EXPECT_NE(inline_shadow.find("visible_inline_publications="), std::string::npos);
+  EXPECT_EQ(inline_shadow.find("sampled_watchpoints="), std::string::npos);
+
+  const std::string sampled = render_summary(
+      rocjitsu::ConSanMoiEngine::Sampled, rocjitsu::consan_hook::AutoMoiSampledDecodedReport{},
+      rocjitsu::consan_hook::AutoMoiSampledConflictAnalysis{});
+  EXPECT_EQ(sampled.find("record_replay_flags="), std::string::npos);
+  EXPECT_EQ(sampled.find("visible_inline_publications="), std::string::npos);
+  EXPECT_NE(sampled.find("sampled_watchpoints="), std::string::npos);
+}
+
 TEST(HsaHooksUnitTest, AutoReportDetailLoggingIsBoundedIndependentlyOfTraceSize) {
   EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(0), 0u);
   EXPECT_EQ(rocjitsu::consan_hook::auto_moi_report_detail_count(3), 3u);

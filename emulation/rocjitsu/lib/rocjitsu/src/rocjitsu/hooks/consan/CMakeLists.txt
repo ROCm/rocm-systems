@@ -60,7 +60,14 @@ target_include_directories(
 )
 target_link_libraries(rocjitsu_consan_report_analyzer PRIVATE util)
 
-add_library(rocjitsu_consan_report_renderer STATIC rj_hsa_dbi_moi_report_renderer.cpp)
+add_library(
+    rocjitsu_consan_report_renderer
+    STATIC
+        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        rj_hsa_dbi_moi_report_renderer.cpp
+        rj_hsa_dbi_moi_sampled_report_renderer.cpp
+)
 set_target_properties(
     rocjitsu_consan_report_renderer
     PROPERTIES POSITION_INDEPENDENT_CODE ON
