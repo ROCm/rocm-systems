@@ -7,10 +7,13 @@
 #ifndef HIP_INCLUDE_HIP_HIP_EXT_H
 #define HIP_INCLUDE_HIP_HIP_EXT_H
 #include "hip/hip_runtime.h"
+
 #if defined(__cplusplus)
 #include <tuple>
 #include <type_traits>
 #include <array>
+
+extern "C" {
 #endif
 /** @addtogroup Execution Execution Control
  *  @{
@@ -52,30 +55,25 @@
  * @note  For this HIP API, the flag 'hipExtAnyOrderLaunch' is not supported on AMD GFX9xx boards.
  *
  */
-HIP_PUBLIC_API
-extern "C" hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                               uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                               uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                               hipStream_t hStream, void** kernelParams,
-                                               void** extra, hipEvent_t startEvent __dparm(NULL),
-                                               hipEvent_t stopEvent __dparm(NULL),
-                                               uint32_t flags __dparm(0));
+hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
+                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                    hipStream_t hStream, void** kernelParams, void** extra,
+                                    hipEvent_t startEvent __dparm(NULL),
+                                    hipEvent_t stopEvent __dparm(NULL), uint32_t flags __dparm(0));
 /**
  * @brief This HIP API is deprecated, please use hipExtModuleLaunchKernel() instead.
  *
  */
 HIP_DEPRECATED("use hipExtModuleLaunchKernel instead")
-HIP_PUBLIC_API
-extern "C" hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                               uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                               uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                               uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                               hipStream_t hStream, void** kernelParams,
-                                               void** extra, hipEvent_t startEvent __dparm(NULL),
-                                               hipEvent_t stopEvent __dparm(NULL));
-
-#if defined(__cplusplus)
+hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
+                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                    hipStream_t hStream, void** kernelParams, void** extra,
+                                    hipEvent_t startEvent __dparm(NULL),
+                                    hipEvent_t stopEvent __dparm(NULL));
 
 /**
  * @brief Launches kernel from the pointer address, with arguments and shared memory on stream.
@@ -97,10 +95,12 @@ extern "C" hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalW
  * @returns #hipSuccess, #hipInvalidDeviceId, #hipErrorNotInitialized, #hipErrorInvalidValue.
  *
  */
-extern "C" hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks,
-                                         dim3 dimBlocks, void** args, size_t sharedMemBytes,
-                                         hipStream_t stream, hipEvent_t startEvent,
-                                         hipEvent_t stopEvent, int flags);
+hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+                              void** args, size_t sharedMemBytes, hipStream_t stream,
+                              hipEvent_t startEvent, hipEvent_t stopEvent, int flags);
+
+#if defined(__cplusplus)
+} // extern "C"
 
 /**
  * @brief Launches kernel with dimention parameters and shared memory on stream with templated
