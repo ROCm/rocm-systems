@@ -10860,3 +10860,62 @@ smaller exact product; leaving both the interface overhead and the legacy
 private branch would violate the anti-circling rule.  Full target/mode locality,
 broad transaction and operating-point reduction, extension-proof revalidation,
 and the independent Section 14 audit remain open.
+
+### 16.158 Convergence checkpoint 157: mode-owned private barrier planning
+
+The remaining central body-construction switch was the automatic private-epoch
+path.  Its shared prelude resolves the owner-scoped resource plan, reapplies the
+accepted persistent assignment, locates the access patch that owns private
+state, and obtains its exact layout.  Everything after that point was mode
+policy.  Record/Replay required six scratch registers, exact-workgroup private
+offsets, captured-entry assignment, owner derivation, compact scalar spill, and
+a record-event body.  InlineShadow required one address-free temporary spill
+and a private epoch-update body.  These disjoint branches occupied the middle
+of the common placement function.
+
+The shared prelude now constructs one `MoiPrivateBarrierPlanningContext` and
+invokes the mode-selected private planner.  Record/Replay's complete private
+planning transaction moved to its barrier owner; InlineShadow's complete
+private planning transaction moved to its barrier owner.  Each returns the
+same `PlannedBarrierLowering` product consumed by common route selection,
+mutation, descriptor accounting, and publication.  The planned product moved
+from function-local to exact-subset scope solely so both mode owners can
+construct it inside the aggregate barrier translation unit.
+
+The architecture gate requires both private planners and their mode-entry
+wiring, requires the one common context invocation, and rejects record-event
+planning, captured-workgroup assignment, private Record/Replay layout policy,
+or direct InlineShadow private-body construction in the common transaction.  A
+pre-existing assignment-count gate now counts mode-owned planning together
+with common planning rather than forcing those calls back into the shared file.
+
+| Signal | Checkpoint 157 | Cumulative change | Slice change from checkpoint 156 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,650 | **-2,326** | +36 |
+| Nonblank production lines | 96,232 | **-2,852** | +36 |
+| Production implementation lines | 88,443 | **-3,007** | +36 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **124 / 49** | **-152 / -8** | +1 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **261 / 52** | **-29 / +1** | 0 / 0 |
+| Mode-specific private body-planning branches in common owner | **0** | n/a | **-2 branches** |
+| Mode-owned private barrier planners | **2 / 2** | n/a | **+2** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `7dd63a60d19`.  Validation includes a
+successful full `-j16` build; **111/111** nonphysical architecture-boundary and
+barrier-named host tests; and the complete **1,150/1,150** Record/Replay plus
+InlineShadow simulator-device matrix across gfx942, gfx950, gfx1100, gfx1201,
+and gfx1250.  All test invocations used `-LE physical`.  No test was removed,
+renamed, disabled, or replaced, and no physical GPU test was run.
+
+The shared transaction is now free of mode-specific body construction, but the
+36-line interface/staging cost means this is not size convergence.  Together,
+checkpoints 156 and 157 invested 55 implementation lines.  The immediate
+mandate is to collapse the broad planning contexts and harvest common staging
+made redundant by mode-owned complete products; failure to recover that cost
+would require replacing this callback design rather than preserving it as a
+permanent abstraction tax.  Full target/mode locality, remaining broad
+transaction and operating-point reduction, extension-proof revalidation, and
+the independent Section 14 audit remain open.
