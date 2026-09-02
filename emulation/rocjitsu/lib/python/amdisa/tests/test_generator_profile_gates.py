@@ -1137,6 +1137,11 @@ def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
 
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
     parser = object.__new__(Parser)
+    parser.profile = {
+        'cdna5': Cdna5Profile(),
+        'rdna3': Rdna3Profile(),
+        'rdna4': Rdna4Profile(),
+    }[arch_name]
     sopp = SimpleNamespace(
         insts=[
             Instruction('S_WAIT_ALU', 'ENC_SOPP', 8, []),
@@ -1192,6 +1197,21 @@ def test_rdna4_parser_injects_s_waitcnt_compat_once_in_opcode_order():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_rdna4_parser_selects_its_compatibility_slot_by_instruction_name():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    parser.profile = SimpleNamespace(
+        compatibility_instruction_slots={
+            ('ENC_OTHER', 4): 'OTHER_COMPAT',
+            ('ENC_SOPP', 9): 'S_WAITCNT',
+        }
+    )
+
+    parser._inject_s_waitcnt_compat()
+
+    assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
+    assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
+
+
 def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
     parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
 
@@ -1206,6 +1226,7 @@ def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
 
 def test_gfx1250_parser_injects_permlane64_compat_once():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[
             Instruction('V_SWAP_B16', 'ENC_VOP1', 102, []),
@@ -1242,6 +1263,7 @@ def test_gfx1250_parser_injects_permlane64_compat_once():
 
 def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
         primary_dt_ptrs=[-1] * 128,
@@ -1268,6 +1290,7 @@ def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
 
 def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     collision = Instruction('V_OTHER_B32', 'ENC_VOP1', 103, [])
     vop1 = SimpleNamespace(
         insts=[collision],
@@ -1292,6 +1315,7 @@ def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
 
 def test_gfx1250_parser_permlane64_rejects_invalid_decode_table_index_before_mutation():
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     vop1 = SimpleNamespace(
         insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
         primary_dt_ptrs=[-1] * 128,
@@ -1346,6 +1370,7 @@ def test_gfx1250_parser_permlane64_rejects_terminal_conflicts_before_mutation(
     decode_entry, message
 ):
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     neighbor = Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])
     vop1 = SimpleNamespace(
         insts=[neighbor],
@@ -1383,6 +1408,7 @@ def test_gfx1250_parser_permlane64_rejects_missing_route_invariants(
     encoding_map, message
 ):
     parser = object.__new__(Parser)
+    parser.profile = Cdna5Profile()
     parser.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         encoding_map=encoding_map,
@@ -1430,6 +1456,7 @@ def test_rdna4_s_waitcnt_rejects_opcode_collision_before_mutation():
 )
 def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message):
     parser = object.__new__(Parser)
+    parser.profile = Rdna4Profile()
     parser.isa_spec = SimpleNamespace(
         arch_name='rdna4',
         encoding_map=encoding_map,
@@ -4851,6 +4878,23 @@ def test_generated_dpp_legality_checks_are_coalesced(
     assert 'does not support DPP' not in _generated_decode_body(vop1, 'VNopVop1')
 
 
+def test_generated_dpp_constructor_binding_is_emitted_once(
+    amdgpu_generated_root: Path,
+):
+    marker = 'reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP'
+    cases = (
+        ('cdna5', 'vop1.cpp', 'VMovB64Vop1', True),
+        ('cdna5', 'vop2.cpp', 'VAddF64Vop2', True),
+        ('cdna5', 'vop3_ternary.cpp', 'VFmaF64Vop3', True),
+        ('rdna4', 'vop3.cpp', 'VMovB32Vop3', False),
+    )
+    for arch, filename, class_name, requires_feature in cases:
+        source = (amdgpu_generated_root / arch / filename).read_text()
+        constructor = _generated_constructor_body(source, class_name)
+        assert constructor.count(marker) == 1, class_name
+        assert ('required_isa_features_' in constructor) is requires_feature
+
+
 def test_generated_optional_includes_have_direct_uses(amdgpu_generated_root: Path):
     unused = []
     for path in sorted(amdgpu_generated_root.rglob('*.cpp')):
@@ -5026,6 +5070,63 @@ def test_split_execution_ids_name_and_match_callbacks(
             selected_ids.extend(ids)
 
         assert sorted(selected_ids) == sorted(callbacks)
+
+
+def test_cdna5_model_only_variant_instructions_have_no_execution_callbacks(
+    gfx1250_generated_root: Path,
+) -> None:
+    model_only_classes = (
+        'VPkFmaF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
+        'VPkAddNcU64Vop3p',
+        'VPkSubNcU64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
+        'VWmmaF6416x16x4F64Vop3p',
+    )
+    header = (gfx1250_generated_root / 'vop3p.h').read_text()
+    model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
+    backend_source = (gfx1250_generated_root / 'execution_backend_exec.cpp').read_text()
+    execution_source = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
+
+    for class_name in model_only_classes:
+        class_body = header.split(f'class {class_name} ', 1)[1].split('\n};', 1)[0]
+        assert 'execute_impl' not in class_body
+        constructor = model.split(f'{class_name}::{class_name}(', 1)[1].split('\n}', 1)[
+            0
+        ]
+        assert 'nullptr' in constructor
+        assert class_name not in backend_header
+        assert class_name not in backend_source
+        assert class_name not in execution_source
+
+    executable_class = 'VPkLshlAddU64Vop3p'
+    class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[0]
+    assert 'execute_impl' in class_body
+    constructor = model.split(f'{executable_class}::{executable_class}(', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'selected_exec_fn(InstructionExecutionId::VPkLshlAddU64Vop3p)' in constructor
+    assert executable_class in backend_header
+    assert executable_class in backend_source
+    assert executable_class in execution_source
+    assert 'PkU64Pair read_pk_u64_pair' in execution_source
+    assert 'PkU32Pair read_pk_u32_pair' in execution_source
+    assert 'void write_pk_u64_pair' in execution_source
+    u64_read_helper = execution_source.split('PkU64Pair read_pk_u64_pair', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'const auto reg = operand.to_register_ref();' in u64_read_helper
+    assert 'if (!reg || reg->cls != RegClass::VGPR)' in u64_read_helper
+    u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
+        '\n}', 1
+    )[0]
+    assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
+    assert 'if (reg && reg->cls == RegClass::SGPR)' in u32_read_helper
+    assert 'read_lane(operand, lane)' in u32_read_helper
+    assert 'read_lane_pair32(operand, lane)' in u32_read_helper
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

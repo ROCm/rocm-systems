@@ -33,9 +33,9 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
    by checking instruction semantics that require the old value.
 """
 
+from collections.abc import Sequence
 import re
 import xml.etree.ElementTree as elem_tree
-
 
 from amdisa import xml_schema as xs
 from amdisa.gpuisa import (
@@ -48,6 +48,12 @@ from amdisa.gpuisa import (
     OperandNamePattern,
     OperandSelector,
     synthesize_fieldless_name,
+)
+from amdisa.isa_additions import (
+    ADDITION_SOURCE_ATTR,
+    IsaAdditionError,
+    apply_isa_additions,
+    parse_encoding_identifier_mask as _parse_enc_id_masks,
 )
 from amdisa.fieldless_policy import validate_fieldless_taxonomy
 from amdisa.isa_profile import IsaProfile
@@ -91,50 +97,6 @@ def _fill_padding_gaps(
             pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
         pads.append(MicrocodeField(pad_name, pad_bit_cnt, next_bit_off))
     return pads
-
-
-def _parse_enc_id_masks(
-    enc_id_mask: str,
-    max_enc_bits: int,
-    enc_field_bit_cnt: int,
-    op_field_bit_cnt: int,
-) -> tuple[tuple[int, int], tuple[int, int], int]:
-    """Parse an encoding identifier mask into (flat_enc_mask, op_mask, dont_care_bits).
-
-    The encoding identifier mask is a binary string where '1' bits mark the
-    encoding field and '0' bits separate encoding from opcode. This function
-    derives the slice positions for the encoding field and opcode field, plus
-    the number of don't-care bits available in the primary decode table index.
-
-    Args:
-        enc_id_mask: Binary string identifier mask (e.g. '111111111000000000000000').
-        max_enc_bits: Maximum bits for the primary decode table index.
-        enc_field_bit_cnt: Bit width of the encoding identifier field.
-        op_field_bit_cnt: Bit width of the opcode field.
-
-    Returns:
-        Tuple of (flat_enc_mask, op_mask, dont_care_bits) where each mask is
-        a (start, end) slice pair into the identifier string.
-    """
-    bit_masks = [(x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)]
-    flat_enc_mask = bit_masks[0]
-    if len(bit_masks) == 1:
-        op_mask = (
-            bit_masks[0][0] + enc_field_bit_cnt,
-            bit_masks[0][0] + enc_field_bit_cnt + op_field_bit_cnt,
-        )
-        if (flat_enc_mask[1] - flat_enc_mask[0]) > max_enc_bits:
-            flat_enc_mask = (
-                flat_enc_mask[0],
-                flat_enc_mask[0] + max_enc_bits,
-            )
-    else:
-        op_mask = (
-            bit_masks[1][0],
-            bit_masks[1][0] + op_field_bit_cnt,
-        )
-    dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
-    return flat_enc_mask, op_mask, dont_care_bits
 
 
 def _uniquify_fieldless_names(opnds: list[Operand]) -> None:
@@ -331,6 +293,8 @@ class Parser:
     Attributes:
         isa_xml: Path to XML file for the ISA specification.
         profile: ISA-specific encoding rules used during parsing.
+        addition_xmls: Ordered ISA additions XML paths to validate and merge
+            before decode-table and instruction parsing.
         tree: XML element tree obtained by parsing the XML file.
         root: Root of the XML element tree.
         isa_spec: ISA specification object.
@@ -339,7 +303,12 @@ class Parser:
         operand_types_node: Element tree node pointing to the operand types.
     """
 
-    def __init__(self, isa_xml: str, profile: IsaProfile) -> None:
+    def __init__(
+        self,
+        isa_xml: str,
+        profile: IsaProfile,
+        addition_xmls: Sequence[str] = (),
+    ) -> None:
         self.isa_xml = isa_xml
         self.profile = profile
         self.tree = elem_tree.parse(self.isa_xml)
@@ -366,6 +335,8 @@ class Parser:
             generated_dir_name,
             cpp_namespace,
         )
+        self.addition_xmls = tuple(addition_xmls)
+        self._addition_by_id = {}
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)
@@ -377,13 +348,60 @@ class Parser:
         Returns:
             Populated IsaSpec object.
         """
+        self.isa_spec.applied_additions = apply_isa_additions(
+            self.root, self.addition_xmls, self.profile
+        )
+        self._addition_by_id = {
+            addition.identifier: addition
+            for addition in self.isa_spec.applied_additions
+        }
         self.parse_encodings()
         self.parse_insts()
+        self._validate_addition_decode_reachability()
         self.parse_operand_types()
         self._inject_compat_insts()
         self._collect_fieldless_operand_types()
         validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
+
+    def _validate_addition_decode_reachability(self) -> None:
+        """Check the final decode pointers for every active added instruction form."""
+        for inst_node in self.insts_node:
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            if addition_id is None:
+                continue
+            inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            provenance = self._addition_by_id.get(addition_id)
+            if provenance is None:
+                raise IsaAdditionError(
+                    f'{self.isa_xml}: instruction {inst_name!r} has unknown '
+                    f'{ADDITION_SOURCE_ATTR} value {addition_id!r}; the attribute '
+                    'was not produced by a configured ISA additions document'
+                )
+            for inst_enc_node in xs.get_node(inst_node, xs.INST_ENCODINGS):
+                enc_name = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_NAME)
+                )
+                if enc_name in self.profile.skip_encodings:
+                    continue
+                condition = xs.get_node_text(
+                    xs.get_node(inst_enc_node, xs.ENCODING_COND)
+                )
+                if self.profile.skip_inst_encoding(enc_name, condition):
+                    continue
+                opcode = int(xs.get_node_text(xs.get_node(inst_enc_node, xs.OPCODE)))
+                pointers = self.isa_spec.encoding_map[enc_name].primary_dt_ptrs
+                if (
+                    pointers is None
+                    or opcode >= len(pointers)
+                    or pointers[opcode] == -1
+                ):
+                    raise IsaAdditionError(
+                        f'{provenance.path}: additions document {addition_id!r} '
+                        f'instruction {inst_name!r} encoding {enc_name!r} '
+                        f'opcode {opcode} is '
+                        'unreachable in the final primary decode table'
+                    )
 
     def implicit_operand_accesses(
         self, operand_type: str
@@ -444,6 +462,24 @@ class Parser:
         self._inject_s_waitcnt_compat()
         self._inject_cdna5_permlane64_compat()
 
+    def _compatibility_instruction_slot(
+        self, expected_instruction_name: str
+    ) -> tuple[str, int, str]:
+        """Return the profile-owned instruction triple for its injector."""
+        slots = self.profile.compatibility_instruction_slots
+        matches = [
+            (enc_name, opcode, instruction_name)
+            for (enc_name, opcode), instruction_name in slots.items()
+            if instruction_name == expected_instruction_name
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f'{self.isa_spec.arch_name} profile must declare exactly one '
+                f'compatibility instruction named {expected_instruction_name}, '
+                f'found {matches}'
+            )
+        return matches[0]
+
     def _inject_s_waitcnt_compat(self) -> None:
         """Add the legacy monolithic S_WAITCNT accepted by LLVM on GFX12."""
         if self.isa_spec.arch_name != 'rdna4':
@@ -452,29 +488,35 @@ class Parser:
         # The RDNA4/GFX12 XML only lists split S_WAIT_* instructions, but LLVM
         # still accepts and emits the monolithic SOPP opcode-9 S_WAITCNT
         # compatibility form for sources such as "s_waitcnt lgkmcnt(0)".
-        enc = self.isa_spec.encoding_map.get('ENC_SOPP')
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'S_WAITCNT'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
         if enc is None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility injection requires ENC_SOPP'
+                f'RDNA4 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
             )
         if enc.primary_dt_ptrs is None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility injection requires an ENC_SOPP '
-                'primary decode route table'
+                f'RDNA4 {instruction_name} compatibility injection requires an '
+                f'{enc_name} primary decode route table'
             )
-        opcode = 9
-        if any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in enc.insts):
+        if any(
+            inst.name == instruction_name and inst.opcode == opcode
+            for inst in enc.insts
+        ):
             return
         occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
         if occupied is not None:
             raise ValueError(
-                'RDNA4 S_WAITCNT compatibility opcode 9 is already occupied by '
-                f'{occupied.name}'
+                f'RDNA4 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
             )
         if len(enc.primary_dt_ptrs) <= opcode:
             raise ValueError(
-                'RDNA4 ENC_SOPP primary decode route table does not contain '
-                'S_WAITCNT opcode 9'
+                f'RDNA4 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
@@ -491,31 +533,33 @@ class Parser:
             }
             if not matching_dt_ptrs:
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 has no ENC_SOPP primary decode route'
+                    f'RDNA4 {instruction_name} opcode {opcode} has no {enc_name} '
+                    'primary decode route'
                 )
             if len(matching_dt_ptrs) != 1:
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 requires exactly one unique '
-                    'ENC_SOPP primary decode route, found '
+                    f'RDNA4 {instruction_name} opcode {opcode} requires exactly '
+                    f'one unique {enc_name} primary decode route, found '
                     f'{sorted(matching_dt_ptrs)}'
                 )
             dt_ptr = matching_dt_ptrs.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
-                'RDNA4 S_WAITCNT opcode 9 resolves to invalid primary '
+                f'RDNA4 {instruction_name} opcode {opcode} resolves to invalid primary '
                 f'decode-table index {dt_ptr}'
             )
 
         dte = self.isa_spec.primary_decode_table[dt_ptr]
-        decode_func = 'decodeSWaitcntSopp'
         if dte.sub_decode_funcs is not None:
             if opcode >= len(dte.sub_decode_funcs):
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 is outside the selected subdecode table'
+                    f'RDNA4 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
                 )
             if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
                 raise ValueError(
-                    'RDNA4 S_WAITCNT opcode 9 subdecode slot is already occupied by '
+                    f'RDNA4 {instruction_name} opcode {opcode} subdecode slot is '
+                    'already occupied by '
                     f'{dte.sub_decode_funcs[opcode]}'
                 )
         elif (
@@ -523,13 +567,13 @@ class Parser:
             or getattr(dte, 'inst_name', None) is not None
         ):
             raise ValueError(
-                'RDNA4 S_WAITCNT terminal decode entry is already occupied'
+                f'RDNA4 {instruction_name} terminal decode entry is already occupied'
             )
 
         inst = Instruction(
-            'S_WAITCNT',
-            'ENC_SOPP',
-            9,
+            instruction_name,
+            enc_name,
+            opcode,
             [
                 Operand(
                     'simm16',
@@ -542,7 +586,7 @@ class Parser:
                     1,
                 )
             ],
-            available_encodings=frozenset({'ENC_SOPP'}),
+            available_encodings=frozenset({enc_name}),
         )
         insert_idx = next(
             (
@@ -576,32 +620,35 @@ class Parser:
         if self.isa_spec.arch_name != 'cdna5':
             return
 
-        enc = self.isa_spec.encoding_map.get('ENC_VOP1')
+        enc_name, opcode, instruction_name = self._compatibility_instruction_slot(
+            'V_PERMLANE64_B32'
+        )
+        enc = self.isa_spec.encoding_map.get(enc_name)
         if enc is None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility injection requires ENC_VOP1'
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'{enc_name}'
             )
         if enc.primary_dt_ptrs is None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility injection requires '
-                'an ENC_VOP1 primary decode route table'
+                f'CDNA5 {instruction_name} compatibility injection requires '
+                f'an {enc_name} primary decode route table'
             )
-        opcode = 103
         if any(
-            inst.name == 'V_PERMLANE64_B32' and inst.opcode == opcode
+            inst.name == instruction_name and inst.opcode == opcode
             for inst in enc.insts
         ):
             return
         occupied = next((inst for inst in enc.insts if inst.opcode == opcode), None)
         if occupied is not None:
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 compatibility opcode 103 is already '
-                f'occupied by {occupied.name}'
+                f'CDNA5 {instruction_name} compatibility opcode {opcode} is '
+                f'already occupied by {occupied.name}'
             )
         if len(enc.primary_dt_ptrs) <= opcode:
             raise ValueError(
-                'CDNA5 ENC_VOP1 primary decode route table does not contain '
-                'V_PERMLANE64_B32 opcode 103'
+                f'CDNA5 {enc_name} primary decode route table does not contain '
+                f'{instruction_name} opcode {opcode}'
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
@@ -615,40 +662,39 @@ class Parser:
             }
             if len(adjacent_routes) != 1:
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 requires exactly one '
-                    'adjacent ENC_VOP1 decode route'
+                    f'CDNA5 {instruction_name} opcode {opcode} requires exactly '
+                    f'one adjacent {enc_name} decode route'
                 )
             dt_ptr = adjacent_routes.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 opcode 103 resolves to invalid primary '
+                f'CDNA5 {instruction_name} opcode {opcode} resolves to invalid primary '
                 f'decode-table index {dt_ptr}'
             )
 
         dte = self.isa_spec.primary_decode_table[dt_ptr]
-        decode_func = 'decodeVPermlane64B32Vop1'
         if dte.sub_decode_funcs is not None:
             if opcode >= len(dte.sub_decode_funcs):
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 is outside the selected '
-                    'subdecode table'
+                    f'CDNA5 {instruction_name} opcode {opcode} is outside the '
+                    'selected subdecode table'
                 )
             if dte.sub_decode_funcs[opcode] not in (None, 'decodeInvalid'):
                 raise ValueError(
-                    'CDNA5 V_PERMLANE64_B32 opcode 103 subdecode slot is already '
-                    f'occupied by {dte.sub_decode_funcs[opcode]}'
+                    f'CDNA5 {instruction_name} opcode {opcode} subdecode slot is '
+                    f'already occupied by {dte.sub_decode_funcs[opcode]}'
                 )
         elif (
             getattr(dte, 'decode_func', None) is not None
             or getattr(dte, 'inst_name', None) is not None
         ):
             raise ValueError(
-                'CDNA5 V_PERMLANE64_B32 terminal decode entry is already occupied'
+                f'CDNA5 {instruction_name} terminal decode entry is already occupied'
             )
 
         inst = Instruction(
-            'V_PERMLANE64_B32',
-            'ENC_VOP1',
+            instruction_name,
+            enc_name,
             opcode,
             [
                 Operand(
@@ -674,7 +720,7 @@ class Parser:
                     'FMT_NUM_B32',
                 ),
             ],
-            available_encodings=frozenset({'ENC_VOP1'}),
+            available_encodings=frozenset({enc_name}),
         )
         insert_idx = next(
             (idx for idx, existing in enumerate(enc.insts) if existing.opcode > opcode),
@@ -684,6 +730,7 @@ class Parser:
         if patch_route:
             enc.primary_dt_ptrs[opcode] = dt_ptr
 
+        decode_func = f'decode{inst.fmt_name}'
         if dte.sub_decode_funcs is not None:
             dte.sub_decode_funcs[opcode] = decode_func
         else:
@@ -1176,6 +1223,10 @@ class Parser:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
             inst_encs_node = xs.get_node(inst_node, xs.INST_ENCODINGS)
             inst_name = inst_name_node.text
+            addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
+            source_addition = (
+                self._addition_by_id.get(addition_id) if addition_id else None
+            )
             available_encodings = frozenset(
                 xs.get_node_text(xs.get_node(inst_enc_node, xs.ENCODING_NAME))
                 for inst_enc_node in inst_encs_node
@@ -1261,6 +1312,7 @@ class Parser:
                     opnds,
                     is_implied_literal,
                     available_encodings,
+                    source_addition,
                 )
 
                 # Implied-literal instructions go to the parent encoding's

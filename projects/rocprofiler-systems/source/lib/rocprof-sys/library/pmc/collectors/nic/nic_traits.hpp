@@ -14,8 +14,7 @@
 #include <set>
 #include <vector>
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 namespace rocprofsys::pmc::collectors::nic
 {
