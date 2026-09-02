@@ -6,14 +6,14 @@
  * This translation unit #includes the (hipified) dev_runtime.cc source
  * directly so it can reach the file-static symMemory* helpers. It links no
  * librccl.so; every dependency the source references is satisfied by no-op
- * stubs in fakes/dev_runtime_fakes.cc (including host-memory fakes for the HIP
+ * stubs in fakes/dev_runtime_micro_fakes.cc (including host-memory fakes for the HIP
  * VMM driver API).
  *
  * Suites appear in the same order as the functions they cover in
  * dev_runtime.cc.
  *************************************************************************/
 
-#include "fakes/dev_runtime_fakes.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. Replace the generated body with one that
@@ -29,7 +29,7 @@
 // TRAP: the substitution is textual and TU-wide, so the index counts every
 // ncclCalloc the *test* reaches, not only the unit under test's.
 // TRAP: both statics are TU-local, so a fixture must reset them itself --
-// ResetDevRuntimeFakes() cannot see them.
+// ResetDevRuntimeMicroFakes() cannot see them.
 #include "alloc.h"
 static int g_devrCallocCallIndex = 0;
 static int g_devrCallocFailAt = -1;  // -1 = never fail; otherwise a 0-based call index
@@ -252,7 +252,7 @@ protected:
 
   void TearDown() override {
     free(comm->devrState.lsaRankList);
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -537,7 +537,7 @@ protected:
     comm->cudaDev = 3;
     msg.segmentSize = 4096;
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
 
 // Branch: cuMemSetAccess succeeds. Also pins the descriptor the caller builds,
@@ -592,7 +592,7 @@ protected:
   }
   void TearDown() override {
     ncclCuMemHandleType = savedHandleType;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -675,7 +675,7 @@ protected:
   void TearDown() override {
     comm->devrState.lsaRankList = nullptr;  // borrowed from lsaRankList, not malloc'd
     ncclCuMemHandleType = savedHandleType;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -874,7 +874,7 @@ protected:
 
   void TearDown() override {
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   // Turn SYM_REUSE_SYSMEM_HANDLES on; other params keep their defaults.
@@ -1030,7 +1030,7 @@ protected:
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
     g_devrCallocCallIndex = 0;                  // TU-local, not covered by the reset below
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -1260,7 +1260,7 @@ protected:
       t = next;
     }
     comm->devrState.teamHead = nullptr;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   static ncclTeam MakeTeam(int nRanks, int rank, int stride) {
@@ -1368,7 +1368,7 @@ protected:
     comm = commStorage.get();
     comm->devrState.bigSize = 1u << 20;
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
   // Teams are freed by the unit under test, so they must be malloc'd. nRanks is
   // 1 because worldRankList is a flexible array member.
@@ -1524,7 +1524,7 @@ protected:
     mem.ginSegmentInfos = nullptr;
     g_devrCallocCallIndex = 0;  // TU-local, not covered by the reset below
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -1765,7 +1765,7 @@ protected:
     mem.primaryAddr = reinterpret_cast<void*>(0x100000);
     mem.size = 8192;
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
 
 // The happy path: connect first, then register the whole allocation into the
@@ -1865,7 +1865,7 @@ protected:
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
     g_devrCallocCallIndex = 0;                  // TU-local, not covered by the reset below
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   ncclResult_t Obtain(int numSegments = 1, size_t size = 4096, bool hasSysmem = false) {
@@ -2294,7 +2294,7 @@ protected:
   void TearDown() override {
     free(comm->devrState.windowTable);  // the shadow-pool fake hands out calloc'd memory
     comm->devrState.windowTable = nullptr;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -2355,7 +2355,7 @@ protected:
   void TearDown() override {
     free(dev);  // the shadow-pool fake hands out calloc'd memory; dev == host
     dev = host = nullptr;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -2436,7 +2436,7 @@ protected:
       t = next;
     }
     devr->windowTable = nullptr;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   ncclResult_t Create(void* userPtr, size_t userSize, size_t memOffset = 0,
@@ -2601,7 +2601,7 @@ protected:
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
     g_devrCallocCallIndex = 0;
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   // A window over freshly obtained memory, so the whole teardown chain is valid.
@@ -2712,7 +2712,7 @@ protected:
     win.ipcPeerPtrsAllocBase = allocBase.data();
     win.ipcPeerCount = 3;
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
 
 // Branch: no peer table means IPC was never active for this window.
@@ -2811,7 +2811,7 @@ protected:
     devr->winSorted = nullptr;
     devr->winSortedCount = devr->winSortedCapacity = 0;
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 
   ncclResult_t Register(ncclWindow_t* out, size_t size = 4096) {
@@ -3138,7 +3138,7 @@ protected:
     devr->winSorted = nullptr;
     devr->winSortedCount = devr->winSortedCapacity = 0;
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -3705,7 +3705,7 @@ protected:
       return ncclSuccess;
     };
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
 
 TEST_F(WinGetUserPtrTest, Succeeds_ReturnsRegisteredPointer) {
@@ -3875,7 +3875,7 @@ protected:
       return ncclSuccess;
     };
   }
-  void TearDown() override { ResetDevRuntimeFakes(); }
+  void TearDown() override { ResetDevRuntimeMicroFakes(); }
 
   ncclWindow_t Handle() { return &vidmem; }
 };
@@ -4101,7 +4101,7 @@ protected:
     free(comm->devrState.lsaRankList);
     g_devrCallocCallIndex = 0;
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -4225,7 +4225,7 @@ protected:
     dst = nullptr;
     g_devrCallocCallIndex = 0;
     g_devrCallocFailAt = -1;
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -4302,7 +4302,7 @@ TEST_F(DeepCopyDevCommRequirementsTest, FreeNull_IsSafe) {
 // getNcclVersionCompat picks the compatibility record covering the version the
 // caller compiled against, refusing a caller newer than the library.
 //
-// The compat table is three globals defined in fakes/dev_runtime_fakes.cc, zeroed
+// The compat table is three globals defined in fakes/dev_runtime_micro_fakes.cc, zeroed
 // there, so each test sets the version window it needs.
 
 class NcclVersionCompatTest : public ::testing::Test {
@@ -4310,7 +4310,7 @@ protected:
   void SetUp() override { Reset(); }
   void TearDown() override {
     Reset();
-    ResetDevRuntimeFakes();
+    ResetDevRuntimeMicroFakes();
   }
   static void Reset() {
     ncclDevCommCompat_v22902 = ncclDevCommCompat{};

@@ -234,7 +234,7 @@ if(BUILD_TESTS)
   # rccl-UnitTestsMicroDevRuntime: host-only microtests for src/dev_runtime.cc
   # (AICOMRCCL-2180). A dedicated executable rather than more sources on
   # rccl-UnitTestsMicro, for the same reason rccl-UnitTestsMicroInit is separate:
-  # dev_runtime.cc drives the HIP VMM API directly, so fakes/dev_runtime_fakes.cc
+  # dev_runtime.cc drives the HIP VMM API directly, so fakes/dev_runtime_micro_fakes.cc
   # defines ~25 hip* entry points (hipMemCreate, hipMemMap, hipStream*, ...) that
   # fakes/hip_fakes.cc also defines. Linking both into one binary is a hard
   # multiple-definition error, and the two sets are not interchangeable: this
@@ -243,7 +243,7 @@ if(BUILD_TESTS)
   # rewriting shared fakes used by four other suites to no one's benefit.
   set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
     dev-runtime-test.cc
-    fakes/dev_runtime_fakes.cc
+    fakes/dev_runtime_micro_fakes.cc
     ../common/main_altrsmi.cpp
     ../common/ProcessIsolatedTestRunner.cpp
   )
@@ -700,7 +700,7 @@ endforeach()
 # its own executable rather than more sources on rccl-UnitTestsMicro.
 add_executable(rccl-UnitTestsMicroDevRuntime
   dev-runtime-test.cc
-  fakes/dev_runtime_fakes.cc
+  fakes/dev_runtime_micro_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )

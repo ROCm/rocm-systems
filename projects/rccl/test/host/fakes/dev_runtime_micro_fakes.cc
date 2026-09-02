@@ -27,7 +27,7 @@
 #include "nccl_device/lsa_barrier.h"
 #include "nccl_device/gin_barrier.h"
 
-#include "fakes/dev_runtime_fakes.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 
 #include <cassert>
 #include <cstdarg>
@@ -454,7 +454,7 @@ HIP_FAKE hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hi
 }
 // Seams, not plain stubs: these three sit on error paths a test needs to drive.
 // Each default lives in a named function so the hook's initialiser and
-// ResetDevRuntimeFakes() share one definition instead of drifting copies.
+// ResetDevRuntimeMicroFakes() share one definition instead of drifting copies.
 static hipError_t DefaultMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
                                                               hipMemGenericAllocationHandle_t) {
   if (prop) {
@@ -676,12 +676,12 @@ HIP_FAKE const char* hipGetErrorString(hipError_t err) {
 HIP_FAKE hipError_t hipGetLastError(void) { return hipSuccess; }
 
 // ---------------------------------------------------------------------------
-// Params are not cached here (see fakes/dev_runtime_fakes.h), so the default just
+// Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
 static int64_t DefaultLoadParam(const char*, int64_t deftVal) { return deftVal; }
 std::function<int64_t(const char*, int64_t)> g_devrLoadParam = DefaultLoadParam;
 
-void ResetDevRuntimeFakes() {
+void ResetDevRuntimeMicroFakes() {
   g_devrHipMemGetAllocationPropertiesFromHandle = DefaultMemGetAllocationPropertiesFromHandle;
   g_devrHipMemExportToShareableHandle           = DefaultMemExportToShareableHandle;
   g_devrHipMemSetAccess                         = DefaultMemSetAccess;

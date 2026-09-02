@@ -3,15 +3,20 @@
  *
  * See LICENSE.txt for license information
  *
- * Controllable seams exposed by fakes/dev_runtime_fakes.cc.
+ * Controllable seams exposed by fakes/dev_runtime_micro_fakes.cc.
+ *
+ * Distinct from fakes/dev_runtime_fakes.{h,cc}, which fakes two dev_runtime.cc
+ * predicates for binaries that do NOT compile that file. This one is the full
+ * fake environment for rccl-UnitTestsMicroDevRuntime, which compiles
+ * dev_runtime.cc itself; the two must never be linked into the same binary.
  *
  * Each hook defaults to the success behaviour the rest of the suite relies on.
  * A test that needs a HIP VMM call to fail installs its own via ScopedHook
  * (test/host/ScopedHook.h), which restores the previous one on scope exit.
  *************************************************************************/
 
-#ifndef RCCL_TEST_HOST_FAKES_DEV_RUNTIME_FAKES_H_
-#define RCCL_TEST_HOST_FAKES_DEV_RUNTIME_FAKES_H_
+#ifndef RCCL_TEST_HOST_FAKES_DEV_RUNTIME_MICRO_FAKES_H_
+#define RCCL_TEST_HOST_FAKES_DEV_RUNTIME_MICRO_FAKES_H_
 
 #include "nccl.h"          // ncclResult_t, for the proxy seam below
 #include "gin/gin_host.h"  // NCCL_GIN_MAX_CONNECTIONS, ncclGinWindow_t
@@ -104,6 +109,6 @@ extern std::function<int64_t(const char*, int64_t)> g_devrLoadParam;
 
 // Restore every seam above to its default. Call from a fixture TearDown so a
 // test cannot leak behaviour into the next one.
-void ResetDevRuntimeFakes();
+void ResetDevRuntimeMicroFakes();
 
-#endif  // RCCL_TEST_HOST_FAKES_DEV_RUNTIME_FAKES_H_
+#endif  // RCCL_TEST_HOST_FAKES_DEV_RUNTIME_MICRO_FAKES_H_
