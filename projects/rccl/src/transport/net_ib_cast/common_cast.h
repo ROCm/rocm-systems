@@ -66,7 +66,7 @@ extern union ncclSocketAddress IbCastIfAddr;
 enum ncclIbRequestMatchingScheme {
   BY_INDEX = 0,
   BY_ID = 1,
-  BY_ORDER = 2, // send requests are posted in the order they are received (CTS OFFLOAD)
+  BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
 struct ncclIbMr {
@@ -684,6 +684,11 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
+
+// True when BY_ORDER was explicitly asked for through NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME.
+// CTS offload also runs BY_ORDER, but it is not covered here: offload already constrains the
+// posting model itself, so its feature set is left untouched.
+bool IbCastByOrderRequested();
 
 struct ncclIbListenComm {
   int dev;
