@@ -25,8 +25,8 @@
 #   build           build all host binaries (default target)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
-#                   COVERAGE_DIR (requires the host tests to be built with
-#                   -DMICRO_COVERAGE=ON, the default)
+#                   <BUILD_DIR>/coverage (requires the host tests to be built
+#                   with -DMICRO_COVERAGE=ON, the default)
 #   coverage        turn the per-binary *.profraw profiles from `run` into
 #                   reports: a per-binary text/HTML report + lcov tracefile
 #                   (clean, no hash mismatch), plus an overall line/branch union
@@ -45,7 +45,6 @@
 #                                                   when bisecting a failure. Deliberately NOT named
 #                                                   GTEST_SHUFFLE: gtest owns that name and reads an
 #                                                   empty value as TRUE, so clearing it would shuffle)
-#   COVERAGE_DIR  coverage output dir (coverage)   (default: <BUILD_DIR>/coverage)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -66,7 +65,11 @@ HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an exp
 read -ra HOST_TEST_SHUFFLE_ARGS <<< "$HOST_TEST_SHUFFLE"
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
-COVERAGE_DIR="${COVERAGE_DIR:-$BUILD_DIR/coverage}"
+# Coverage output always lives in a dedicated subdir we own under BUILD_DIR.
+# Deliberately NOT a user knob: the `run` phase wipes this dir, and an
+# arbitrary user-supplied path (e.g. '/', '.', or a source dir) would then
+# recursively delete unrelated files.
+COVERAGE_DIR="$BUILD_DIR/coverage"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
 PHASE="${1:-all}"
@@ -122,6 +125,8 @@ do_host_tests() {
   # Keeping profiles isolated lets `coverage` emit a clean per-binary report and
   # a clean per-binary lcov tracefile; the tracefiles are then unioned at the
   # line/branch level into one overall report (hash-agnostic). Start clean.
+  # COVERAGE_DIR is always <BUILD_DIR>/coverage, a dedicated subdir we own; the
+  # ${VAR:?} guard is belt-and-suspenders against an empty BUILD_DIR. Start clean.
   mkdir -p "$COVERAGE_DIR"
   rm -rf "${COVERAGE_DIR:?}"/*
 
