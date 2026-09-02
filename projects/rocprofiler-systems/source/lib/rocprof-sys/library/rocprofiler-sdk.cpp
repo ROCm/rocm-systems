@@ -6,6 +6,7 @@
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
+#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
@@ -3171,4 +3172,21 @@ extern "C"
         return &cfg;
     }
 #endif  // ROCPROFILER_VERSION >= 10200
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+    ompt_start_tool_result_t* ompt_start_tool(
+        unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
+
+    // rocprofiler-sdk does not export ompt_start_tool. A tool that wants OMPT provides
+    // its own and forwards to rocprofiler_ompt_start_tool(), which is honored only once
+    // rocprofiler-sdk is initialized. Nothing here may read configuration or load
+    // anything: an offloading binary registers its device image from a static
+    // initializer, and the OpenMP runtime holds its initialization lock across the
+    // call, so re-entering either is a deadlock.
+    ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
+                                              const char*  runtime_version)
+    {
+        return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    }
+#endif
 }
