@@ -30,6 +30,32 @@ not capture with a prebuilt SDK runtime and replay with a checkout-built `hrr-pl
 their generated payload layouts may differ, producing `payload too small` or missing
 kernel/code-object errors.
 
+The integration tests take that pairing as a build option. Point `HRR_CLR_LIB` at the
+`hipamd/lib` of a same-tree CLR build; the test driver then prepends it to
+`LD_LIBRARY_PATH` for every capture and replay subprocess it spawns, so the pairing holds
+even when the surrounding environment points at a different ROCm (it usually must, to
+supply comgr and hiprtc). The same directory goes on the RUNPATH of the test binary and
+`hrr-playback` as a fallback for running them by hand:
+
+```bash
+cmake -S projects/clr -B build/clr -GNinja -DHIP_PLATFORM=amd \
+  -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF \
+  -DHIP_COMMON_DIR="$PWD/projects/hip" -DROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+cmake --build build/clr --target amdhip64 -j"$(nproc)"
+
+cmake -S projects/hrr -B build/hrr -GNinja \
+  -DROCM_PATH="${ROCM_PATH:-/opt/rocm}" \
+  -DCMAKE_PREFIX_PATH="${ROCM_PATH:-/opt/rocm}" \
+  -DHRR_BUILD_TESTS=ON -DHRR_BUILD_INTEGRATION_TESTS=ON \
+  -DHRR_CLR_LIB="$PWD/build/clr/hipamd/lib"
+cmake --build build/hrr -j"$(nproc)"
+ctest --test-dir build/hrr --output-on-failure
+```
+
+Leaving `HRR_CLR_LIB` unset is allowed — a matching install prefix is a valid setup — but
+configure then warns, because the tests will capture with whatever `libamdhip64` the loader
+happens to resolve.
+
 ## Build `hrr-playback`
 
 `hrr-playback` builds standalone from `projects/hrr` against a capture-enabled

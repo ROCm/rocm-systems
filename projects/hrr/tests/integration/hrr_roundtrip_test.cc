@@ -27,7 +27,14 @@
  * HRR_TEST_EXE and HRR_PLAYBACK_EXE are required; CMakeLists.txt fails at
  * configure time if HRR_PLAYBACK_EXE is not found. Pass -DHRR_PLAYBACK_EXE=<path>
  * if hrr-playback is not installed under CMAKE_INSTALL_PREFIX or ROCM_PATH.
+ *
+ * HRR_CLR_LIB (hipamd/lib from a same-commit CLR build) is injected by CMake so
+ * capture subprocesses and hrr-playback load matching capture-enabled libamdhip64.
  */
+
+#ifndef HRR_CLR_LIB
+#define HRR_CLR_LIB ""
+#endif
 
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
@@ -55,14 +62,23 @@ static constexpr char kPathSep = ';';
 static constexpr char kPathSep = ':';
 #endif
 
-// Set PATH so the subprocess can find the ROCm runtime binaries.
+// Set PATH and (on Linux) LD_LIBRARY_PATH so capture/replay subprocesses load
+// capture-enabled libamdhip64 from the same commit as projects/hrr playback.
 // On Windows: DLLs are found via PATH.
-// On Linux:   fork() inherits LD_LIBRARY_PATH from the parent automatically;
-//             no explicit setEnv needed.
 static void set_proc_search_path(hrr::test::SpawnProc& proc) {
   const char* cur_path = getenv("PATH");
   proc.setEnv("PATH",
               std::string(ROCM_BIN_PATH) + kPathSep + (cur_path ? cur_path : ""));
+#if !defined(_WIN32)
+  // A trailing separator would add the current directory to the search path, so
+  // only join when there is an existing value to keep.
+  if (HRR_CLR_LIB[0] != '\0') {
+    const char* cur_ld = getenv("LD_LIBRARY_PATH");
+    std::string ld = HRR_CLR_LIB;
+    if (cur_ld && cur_ld[0] != '\0') ld += kPathSep + std::string(cur_ld);
+    proc.setEnv("LD_LIBRARY_PATH", ld);
+  }
+#endif
 }
 
 // RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).

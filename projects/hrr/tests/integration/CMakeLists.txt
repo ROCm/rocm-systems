@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/HrrCaptureLib.cmake")
+
 # HRR GPU capture/replay integration tests.
 #
 # hrr_roundtrip_test.cc is the driver: it sets HIP_HRR_CAPTURE_OUTPUT, spawns the
@@ -84,6 +86,27 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   endif()
 endif()
 
+# Capture writes payloads using the generated structs it was compiled against, so
+# replay only works when libamdhip64 comes from this same tree. HRR_CLR_LIB names
+# that build; without it the tests fall back to whatever libamdhip64 the loader
+# finds, which is a skew risk rather than an error (a matching install prefix is
+# a legitimate configuration).
+hrr_resolve_capture_lib(HRR_CAPTURE_LIB_DIR)
+if(HRR_CAPTURE_LIB_DIR)
+  message(STATUS "HRR capture lib: ${HRR_CAPTURE_LIB_DIR}")
+else()
+  message(WARNING
+    "HRR_CLR_LIB is not set: integration tests will capture with whichever "
+    "libamdhip64 the loader resolves. If that runtime predates this tree, replay "
+    "fails with \"payload too small\" or missing kernel/code-object errors instead "
+    "of a clear mismatch. Point it at a same-tree build to be sure:\n"
+    "  cmake -S projects/clr -B build/clr -GNinja -DHIP_PLATFORM=amd "
+    "-DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF "
+    "-DHIP_COMMON_DIR=<repo>/projects/hip -DROCM_PATH=$ROCM_PATH\n"
+    "  cmake --build build/clr --target amdhip64\n"
+    "  cmake ... -DHRR_CLR_LIB=<abs-path>/build/clr/hipamd/lib")
+endif()
+
 target_compile_definitions(hrr-integration-tests PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   __HIP_PLATFORM_AMD__
@@ -91,7 +114,16 @@ target_compile_definitions(hrr-integration-tests PRIVATE
   HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>"
   HRR_RAW_TRACE_EXE="${HRR_RAW_TRACE_EXE}"
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
+  HRR_CLR_LIB="${HRR_CAPTURE_LIB_DIR}"
 )
+
+# RUNPATH is the fallback, not the guarantee: DT_RUNPATH is searched *after*
+# LD_LIBRARY_PATH, so an environment that lists another ROCm lib dir (the SDK
+# ones have to be listed, for comgr and hiprtc) still wins. What actually pins
+# the pairing is the driver prepending HRR_CLR_LIB to LD_LIBRARY_PATH for every
+# capture and replay subprocess it spawns. This covers direct invocation of the
+# binaries by hand, where no such environment is set.
+hrr_apply_capture_lib_rpath("${HRR_CAPTURE_LIB_DIR}" hrr-integration-tests hrr-playback)
 
 # The integration tests spawn hrr-playback; make sure it is built first.
 add_dependencies(hrr-integration-tests hrr-playback)
