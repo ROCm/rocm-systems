@@ -8535,3 +8535,70 @@ simply moving its switch. Full architecture locality, remaining mode-local
 transformation ownership, wider coordinator confinement, material additional
 deletion, and the independent Section 14 audit remain open, so the goal
 remains active.
+
+### 16.121 Convergence checkpoint 120: mode-owned atomic scratch demand
+
+The adjacent atomic-resource trace found the corresponding common cross-axis
+switch. `operational_atomic_scratch_count` interpreted the selected evidence
+kind as Record/Replay, Sampled, or InlineShadow policy. It then combined that
+mode choice with an architecture identity because InlineShadow needs two
+additional registers on targets whose FLAT compare-swap data pair has legacy
+even alignment. Resource planning therefore had to know both axes even though
+it owns neither policy.
+
+`MoiModeOperations` now publishes `atomic_scratch_vgpr_count`. Record/Replay
+owns its ordinary-versus-compare-exchange record window, Sampled owns its
+fixed causal window, and InlineShadow owns its exact-ordering window in their
+mode-named translation units. The existing scalar-ABI target projection is
+generalized to one `MoiTargetFacts` product that also carries dense-call
+support and the normalized compare-swap alignment property. Common resource
+planning resolves that product once and asks the selected mode for demand; it
+does not inspect an evidence kind or architecture identity.
+
+InlineShadow candidate planning retains both the selected scratch count and
+the exact alignment property in `MoiInlineAtomicEmissionPlan`. Native body
+emission no longer looks up a target profile, recomputes scratch demand, or
+calls an architecture predicate. The InlineShadow policy formula itself was
+moved out of shared synchronization emission into the InlineShadow mode owner.
+The common selector, its optional invalid-evidence path, the public shared
+policy declaration, and the now-dead raw architecture helper are deleted.
+
+The hypothetical fifth-mode fixture publishes a distinct atomic scratch
+operation. The owner regression exercises Record/Replay ordinary and CAS
+forms, Sampled, InlineShadow's ordinary target layout, and its legacy aligned
+CAS layout. The architecture gate requires every production mode and the
+extension fixture to publish the operation, rejects evidence-specific atomic
+sizing in common planning, requires the normalized target fact and retained
+body facts, and prevents the raw architecture predicate or shared
+InlineShadow policy from returning.
+
+| Signal | Checkpoint 120 | Cumulative change | Slice change from checkpoint 119 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,852 | **-2,124** | +5 |
+| Nonblank production lines | 96,486 | **-2,598** | +3 |
+| Production implementation lines | 88,738 | **-2,712** | +8 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Evidence-specific atomic scratch branches in common resource planning | **0** | n/a | **-3** |
+| Raw architecture-dependent atomic scratch helpers | **0** | n/a | **-1** |
+| Test inventory | **5,413** | **+68** | **+1** |
+
+The implementation is committed as `23521968223`. Validation includes a
+warning-clean `-j16` rebuild, the focused mode, pipeline, atomic, and
+architecture gate **180/180**, the affected end-to-end simulator matrix
+**168/168**, and all **1,296/1,296** nonphysical host/component tests. The
+simulator matrix exercises Record/Replay, Sampled, and InlineShadow atomic
+workloads on gfx942, gfx950, gfx1100, gfx1201, and gfx1250. No test was removed,
+renamed, or disabled, and no physical test was run.
+
+This is a complete cross-axis migration and legacy harvest, but the eight-line
+net implementation growth is an interface investment rather than Section
+14.8 progress. It replaces an `N*M` composition point with one mode operation
+over one normalized target product and leaves no parallel authority, but the
+next convergence work must reap more than that investment. Full architecture
+locality, remaining mode-local transformation ownership, wider coordinator
+confinement, material additional deletion, and the independent Section 14
+audit remain open, so the goal remains active.
