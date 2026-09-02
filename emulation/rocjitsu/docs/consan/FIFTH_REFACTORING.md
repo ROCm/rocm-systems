@@ -12157,3 +12157,40 @@ a deferred dual path: there is one implementation and one declaration, both
 owned by Record/Replay.  The now-small shared-lowering file also makes its
 remaining Sampled- and InlineShadow-specific helpers visible as tractable next
 convergence candidates.
+
+### 16.185 Convergence checkpoint 184: delete the private record-owner wrapper
+
+The smaller shared-lowering component exposed
+`moi_record_uses_private_owner` as a one-caller Record/Replay policy wrapper.
+Its definition and shared-header declaration duplicated a decision already
+made at the exact event-planning branch: the outer branch had established the
+absence of persistent owner registers, while the wrapper rechecked those facts
+and combined them with private-epoch and WorkitemId policy.
+
+The Record/Replay event planner now states the remaining private-owner
+condition directly at the decision that chooses private entry capture versus
+the descriptor-derived owner.  The wrapper and shared API are deleted.  A
+production-wide structural rule rejects restoration of the obsolete name, so
+the policy cannot migrate back into common lowering under the old abstraction.
+
+| Signal | Checkpoint 184 | Cumulative change | Slice change from checkpoint 183 |
+| --- | ---: | ---: | ---: |
+| Production files | 310 | +81 | 0 |
+| Physical production lines | 102,164 | **-2,812** | **-9** |
+| Nonblank production lines | 95,751 | **-3,333** | **-7** |
+| Production implementation lines | 88,013 | **-3,437** | **-7** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **245 / 53** | **-45 / +2** | **-2 / 0** |
+| Shared Record/Replay private-owner policy APIs | **0** | n/a | **-1** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `270b32f6d37`.  Validation includes a
+successful full `-j16` build and **267/267** nonphysical Record/Replay,
+first-light, record-event, and architecture-boundary tests.  All invocations
+used `-LE physical`; no physical GPU test was run.
+
+This checkpoint immediately reaps a deletion enabled by checkpoint 183: once
+the large mode body left shared lowering, the leftover policy wrapper was easy
+to identify as neither shared mechanism nor a reusable Record/Replay concept.
