@@ -22,23 +22,12 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_CONTAINER_ID_PARSER_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_CONTAINER_ID_PARSER_H_
 
-#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
 
 namespace amd::smi {
-
-// Copy `src` into `out` (capacity `out_cap`), always NUL-terminating.
-// Returns the number of bytes written, not counting the NUL.
-inline size_t CopyBounded(char* out, size_t out_cap, const std::string& src) {
-  if (out_cap == 0) return 0;
-  const size_t len = std::min<size_t>(out_cap - 1, src.length());
-  std::memcpy(out, src.data(), len);
-  out[len] = '\0';
-  return len;
-}
 
 // Character class accepted in extracted container IDs.
 inline bool IsContainerIdChar(unsigned char c) {
