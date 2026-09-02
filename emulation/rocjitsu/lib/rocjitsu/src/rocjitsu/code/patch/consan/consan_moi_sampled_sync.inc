@@ -21,8 +21,8 @@ struct SampledBarrierCandidate {
     const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &accepted_point,
     std::span<const uint64_t> owner_descriptors, const ConSanMoiPrivateStateLayout *private_layout,
     uint16_t scratch_vgpr, uint16_t scratch_owner_vgpr, uint16_t scratch_epoch_vgpr,
-    bool transient_assignment_already_resolved,
-    std::string_view diagnostic_subject, std::vector<std::string> &errors) {
+    bool transient_assignment_already_resolved, std::string_view diagnostic_subject,
+    std::vector<std::string> &errors) {
   if (!bound_resources.moi_report_buffer_address) {
     errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) +
                         " lacks a bound report buffer");
@@ -49,8 +49,7 @@ struct SampledBarrierCandidate {
     owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs);
   }
   const auto workgroup_sources = moi_exact_entry_workgroup_sources(
-      point,
-      private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
+      point, private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
   if (!workgroup_sources)
     return std::nullopt;
   return MoiSampledSyncEmissionPlan{
@@ -110,31 +109,26 @@ sampled_route_ranges_are_safe(MoiResourcePlanningState &state, std::span<const u
     bool clone_local_routes, uint64_t dispatcher_offset, uint64_t island_offset,
     const ConSanTargetProfile &target, rj_code_arch_t arch) {
   std::vector<uint32_t> words;
+  InstructionSequence sequence(words);
   if (key_encodes_scc) {
     words.push_back(build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
   }
   if (!derive_key_at_entry && !clone_local_routes) {
-    const auto subtract_pc =
-        instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
-    if (!subtract_pc)
+    if (!sequence.emit(
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch)))
       return std::nullopt;
-    words.push_back(*subtract_pc);
     words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
     words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
   }
   for (const SampledDenseSyncRoute &route : routes) {
     if (clone_local_routes) {
-      const auto compare = instrumentation::build_s_cmp_eq_u32(
-          key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch);
-      if (!compare)
+      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch)))
         return std::nullopt;
-      words.push_back(*compare);
     } else {
-      const auto compare = instrumentation::build_s_cmp_eq_u32(
-          key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
-      if (!compare)
+      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch)))
         return std::nullopt;
-      words.push_back(*compare);
       words.push_back(static_cast<uint32_t>(route.caller_return - island_offset) /
                       (key_encodes_scc ? 2u : 1u));
     }
@@ -149,12 +143,10 @@ sampled_route_ranges_are_safe(MoiResourcePlanningState &state, std::span<const u
                                                  /*capture_scc=*/false, arch)) {
       return std::nullopt;
     }
-    const auto skip =
-        instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
-    if (!skip)
+    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(
+            static_cast<int16_t>(matched_words.size()), arch)) ||
+        !sequence.emit(matched_words))
       return std::nullopt;
-    words.push_back(*skip);
-    words.insert(words.end(), matched_words.begin(), matched_words.end());
   }
   words.push_back(build_s_endpgm(arch));
   return words;
@@ -299,21 +291,16 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
-  const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch);
-  if (!save_exec) {
+  if (!sequence.emit(instrumentation::build_s_mov_b64(original_exec, kAmdGpuExecLo, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at EXEC snapshot");
     return std::nullopt;
   }
-  words.push_back(*save_exec);
   for (const SampledBarrierWindow &window : candidate.windows) {
     const auto next_window_label = sequence.make_label();
-    const auto restore_scan_exec =
-        instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
-    if (!restore_scan_exec) {
+    if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))) {
       errors.emplace_back("ConSan MOI sampled barrier failed at window-scan EXEC restoration");
       return std::nullopt;
     }
-    words.push_back(*restore_scan_exec);
     if (!append_sampled_window_bank_index(words, plan.dispatch_id, plan.workgroup_sources,
                                           window.bank_count, bank_vgpr, value,
                                           *plan.owner_epoch_vgprs.owner, arch)) {
@@ -323,13 +310,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     if (window.first_slot != 0u) {
       // VALUE is dead after bank selection and is distinct from BANK. Use it
       // as CDNA4's explicit literal temporary while keeping the result in BANK.
-      const auto absolute_slot = instrumentation::build_v_add_u32_literal(
-          bank_vgpr, value, window.first_slot, bank_vgpr, arch);
-      if (!absolute_slot) {
+      if (!sequence.emit(instrumentation::build_v_add_u32_literal(
+              bank_vgpr, value, window.first_slot, bank_vgpr, arch))) {
         errors.emplace_back("ConSan MOI sampled barrier failed at absolute slot materialization");
         return std::nullopt;
       }
-      words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
     }
     if (!consan_detail::append_moi_indexed_address(
             words,
@@ -368,9 +353,8 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     return std::nullopt;
 
   const auto narrow_current = [&]() -> bool {
-    const auto narrow =
-        instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-    if (!sequence.emit(narrow))
+    if (!sequence.emit(
+            instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch)))
       return false;
     return sequence.emit_branch(restore_label, InstructionSequence::BranchKind::SccZero);
   };
@@ -378,13 +362,11 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // before the wave-local lane election below so exactly one wave can publish
   // the workgroup-wide transition. Without this narrowing, every wave races
   // the same metadata slot and the losing waves look like unsupported sync.
-  const auto owner_zero = instrumentation::build_v_cmp_eq_u32_vcc(
-      scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch);
-  if (!owner_zero) {
+  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
+          scalar_positive_inline_u32(0), *plan.owner_epoch_vgprs.owner, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at owner election");
     return std::nullopt;
   }
-  words.push_back(*owner_zero);
   if (!narrow_current()) {
     errors.emplace_back("ConSan MOI sampled barrier failed at owner narrowing");
     return std::nullopt;
@@ -393,68 +375,52 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       expected, consan_moi_sampled_watchpoint::max_epoch, arch);
   const auto epoch_has_successor = instrumentation::build_v_cmp_ne_u32_vcc(
       vector_source_vgpr(expected), *plan.owner_epoch_vgprs.epoch, arch);
-  if (!max_epoch || !epoch_has_successor) {
+  if (!sequence.emit_all(max_epoch, epoch_has_successor)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch successor check");
     return std::nullopt;
   }
-  words.insert(words.end(), max_epoch->begin(), max_epoch->end());
-  words.push_back(*epoch_has_successor);
   if (!narrow_current()) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch narrowing");
     return std::nullopt;
   }
 
-  const auto matching_exec = instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch);
-  const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      lane_rank, temporary_exec, scalar_positive_inline_u32(0), arch);
-  const auto mbcnt_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      lane_rank, static_cast<uint16_t>(temporary_exec + 1u), vector_source_vgpr(lane_rank), arch);
-  const auto first =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch);
-  const auto narrow_first =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!matching_exec || !mbcnt_lo || !mbcnt_hi || !first || !narrow_first) {
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(temporary_exec, kAmdGpuExecLo, arch),
+          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
+                                                    scalar_positive_inline_u32(0), arch),
+          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank,
+                                                    static_cast<uint16_t>(temporary_exec + 1u),
+                                                    vector_source_vgpr(lane_rank), arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at lane election");
     return std::nullopt;
   }
-  words.push_back(*matching_exec);
-  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
-  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
-  words.push_back(*first);
-  words.push_back(*narrow_first);
 
-  const auto sentinel = instrumentation::build_v_mov_b32_literal(
-      value, kConSanMoiSampledSyncPublishingDescriptor, arch);
-  const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0u, arch);
-  const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                    kAmdGpuScopeDevice, arch);
-  if (!sentinel || !zero || !claim ||
-      !consan_detail::append_moi_indexed_address(
+  if (!consan_detail::append_moi_indexed_address(
           words,
           {.table_address =
                first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
            .stride_bytes = sizeof(ConSanMoiSampledSyncMetadataPacked),
            .address_vgpr = base,
            .index_vgpr = bank_vgpr},
-          *target)) {
+          *target) ||
+      !sequence.emit_all(instrumentation::build_v_mov_b32_literal(
+                             value, kConSanMoiSampledSyncPublishingDescriptor, arch),
+                         instrumentation::build_v_mov_b32_literal(expected, 0u, arch),
+                         instrumentation::build_flat_atomic_cmpswap_b32(
+                             base, value, value, true, kAmdGpuScopeDevice, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim setup");
     return std::nullopt;
   }
-  words.insert(words.end(), sentinel->begin(), sentinel->end());
-  words.insert(words.end(), zero->begin(), zero->end());
-  words.insert(words.end(), claim->begin(), claim->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
-  const auto claimed =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch);
-  const auto narrow_claimed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!claimed || !narrow_claimed) {
+  if (!sequence.emit_all(
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), value, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata claim result");
     return std::nullopt;
   }
-  words.push_back(*claimed);
-  words.push_back(*narrow_claimed);
   if (!sequence.emit_branch(existing_label, InstructionSequence::BranchKind::SccZero)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata branch");
     return std::nullopt;
@@ -462,11 +428,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   const auto increment = instrumentation::build_v_add_u32(next_epoch, scalar_positive_inline_u32(1),
                                                           *plan.owner_epoch_vgprs.epoch, arch);
-  if (!increment) {
+  if (!sequence.emit(increment)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at next-epoch materialization");
     return std::nullopt;
   }
-  words.insert(words.end(), increment->begin(), increment->end());
   if (!consan_detail::append_moi_indexed_address(
           words,
           {.table_address = first_metadata_address,
@@ -485,20 +450,14 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata body stores");
     return std::nullopt;
   }
-  const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
-  const auto final_value =
-      instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch);
-  const auto final_expected = instrumentation::build_v_mov_b32_literal(
-      expected, kConSanMoiSampledSyncPublishingDescriptor, arch);
-  const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
-                                                                     kAmdGpuScopeDevice, arch);
-  if (!wait_store || !final_value || !final_expected || !commit) {
+  if (!sequence.emit_all(
+          instrumentation::build_s_wait_global_store0(arch),
+          instrumentation::build_v_mov_b32_literal(value, encoded.packed.descriptor, arch),
+          instrumentation::build_v_mov_b32_literal(
+              expected, kConSanMoiSampledSyncPublishingDescriptor, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit setup");
     return std::nullopt;
   }
-  words.push_back(*wait_store);
-  words.insert(words.end(), final_value->begin(), final_value->end());
-  words.insert(words.end(), final_expected->begin(), final_expected->end());
   if (!consan_detail::append_moi_indexed_address(
           words,
           {.table_address =
@@ -510,19 +469,19 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit addressing");
     return std::nullopt;
   }
-  words.insert(words.end(), commit->begin(), commit->end());
+  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
+                                                                    kAmdGpuScopeDevice, arch))) {
+    errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit setup");
+    return std::nullopt;
+  }
   if (!append_moi_global_atomic_wait(words, arch))
     return std::nullopt;
-  const auto committed =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
-  const auto narrow_committed =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!committed || !narrow_committed) {
+  if (!sequence.emit_all(
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at metadata commit result");
     return std::nullopt;
   }
-  words.push_back(*committed);
-  words.push_back(*narrow_committed);
   if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
     return std::nullopt;
   if (!append_atomic_fetch_add_one_u32(
@@ -544,22 +503,17 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
     errors.emplace_back("ConSan MOI sampled barrier failed to bind existing metadata");
     return std::nullopt;
   }
-  const auto restore_existing_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch);
-  const auto existing_descriptor =
-      instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch);
-  const auto descriptor_equal =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
-  if (!restore_existing_exec || !existing_descriptor || !descriptor_equal) {
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, temporary_exec, arch),
+          instrumentation::build_v_mov_b32_literal(expected, encoded.packed.descriptor, arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at existing metadata descriptor");
     return std::nullopt;
   }
-  words.push_back(*restore_existing_exec);
-  words.insert(words.end(), existing_descriptor->begin(), existing_descriptor->end());
-  words.push_back(*descriptor_equal);
   if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero))
     return std::nullopt;
-  words.insert(words.end(), increment->begin(), increment->end());
+  if (!sequence.emit(increment))
+    return std::nullopt;
   if (!consan_detail::append_moi_indexed_address(
           words,
           {.table_address = first_metadata_address,
@@ -573,14 +527,13 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   const auto require_existing_vgpr = [&](uint32_t offset, uint16_t expected_vgpr) -> bool {
     if (!record.load(offset, value))
       return false;
-    const auto equal =
-        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr), value, arch);
-    return equal && sequence.emit(equal) &&
+    return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr),
+                                                                 value, arch)) &&
            sequence.emit_branch(collision_label, InstructionSequence::BranchKind::VccZero);
   };
   const auto require_existing_literal = [&](uint32_t offset, uint32_t literal) -> bool {
-    const auto materialize = instrumentation::build_v_mov_b32_literal(expected, literal, arch);
-    return sequence.emit(materialize) && require_existing_vgpr(offset, expected);
+    return sequence.emit(instrumentation::build_v_mov_b32_literal(expected, literal, arch)) &&
+           require_existing_vgpr(offset, expected);
   };
   if (!require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address), 0u) ||
       !require_existing_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u, 0u) ||
@@ -596,28 +549,19 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   if (!sequence.bind(collision_label))
     return std::nullopt;
-  const auto restore_collision_exec =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
-  const auto collision_mask = instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch);
-  const auto collision_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
-      lane_rank, temporary_exec, scalar_positive_inline_u32(0), arch);
-  const auto collision_hi = instrumentation::build_v_mbcnt_hi_u32_b32(
-      lane_rank, static_cast<uint16_t>(temporary_exec + 1u), vector_source_vgpr(lane_rank), arch);
-  const auto collision_first =
-      instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch);
-  const auto narrow_collision =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!restore_collision_exec || !collision_mask || !collision_lo || !collision_hi ||
-      !collision_first || !narrow_collision) {
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
+          instrumentation::build_s_mov_b64(temporary_exec, original_exec, arch),
+          instrumentation::build_v_mbcnt_lo_u32_b32(lane_rank, temporary_exec,
+                                                    scalar_positive_inline_u32(0), arch),
+          instrumentation::build_v_mbcnt_hi_u32_b32(lane_rank,
+                                                    static_cast<uint16_t>(temporary_exec + 1u),
+                                                    vector_source_vgpr(lane_rank), arch),
+          instrumentation::build_v_cmp_eq_u32_vcc(scalar_positive_inline_u32(0), lane_rank, arch),
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at collision lane election");
     return std::nullopt;
   }
-  words.push_back(*restore_collision_exec);
-  words.push_back(*collision_mask);
-  words.insert(words.end(), collision_lo->begin(), collision_lo->end());
-  words.insert(words.end(), collision_hi->begin(), collision_hi->end());
-  words.push_back(*collision_first);
-  words.push_back(*narrow_collision);
   if (!append_atomic_fetch_add_one_u32(
           words, report_base + offsetof(ConSanMoiReportHeader, sampled_unsupported_sync_count),
           value, base, arch)) {
@@ -627,53 +571,32 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
 
   if (!sequence.bind(restore_label))
     return std::nullopt;
-  const auto restore_exec = instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
-  const auto restore_after_advance =
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch);
-  if (!restore_exec || !restore_after_advance) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at EXEC restoration");
-    return std::nullopt;
-  }
-  words.push_back(*restore_exec);
-  words.insert(words.end(), max_epoch->begin(), max_epoch->end());
-  words.push_back(*epoch_has_successor);
-  const auto narrow_advance =
-      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch);
-  if (!narrow_advance) {
+  if (!sequence.emit_all(
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
+          epoch_has_successor,
+          instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch),
+          instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch,
+                                           scalar_positive_inline_u32(1),
+                                           *plan.owner_epoch_vgprs.epoch, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch))) {
     errors.emplace_back("ConSan MOI sampled barrier failed at epoch-advance narrowing");
     return std::nullopt;
   }
-  words.push_back(*narrow_advance);
-  const auto advance_epoch =
-      instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch, scalar_positive_inline_u32(1),
-                                       *plan.owner_epoch_vgprs.epoch, arch);
-  if (!advance_epoch) {
-    errors.emplace_back("ConSan MOI sampled barrier failed at epoch advance");
-    return std::nullopt;
-  }
-  words.insert(words.end(), advance_epoch->begin(), advance_epoch->end());
-  words.push_back(*restore_after_advance);
   if (scalar_persistent) {
-    const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-        *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch);
-    const auto delay = instrumentation::build_salu_dependency_delay(arch);
-    if (!persist_epoch || !delay) {
+    if (!sequence.emit_all(instrumentation::build_v_readfirstlane_b32(
+                               *plan.persistent_sgprs.epoch(), *plan.owner_epoch_vgprs.epoch, arch),
+                           instrumentation::build_salu_dependency_delay(arch))) {
       errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
       return std::nullopt;
     }
-    words.push_back(*persist_epoch);
-    words.push_back(*delay);
   }
   if (private_layout) {
-    const auto store = instrumentation::build_private_store_b32(*plan.owner_epoch_vgprs.epoch,
-                                                                private_layout->epoch_offset, arch);
-    const auto wait = instrumentation::build_s_wait_private_store0(arch);
-    if (!store || !wait) {
+    if (!sequence.emit_all(instrumentation::build_private_store_b32(
+                               *plan.owner_epoch_vgprs.epoch, private_layout->epoch_offset, arch),
+                           instrumentation::build_s_wait_private_store0(arch))) {
       errors.emplace_back("ConSan MOI sampled barrier failed at private epoch store");
       return std::nullopt;
     }
-    words.insert(words.end(), store->begin(), store->end());
-    words.push_back(*wait);
   }
   if (!append_restore_moi_special_state(words, plan.scalar_abi.special_state, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state restore");
@@ -687,8 +610,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   if (spill)
     words.insert(words.end(), spill->restore_words.begin(), spill->restore_words.end());
   if (restore_guest_vgpr_bank)
-    words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch));
+    if (!sequence.emit(instrumentation::build_s_set_vgpr_msb_transition(
+            0u, static_cast<uint8_t>(*selectable_vgpr_bank_mode), arch)))
+      return std::nullopt;
   const uint64_t branch_pc = cave_text_offset + words.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(branch_pc, return_text_offset);
   if (ret) {
@@ -1039,8 +963,8 @@ void try_apply_sampled_barrier_sync_patch(
         original_text_size + barrier_index * kIndirectIslandWords * sizeof(uint32_t);
     const uint64_t cave_offset = new_text.size();
     const auto emission_plan = plan_sampled_sync_emission(
-        options, options, operating_point,
-        result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
+        options, options, operating_point, result.moi_operating_point,
+        planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + 7u),
         static_cast<uint16_t>(planned.resources.base + 8u),
@@ -1322,8 +1246,8 @@ void try_apply_sampled_barrier_sync_patch(
         const Planned &planned = selected[index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         const auto emission_plan = plan_sampled_sync_emission(
-            options, options, operating_point,
-            result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
+            options, options, operating_point, result.moi_operating_point,
+            planned.resources.owner_descriptor_file_offsets,
             planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
             static_cast<uint16_t>(planned.resources.base + 7u),
             static_cast<uint16_t>(planned.resources.base + 8u),
@@ -2060,9 +1984,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           bool preserve_guest_at_anchor = false, std::span<const uint32_t> leading_guest_words = {})
       -> std::optional<std::vector<uint32_t>> {
     const auto emission_plan = plan_sampled_sync_emission(
-        options, options,
-        resolved_point ? *resolved_point : operating_point, result.moi_operating_point,
-        planned.resources.owner_descriptor_file_offsets,
+        options, options, resolved_point ? *resolved_point : operating_point,
+        result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
         static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch),
