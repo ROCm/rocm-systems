@@ -758,27 +758,16 @@ enum class ConSanRuntimeBackend : uint8_t {
 /// but excluding the one-past-the-end iteration bound. Keeping this inventory
 /// beside the enum makes exhaustive tests and diagnostic rendering fail
 /// visibly when the backend vocabulary grows.
-inline constexpr std::array<ConSanRuntimeBackend, 3> kConSanRuntimeBackends = {
-    ConSanRuntimeBackend::Unknown,
-    ConSanRuntimeBackend::PhysicalHsa,
-    ConSanRuntimeBackend::RocJitsuSimulator,
-};
+inline constexpr auto kConSanRuntimeBackends = make_consan_enum_vocabulary(
+    "invalid-runtime-backend", consan_enum(ConSanRuntimeBackend::Unknown, "unknown"),
+    consan_enum(ConSanRuntimeBackend::PhysicalHsa, "physical-hsa"),
+    consan_enum(ConSanRuntimeBackend::RocJitsuSimulator, "rocjitsu-simulator"));
 
 /// Return the stable diagnostic spelling of a runtime-backend provenance.
 /// Invalid values, including `Count`, deliberately share an invalid spelling
 /// so they cannot masquerade as a queried backend in logs or test fixtures.
 [[nodiscard]] constexpr std::string_view consan_runtime_backend_name(ConSanRuntimeBackend backend) {
-  switch (backend) {
-  case ConSanRuntimeBackend::Unknown:
-    return "unknown";
-  case ConSanRuntimeBackend::PhysicalHsa:
-    return "physical-hsa";
-  case ConSanRuntimeBackend::RocJitsuSimulator:
-    return "rocjitsu-simulator";
-  case ConSanRuntimeBackend::Count:
-    break;
-  }
-  return "invalid-runtime-backend";
+  return kConSanRuntimeBackends.name(backend);
 }
 
 static_assert(kConSanRuntimeBackends.size() == static_cast<size_t>(ConSanRuntimeBackend::Count));
@@ -832,30 +821,19 @@ enum class ConSanRuntimeResourceScope : uint8_t {
 
 /// Every valid resource-scope value, including the explicitly unbound state
 /// but excluding the one-past-the-end iteration bound.
-inline constexpr std::array<ConSanRuntimeResourceScope, 4> kConSanRuntimeResourceScopes = {
-    ConSanRuntimeResourceScope::Unbound,
-    ConSanRuntimeResourceScope::CodeObject,
-    ConSanRuntimeResourceScope::Executable,
-    ConSanRuntimeResourceScope::Dispatch,
-};
+inline constexpr auto kConSanRuntimeResourceScopes = [] {
+  using E = ConSanRuntimeResourceScope;
+  return make_consan_enum_vocabulary(
+      "invalid-runtime-resource-scope", consan_enum(E::Unbound, "unbound"),
+      consan_enum(E::CodeObject, "code-object"), consan_enum(E::Executable, "executable"),
+      consan_enum(E::Dispatch, "dispatch"));
+}();
 
 /// Return the stable diagnostic spelling of a runtime-resource lifetime.
 /// Invalid values never acquire a plausible lifetime name.
 [[nodiscard]] constexpr std::string_view
 consan_runtime_resource_scope_name(ConSanRuntimeResourceScope scope) {
-  switch (scope) {
-  case ConSanRuntimeResourceScope::Unbound:
-    return "unbound";
-  case ConSanRuntimeResourceScope::CodeObject:
-    return "code-object";
-  case ConSanRuntimeResourceScope::Executable:
-    return "executable";
-  case ConSanRuntimeResourceScope::Dispatch:
-    return "dispatch";
-  case ConSanRuntimeResourceScope::Count:
-    break;
-  }
-  return "invalid-runtime-resource-scope";
+  return kConSanRuntimeResourceScopes.name(scope);
 }
 
 static_assert(kConSanRuntimeResourceScopes.size() ==

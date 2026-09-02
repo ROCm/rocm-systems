@@ -818,9 +818,14 @@ TEST(ConSanCapabilityContract, EnumIterationTablesAreCompleteAndRejectMalformedT
       ConSanCapabilityForm::OrderedLdsAtomic,       ConSanCapabilityForm::RelaxedLdsAtomicAccess,
       ConSanCapabilityForm::AddressedOrdinaryFence,
   };
-  EXPECT_EQ(kConSanCapabilityEngines, expected_engines);
+  const auto expect_values_equal = []<typename Lhs, typename Rhs>(const Lhs &lhs, const Rhs &rhs) {
+    ASSERT_EQ(lhs.size(), rhs.size());
+    for (size_t i = 0; i < lhs.size(); ++i)
+      EXPECT_EQ(lhs[i], rhs[i]);
+  };
+  expect_values_equal(kConSanCapabilityEngines, expected_engines);
   EXPECT_EQ(kConSanCapabilityDomains, expected_domains);
-  EXPECT_EQ(kConSanCapabilityForms, expected_forms);
+  expect_values_equal(kConSanCapabilityForms, expected_forms);
   EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityEngines));
   EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityDomains));
   EXPECT_TRUE(consan_capability_enum_is_complete(kConSanCapabilityForms));

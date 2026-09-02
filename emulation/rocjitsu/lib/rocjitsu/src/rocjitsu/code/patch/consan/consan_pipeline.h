@@ -43,44 +43,24 @@ enum class ConSanPipelineStage : uint8_t {
 };
 
 /// Complete dependency-ordered set of ConSan transformation stages.
-inline constexpr std::array<ConSanPipelineStage, 9> kConSanPipelineStages = {
-    ConSanPipelineStage::Configuration,
-    ConSanPipelineStage::TargetAndRuntimeCapabilities,
-    ConSanPipelineStage::ProgramInventory,
-    ConSanPipelineStage::ObservationPlan,
-    ConSanPipelineStage::EvidenceRequirements,
-    ConSanPipelineStage::RuntimeBinding,
-    ConSanPipelineStage::ResourceSolvingAndLowering,
-    ConSanPipelineStage::FinalValidation,
-    ConSanPipelineStage::ResultPublication,
-};
+inline constexpr auto kConSanPipelineStages = [] {
+  using E = ConSanPipelineStage;
+  return make_consan_enum_vocabulary(
+      "invalid-pipeline-stage", consan_enum(E::Configuration, "configuration"),
+      consan_enum(E::TargetAndRuntimeCapabilities, "target-and-runtime-capabilities"),
+      consan_enum(E::ProgramInventory, "program-inventory"),
+      consan_enum(E::ObservationPlan, "observation-plan"),
+      consan_enum(E::EvidenceRequirements, "evidence-requirements"),
+      consan_enum(E::RuntimeBinding, "runtime-binding"),
+      consan_enum(E::ResourceSolvingAndLowering, "resource-solving-and-lowering"),
+      consan_enum(E::FinalValidation, "final-validation"),
+      consan_enum(E::ResultPublication, "result-publication"));
+}();
 
 /// Return the stable diagnostic spelling of a pipeline stage. Sentinels and
 /// out-of-range values deliberately cannot acquire a plausible stage name.
 [[nodiscard]] constexpr std::string_view consan_pipeline_stage_name(ConSanPipelineStage stage) {
-  switch (stage) {
-  case ConSanPipelineStage::Configuration:
-    return "configuration";
-  case ConSanPipelineStage::TargetAndRuntimeCapabilities:
-    return "target-and-runtime-capabilities";
-  case ConSanPipelineStage::ProgramInventory:
-    return "program-inventory";
-  case ConSanPipelineStage::ObservationPlan:
-    return "observation-plan";
-  case ConSanPipelineStage::EvidenceRequirements:
-    return "evidence-requirements";
-  case ConSanPipelineStage::RuntimeBinding:
-    return "runtime-binding";
-  case ConSanPipelineStage::ResourceSolvingAndLowering:
-    return "resource-solving-and-lowering";
-  case ConSanPipelineStage::FinalValidation:
-    return "final-validation";
-  case ConSanPipelineStage::ResultPublication:
-    return "result-publication";
-  case ConSanPipelineStage::Count:
-    break;
-  }
-  return "invalid-pipeline-stage";
+  return kConSanPipelineStages.name(stage);
 }
 
 static_assert(kConSanPipelineStages.size() == static_cast<size_t>(ConSanPipelineStage::Count));
@@ -106,32 +86,19 @@ enum class ConSanPipelineStageStatus : uint8_t {
 };
 
 /// Complete iterable set of pipeline-stage statuses.
-inline constexpr std::array<ConSanPipelineStageStatus, 6> kConSanPipelineStageStatuses = {
-    ConSanPipelineStageStatus::Completed,   ConSanPipelineStageStatus::Deferred,
-    ConSanPipelineStageStatus::Blocked,     ConSanPipelineStageStatus::NotApplicable,
-    ConSanPipelineStageStatus::Unsupported, ConSanPipelineStageStatus::Invalid,
-};
+inline constexpr auto kConSanPipelineStageStatuses = [] {
+  using E = ConSanPipelineStageStatus;
+  return make_consan_enum_vocabulary(
+      "invalid-pipeline-stage-status", consan_enum(E::Completed, "completed"),
+      consan_enum(E::Deferred, "deferred"), consan_enum(E::Blocked, "blocked"),
+      consan_enum(E::NotApplicable, "not-applicable"), consan_enum(E::Unsupported, "unsupported"),
+      consan_enum(E::Invalid, "invalid"));
+}();
 
 /// Return the stable diagnostic spelling of a stage status.
 [[nodiscard]] constexpr std::string_view
 consan_pipeline_stage_status_name(ConSanPipelineStageStatus status) {
-  switch (status) {
-  case ConSanPipelineStageStatus::Completed:
-    return "completed";
-  case ConSanPipelineStageStatus::Deferred:
-    return "deferred";
-  case ConSanPipelineStageStatus::Blocked:
-    return "blocked";
-  case ConSanPipelineStageStatus::NotApplicable:
-    return "not-applicable";
-  case ConSanPipelineStageStatus::Unsupported:
-    return "unsupported";
-  case ConSanPipelineStageStatus::Invalid:
-    return "invalid";
-  case ConSanPipelineStageStatus::Count:
-    break;
-  }
-  return "invalid-pipeline-stage-status";
+  return kConSanPipelineStageStatuses.name(status);
 }
 
 static_assert(kConSanPipelineStageStatuses.size() ==

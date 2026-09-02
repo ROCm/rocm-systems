@@ -143,86 +143,37 @@ enum class ConSanContractIssue : uint8_t {
 /// Every validation result that may be returned by a contract validator. The
 /// one-past-the-end bound is excluded so callers cannot mistake it for an
 /// actionable issue.
-inline constexpr std::array<ConSanContractIssue, 23> kConSanContractIssues = {
-    ConSanContractIssue::None,
-    ConSanContractIssue::MissingFlavor,
-    ConSanContractIssue::InvalidMode,
-    ConSanContractIssue::InvalidSampleStride,
-    ConSanContractIssue::InvalidSampleOffset,
-    ConSanContractIssue::InvalidPatchBudget,
-    ConSanContractIssue::InvalidDebugRegister,
-    ConSanContractIssue::InvalidMutationDependency,
-    ConSanContractIssue::InvalidMutationAddressDelta,
-    ConSanContractIssue::InvalidPerturbationBounds,
-    ConSanContractIssue::ModeConflict,
-    ConSanContractIssue::ConflictingRuntimeAssertions,
-    ConSanContractIssue::MissingRuntimeBackend,
-    ConSanContractIssue::MissingVisibleMemory,
-    ConSanContractIssue::MissingCoherentMemory,
-    ConSanContractIssue::MissingAtomicPublication,
-    ConSanContractIssue::InsufficientReportAllocation,
-    ConSanContractIssue::MissingWorkgroupLdsLimit,
-    ConSanContractIssue::MissingExecutableBinding,
-    ConSanContractIssue::MissingDispatchSegmentBinding,
-    ConSanContractIssue::InvalidResourceScope,
-    ConSanContractIssue::InvalidResourceAddress,
-    ConSanContractIssue::InvalidResourceSize,
-};
+inline constexpr auto kConSanContractIssues = [] {
+  using E = ConSanContractIssue;
+  return make_consan_enum_vocabulary(
+      "invalid-contract-issue", consan_enum(E::None, "none"),
+      consan_enum(E::MissingFlavor, "missing-flavor"), consan_enum(E::InvalidMode, "invalid-mode"),
+      consan_enum(E::InvalidSampleStride, "invalid-sample-stride"),
+      consan_enum(E::InvalidSampleOffset, "invalid-sample-offset"),
+      consan_enum(E::InvalidPatchBudget, "invalid-patch-budget"),
+      consan_enum(E::InvalidDebugRegister, "invalid-debug-register"),
+      consan_enum(E::InvalidMutationDependency, "invalid-mutation-dependency"),
+      consan_enum(E::InvalidMutationAddressDelta, "invalid-mutation-address-delta"),
+      consan_enum(E::InvalidPerturbationBounds, "invalid-perturbation-bounds"),
+      consan_enum(E::ModeConflict, "mode-conflict"),
+      consan_enum(E::ConflictingRuntimeAssertions, "conflicting-runtime-assertions"),
+      consan_enum(E::MissingRuntimeBackend, "missing-runtime-backend"),
+      consan_enum(E::MissingVisibleMemory, "missing-visible-memory"),
+      consan_enum(E::MissingCoherentMemory, "missing-coherent-memory"),
+      consan_enum(E::MissingAtomicPublication, "missing-atomic-publication"),
+      consan_enum(E::InsufficientReportAllocation, "insufficient-report-allocation"),
+      consan_enum(E::MissingWorkgroupLdsLimit, "missing-workgroup-lds-limit"),
+      consan_enum(E::MissingExecutableBinding, "missing-executable-binding"),
+      consan_enum(E::MissingDispatchSegmentBinding, "missing-dispatch-segment-binding"),
+      consan_enum(E::InvalidResourceScope, "invalid-resource-scope"),
+      consan_enum(E::InvalidResourceAddress, "invalid-resource-address"),
+      consan_enum(E::InvalidResourceSize, "invalid-resource-size"));
+}();
 
 static_assert(kConSanContractIssues.size() == static_cast<size_t>(ConSanContractIssue::Count));
 
 [[nodiscard]] constexpr std::string_view consan_contract_issue_name(ConSanContractIssue issue) {
-  switch (issue) {
-  case ConSanContractIssue::None:
-    return "none";
-  case ConSanContractIssue::MissingFlavor:
-    return "missing-flavor";
-  case ConSanContractIssue::InvalidMode:
-    return "invalid-mode";
-  case ConSanContractIssue::InvalidSampleStride:
-    return "invalid-sample-stride";
-  case ConSanContractIssue::InvalidSampleOffset:
-    return "invalid-sample-offset";
-  case ConSanContractIssue::InvalidPatchBudget:
-    return "invalid-patch-budget";
-  case ConSanContractIssue::InvalidDebugRegister:
-    return "invalid-debug-register";
-  case ConSanContractIssue::InvalidMutationDependency:
-    return "invalid-mutation-dependency";
-  case ConSanContractIssue::InvalidMutationAddressDelta:
-    return "invalid-mutation-address-delta";
-  case ConSanContractIssue::InvalidPerturbationBounds:
-    return "invalid-perturbation-bounds";
-  case ConSanContractIssue::ModeConflict:
-    return "mode-conflict";
-  case ConSanContractIssue::ConflictingRuntimeAssertions:
-    return "conflicting-runtime-assertions";
-  case ConSanContractIssue::MissingRuntimeBackend:
-    return "missing-runtime-backend";
-  case ConSanContractIssue::MissingVisibleMemory:
-    return "missing-visible-memory";
-  case ConSanContractIssue::MissingCoherentMemory:
-    return "missing-coherent-memory";
-  case ConSanContractIssue::MissingAtomicPublication:
-    return "missing-atomic-publication";
-  case ConSanContractIssue::InsufficientReportAllocation:
-    return "insufficient-report-allocation";
-  case ConSanContractIssue::MissingWorkgroupLdsLimit:
-    return "missing-workgroup-lds-limit";
-  case ConSanContractIssue::MissingExecutableBinding:
-    return "missing-executable-binding";
-  case ConSanContractIssue::MissingDispatchSegmentBinding:
-    return "missing-dispatch-segment-binding";
-  case ConSanContractIssue::InvalidResourceScope:
-    return "invalid-resource-scope";
-  case ConSanContractIssue::InvalidResourceAddress:
-    return "invalid-resource-address";
-  case ConSanContractIssue::InvalidResourceSize:
-    return "invalid-resource-size";
-  case ConSanContractIssue::Count:
-    break;
-  }
-  return "invalid-contract-issue";
+  return kConSanContractIssues.name(issue);
 }
 
 [[nodiscard]] constexpr ConSanContractIssue validate_consan_request(const ConSanRequest &request) {

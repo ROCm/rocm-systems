@@ -427,12 +427,13 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
     kConSanGfx1250TargetProfile,
 }};
 
-inline constexpr std::array<ConSanCapabilityEngine, 4> kConSanCapabilityEngines = {
-    ConSanCapabilityEngine::SuperCollider,
-    ConSanCapabilityEngine::RecordReplay,
-    ConSanCapabilityEngine::Sampled,
-    ConSanCapabilityEngine::InlineShadow,
-};
+inline constexpr auto kConSanCapabilityEngines = [] {
+  using E = ConSanCapabilityEngine;
+  return make_consan_enum_vocabulary("unknown", consan_enum(E::SuperCollider, "SuperCollider"),
+                                     consan_enum(E::RecordReplay, "Record/Replay"),
+                                     consan_enum(E::Sampled, "Sampled"),
+                                     consan_enum(E::InlineShadow, "Inline Shadow"));
+}();
 
 inline constexpr std::array<ConSanCapabilityDomain, 4> kConSanCapabilityDomains = {
     ConSanCapabilityDomain::Access,
@@ -441,18 +442,23 @@ inline constexpr std::array<ConSanCapabilityDomain, 4> kConSanCapabilityDomains 
     ConSanCapabilityDomain::Fence,
 };
 
-inline constexpr std::array<ConSanCapabilityForm, 9> kConSanCapabilityForms = {
-    ConSanCapabilityForm::NativeLdsAccess,        ConSanCapabilityForm::GroupFlatAccess,
-    ConSanCapabilityForm::WorkgroupBarrier,       ConSanCapabilityForm::ClusterBarrier,
-    ConSanCapabilityForm::OrderedFlatAtomic,      ConSanCapabilityForm::OrderedVglobalAtomic,
-    ConSanCapabilityForm::OrderedLdsAtomic,       ConSanCapabilityForm::RelaxedLdsAtomicAccess,
-    ConSanCapabilityForm::AddressedOrdinaryFence,
-};
+inline constexpr auto kConSanCapabilityForms = [] {
+  using E = ConSanCapabilityForm;
+  return make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::NativeLdsAccess, "native LDS"),
+      consan_enum(E::GroupFlatAccess, "group FLAT"), consan_enum(E::WorkgroupBarrier, "workgroup"),
+      consan_enum(E::ClusterBarrier, "cluster"), consan_enum(E::OrderedFlatAtomic, "ordered FLAT"),
+      consan_enum(E::OrderedVglobalAtomic, "ordered VGLOBAL"),
+      consan_enum(E::OrderedLdsAtomic, "ordered LDS"),
+      consan_enum(E::RelaxedLdsAtomicAccess, "relaxed LDS RMW"),
+      consan_enum(E::AddressedOrdinaryFence, "addressed ordinary"));
+}();
 
-template <typename Enum, std::size_t N>
-[[nodiscard]] constexpr bool consan_capability_enum_is_complete(const std::array<Enum, N> &values) {
+template <typename Values>
+[[nodiscard]] constexpr bool consan_capability_enum_is_complete(const Values &values) {
+  using Enum = std::remove_cvref_t<decltype(values[0])>;
   constexpr std::size_t count = static_cast<std::size_t>(Enum::Count);
-  if (N != count)
+  if (values.size() != count)
     return false;
   std::array<bool, count> seen{};
   for (Enum value : values) {
@@ -806,64 +812,25 @@ consan_capability_disposition(rj_code_target_id_t target, ConSanCapabilityEngine
 
 [[nodiscard]] constexpr std::string_view
 consan_capability_engine_name(ConSanCapabilityEngine engine) {
-  switch (engine) {
-  case ConSanCapabilityEngine::SuperCollider:
-    return "SuperCollider";
-  case ConSanCapabilityEngine::RecordReplay:
-    return "Record/Replay";
-  case ConSanCapabilityEngine::Sampled:
-    return "Sampled";
-  case ConSanCapabilityEngine::InlineShadow:
-    return "Inline Shadow";
-  case ConSanCapabilityEngine::Count:
-    return "unknown";
-  }
-  return "unknown";
+  return kConSanCapabilityEngines.name(engine);
 }
 
 [[nodiscard]] constexpr std::string_view consan_capability_form_name(ConSanCapabilityForm form) {
-  switch (form) {
-  case ConSanCapabilityForm::NativeLdsAccess:
-    return "native LDS";
-  case ConSanCapabilityForm::GroupFlatAccess:
-    return "group FLAT";
-  case ConSanCapabilityForm::WorkgroupBarrier:
-    return "workgroup";
-  case ConSanCapabilityForm::ClusterBarrier:
-    return "cluster";
-  case ConSanCapabilityForm::OrderedFlatAtomic:
-    return "ordered FLAT";
-  case ConSanCapabilityForm::OrderedVglobalAtomic:
-    return "ordered VGLOBAL";
-  case ConSanCapabilityForm::OrderedLdsAtomic:
-    return "ordered LDS";
-  case ConSanCapabilityForm::RelaxedLdsAtomicAccess:
-    return "relaxed LDS RMW";
-  case ConSanCapabilityForm::AddressedOrdinaryFence:
-    return "addressed ordinary";
-  case ConSanCapabilityForm::Count:
-    return "unknown";
-  }
-  return "unknown";
+  return kConSanCapabilityForms.name(form);
 }
+
+inline constexpr auto kConSanCapabilityDispositions = [] {
+  using E = ConSanCapabilityDisposition;
+  return make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::OutOfContract, "out of contract"),
+      consan_enum(E::NotApplicable, "not applicable"), consan_enum(E::Supported, "supported"),
+      consan_enum(E::MutationOnly, "mutation only"), consan_enum(E::AccessOnly, "access only"),
+      consan_enum(E::AssociatedOnly, "associated only"));
+}();
 
 [[nodiscard]] constexpr std::string_view
 consan_capability_disposition_name(ConSanCapabilityDisposition disposition) {
-  switch (disposition) {
-  case ConSanCapabilityDisposition::OutOfContract:
-    return "out of contract";
-  case ConSanCapabilityDisposition::NotApplicable:
-    return "not applicable";
-  case ConSanCapabilityDisposition::Supported:
-    return "supported";
-  case ConSanCapabilityDisposition::MutationOnly:
-    return "mutation only";
-  case ConSanCapabilityDisposition::AccessOnly:
-    return "access only";
-  case ConSanCapabilityDisposition::AssociatedOnly:
-    return "associated only";
-  }
-  return "unknown";
+  return kConSanCapabilityDispositions.name(disposition);
 }
 
 static_assert(consan_target_profiles_are_valid());
