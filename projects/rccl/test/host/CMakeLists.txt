@@ -329,6 +329,14 @@ if(BUILD_TESTS)
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
     ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc")
+
+  # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
+  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
+  # in rocSHMEM's sdma device headers.
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsMicroEnqueue PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+
   # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
   foreach(_hip_tgt hip::host hip::device)
     if(TARGET ${_hip_tgt})
