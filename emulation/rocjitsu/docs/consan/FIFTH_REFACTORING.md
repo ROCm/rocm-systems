@@ -10740,3 +10740,58 @@ move each branch behind its mode owner without cloning resource, placement, or
 publication machinery.  Full target/mode locality, broad transaction and
 operating-point reduction, extension-proof revalidation, and the independent
 Section 14 audit remain open.
+
+### 16.156 Convergence checkpoint 155: InlineShadow owns barrier planning
+
+The first planning cut follows the dependency in both directions.  The common
+transaction previously rediscovered its evidence operation from the global
+observation plan even though its two callers are already mode owners.  The
+Record/Replay and InlineShadow entry points now explicitly supply
+`BarrierRecord` and `ExactBarrierEpoch`, respectively.  Common placement still
+validates that the supplied operation belongs to the exact two-operation
+subset, but no longer consults the engine vocabulary to infer mode intent.
+
+InlineShadow's three barrier-body products and the planner that constructs its
+ordinary epoch body moved out of `consan_moi_barrier.inc` into the new
+`consan_moi_inline_shadow_barrier_planning.inc` mode facet.  The aggregate
+barrier translation unit includes that facet before the common transaction,
+which consumes the typed products without owning their construction.  The
+shared file retains the two-mode `MoiBarrierBodyPlan` sum type, placement,
+routing, mutation, and publication machinery; none of those mechanisms was
+copied into the mode owner.
+
+The structural gate requires the planning facet in the aggregate translation
+unit, requires all three InlineShadow products and their planner there, rejects
+their definitions in the common barrier body, and requires each mode owner to
+pass its exact evidence operation.  It also rejects restoration of vocabulary
+lookup inside the common mechanism.
+
+| Signal | Checkpoint 155 | Cumulative change | Slice change from checkpoint 154 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | +1 mode facet |
+| Physical production lines | 102,595 | **-2,381** | +5 |
+| Nonblank production lines | 96,177 | **-2,907** | +4 |
+| Production implementation lines | 88,388 | **-3,062** | +1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| InlineShadow barrier product/planner definitions in common owner | **0** | n/a | **-4 definitions** |
+| Common barrier engine-vocabulary lookups | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `4493d887a63`.  Validation includes a
+successful full `-j16` build; **111/111** nonphysical architecture-boundary and
+barrier-named host tests using `-LE physical`; and **40/40** focused
+Record/Replay and InlineShadow simulator cases across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250.  No test was removed, renamed, disabled, or replaced, and
+no physical GPU test was run for this checkpoint.
+
+This is the narrow seam required by checkpoint 154, with one implementation
+line of temporary growth for the aggregate inclusion edge.  The next work must
+use it to move the remaining Record/Replay-versus-InlineShadow candidate-
+planning branches behind mode owners and harvest the resulting switches and
+staging rather than stopping at physical relocation.  Common placement and
+publication remain the single mechanisms.  Full target/mode locality, broad
+transaction and operating-point reduction, extension-proof revalidation, and
+the independent Section 14 audit remain open.
