@@ -279,8 +279,6 @@ struct DecodedValidationInstruction {
   std::unique_ptr<Instruction> instruction;
 };
 
-using DecodedValidationRegion = std::vector<DecodedValidationInstruction>;
-
 [[nodiscard]] std::optional<DecodedValidationInstruction>
 decode_validation_instruction(ValidationText text, Decoder &decoder, uint64_t offset,
                               uint64_t end) {
@@ -302,28 +300,6 @@ decode_validation_instruction(ValidationText text, Decoder &decoder, uint64_t of
       .next_offset = offset + static_cast<uint64_t>(instruction->size()),
       .instruction = std::move(instruction),
   };
-}
-
-[[nodiscard]] std::optional<DecodedValidationRegion>
-decode_validation_region(const FinalValidationEnvironment &environment, uint64_t begin,
-                         uint64_t end) {
-  DecodedValidationRegion result;
-  for (uint64_t cursor = begin; cursor < end;) {
-    auto decoded = decode_validation_instruction(environment.replacement_text, *environment.decoder,
-                                                 cursor, end);
-    if (!decoded)
-      return std::nullopt;
-    cursor = decoded->next_offset;
-    result.push_back(std::move(*decoded));
-  }
-  return result;
-}
-
-[[nodiscard]] std::span<const uint8_t>
-validation_instruction_bytes(const FinalValidationEnvironment &environment,
-                             const DecodedValidationInstruction &decoded) {
-  return environment.replacement_text.bytes.subspan(
-      decoded.offset, static_cast<size_t>(decoded.next_offset - decoded.offset));
 }
 
 [[nodiscard]] bool operand_is_register(const Operand *operand, RegClass cls, uint16_t index,
@@ -451,115 +427,10 @@ template <typename Predicate>
 
 [[nodiscard]] bool is_vector_move_from_scalar(const Instruction &instruction, uint16_t destination,
                                               uint16_t source) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  return (mnemonic == "v_mov_b32_e32" || mnemonic == "v_mov_b32") &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 1 &&
+  return instruction.mnemonic() == "v_mov_b32_e32" && instruction.num_dst_operands() == 1 &&
+         instruction.num_src_operands() == 1 &&
          operand_is_register(instruction.dst_operand(0), RegClass::VGPR, destination) &&
          operand_is_register(instruction.src_operand(0), RegClass::SGPR, source);
-}
-
-[[nodiscard]] bool is_vector_move_from_vector(const Instruction &instruction, uint16_t destination,
-                                              uint16_t source) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  return (mnemonic == "v_mov_b32_e32" || mnemonic == "v_mov_b32") &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 1 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::VGPR, destination) &&
-         operand_is_register(instruction.src_operand(0), RegClass::VGPR, source);
-}
-
-[[nodiscard]] bool is_vector_move_constant(const Instruction &instruction, uint16_t destination,
-                                           uint32_t value) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  return (mnemonic == "v_mov_b32_e32" || mnemonic == "v_mov_b32") &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 1 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::VGPR, destination) &&
-         operand_is_constant(instruction.src_operand(0), value);
-}
-
-[[nodiscard]] std::optional<ConSanAtomicSite>
-decode_validation_atomic(const FinalValidationEnvironment &environment,
-                         const DecodedValidationInstruction &decoded) {
-  ConSanAtomicSite site;
-  site.mnemonic = decoded.instruction->mnemonic();
-  site.size = static_cast<uint32_t>(decoded.next_offset - decoded.offset);
-  if (!decode_consan_atomic_site_encoding(site, site.mnemonic,
-                                          validation_instruction_bytes(environment, decoded),
-                                          environment.arch()))
-    return std::nullopt;
-  return site;
-}
-
-[[nodiscard]] bool is_flat_compare_exchange(const FinalValidationEnvironment &environment,
-                                            const DecodedValidationInstruction &decoded,
-                                            uint16_t address, uint16_t data, uint16_t destination) {
-  const std::optional<ConSanAtomicSite> site = decode_validation_atomic(environment, decoded);
-  return site && decoded.instruction->mnemonic().starts_with("flat_atomic_cmpswap") &&
-         site->raw_vaddr == address && site->raw_vsrc == data && site->raw_vdst == destination &&
-         site->raw_ioffset == 0 && site->scope == ConSanMemoryScope::Agent &&
-         site->returns_old_value == true;
-}
-
-[[nodiscard]] bool is_local_exchange_b64(const FinalValidationEnvironment &environment,
-                                         const DecodedValidationInstruction &decoded,
-                                         uint16_t destination, uint16_t address, uint16_t data) {
-  const std::optional<ConSanAtomicSite> site = decode_validation_atomic(environment, decoded);
-  const std::string_view mnemonic = decoded.instruction->mnemonic();
-  return site &&
-         (mnemonic.starts_with("ds_storexchg_rtn_b64") ||
-          mnemonic.starts_with("ds_wrxchg_rtn_b64")) &&
-         site->raw_vdst == destination && site->raw_addr == address && site->raw_data0 == data &&
-         site->raw_data1 == 0u && site->raw_ioffset == 0;
-}
-
-enum class ValidationFlatOperation : uint8_t { Load, Store };
-
-[[nodiscard]] bool is_flat_memory_operation(const FinalValidationEnvironment &environment,
-                                            const DecodedValidationInstruction &decoded,
-                                            ValidationFlatOperation operation, uint16_t address,
-                                            uint16_t data, int32_t byte_offset) {
-  const std::string_view mnemonic = decoded.instruction->mnemonic();
-  const bool expected_mnemonic =
-      operation == ValidationFlatOperation::Load
-          ? (mnemonic == "flat_load_b32" || mnemonic == "flat_load_dword")
-          : (mnemonic == "flat_store_b32" || mnemonic == "flat_store_dword");
-  if (!expected_mnemonic)
-    return false;
-  const ConSanVectorMemoryDecode memory = decode_consan_flat_memory_encoding(
-      validation_instruction_bytes(environment, decoded), environment.arch());
-  if (memory.status != ConSanTargetDecodeStatus::Decoded || !memory.encoding.exact_size ||
-      !memory.encoding.ordinary_well_formed || memory.encoding.raw_vaddr != address ||
-      memory.encoding.raw_ioffset != byte_offset || memory.encoding.scalar_provenance_sgpr)
-    return false;
-  return operation == ValidationFlatOperation::Load ? memory.encoding.raw_vdst == data
-                                                    : memory.encoding.raw_vsrc == data;
-}
-
-[[nodiscard]] bool is_global_store_completion(const FinalValidationEnvironment &environment,
-                                              const DecodedValidationInstruction &decoded) {
-  uint32_t word = 0;
-  const std::span<const uint8_t> bytes = validation_instruction_bytes(environment, decoded);
-  if (bytes.size() < sizeof(word))
-    return false;
-  std::memcpy(&word, bytes.data(), sizeof(word));
-  return classify_consan_wait_instruction(decoded.instruction->mnemonic(), word, environment.arch())
-      .drains_store;
-}
-
-[[nodiscard]] bool is_vector_compare_equal(const Instruction &instruction, uint16_t lhs,
-                                           uint16_t rhs) {
-  return (instruction.mnemonic() == "v_cmp_eq_u32_e32" ||
-          instruction.mnemonic() == "v_cmp_eq_u32") &&
-         instruction.num_dst_operands() >= 1 && instruction.num_src_operands() >= 2 &&
-         operand_is_vcc(instruction.dst_operand(0)) &&
-         operand_is_register(instruction.src_operand(0), RegClass::VGPR, lhs) &&
-         operand_is_register(instruction.src_operand(1), RegClass::VGPR, rhs);
-}
-
-[[nodiscard]] bool is_saveexec_from_vcc(const Instruction &instruction, uint16_t destination) {
-  return instruction.mnemonic() == "s_and_saveexec_b64" && instruction.num_dst_operands() >= 1 &&
-         instruction.num_src_operands() >= 1 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::SGPR, destination, 2u) &&
-         operand_is_vcc(instruction.src_operand(0));
 }
 
 [[nodiscard]] bool is_scalar_dispatch_increment(const Instruction &instruction,
@@ -575,8 +446,10 @@ enum class ValidationFlatOperation : uint8_t { Load, Store };
                                           return operand_is_register(operand, RegClass::SGPR,
                                                                      destination);
                                         }) == 1u &&
-         count_instruction_destinations(
-             instruction, [&](const Operand *operand) { return operand_is_scc(operand); }) == 1u &&
+         count_instruction_destinations(instruction,
+                                        [&](const Operand *operand) {
+                                          return operand_is_scc(operand);
+                                        }) == 1u &&
          count_instruction_sources(instruction,
                                    [&](const Operand *operand) {
                                      return operand_is_register(operand, RegClass::SGPR,
@@ -605,8 +478,10 @@ enum class ValidationFlatOperation : uint8_t { Load, Store };
                                           return operand_is_register(operand, RegClass::VGPR,
                                                                      destination);
                                         }) == 1u &&
-         count_instruction_destinations(
-             instruction, [&](const Operand *operand) { return operand_is_vcc(operand); }) == 1u &&
+         count_instruction_destinations(instruction,
+                                        [&](const Operand *operand) {
+                                          return operand_is_vcc(operand);
+                                        }) == 1u &&
          count_instruction_sources(instruction,
                                    [&](const Operand *operand) {
                                      return operand_is_register(operand, RegClass::VGPR,
@@ -715,30 +590,31 @@ private:
                                     std::initializer_list<std::string_view> mnemonics,
                                     uint16_t destination, uint16_t lhs, uint16_t rhs) {
   const bool right_opcode = std::ranges::find(mnemonics, instruction.mnemonic()) != mnemonics.end();
-  return right_opcode &&
-         (instruction.num_dst_operands() == 1 ||
-          (instruction.num_dst_operands() == 2 && operand_is_scc(instruction.dst_operand(1)))) &&
+  return right_opcode && (instruction.num_dst_operands() == 1 ||
+                          (instruction.num_dst_operands() == 2 &&
+                           operand_is_scc(instruction.dst_operand(1)))) &&
          instruction.num_src_operands() == 2 &&
          operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
          operand_is_scalar_selector(instruction.src_operand(0), lhs) &&
          operand_is_scalar_selector(instruction.src_operand(1), rhs);
 }
 
-[[nodiscard]] bool is_scalar_binary_constant(const Instruction &instruction,
-                                             std::initializer_list<std::string_view> mnemonics,
-                                             uint16_t destination, uint16_t lhs, uint64_t rhs) {
+[[nodiscard]] bool is_scalar_binary_constant(
+    const Instruction &instruction, std::initializer_list<std::string_view> mnemonics,
+    uint16_t destination, uint16_t lhs, uint64_t rhs) {
   const bool right_opcode = std::ranges::find(mnemonics, instruction.mnemonic()) != mnemonics.end();
-  return right_opcode &&
-         (instruction.num_dst_operands() == 1 ||
-          (instruction.num_dst_operands() == 2 && operand_is_scc(instruction.dst_operand(1)))) &&
+  return right_opcode && (instruction.num_dst_operands() == 1 ||
+                          (instruction.num_dst_operands() == 2 &&
+                           operand_is_scc(instruction.dst_operand(1)))) &&
          instruction.num_src_operands() == 2 &&
          operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
          operand_is_scalar_selector(instruction.src_operand(0), lhs) &&
          operand_is_constant(instruction.src_operand(1), rhs);
 }
 
-[[nodiscard]] bool is_direct_transfer_to(const Instruction &instruction, std::string_view mnemonic,
-                                         uint64_t source, uint64_t target) {
+[[nodiscard]] bool is_direct_transfer_to(const Instruction &instruction,
+                                         std::string_view mnemonic, uint64_t source,
+                                         uint64_t target) {
   const std::optional<int64_t> delta = instruction.branch_offset_bytes();
   if (instruction.mnemonic() != mnemonic || !delta ||
       source > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
@@ -770,8 +646,7 @@ private:
          instruction.num_src_operands() == 3 &&
          operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
          operand_is_constant(instruction.src_operand(0), 1u) &&
-         operand_is_constant(instruction.src_operand(1), 0u) &&
-         operand_is_scc(instruction.src_operand(2));
+         operand_is_constant(instruction.src_operand(1), 0u) && operand_is_scc(instruction.src_operand(2));
 }
 
 [[nodiscard]] bool is_scc_restore(const Instruction &instruction, uint16_t source) {
@@ -798,15 +673,19 @@ private:
 }
 
 [[nodiscard]] bool is_getpc(const Instruction &instruction, uint16_t destination) {
-  return (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64") &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 1 &&
+  return (instruction.mnemonic() == "s_getpc_b64" ||
+          instruction.mnemonic() == "s_get_pc_i64") &&
+         instruction.num_dst_operands() == 1 &&
+         instruction.num_src_operands() == 1 &&
          operand_is_scalar_selector(instruction.dst_operand(0), destination, 2u) &&
          operand_is_pc(instruction.src_operand(0));
 }
 
 [[nodiscard]] bool is_setpc(const Instruction &instruction, uint16_t source) {
-  return (instruction.mnemonic() == "s_setpc_b64" || instruction.mnemonic() == "s_set_pc_i64") &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 1 &&
+  return (instruction.mnemonic() == "s_setpc_b64" ||
+          instruction.mnemonic() == "s_set_pc_i64") &&
+         instruction.num_dst_operands() == 1 &&
+         instruction.num_src_operands() == 1 &&
          operand_is_pc(instruction.dst_operand(0)) &&
          operand_is_scalar_selector(instruction.src_operand(0), source, 2u);
 }
@@ -814,11 +693,11 @@ private:
 [[nodiscard]] bool is_scalar_pc_half_adjust(const Instruction &instruction, uint16_t scalar,
                                             uint64_t constant, bool subtract, bool carry) {
   const std::string_view mnemonic = instruction.mnemonic();
-  const bool right_opcode = subtract
-                                ? (carry ? mnemonic == "s_subb_u32" || mnemonic == "s_sub_co_ci_u32"
-                                         : mnemonic == "s_sub_u32" || mnemonic == "s_sub_co_u32")
-                                : (carry ? mnemonic == "s_addc_u32" || mnemonic == "s_add_co_ci_u32"
-                                         : mnemonic == "s_add_u32" || mnemonic == "s_add_co_u32");
+  const bool right_opcode =
+      subtract ? (carry ? mnemonic == "s_subb_u32" || mnemonic == "s_sub_co_ci_u32"
+                        : mnemonic == "s_sub_u32" || mnemonic == "s_sub_co_u32")
+               : (carry ? mnemonic == "s_addc_u32" || mnemonic == "s_add_co_ci_u32"
+                        : mnemonic == "s_add_u32" || mnemonic == "s_add_co_u32");
   return right_opcode && instruction.num_dst_operands() == 2 &&
          instruction.num_src_operands() == (carry ? 3 : 2) &&
          operand_is_scalar_selector(instruction.dst_operand(0), scalar) &&
@@ -858,32 +737,31 @@ private:
                                 /*carry=*/false))
     return false;
   std::unique_ptr<Instruction> high = cursor.take();
-  return high &&
-         is_scalar_pc_half_adjust(*high, static_cast<uint16_t>(pc_sgpr + 1u),
-                                  static_cast<uint32_t>(magnitude >> 32u), subtract,
-                                  /*carry=*/true) &&
+  return high && is_scalar_pc_half_adjust(*high, static_cast<uint16_t>(pc_sgpr + 1u),
+                                          static_cast<uint32_t>(magnitude >> 32u), subtract,
+                                          /*carry=*/true) &&
          cursor.offset() == delta_end;
 }
 
-[[nodiscard]] bool
-validate_scc_preserving_indirect_transfer(const FinalValidationEnvironment &environment,
-                                          uint64_t offset, uint64_t target,
-                                          const ConSanIndirectJumpSgprs &jump, bool capture_scc) {
+[[nodiscard]] bool validate_scc_preserving_indirect_transfer(
+    const FinalValidationEnvironment &environment, uint64_t offset, uint64_t target,
+    const ConSanIndirectJumpSgprs &jump, bool capture_scc) {
   constexpr uint64_t kTransferBytes = kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
   if (offset > environment.replacement_text.bytes.size() ||
       kTransferBytes > environment.replacement_text.bytes.size() - offset ||
       target > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - 2u * sizeof(uint32_t))
+      offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) -
+                   2u * sizeof(uint32_t))
     return false;
 
   const uint64_t end = offset + kTransferBytes;
   DecodedValidationCursor cursor(environment, offset, end);
   std::unique_ptr<Instruction> first = cursor.take();
   std::unique_ptr<Instruction> getpc = cursor.take();
-  const int64_t delta =
-      static_cast<int64_t>(target) - static_cast<int64_t>(offset + 2u * sizeof(uint32_t));
-  const bool first_ok =
-      first && (capture_scc ? is_scc_capture(*first, jump.scc_save_sgpr) : is_scalar_nop(*first));
+  const int64_t delta = static_cast<int64_t>(target) -
+                        static_cast<int64_t>(offset + 2u * sizeof(uint32_t));
+  const bool first_ok = first && (capture_scc ? is_scc_capture(*first, jump.scc_save_sgpr)
+                                             : is_scalar_nop(*first));
   const bool getpc_ok = getpc && is_getpc(*getpc, jump.pc_sgpr);
   const bool delta_ok = take_pc_delta(cursor, offset + 5u * sizeof(uint32_t), jump.pc_sgpr, delta);
   if (!first_ok || !getpc_ok || !delta_ok)
@@ -917,8 +795,7 @@ validate_dispatch_repair_at(const FinalValidationEnvironment &environment, uint6
       return std::nullopt;
     std::unique_ptr<Instruction> high_increment = cursor.take();
     if (!high_increment ||
-        !is_scalar_dispatch_increment(*high_increment, static_cast<uint16_t>(*capture + 1u),
-                                      true) ||
+        !is_scalar_dispatch_increment(*high_increment, static_cast<uint16_t>(*capture + 1u), true) ||
         !take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu))
       return std::nullopt;
   } else if (const std::optional<uint16_t> capture = dispatch.capture.vgpr()) {
@@ -1353,9 +1230,9 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
         !validate_scc_preserving_indirect_transfer(environment, island.trampoline_offset,
                                                    body->trampoline_offset, route.jump,
                                                    /*capture_scc=*/true) ||
-        !validate_scc_preserving_indirect_transfer(environment, route.return_offset,
-                                                   body->anchor_offset + body->original_size,
-                                                   route.jump, /*capture_scc=*/false)) {
+        !validate_scc_preserving_indirect_transfer(
+            environment, route.return_offset, body->anchor_offset + body->original_size,
+            route.jump, /*capture_scc=*/false)) {
       errors.emplace_back(
           "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
     }
@@ -1417,7 +1294,8 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
         static_cast<uint16_t>(jump.pc_sgpr + 1u),
         jump.scc_save_sgpr,
     };
-    const uint64_t transfer_offset = patch.anchor_offset + borrowed.size() * 2u * sizeof(uint32_t);
+    const uint64_t transfer_offset =
+        patch.anchor_offset + borrowed.size() * 2u * sizeof(uint32_t);
     const uint64_t transfer_end =
         transfer_offset + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
     const uint64_t anchor_end = patch.anchor_offset + patch.original_size;
@@ -1444,7 +1322,8 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     DecodedValidationCursor restores(environment, patch.trampoline_offset, trampoline_end);
     for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
       std::unique_ptr<Instruction> restore = restores.take();
-      if (!restore || !is_scalar_lane_restore(*restore, borrowed[lane], entry.backup_vgpr, lane))
+      if (!restore ||
+          !is_scalar_lane_restore(*restore, borrowed[lane], entry.backup_vgpr, lane))
         return false;
     }
     if (!take_dependency(restores, environment, ConSanDependencyKind::ValuToSalu))
@@ -1605,9 +1484,9 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     DecodedValidationCursor host_anchor(environment, host->anchor_offset, island_offset);
     std::unique_ptr<Instruction> host_entry = host_anchor.take();
     if (!host_entry ||
-        !(explicit_key
-              ? is_scalar_move_constant(*host_entry, dispatch_key, 0u)
-              : is_direct_call_to(*host_entry, dispatch_key, host->anchor_offset, island_offset)) ||
+        !(explicit_key ? is_scalar_move_constant(*host_entry, dispatch_key, 0u)
+                       : is_direct_call_to(*host_entry, dispatch_key, host->anchor_offset,
+                                           island_offset)) ||
         host_anchor.offset() != island_offset ||
         !validate_scc_preserving_indirect_transfer(environment, island_offset,
                                                    dispatcher.trampoline_offset, route.jump,
@@ -1617,19 +1496,19 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     }
 
     const uint64_t host_return_offset = host->trampoline_offset + host->original_size;
-    if (!std::ranges::equal(
-            original_text.subspan(host->anchor_offset, host->original_size),
-            replacement_text.subspan(host->trampoline_offset, host->original_size)) ||
-        !validate_scc_preserving_indirect_transfer(environment, host_return_offset,
-                                                   host->anchor_offset + host->original_size,
-                                                   route.jump, /*capture_scc=*/true)) {
+    if (!std::ranges::equal(original_text.subspan(host->anchor_offset, host->original_size),
+                            replacement_text.subspan(host->trampoline_offset,
+                                                     host->original_size)) ||
+        !validate_scc_preserving_indirect_transfer(
+            environment, host_return_offset, host->anchor_offset + host->original_size,
+            route.jump, /*capture_scc=*/true)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted relocated entry host");
       continue;
     }
 
     const uint64_t dispatcher_end = dispatcher.trampoline_offset + dispatcher.trampoline_size;
     DecodedValidationCursor dispatcher_cursor(environment, dispatcher.trampoline_offset,
-                                              dispatcher_end);
+                                               dispatcher_end);
     if (!explicit_key) {
       std::unique_ptr<Instruction> subtract_pc = dispatcher_cursor.take();
       std::unique_ptr<Instruction> add_origin = dispatcher_cursor.take();
@@ -1637,7 +1516,8 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
           !is_scalar_binary(*subtract_pc, {"s_sub_u32", "s_sub_co_u32", "s_sub_nc_u32"},
                             dispatch_key, dispatch_key, route.jump.pc_sgpr) ||
           !add_origin ||
-          !is_scalar_binary_constant(*add_origin, {"s_add_u32", "s_add_co_u32", "s_add_nc_u32"},
+          !is_scalar_binary_constant(*add_origin,
+                                     {"s_add_u32", "s_add_co_u32", "s_add_nc_u32"},
                                      dispatch_key, dispatch_key,
                                      dispatcher.trampoline_offset - island_offset)) {
         errors.emplace_back("ConSan dense-call proof found a corrupted dispatch key");
@@ -1654,7 +1534,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       return compare && is_scalar_compare_equal(*compare, dispatch_key, key) && skip &&
              is_scc0_branch_to(*skip, branch_offset, transfer_end) &&
              validate_scc_preserving_indirect_transfer(environment, transfer_offset, target,
-                                                       route.jump, /*capture_scc=*/false) &&
+                                                        route.jump, /*capture_scc=*/false) &&
              dispatcher_cursor.consume_validated_region(transfer_end);
     };
     bool valid = validate_target(0u, host->trampoline_offset);
@@ -1686,14 +1566,15 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
                                            island_offset)
                : is_direct_call_to(*entry, dispatch_key, body->anchor_offset, island_offset) &&
                      is_scalar_nop(*continuation));
-      const uint64_t key =
-          explicit_key ? body_index + 1u : body->anchor_offset + sizeof(uint32_t) - island_offset;
-      valid &= body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
-               body_required_sgprs <= body->required_sgpr_count && valid_anchor &&
-               validate_scc_preserving_indirect_transfer(environment, body_route->return_offset,
-                                                         body->anchor_offset + body->original_size,
-                                                         route.jump, /*capture_scc=*/false) &&
-               validate_target(key, body->trampoline_offset);
+      const uint64_t key = explicit_key ? body_index + 1u
+                                        : body->anchor_offset + sizeof(uint32_t) - island_offset;
+      valid &=
+          body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
+          body_required_sgprs <= body->required_sgpr_count && valid_anchor &&
+          validate_scc_preserving_indirect_transfer(
+              environment, body_route->return_offset, body->anchor_offset + body->original_size,
+              route.jump, /*capture_scc=*/false) &&
+          validate_target(key, body->trampoline_offset);
     }
     std::unique_ptr<Instruction> terminator = dispatcher_cursor.take();
     valid &= terminator && is_endpgm(*terminator) && dispatcher_cursor.offset() == dispatcher_end;
@@ -2115,9 +1996,11 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
     const ConSanSuperColliderRelayEncodingScratch scratch =
         route.encoding_scratch({kAmdGpuVccLo, kAmdGpuExecHi});
     const bool wave32_vcc = scratch.entry_vcc_save_sgpr.has_value();
-    const auto validate_vcc_transfer = [&](uint64_t offset, uint16_t destination, uint16_t source) {
-      const auto decoded = decode_validation_instruction(
-          environment.replacement_text, *environment.decoder, offset, offset + sizeof(uint32_t));
+    const auto validate_vcc_transfer = [&](uint64_t offset, uint16_t destination,
+                                           uint16_t source) {
+      const auto decoded = decode_validation_instruction(environment.replacement_text,
+                                                         *environment.decoder, offset,
+                                                         offset + sizeof(uint32_t));
       return decoded &&
              (wave32_vcc ? is_scalar_selector_move(*decoded->instruction, destination, source)
                          : is_scalar_nop(*decoded->instruction));
@@ -2126,20 +2009,20 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
     const uint64_t return_prefix =
         patch->trampoline_offset + sizeof(uint32_t) + patch->original_size;
     const uint64_t return_transfer = return_prefix + sizeof(uint32_t);
-    const uint64_t return_target =
-        patch->anchor_offset + patch->original_size - kScRelayTailRestoreWords * sizeof(uint32_t);
-    if (!validate_vcc_transfer(patch->anchor_offset, scratch.entry_vcc_save_sgpr.value_or(0u),
-                               kAmdGpuVccLo) ||
-        !validate_scc_preserving_indirect_transfer(environment, entry_transfer,
-                                                   patch->trampoline_offset, scratch.entry_jump,
-                                                   /*capture_scc=*/true) ||
+    const uint64_t return_target = patch->anchor_offset + patch->original_size -
+                                   kScRelayTailRestoreWords * sizeof(uint32_t);
+    if (!validate_vcc_transfer(patch->anchor_offset,
+                               scratch.entry_vcc_save_sgpr.value_or(0u), kAmdGpuVccLo) ||
+        !validate_scc_preserving_indirect_transfer(
+            environment, entry_transfer, patch->trampoline_offset, scratch.entry_jump,
+            /*capture_scc=*/true) ||
         !validate_vcc_transfer(patch->trampoline_offset, kAmdGpuVccLo,
                                scratch.entry_vcc_save_sgpr.value_or(0u)) ||
         !validate_vcc_transfer(return_prefix, scratch.return_vcc_save_sgpr.value_or(0u),
                                kAmdGpuVccLo) ||
-        !validate_scc_preserving_indirect_transfer(environment, return_transfer, return_target,
-                                                   scratch.return_jump,
-                                                   /*capture_scc=*/true) ||
+        !validate_scc_preserving_indirect_transfer(
+            environment, return_transfer, return_target, scratch.return_jump,
+            /*capture_scc=*/true) ||
         !validate_vcc_transfer(return_target, kAmdGpuVccLo,
                                scratch.return_vcc_save_sgpr.value_or(0u))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
@@ -3630,6 +3513,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
   };
   if (!environment.require_target(errors, "ConSan exact-shadow proof found no target profile"))
     return;
+  const rj_code_arch_t arch = environment.arch();
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && !patch.workgroup_shadow &&
@@ -3667,45 +3551,69 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       continue;
     }
 
-    const std::optional<DecodedValidationRegion> decoded_body =
-        decode_validation_region(environment, body_offset, body_offset + body_size);
-    if (!decoded_body) {
-      errors.emplace_back(
-          "ConSan final validation could not re-decode exact-shadow generated body");
-      continue;
+    const std::span<const uint8_t> body = text.subspan(body_offset, body_size);
+    size_t decoded_cas_count = 0;
+    size_t decoded_local_exchange_count = 0;
+    size_t decoded_local_exchange_b32_count = 0;
+    size_t decoded_local_exchange_b64_count = 0;
+    size_t decoded_backward_local_loop_count = 0;
+    bool decoded_nonbackward_local_loop = false;
+    bool decoded_legacy_swap = false;
+    size_t cursor = 0;
+    while (cursor < body.size()) {
+      std::array<uint32_t, 4> words{};
+      std::memcpy(words.data(), body.data() + cursor,
+                  std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
+      std::unique_ptr<Instruction> instruction =
+          decode_bounded_instruction(*environment.decoder,
+                                     std::span<const uint32_t>(words).first(std::min(
+                                         words.size(), (body.size() - cursor) / sizeof(uint32_t))),
+                                     body_offset + cursor);
+      if (!instruction) {
+        errors.emplace_back(
+            "ConSan final validation could not re-decode exact-shadow generated body");
+        break;
+      }
+      if (!instruction || instruction->size() <= 0 ||
+          static_cast<size_t>(instruction->size()) > body.size() - cursor) {
+        errors.emplace_back(
+            "ConSan final validation found invalid exact-shadow instruction extent");
+        break;
+      }
+      const std::string_view mnemonic = instruction->mnemonic();
+      decoded_cas_count +=
+          (mnemonic == "flat_atomic_cmpswap" || mnemonic.starts_with("flat_atomic_cmpswap_b32"))
+              ? 1u
+              : 0u;
+      const bool local_exchange_b32 = mnemonic.starts_with("ds_storexchg_rtn_b32");
+      const bool local_exchange_b64 =
+          mnemonic.starts_with("ds_storexchg_rtn_b64") || mnemonic.starts_with("ds_wrxchg_rtn_b64");
+      decoded_local_exchange_b32_count += local_exchange_b32 ? 1u : 0u;
+      decoded_local_exchange_b64_count += local_exchange_b64 ? 1u : 0u;
+      decoded_local_exchange_count += local_exchange_b32 || local_exchange_b64 ? 1u : 0u;
+      if (mnemonic == "s_cbranch_execnz") {
+        const int16_t displacement = static_cast<int16_t>(words.front());
+        decoded_backward_local_loop_count += displacement < 0 ? 1u : 0u;
+        decoded_nonbackward_local_loop |= displacement >= 0;
+      }
+      decoded_legacy_swap |=
+          mnemonic == "flat_atomic_swap_x2" || mnemonic.starts_with("flat_atomic_swap_b64");
+      cursor += static_cast<size_t>(instruction->size());
     }
+
     const uint16_t scratch = *patch.scratch_vgpr;
-    const auto count_decoded = [&](auto predicate) {
-      return static_cast<size_t>(std::ranges::count_if(*decoded_body, predicate));
+    std::vector<uint32_t> body_words(body.size() / sizeof(uint32_t));
+    std::memcpy(body_words.data(), body.data(), body.size());
+    const auto count_pattern = [&body_words](std::span<const uint32_t> pattern) {
+      size_t count = 0;
+      auto position = body_words.cbegin();
+      while ((position = std::search(position, body_words.cend(), pattern.begin(),
+                                     pattern.end())) != body_words.cend()) {
+        ++count;
+        position += static_cast<std::ptrdiff_t>(pattern.size());
+      }
+      return count;
     };
-    const size_t decoded_cas_count = count_decoded([](const auto &decoded) {
-      return decoded.instruction->mnemonic().starts_with("flat_atomic_cmpswap");
-    });
-    const size_t decoded_local_exchange_b32_count = count_decoded([](const auto &decoded) {
-      return decoded.instruction->mnemonic().starts_with("ds_storexchg_rtn_b32");
-    });
-    const size_t decoded_local_exchange_b64_count = count_decoded([](const auto &decoded) {
-      const std::string_view mnemonic = decoded.instruction->mnemonic();
-      return mnemonic.starts_with("ds_storexchg_rtn_b64") ||
-             mnemonic.starts_with("ds_wrxchg_rtn_b64");
-    });
-    const size_t decoded_local_exchange_count =
-        decoded_local_exchange_b32_count + decoded_local_exchange_b64_count;
-    const size_t decoded_backward_local_loop_count = count_decoded([](const auto &decoded) {
-      const std::optional<int64_t> displacement = decoded.instruction->branch_offset_bytes();
-      return decoded.instruction->mnemonic() == "s_cbranch_execnz" && displacement &&
-             *displacement < 0;
-    });
-    const bool decoded_nonbackward_local_loop =
-        std::ranges::any_of(*decoded_body, [](const auto &decoded) {
-          const std::optional<int64_t> displacement = decoded.instruction->branch_offset_bytes();
-          return decoded.instruction->mnemonic() == "s_cbranch_execnz" &&
-                 (!displacement || *displacement >= 0);
-        });
-    const bool decoded_legacy_swap = std::ranges::any_of(*decoded_body, [](const auto &decoded) {
-      const std::string_view mnemonic = decoded.instruction->mnemonic();
-      return mnemonic == "flat_atomic_swap_x2" || mnemonic.starts_with("flat_atomic_swap_b64");
-    });
     if (patch.workgroup_shadow) {
       const ConSanMoiWorkgroupShadowLayout &workgroup_shadow = *patch.workgroup_shadow;
       const auto intent = std::ranges::find_if(
@@ -3735,27 +3643,26 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           (needs_publication_loop ? 1u : 0u);
       const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
+      const auto expected_local_exchange_b64 = instrumentation::build_ds_storexchg_rtn_b64(
+          static_cast<uint16_t>(scratch + old_value_offset), scratch,
+          static_cast<uint16_t>(scratch + 2u), 0u, arch);
       // Exact-byte publication reserves v14:v15 for the diagnostic
       // compare-swap tuple. Keep this independent of the emitter's scratch
       // arithmetic so final validation catches accidental tuple relocation.
       const uint16_t diagnostic_claim_offset = 14u;
-      const size_t exact_local_exchange_count = count_decoded([&](const auto &decoded) {
-        return is_local_exchange_b64(environment, decoded,
-                                     static_cast<uint16_t>(scratch + old_value_offset), scratch,
-                                     static_cast<uint16_t>(scratch + 2u));
-      });
-      const size_t exact_diagnostic_claim_count = count_decoded([&](const auto &decoded) {
-        return is_flat_compare_exchange(environment, decoded, scratch,
-                                        static_cast<uint16_t>(scratch + diagnostic_claim_offset),
-                                        static_cast<uint16_t>(scratch + diagnostic_claim_offset));
-      });
-      if (decoded_legacy_swap || decoded_cas_count != decoded_local_exchange_cell_count ||
+      const auto expected_first_diagnostic_claim = instrumentation::build_flat_atomic_cmpswap_b32(
+          scratch, static_cast<uint16_t>(scratch + diagnostic_claim_offset),
+          static_cast<uint16_t>(scratch + diagnostic_claim_offset),
+          /*return_old_value=*/true,
+          /*scope=*/2, arch);
+      if (!expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
+          decoded_cas_count != decoded_local_exchange_cell_count ||
           decoded_local_exchange_count == 0u ||
           access == result.program_inventory.access_sites().end() ||
           decoded_backward_local_loop_count < minimum_backward_loop_count ||
           decoded_nonbackward_local_loop || decoded_local_exchange_b32_count != 0u ||
-          exact_local_exchange_count != decoded_local_exchange_b64_count ||
-          exact_diagnostic_claim_count != decoded_cas_count) {
+          count_pattern(*expected_local_exchange_b64) != decoded_local_exchange_b64_count ||
+          count_pattern(*expected_first_diagnostic_claim) != decoded_cas_count) {
         errors.emplace_back(
             "ConSan final validation found invalid workgroup-local exact-shadow publication "
             "semantics: decoded_cas=" +
@@ -3766,20 +3673,37 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
             " backward_loops=" + std::to_string(decoded_backward_local_loop_count) +
             " minimum_backward_loops=" + std::to_string(minimum_backward_loop_count) +
             " nonbackward_loop=" + std::to_string(decoded_nonbackward_local_loop) +
-            " legacy_swap=" + std::to_string(decoded_legacy_swap) +
-            " decoded_exchange_b32=" + std::to_string(decoded_local_exchange_b32_count) +
-            " expected_exchange_b64=" + std::to_string(exact_local_exchange_count) +
-            " expected_claim=" + std::to_string(exact_diagnostic_claim_count));
+            " legacy_swap=" + std::to_string(decoded_legacy_swap) + " decoded_exchange_b32=" +
+            std::to_string(decoded_local_exchange_b32_count) + " expected_exchange_b64=" +
+            std::to_string(expected_local_exchange_b64 ? count_pattern(*expected_local_exchange_b64)
+                                                       : 0u) +
+            " expected_claim=" +
+            std::to_string(expected_first_diagnostic_claim
+                               ? count_pattern(*expected_first_diagnostic_claim)
+                               : 0u));
       }
       continue;
     }
 
-    const size_t exact_cas_count = count_decoded([&](const auto &decoded) {
-      return is_flat_compare_exchange(environment, decoded, scratch,
-                                      static_cast<uint16_t>(scratch + 14u),
-                                      static_cast<uint16_t>(scratch + 14u));
-    });
+    const auto expected_cas = instrumentation::build_flat_atomic_cmpswap_b32(
+        scratch, static_cast<uint16_t>(scratch + 14u), static_cast<uint16_t>(scratch + 14u),
+        /*return_old_value=*/true, /*scope=*/2, arch);
+    const auto expected_dispatch_low_store = instrumentation::build_flat_store_b32(
+        scratch, static_cast<uint16_t>(scratch + 2u), arch,
+        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id));
+    const auto expected_dispatch_high_store = instrumentation::build_flat_store_b32(
+        scratch, static_cast<uint16_t>(scratch + 3u), arch,
+        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t));
+    if (!expected_cas || !expected_dispatch_low_store || !expected_dispatch_high_store) {
+      errors.emplace_back(
+          "ConSan final validation could not encode exact-shadow semantic expectations");
+      continue;
+    }
+
+    const size_t exact_cas_count = count_pattern(*expected_cas);
     const size_t transaction_count = exact_cas_count / 2u;
+    std::vector<uint32_t> capture_low;
+    std::vector<uint32_t> capture_high;
     const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
     std::optional<uint16_t> expected_dispatch_sgpr =
         result.moi_operating_point.moi_dispatch_identity.sgpr();
@@ -3853,44 +3777,43 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
     }
     if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
       expected_dispatch_vgpr = owner_dispatch_vgpr;
-    const auto is_dispatch_capture = [&](const DecodedValidationInstruction &decoded, bool high) {
-      const uint16_t destination = static_cast<uint16_t>(scratch + (high ? 3u : 2u));
-      if (expected_dispatch_sgpr)
-        return is_vector_move_from_scalar(
-            *decoded.instruction, destination,
-            static_cast<uint16_t>(*expected_dispatch_sgpr + (high ? 1u : 0u)));
-      if (expected_dispatch_vgpr)
-        return is_vector_move_from_vector(
-            *decoded.instruction, destination,
-            static_cast<uint16_t>(*expected_dispatch_vgpr + (high ? 1u : 0u)));
-      const uint64_t shift = high ? 32u : 0u;
-      return is_vector_move_constant(
-          *decoded.instruction, destination,
-          static_cast<uint32_t>(expected_moi_report_dispatch_id >> shift));
-    };
-    const size_t dispatch_low_store_count = count_decoded([&](const auto &decoded) {
-      return is_flat_memory_operation(environment, decoded, ValidationFlatOperation::Store, scratch,
-                                      static_cast<uint16_t>(scratch + 2u),
-                                      offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id));
-    });
-    const size_t dispatch_high_store_count = count_decoded([&](const auto &decoded) {
-      return is_flat_memory_operation(environment, decoded, ValidationFlatOperation::Store, scratch,
-                                      static_cast<uint16_t>(scratch + 3u),
-                                      offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) +
-                                          sizeof(uint32_t));
-    });
-    const size_t capture_low_count = count_decoded(
-        [&](const auto &decoded) { return is_dispatch_capture(decoded, /*high=*/false); });
-    const size_t capture_high_count = count_decoded(
-        [&](const auto &decoded) { return is_dispatch_capture(decoded, /*high=*/true); });
+    if (expected_dispatch_sgpr) {
+      capture_low.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
+      capture_high.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
+                              static_cast<uint16_t>(*expected_dispatch_sgpr + 1u), arch));
+    } else if (expected_dispatch_vgpr) {
+      capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
+                                                vector_source_vgpr(*expected_dispatch_vgpr), arch));
+      capture_high.push_back(build_v_mov_b32_e32(
+          static_cast<uint16_t>(scratch + 3u),
+          vector_source_vgpr(static_cast<uint16_t>(*expected_dispatch_vgpr + 1u)), arch));
+    } else {
+      const auto low = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 2u),
+          static_cast<uint32_t>(expected_moi_report_dispatch_id), arch);
+      const auto high = instrumentation::build_v_mov_b32_literal(
+          static_cast<uint16_t>(scratch + 3u),
+          static_cast<uint32_t>(expected_moi_report_dispatch_id >> 32u), arch);
+      if (!low || !high) {
+        errors.emplace_back(
+            "ConSan final validation could not encode literal dispatch-ID expectations");
+        continue;
+      }
+      capture_low = *low;
+      capture_high = *high;
+    }
     // One composite-key partition body owns each generated cell. Its odd
     // claim and even commit are the two required CAS operations; distinct
     // address/access/mask groups revisit the same body at runtime rather than
     // requiring a duplicated uniform/fallback transaction in the image.
     if (decoded_legacy_swap || decoded_cas_count < 2u || decoded_cas_count % 2u != 0u ||
-        exact_cas_count != decoded_cas_count || dispatch_low_store_count != transaction_count ||
-        dispatch_high_store_count != transaction_count || capture_low_count < transaction_count ||
-        capture_high_count < transaction_count) {
+        exact_cas_count != decoded_cas_count ||
+        count_pattern(*expected_dispatch_low_store) != transaction_count ||
+        count_pattern(*expected_dispatch_high_store) != transaction_count ||
+        count_pattern(capture_low) < transaction_count ||
+        count_pattern(capture_high) < transaction_count) {
       const auto optional_register = [](std::optional<uint16_t> value) {
         return value ? std::to_string(*value) : std::string("none");
       };
@@ -3900,10 +3823,10 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           std::to_string(patch.anchor_offset) + " scratch=v" + std::to_string(scratch) +
           " decoded_cas=" + std::to_string(decoded_cas_count) + " exact_cas=" +
           std::to_string(exact_cas_count) + " transactions=" + std::to_string(transaction_count) +
-          " dispatch_low_stores=" + std::to_string(dispatch_low_store_count) +
-          " dispatch_high_stores=" + std::to_string(dispatch_high_store_count) +
-          " capture_low=" + std::to_string(capture_low_count) +
-          " capture_high=" + std::to_string(capture_high_count) +
+          " dispatch_low_stores=" + std::to_string(count_pattern(*expected_dispatch_low_store)) +
+          " dispatch_high_stores=" + std::to_string(count_pattern(*expected_dispatch_high_store)) +
+          " capture_low=" + std::to_string(count_pattern(capture_low)) +
+          " capture_high=" + std::to_string(count_pattern(capture_high)) +
           " expected_dispatch_sgpr=" + optional_register(expected_dispatch_sgpr) +
           " expected_dispatch_vgpr=" + optional_register(expected_dispatch_vgpr) +
           " owner_dispatch_vgpr=" + optional_register(owner_dispatch_vgpr) +
@@ -3917,6 +3840,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
 void validate_inline_release_transaction_semantics(const FinalValidationEnvironment &environment,
                                                    const ConSanFinalValidationInput &result,
                                                    std::vector<std::string> &errors) {
+  constexpr uint16_t kVccLo = 106u;
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       return false;
@@ -3976,18 +3900,45 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
           "ConSan final validation found invalid versioned release transaction bounds");
       continue;
     }
-    const std::optional<DecodedValidationRegion> decoded_body = decode_validation_region(
-        environment, patch.trampoline_offset, patch.trampoline_offset + patch.trampoline_size);
-    if (!decoded_body) {
+    const std::span<const uint8_t> body =
+        text.subspan(patch.trampoline_offset, patch.trampoline_size);
+    size_t cursor = 0;
+    bool decode_failed = false;
+    while (cursor < body.size()) {
+      std::array<uint32_t, 4> words{};
+      std::memcpy(words.data(), body.data() + cursor,
+                  std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
+      std::unique_ptr<Instruction> instruction =
+          decode_bounded_instruction(*environment.decoder,
+                                     std::span<const uint32_t>(words).first(std::min(
+                                         words.size(), (body.size() - cursor) / sizeof(uint32_t))),
+                                     patch.trampoline_offset + cursor);
+      if (!instruction) {
+        decode_failed = true;
+      }
+      if (!instruction || instruction->size() <= 0 ||
+          static_cast<size_t>(instruction->size()) > body.size() - cursor) {
+        decode_failed = true;
+        break;
+      }
+      cursor += static_cast<size_t>(instruction->size());
+    }
+    if (decode_failed) {
       errors.emplace_back(
           "ConSan final validation could not re-decode versioned release transaction");
       continue;
     }
-    const auto positions = [&](auto predicate) {
-      std::vector<uint64_t> result_positions;
-      for (const DecodedValidationInstruction &decoded : *decoded_body) {
-        if (predicate(decoded))
-          result_positions.push_back(decoded.offset);
+
+    std::vector<uint32_t> body_words(body.size() / sizeof(uint32_t));
+    std::memcpy(body_words.data(), body.data(), body.size());
+    const auto positions = [&](std::span<const uint32_t> pattern) {
+      std::vector<size_t> result_positions;
+      auto position = body_words.cbegin();
+      while ((position = std::search(position, body_words.cend(), pattern.begin(),
+                                     pattern.end())) != body_words.cend()) {
+        result_positions.push_back(
+            static_cast<size_t>(std::distance(body_words.cbegin(), position)));
+        position += static_cast<std::ptrdiff_t>(pattern.size());
       }
       return result_positions;
     };
@@ -3996,6 +3947,9 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
+    const auto version_cas = instrumentation::build_flat_atomic_cmpswap_b32(
+        scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
+        arch);
     uint16_t owner_vgpr = 0;
     if (patch.private_state_layout || patch.persistent_sgpr_state.owner()) {
       const auto resource_plan = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
@@ -4019,15 +3973,16 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
           "ConSan final validation could not resolve release-transaction owner state");
       continue;
     }
-    const std::vector<uint64_t> cas_positions = positions([&](const auto &decoded) {
-      return is_flat_compare_exchange(environment, decoded, scratch, version_cas_value,
-                                      version_cas_value);
-    });
-    const std::vector<uint64_t> owner_positions = positions([&](const auto &decoded) {
-      return is_flat_memory_operation(environment, decoded, ValidationFlatOperation::Store, scratch,
-                                      owner_vgpr,
-                                      offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id));
-    });
+    const auto owner_store = instrumentation::build_flat_store_b32(
+        scratch, owner_vgpr, arch, offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id));
+    const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
+    if (!version_cas || !owner_store || !wait_store) {
+      errors.emplace_back(
+          "ConSan final validation could not encode release-transaction expectations");
+      continue;
+    }
+    const std::vector<size_t> cas_positions = positions(*version_cas);
+    const std::vector<size_t> owner_positions = positions(*owner_store);
     const size_t owner_between =
         cas_positions.size() >= 2u
             ? std::ranges::count_if(owner_positions,
@@ -4045,10 +4000,8 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     const ConSanAtomicSite *site = atomic_site_for(patch.anchor_offset);
     const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
     const bool claimed_compare_exchange = compare_exchange && cas_positions.size() == 3u;
-    const uint64_t publication_begin =
-        claimed_compare_exchange ? cas_positions[1]
-                                 : (cas_positions.empty() ? std::numeric_limits<uint64_t>::max()
-                                                          : cas_positions.front());
+    const size_t publication_begin =
+        claimed_compare_exchange ? cas_positions[1] : cas_positions.front();
     const size_t publisher_owner_count =
         cas_positions.size() >= 2u ? std::ranges::count_if(owner_positions,
                                                            [&](size_t position) {
@@ -4060,32 +4013,33 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u)) &&
                  (!claimed_compare_exchange || publisher_owner_count == 1u);
 
-    const auto has_flat_load = [&](uint16_t destination, size_t offset) {
-      return std::ranges::any_of(*decoded_body, [&](const auto &decoded) {
-        return is_flat_memory_operation(environment, decoded, ValidationFlatOperation::Load,
-                                        snapshot_address, destination,
-                                        static_cast<int32_t>(offset));
-      });
-    };
-    bool token_loads_valid =
-        has_flat_load(static_cast<uint16_t>(scratch + 17u),
-                      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version)) &&
-        has_flat_load(temporary, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version));
+    const auto version_before = instrumentation::build_flat_load_b32(
+        snapshot_address, static_cast<uint16_t>(scratch + 17u), arch,
+        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version));
+    const auto version_after = instrumentation::build_flat_load_b32(
+        snapshot_address, temporary, arch,
+        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version));
+    bool token_loads_valid = version_before && version_after &&
+                             !positions(*version_before).empty() &&
+                             !positions(*version_after).empty();
     for (size_t offset : kConSanMoiInlineAcquiredEpochTokenPayloadOffsets) {
-      token_loads_valid &= has_flat_load(temporary, offset);
+      const auto load =
+          instrumentation::build_flat_load_b32(snapshot_address, temporary, arch, offset);
+      token_loads_valid &= load && !positions(*load).empty();
     }
     valid &= token_loads_valid;
 
     const auto require_snapshot_store = [&](size_t offset, uint16_t source) {
-      const std::vector<uint64_t> store_positions = positions([&](const auto &decoded) {
-        return is_flat_memory_operation(environment, decoded, ValidationFlatOperation::Store,
-                                        snapshot_address, source, static_cast<int32_t>(offset));
-      });
+      const auto store =
+          instrumentation::build_flat_store_b32(snapshot_address, source, arch, offset);
+      if (!store)
+        return false;
+      const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              publication_begin < store_positions.front() &&
              std::ranges::any_of(
                  owner_positions,
-                 [&](uint64_t owner_position) {
+                 [&](size_t owner_position) {
                    return store_positions.front() < owner_position &&
                           owner_position < cas_positions.back();
                  });
@@ -4104,42 +4058,45 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
                                                       static_cast<uint16_t>(scratch + 13u + i));
     }
     valid &= snapshot_stores_valid;
-    const size_t wait_store_count = positions([&](const auto &decoded) {
-                                      return is_global_store_completion(environment, decoded);
-                                    }).size();
+    const size_t wait_store_count = positions(std::array<uint32_t, 1>{*wait_store}).size();
     valid &= wait_store_count >= 2u;
 
     if (compare_exchange) {
       if (!site->data_vgpr || !site->dst_vgpr) {
         valid = false;
       } else {
-        std::vector<uint64_t> success_positions;
-        for (size_t index = 0; index + 1u < decoded_body->size(); ++index) {
-          if (is_vector_compare_equal(*(*decoded_body)[index].instruction,
-                                      static_cast<uint16_t>(*site->data_vgpr + 1u),
-                                      *site->dst_vgpr) &&
-              is_saveexec_from_vcc(*(*decoded_body)[index + 1u].instruction,
-                                   *result.moi_operating_point.moi_exec_save_sgpr)) {
-            success_positions.push_back((*decoded_body)[index].offset);
-          }
+        const auto success = instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)), *site->dst_vgpr,
+            arch);
+        const auto narrow = instrumentation::build_s_and_saveexec_b64(
+            *result.moi_operating_point.moi_exec_save_sgpr, kVccLo, arch);
+        if (!success || !narrow) {
+          valid = false;
+        } else {
+          const std::array<uint32_t, 2> success_sequence = {*success, *narrow};
+          const std::vector<size_t> success_positions = positions(success_sequence);
+          const bool guest_offset_valid =
+              patch.relocated_guest_instruction_offset &&
+              *patch.relocated_guest_instruction_offset >= patch.trampoline_offset &&
+              (*patch.relocated_guest_instruction_offset - patch.trampoline_offset) %
+                      sizeof(uint32_t) ==
+                  0u;
+          const size_t guest_position =
+              guest_offset_valid ? static_cast<size_t>((*patch.relocated_guest_instruction_offset -
+                                                        patch.trampoline_offset) /
+                                                       sizeof(uint32_t))
+                                 : body_words.size();
+          // The release slot must already be odd when the guest CAS exposes
+          // its new value. Both post-guest outcome qualifications precede the
+          // failed-comparison rollback, and only then may successor metadata
+          // be staged and committed.
+          valid &= claimed_compare_exchange && guest_offset_valid &&
+                   guest_position < body_words.size() && success_positions.size() == 2u &&
+                   cas_positions.front() < guest_position &&
+                   guest_position < success_positions.front() &&
+                   success_positions.front() < success_positions.back() &&
+                   success_positions.back() < cas_positions[1];
         }
-        const bool guest_offset_valid =
-            patch.relocated_guest_instruction_offset &&
-            *patch.relocated_guest_instruction_offset >= patch.trampoline_offset &&
-            *patch.relocated_guest_instruction_offset <
-                patch.trampoline_offset + patch.trampoline_size;
-        const uint64_t guest_position = guest_offset_valid
-                                            ? *patch.relocated_guest_instruction_offset
-                                            : std::numeric_limits<uint64_t>::max();
-        // The release slot must already be odd when the guest CAS exposes
-        // its new value. Both post-guest outcome qualifications precede the
-        // failed-comparison rollback, and only then may successor metadata
-        // be staged and committed.
-        valid &= claimed_compare_exchange && guest_offset_valid && success_positions.size() == 2u &&
-                 cas_positions.front() < guest_position &&
-                 guest_position < success_positions.front() &&
-                 success_positions.front() < success_positions.back() &&
-                 success_positions.back() < cas_positions[1];
       }
     }
     if (!valid) {

@@ -26,7 +26,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_perturbation_policy.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"

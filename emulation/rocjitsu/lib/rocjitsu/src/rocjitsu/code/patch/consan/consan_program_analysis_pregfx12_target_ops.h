@@ -110,19 +110,9 @@ void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool glob
   }
 }
 
-template <typename DsRaw, typename FlatRaw, typename GlobalRaw>
+template <typename FlatRaw, typename GlobalRaw>
 bool decode_pregfx12_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
                                  std::span<const uint8_t> instruction, uint32_t null_saddr) {
-  if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(DsRaw)) {
-    DsRaw raw{};
-    std::memcpy(&raw, instruction.data(), sizeof(raw));
-    site.raw_addr = static_cast<uint32_t>(raw.addr);
-    site.raw_data0 = static_cast<uint32_t>(raw.data0);
-    site.raw_data1 = static_cast<uint32_t>(raw.data1);
-    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
-    site.raw_ioffset = static_cast<int32_t>(raw.offset0);
-    return true;
-  }
   if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
     FlatRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
