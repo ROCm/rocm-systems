@@ -176,6 +176,12 @@ cmake --build hrr-build --target hrr-playback
 ```
 
 ### Usage
+The capture runtime and playback tool must come from the same source commit. They
+share generated HRR wire-format structs; mixing a checkout-built `hrr-playback`
+with a prebuilt SDK `libamdhip64` can produce `payload too small` errors or missing
+kernel/code-object replay. Use the same install prefix or matching `LD_LIBRARY_PATH`
+for both components.
+
 ```bash
 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture
 hrr-playback ./out.hrr                           # replay + D2H validation
