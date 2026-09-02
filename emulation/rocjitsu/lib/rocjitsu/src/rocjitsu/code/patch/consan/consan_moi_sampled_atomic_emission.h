@@ -5,7 +5,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
 
 #include <optional>

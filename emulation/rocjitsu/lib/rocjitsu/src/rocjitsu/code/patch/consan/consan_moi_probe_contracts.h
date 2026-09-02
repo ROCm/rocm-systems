@@ -13,10 +13,4 @@ namespace rocjitsu::consan_moi_impl {
                                                                  rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors);
 
-[[nodiscard]] bool append_sampled_private_owner_epoch_load(
-    std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
-    bool automatic_private_epoch, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    const ConSanMoiPrivateStateLayout &layout, rj_code_arch_t arch,
-    std::vector<std::string> &errors);
-
 } // namespace rocjitsu::consan_moi_impl

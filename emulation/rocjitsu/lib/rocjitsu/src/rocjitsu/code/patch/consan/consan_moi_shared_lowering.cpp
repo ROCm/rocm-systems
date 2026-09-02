@@ -282,38 +282,6 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
   return cached->second;
 }
 
-[[nodiscard]] bool append_sampled_private_owner_epoch_load(
-    std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
-    bool automatic_private_epoch, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    const ConSanMoiPrivateStateLayout &layout, rj_code_arch_t arch,
-    std::vector<std::string> &errors) {
-  if (!automatic_private_epoch || !owner_epoch_vgprs.owner || !owner_epoch_vgprs.epoch ||
-      !layout.owner_offset) {
-    errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
-    return false;
-  }
-  const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, arch, errors);
-  const auto load_epoch =
-      instrumentation::build_private_load_b32(*owner_epoch_vgprs.epoch, layout.epoch_offset, arch);
-  const auto load_owner =
-      instrumentation::build_private_load_b32(*owner_epoch_vgprs.owner, *layout.owner_offset, arch);
-  const auto wait = instrumentation::build_s_wait_private_load0(arch);
-  const auto owner =
-      owner_shift ? instrumentation::build_v_lshrrev_b32(*owner_epoch_vgprs.owner,
-                                                         scalar_positive_inline_u32(*owner_shift),
-                                                         *owner_epoch_vgprs.owner, arch)
-                  : std::nullopt;
-  if (!owner_shift || !load_epoch || !load_owner || !wait || !owner) {
-    errors.emplace_back("ConSan MOI sampled sync could not load private owner/epoch state");
-    return false;
-  }
-  words.insert(words.end(), load_epoch->begin(), load_epoch->end());
-  words.insert(words.end(), load_owner->begin(), load_owner->end());
-  words.push_back(*wait);
-  words.push_back(*owner);
-  return true;
-}
-
 [[nodiscard]] std::optional<VgprSpillSequence> build_moi_spill_sequence(
     const ProgramInventory &program_inventory, const ResolvedMoiScratchPlan &resources,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,

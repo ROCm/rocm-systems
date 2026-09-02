@@ -678,6 +678,21 @@ foreach(_file IN LISTS _consan_production_files)
         "Record/Replay private-owner selection must remain at its planning decision"
     )
 endforeach()
+foreach(_common_sampled_private_emitter_owner IN ITEMS
+    consan_moi_probe_contracts.h
+    consan_moi_shared_lowering.cpp
+    consan_moi_shared_lowering.h
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_common_sampled_private_emitter_owner}"
+        "append_sampled_private_owner_epoch_load"
+        "Sampled private owner/epoch emission must remain in its mode owner"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_moi_sampled.cpp" _sampled_mode_owner)
+if(NOT _sampled_mode_owner MATCHES "append_sampled_private_owner_epoch_load")
+    message(FATAL_ERROR "Sampled private owner/epoch emission lost its mode owner")
+endif()
 file(READ
     "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
     _record_replay_access_emission

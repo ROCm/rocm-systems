@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
 
+#include "rocjitsu/code/patch/consan/consan_moi_sampled.h"
+
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
