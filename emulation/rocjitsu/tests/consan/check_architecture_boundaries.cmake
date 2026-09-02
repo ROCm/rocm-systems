@@ -934,6 +934,24 @@ if(NOT _moi_barrier_planning MATCHES
         "ordinary barrier bodies must be planned by the selected mode owner"
     )
 endif()
+if(NOT _moi_barrier_planning MATCHES
+       "MoiPrivateBarrierPlanner[ \t]+plan_private_body" OR
+   NOT _moi_barrier_planning MATCHES
+       "plan_private_body[(]MoiPrivateBarrierPlanningContext" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "plan_record_replay_private_barrier" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*plan_record_replay_private_barrier" OR
+   NOT _inline_barrier_owner MATCHES
+       "plan_inline_shadow_private_barrier" OR
+   NOT _inline_barrier_owner MATCHES
+       "try_apply_shared_barrier_patch[^;]*plan_inline_shadow_private_barrier" OR
+   _moi_barrier_planning MATCHES
+       "resolve_moi_record_event_emission_plan|apply_record_replay_entry_workgroup_assignment|record_replay_workgroup_offsets|MoiInlinePrivateEpochBarrierEmissionPlan[ \t\r\n]*[{]")
+    message(FATAL_ERROR
+        "private-epoch barrier bodies must be planned by the selected mode owner"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
@@ -2906,11 +2924,14 @@ endif()
 foreach(_inline_barrier_assignment_count IN ITEMS 4 2)
     if(_inline_barrier_assignment_count EQUAL 4)
         set(_inline_barrier_assignment apply_moi_transient_sgpr_assignment)
+        set(_inline_barrier_assignment_owners
+            "${_moi_barrier_owner}\n${_record_replay_barrier_owner}\n${_inline_barrier_owner}")
     else()
         set(_inline_barrier_assignment apply_moi_persistent_vgpr_assignment)
+        set(_inline_barrier_assignment_owners "${_moi_barrier_owner}")
     endif()
     string(REGEX MATCHALL "${_inline_barrier_assignment}[(]"
-           _inline_barrier_assignment_calls "${_moi_barrier_owner}")
+           _inline_barrier_assignment_calls "${_inline_barrier_assignment_owners}")
     list(LENGTH _inline_barrier_assignment_calls _inline_barrier_actual_assignment_count)
     if(NOT _inline_barrier_actual_assignment_count EQUAL _inline_barrier_assignment_count)
         message(

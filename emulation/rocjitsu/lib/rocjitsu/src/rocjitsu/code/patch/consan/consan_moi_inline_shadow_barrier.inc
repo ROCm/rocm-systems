@@ -182,6 +182,54 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
   return words;
 }
 
+[[nodiscard]] std::optional<PlannedBarrierLowering>
+plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
+  auto &[bytes, options, point, candidate, resource_plan, owners, access_patch,
+         private_state_layout, semantics, spill_managers, private_requirements, arch, result] =
+      context;
+  const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
+  const auto private_limit = consan_address_free_private_limit(arch);
+  if (!private_limit) {
+    result.warnings.emplace_back(
+        "ConSan MOI private epoch barrier has no address-free scratch support");
+    return std::nullopt;
+  }
+  SpillManager manager(ephemeral_base, *private_limit);
+  auto spill = build_vgpr_spill_sequence(manager, *access_patch.scratch_vgpr,
+                                         /*vgpr_count=*/1, arch);
+  if (!spill) {
+    result.warnings.emplace_back(
+        "ConSan MOI private epoch barrier could not preserve its temporary VGPR");
+    return std::nullopt;
+  }
+  if (!apply_moi_transient_sgpr_assignment(options, point, result.moi_operating_point, owners)) {
+    result.warnings.emplace_back(
+        "ConSan MOI private epoch barrier lost its transient scalar assignment");
+    return std::nullopt;
+  }
+  const uint32_t required_private_bytes =
+      std::max(access_patch.required_private_segment_size, spill->total_private_bytes);
+  note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
+  ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
+      owners, access_patch.scratch_vgpr, private_state_layout, &*spill, required_private_bytes);
+  const MoiScalarAbiPlan scalar_abi =
+      plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
+  return PlannedBarrierLowering{
+      .candidate = candidate,
+      .derived_owner = std::nullopt,
+      .body =
+          MoiInlinePrivateEpochBarrierEmissionPlan{
+              .scratch_vgpr = *access_patch.scratch_vgpr,
+              .epoch_offset = private_state_layout.epoch_offset,
+              .indirect_jump = scalar_abi.indirect_jump,
+          },
+      .branch_only_spill = point.moi_branch_only_spill.has_value(),
+      .spill = std::move(spill),
+      .scalar_spill = std::nullopt,
+      .patch_abi = std::move(patch_abi),
+  };
+}
+
 [[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_inline_shadow_barrier_body(
     const ConSanOptions &options, ConSanMoiOperatingPoint &point,
     const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
@@ -205,6 +253,7 @@ void try_apply_inline_shadow_barrier_patch(
   if (barrier_point.has_inline_moi_scalar_spill())
     barrier_point.moi_exec_save_sgpr.reset();
   try_apply_shared_barrier_patch(bytes, options, ConSanProbeIntentKind::ExactBarrierEpoch,
-                                 plan_inline_shadow_barrier_body, barrier_point, arch,
+                                 plan_inline_shadow_barrier_body,
+                                 plan_inline_shadow_private_barrier, barrier_point, arch,
                                  resource_state, reserved_sync_islands, semantics, result);
 }

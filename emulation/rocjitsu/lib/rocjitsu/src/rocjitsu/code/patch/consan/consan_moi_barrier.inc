@@ -201,6 +201,40 @@ using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
     std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t,
     ConSanTransformArtifacts &);
 
+struct PlannedBarrierLowering {
+  MoiBarrierEvidenceSitePlan candidate;
+  std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
+  MoiBarrierBodyPlan body;
+  bool branch_only_spill = false;
+  std::optional<VgprSpillSequence> spill;
+  std::optional<SgprSpillSequence> scalar_spill;
+  ConSanPatchAbiEffects patch_abi;
+
+  [[nodiscard]] bool uses_scalar_epoch() const {
+    const auto *inline_epoch = std::get_if<MoiInlineBarrierEpochEmissionPlan>(&body);
+    return inline_epoch != nullptr && inline_epoch->persistent_epoch_sgpr.has_value();
+  }
+};
+
+struct MoiPrivateBarrierPlanningContext {
+  std::span<const uint8_t> bytes;
+  const ConSanOptions &options;
+  ConSanMoiOperatingPoint point;
+  const MoiBarrierEvidenceSitePlan &candidate;
+  const ConSanCandidateResourcePlan &resource_plan;
+  std::span<const uint64_t> owners;
+  const ConSanPatchLoweringProduct &access_patch;
+  const ConSanMoiPrivateStateLayout &private_state_layout;
+  const MoiObjectModeSemantics &semantics;
+  MoiSpillManagers &spill_managers;
+  MoiDescriptorPrivateRequirements &private_requirements;
+  rj_code_arch_t arch;
+  ConSanTransformArtifacts &result;
+};
+
+using MoiPrivateBarrierPlanner =
+    std::optional<PlannedBarrierLowering> (*)(MoiPrivateBarrierPlanningContext);
+
 [[nodiscard]] std::optional<ConSanIndirectJumpSgprs>
 moi_barrier_body_indirect_jump(const MoiBarrierBodyPlan &body) {
   return std::visit([](const auto &plan) { return plan.indirect_jump; }, body);
@@ -284,6 +318,7 @@ validate_reserved_barrier_island_layout(
 void try_apply_shared_barrier_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     ConSanProbeIntentKind evidence_kind, MoiBarrierBodyPlanner plan_body,
+    MoiPrivateBarrierPlanner plan_private_body,
     const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
     MoiResourcePlanningState &resource_state,
     const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
@@ -371,20 +406,6 @@ void try_apply_shared_barrier_patch(
     return;
   }
 
-  struct PlannedBarrierLowering {
-    MoiBarrierEvidenceSitePlan candidate;
-    std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-    MoiBarrierBodyPlan body;
-    bool branch_only_spill = false;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<SgprSpillSequence> scalar_spill;
-    ConSanPatchAbiEffects patch_abi;
-
-    [[nodiscard]] bool uses_scalar_epoch() const {
-      const auto *inline_epoch = std::get_if<MoiInlineBarrierEpochEmissionPlan>(&body);
-      return inline_epoch != nullptr && inline_epoch->persistent_epoch_sgpr.has_value();
-    }
-  };
   std::vector<PlannedBarrierLowering> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
   MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
@@ -423,134 +444,23 @@ void try_apply_shared_barrier_patch(
         continue;
       }
       const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch->private_state_layout;
-      if (emits_barrier_record) {
-        const auto resources =
-            resolve_moi_scratch_plan(*plan, owner_point, result.moi_operating_point,
-                                     /*expected_count=*/6u);
-        if (!resources || !private_state_layout.record_replay_workgroup_offsets.complete()) {
-          result.warnings.emplace_back(
-              "ConSan MOI Record/Replay dense barrier has no complete private exact-workgroup "
-              "layout in " +
-              candidate.container_name);
-          continue;
-        }
-        ConSanMoiOperatingPoint candidate_point = std::move(owner_point);
-        if (!apply_moi_transient_sgpr_assignment(options, candidate_point,
-                                                 result.moi_operating_point, owners) ||
-            !apply_record_replay_entry_workgroup_assignment(options, candidate_point,
-                                                            result.moi_operating_point, owners,
-                                                            &private_state_layout)) {
-          result.warnings.emplace_back(
-              "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
-          continue;
-        }
-        const MoiScalarAbiPlan scalar_abi =
-            plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
-        const auto record_emission =
-            resolve_moi_record_event_emission_plan(options, options, candidate_point, scalar_abi,
-                                                   resources->base, arch, &private_state_layout);
-        if (!record_emission) {
-          result.warnings.emplace_back(
-              "ConSan MOI Record/Replay dense barrier has an incomplete emission plan");
-          continue;
-        }
-        std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
-        if (!candidate_point.moi_owner_epoch_vgprs.owner() &&
-            !candidate_point.moi_persistent_sgprs.owner()) {
-          const auto owner_shift =
-              common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
-          if (!owner_shift)
-            continue;
-          derived_owner = MoiWorkitemOwnerDerivationPlan{
-              .entry_workitem_x_private_offset = private_state_layout.owner_offset,
-              .wave_size_shift = *owner_shift,
-          };
-        }
-        const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
-        std::optional<VgprSpillSequence> spill;
-        if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-            moi_scalar_spill_requires_dynamic_vgpr_frame(result.program_inventory, *resources,
-                                                         candidate_point)) {
-          spill = build_moi_spill_sequence(
-              result.program_inventory, *resources, options, options, candidate_point, semantics,
-              visible_evidence_spill_managers, arch, result.warnings, ephemeral_base);
-          if (!spill)
-            continue;
-        }
-        std::optional<SgprSpillSequence> scalar_spill;
-        if (candidate_point.has_compact_moi_scalar_spill()) {
-          scalar_spill = build_moi_sgpr_spill_sequence(
-              result.program_inventory, *resources, options, options, candidate_point, semantics,
-              visible_evidence_spill_managers, arch, result.warnings, ephemeral_base,
-              spill ? &*spill : nullptr);
-          if (!scalar_spill)
-            continue;
-        }
-        uint32_t required_private_bytes = ephemeral_base;
-        if (spill)
-          required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
-        if (scalar_spill) {
-          required_private_bytes =
-              std::max(required_private_bytes, scalar_spill->total_private_bytes);
-        }
-        note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
-        ConSanPatchAbiEffects patch_abi =
-            plan_barrier_patch_abi(owners, resources->base, private_state_layout,
-                                   spill ? &*spill : nullptr, required_private_bytes);
-        planned_candidates.push_back(PlannedBarrierLowering{
-            .candidate = candidate,
-            .derived_owner = derived_owner,
-            .body = *record_emission,
-            .branch_only_spill = candidate_point.moi_branch_only_spill.has_value(),
-            .spill = std::move(spill),
-            .scalar_spill = std::move(scalar_spill),
-            .patch_abi = std::move(patch_abi),
-        });
-        continue;
-      }
-      const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
-      const auto private_limit = consan_address_free_private_limit(arch);
-      if (!private_limit) {
-        result.warnings.emplace_back(
-            "ConSan MOI private epoch barrier has no address-free scratch support");
-        continue;
-      }
-      SpillManager manager(ephemeral_base, *private_limit);
-      auto spill = build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr,
-                                             /*vgpr_count=*/1, arch);
-      if (!spill) {
-        result.warnings.emplace_back(
-            "ConSan MOI private epoch barrier could not preserve its temporary VGPR");
-        continue;
-      }
-      if (!apply_moi_transient_sgpr_assignment(options, owner_point, result.moi_operating_point,
-                                               owners)) {
-        result.warnings.emplace_back(
-            "ConSan MOI private epoch barrier lost its transient scalar assignment");
-        continue;
-      }
-      const uint32_t required_private_bytes =
-          std::max(access_patch->required_private_segment_size, spill->total_private_bytes);
-      note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
-      ConSanPatchAbiEffects patch_abi =
-          plan_barrier_patch_abi(owners, access_patch->scratch_vgpr, private_state_layout, &*spill,
-                                 required_private_bytes);
-      const MoiScalarAbiPlan scalar_abi =
-          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(owner_point));
-      planned_candidates.push_back(PlannedBarrierLowering{
+      auto planned = plan_private_body(MoiPrivateBarrierPlanningContext{
+          .bytes = bytes,
+          .options = options,
+          .point = std::move(owner_point),
           .candidate = candidate,
-          .derived_owner = std::nullopt,
-          .body =
-              MoiInlinePrivateEpochBarrierEmissionPlan{
-                  .scratch_vgpr = *access_patch->scratch_vgpr,
-                  .epoch_offset = private_state_layout.epoch_offset,
-                  .indirect_jump = scalar_abi.indirect_jump,
-              },
-          .branch_only_spill = owner_point.moi_branch_only_spill.has_value(),
-          .spill = std::move(spill),
-          .scalar_spill = std::nullopt,
-          .patch_abi = std::move(patch_abi),
+          .resource_plan = *plan,
+          .owners = owners,
+          .access_patch = *access_patch,
+          .private_state_layout = private_state_layout,
+          .semantics = semantics,
+          .spill_managers = visible_evidence_spill_managers,
+          .private_requirements = private_requirements,
+          .arch = arch,
+          .result = result,
       });
+      if (planned)
+        planned_candidates.push_back(std::move(*planned));
     }
   }
   if (operating_point.moi_persistent_sgprs.complete()) {
