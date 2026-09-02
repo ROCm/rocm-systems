@@ -170,7 +170,15 @@ continues to return the HSA error to callers that correctly handle it.
 The kernel allowlist is a production scoping control, not a substring filter.
 For example, `RJ_CONSAN_KERNEL_ALLOWLIST=attention_fwd,attention_bwd.kd`
 selects exactly those two entries and does not select `attention_fwd_debug`.
-Code objects containing no matching entry are loaded without ConSan changes.
+Before waitcheck or ConSan semantic inventory, the hook checks only the bounded
+ELF kernel-symbol index. Code objects containing no matching entry are loaded
+unchanged without decoding executable instructions, constructing inventory,
+reserving transform memory, or running patch planning. A malformed or
+unsupported symbol index is not treated as proof of absence: it falls through
+to the ordinary conservative analysis path. The hook logs an immediate
+`outcome=skipped reason=no-matching-entry` record for every definitively
+unmatched object, so scoping remains observable even if the process does not
+reach normal unload reporting.
 Kernel-local sites owned by unlisted entries remain untouched. A physical site
 in a shared helper is instrumented only when every kernel entry that can reach
 it is allowlisted; this avoids silently instrumenting an unselected dispatch.
