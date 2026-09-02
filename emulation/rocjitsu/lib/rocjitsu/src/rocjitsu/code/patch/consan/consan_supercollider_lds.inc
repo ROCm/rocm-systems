@@ -190,7 +190,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::optional<size_t> dense_call_group_index;
     std::optional<uint16_t> dense_explicit_key;
     std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
-    bool requires_branch_only_route = false;
     std::optional<BranchOnlyRelayRoute> branch_only_route = std::nullopt;
   };
 
@@ -1230,7 +1229,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             std::nullopt,
                                             std::nullopt,
                                             scalar_vcc_spill};
-            candidate.requires_branch_only_route = true;
             branch_only_candidates.push_back(std::move(candidate));
           } else {
             LdsCheckTrapCandidate generated_seed{&site,
@@ -1308,7 +1306,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                           std::nullopt,
                                           std::nullopt,
                                           scalar_vcc_spill};
-          candidate.requires_branch_only_route = true;
           branch_only_candidates.push_back(std::move(candidate));
         }
         if (appended_cave_reachable)
@@ -3335,12 +3332,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       const uint64_t trampoline_text_offset = candidate.placement->body_offset;
       planned.cave_words = planned.words;
       uint64_t entry_target = candidate.placement->body_offset;
-      if (candidate.requires_branch_only_route) {
-        if (!candidate.branch_only_route) {
-          result.errors.emplace_back(
-              "ConSan LDS check/trap shared router lost its branch-only route");
-          return;
-        }
+      if (candidate.branch_only_route) {
         const BranchOnlyRelayRoute &route = *candidate.branch_only_route;
         planned.cave_words.push_back(build_s_nop(0, arch));
         entry_target = route.entry_relay_offsets.empty() ? candidate.placement->body_offset

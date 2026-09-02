@@ -277,7 +277,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint64_t requested_words = 0;
     bool use_local_cave = false;
     bool use_appended_cave = false;
-    bool branch_only_continuation = false;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch;
     std::vector<uint64_t> owner_descriptor_file_offsets;
@@ -530,7 +529,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
                          /*use_local_cave=*/false, /*use_appended_cave=*/true, std::nullopt,
                          owner_descriptor_file_offsets));
-      branch_only_appended_candidates.back().branch_only_continuation = true;
       finish_candidate(branch_only_appended_candidates.back());
     }
     const std::vector<const LocalNopCave *> caves = reachable_local_caves(site, requested_words);
@@ -909,7 +907,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
   };
   std::unordered_set<uint64_t> selected_flat_site_offsets;
-  auto try_select_candidate = [&](FlatCheckTrapCandidate candidate) {
+  auto try_select_candidate = [&](FlatCheckTrapCandidate candidate,
+                                  bool branch_only_continuation = false) {
     if (selected_candidates.size() >= max_patches)
       return;
     const ConSanAccessInventorySite &site = *candidate.site;
@@ -956,7 +955,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                 {site.file_offset, site.file_offset + body_bytes}))
       return;
 
-    if (candidate.branch_only_continuation) {
+    if (branch_only_continuation) {
       DbiPatchPlacementPlanner tentative_planner = placement_planner;
       const auto placement = tentative_planner.plan_indirect_appended(
           site.physical_id.original_text_offset, original_size, body_bytes + sizeof(uint32_t));
@@ -1054,7 +1053,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     try_select_candidate(candidate);
 
   for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
-    try_select_candidate(candidate);
+    try_select_candidate(candidate, true);
   if (selected_candidates.size() < max_patches && !branch_only_appended_candidates.empty()) {
     BranchOnlyRelayRouter router_without_direct_reservoirs = branch_router;
     DbiPatchPlacementPlanner planner_without_direct_reservoirs = placement_planner;
@@ -1063,7 +1062,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
 
     for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
-      try_select_candidate(candidate);
+      try_select_candidate(candidate, true);
 
     if (selected_candidates.size() == selected_before_direct_reservoirs) {
       branch_router = std::move(router_without_direct_reservoirs);
@@ -1129,7 +1128,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     ConSanPatchInfo info;
     bool use_local_cave = false;
     bool use_appended_cave = false;
-    bool branch_only_continuation = false;
     std::optional<BranchOnlyRelayRoute> branch_only_route;
     std::optional<DbiPatchPlacement> placement;
     bool entry_island_at_anchor = false;
@@ -1203,7 +1201,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     planned.entry_island = candidate.entry_island;
     planned.use_local_cave = candidate.use_local_cave;
     planned.use_appended_cave = candidate.use_appended_cave;
-    planned.branch_only_continuation = candidate.branch_only_continuation;
     planned.branch_only_route = candidate.branch_only_route;
     planned.placement = candidate.placement;
     planned.entry_island_at_anchor = candidate.entry_island_at_anchor;
@@ -1529,9 +1526,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
       planned.cave_words = planned.words;
       uint64_t entry_target = candidate.placement->body_offset;
-      if (candidate.branch_only_continuation) {
+      if (candidate.branch_only_route) {
         if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor ||
-            candidate.indirect_scratch || !candidate.branch_only_route ||
+            candidate.indirect_scratch ||
             candidate.placement->body_size !=
                 planned.words.size() * sizeof(uint32_t) + sizeof(uint32_t)) {
           result.errors.emplace_back(

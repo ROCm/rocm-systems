@@ -116,10 +116,7 @@ struct BranchOnlyRelayRoute {
 /// boundary.
 [[nodiscard]] inline ConSanBranchOnlyContinuation
 consan_branch_only_continuation(const BranchOnlyRelayRoute &route) {
-  return {
-      .entry = ConSanBranchOnlyRelayEntry{route.entry_relay_offsets},
-      .return_relay_offsets = route.return_relay_offsets,
-  };
+  return {ConSanBranchOnlyRelayEntry{route.entry_relay_offsets}, route.return_relay_offsets};
 }
 
 struct BranchOnlyRelayPairRequest {

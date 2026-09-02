@@ -1389,6 +1389,13 @@ _consan_assert_no_match(
     "(bool[ \t]+branch_only_(continuation|borrowed_indirect_entry)|std::optional<uint(16|64)_t>[ \t]+branch_only_(borrowed_backup_vgpr|borrowed_continuation_offset|entry_prologue_offset)|std::vector<uint64_t>[ \t]+branch_only_(entry|return)_relay_offsets|std::optional<ConSanIndirectJumpSgprs>[ \t]+moi_borrowed_entry_jump)"
     "branch-only routing must retain one mutually exclusive typed effect"
 )
+foreach(_branch_only_owner IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_branch_only_owner}"
+        "[.]branch_only_continuation|requires_branch_only_route"
+        "branch-only route presence must not regain a parallel stored boolean"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_code_object_types.h.inc"
     "indirect_(pc_sgpr|saved_scc_sgpr|saved_vcc_sgpr|return_offset|return_pc_sgpr|return_saved_scc_sgpr|return_saved_vcc_sgpr)"
