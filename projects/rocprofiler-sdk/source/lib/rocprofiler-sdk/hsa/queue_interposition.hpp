@@ -70,13 +70,13 @@ struct QueueState
     hsa_signal_t       doorbell_signal = {0};      ///< The queue's doorbell signal
     std::mutex         gate_lock       = {};       ///< Lock for packet submission gating
 
-    /// Signal-less admission latch (§1.5.4). Plain bool, guarded by gate_lock: set
+    /// Signal-less admission latch. Plain bool, guarded by gate_lock: set
     /// by the destroy path's close_admission_and_snapshot_locked() so no later batch can
     /// register against this queue's window, read in signal_less_batch_eligible()
     /// which already holds gate_lock. Never an atomic -- one lock orders both.
     bool admission_closed = false;
 
-    /// F1 lifetime interlock. drain_mu is held by whoever dereferences real_rdid for
+    /// Lifetime interlock. drain_mu is held by whoever dereferences real_rdid for
     /// a bounded HW drain; destroy_queue() holds it across its whole sequence and
     /// clears rdid_valid+real_rdid under it BEFORE the runtime queue can be freed, so
     /// finalization's "skip if it disappeared" test (rdid_valid) is race-free. Leaf:
@@ -178,9 +178,6 @@ cas_write_index_impl(QueueState*       state,
 uint64_t
 load_write_index_impl(const QueueState* state, std::memory_order order = std::memory_order_relaxed);
 
-size_t
-get_async_signal_handler_thread_count();
-
 /// Type alias for doorbell function callback
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 
@@ -232,7 +229,7 @@ destroy_queue_state(const hsa_queue_t* queue);
 void
 fence_all_queue_gates();
 
-// F1 teardown HW drain across every live queue, race-free against a concurrent
+// Teardown HW drain across every live queue, race-free against a concurrent
 // hsa_queue_destroy (the drain_mu/rdid_valid interlock). One shared absolute
 // deadline. Caller holds no hub, registry, gate, or drain lock.
 void
@@ -247,12 +244,12 @@ hw_queue_drained(uint64_t real_rdid, uint64_t next_submit_pos)
 }
 
 // Close signal-less admission and snapshot the submit position in ONE gate_lock
-// section (§1.5.4, Path-4 step 0): set admission_closed (SW-2, no later batch can
-// register against this queue's window) AND read next_submit_pos, ordered by the
-// same lock that serialises every publishing critical section. Returns that
-// snapshot P. No separate fence and no atomic are needed.
+// section: set admission_closed (no later batch can register against this queue's
+// window) AND read next_submit_pos, ordered by the same lock that serialises every
+// publishing critical section. Returns that snapshot P. No separate fence and no
+// atomic are needed.
 //
-// _locked: the caller holds state.drain_mu (F1). State-based, not pointer-based, so
+// _locked: the caller holds state.drain_mu. State-based, not pointer-based, so
 // no relookup races the queue's destruction. The pointer-taking overloads are gone.
 uint64_t
 close_admission_and_snapshot_locked(QueueState& state);
@@ -260,11 +257,11 @@ close_admission_and_snapshot_locked(QueueState& state);
 /// Wait, bounded by an absolute kfd::steady_now_ns() deadline, until this queue's
 /// hardware read index has caught up with the sampled submit position `P`, so
 /// every packet in that snapshot -- hence every registered START -- has been
-/// consumed by the CP before the caller decides anything was lost (§1.3 Path 4).
+/// consumed by the CP before the caller decides anything was lost.
 ///
 /// False on deadline; true immediately when real_rdid is null or P is already
 /// drained. _locked: the caller holds state.drain_mu, so real_rdid cannot be freed
-/// under the load (F1). State-based; the pointer-taking overload is gone.
+/// under the load. State-based; the pointer-taking overload is gone.
 bool
 wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t deadline_ns);
 
@@ -309,13 +306,41 @@ void
 interposition_fini();
 
 /**
- * @brief Wait for all in-flight signal handlers to complete and clean up resources
+ * @brief Wait, bounded, for in-flight completions to retire
  *
- * This should be called during shutdown to ensure that any pending doorbell
- * processing is completed and that the signal pool is cleaned up.
+ * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
+ * (context stop, code-object unload). Waits on the in-flight counter rather than the monitor
+ * state, since batches already handed to the record emitter outlive the monitor thread. The
+ * wait is bounded in every case and warns on expiry rather than hanging.
  */
 void
 interposition_sync();
+
+/**
+ * @brief Create the wake signal and launch the completion-monitor thread
+ *
+ * Does nothing if the monitor is already running, if interception was never installed, or once
+ * finalization has completed. Called from interposition_init and again whenever an HSA reference
+ * count rises from zero, since the monitor does not outlive an HSA teardown and every producer is
+ * turned away while it is stopped.
+ */
+void
+start_completion_monitor();
+
+/**
+ * @brief Stop and join the completion-monitor thread, retiring any stragglers
+ *
+ * Closes the producer admission gate, wakes the monitor, joins it, then retires what is left so
+ * pooled signals and correlation-id references are released. Must run before the signal pool is
+ * torn down, so those releases target a live pool. A batch whose completion signal never dropped
+ * produces no dispatch record and keeps its pooled signal, since its timestamps were never
+ * written and the GPU may still write to that signal. Every caller returns with the monitor
+ * thread dead and every record delivered, waiting on the record emitter to do so. Producers still
+ * inside the doorbell path are not waited on; they see the monitor stopped and dispose of their
+ * own batch.
+ */
+void
+stop_completion_monitor();
 }  // namespace queue_interposition
 }  // namespace hsa
 }  // namespace rocprofiler

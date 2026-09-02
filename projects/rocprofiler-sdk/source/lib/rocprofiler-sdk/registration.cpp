@@ -925,7 +925,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // Terminal fail-closed fence: client detach frees the tool's callback
             // and buffer machinery next, so no callback-capable signal-less completion
             // may survive. On timeout this abandons+disables signal-less process-wide
             // (correct here -- the client is going away). No-op with the feature off.
@@ -982,7 +982,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                // F23 terminal fail-closed fence: the client finalizer frees the
+                // Terminal fail-closed fence: the client finalizer frees the
                 // tool's callback/buffer machinery next, so no callback-capable
                 // signal-less completion may survive. On timeout abandon+disable
                 // process-wide. No-op with the feature off.
@@ -1162,11 +1162,12 @@ finalize()
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
-        // Signal-less teardown steps 1-6, in the one order that strands no
-        // EOP-proven completion. Must precede the sequence below:
-        // queue_controller_fini joins the task group, and correlation_id_finalize
-        // consults the loss ledger this populates. No-op unless signal-less is
-        // active.
+        // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
+        // completion. Must precede the sequence below: queue_controller_fini stops the
+        // completion monitor that runs these completions, and correlation_id_finalize
+        // consults the loss ledger this populates. Its drain waits on the in-flight counter,
+        // so it still works when an application hsa_shut_down stopped the monitor first.
+        // No-op unless signal-less is active.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
@@ -1589,16 +1590,23 @@ rocprofiler_set_api_table(const char* name,
                 [](const rocprofiler::context::context* ctx) {
                     return ctx->device_thread_trace != nullptr;
                 });
+            auto registered_contexts = rocprofiler::context::get_registered_contexts();
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] non-inline contexts found: {}. The presence of "
-                "any of these contexts will prevent inline intercept (for the time being).",
+                "[queue-interposition] {} registered contexts, {} of them non-inline. The presence "
+                "of any non-inline context will prevent inline intercept (for the time being).",
+                registered_contexts.size(),
                 non_queue_interposition_contexts.size());
 
             // if non_queue_interposition_contexts is empty, default to inline intercept.
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // With no registered context there is nothing to intercept for. Installing the inline
+            // path starts the completion monitor and its record emitter, and the SDK creates no
+            // internal threads when no tool is active. This overrides the environment variable.
+            if(registered_contexts.empty()) enable_queue_interposition = false;
 
             if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
                !rocprofiler::hsa::enable_queue_intercept())

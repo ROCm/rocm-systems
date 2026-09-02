@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+
+# MIT License
+#
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+import sys
+import pytest
+
+
+def node_exists(name, data):
+    assert name in data
+    assert data[name] is not None
+    if isinstance(data[name], (list, tuple, dict, set)):
+        assert len(data[name]) > 0
+
+
+def test_data_structure(input_data):
+    """Minimum expected structure is present."""
+    node_exists("rocprofiler-sdk-json-tool", input_data)
+
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+
+    node_exists("metadata", sdk_data)
+    node_exists("init_time", sdk_data["metadata"])
+    node_exists("fini_time", sdk_data["metadata"])
+
+    node_exists("agents", sdk_data)
+    node_exists("buffer_records", sdk_data)
+    node_exists("kernel_dispatch", sdk_data["buffer_records"])
+
+
+def test_dispatch_count(input_data, expected_dispatches):
+    """Every graph kernel dispatch was captured. The workload synchronizes each replay,
+    so every completion retires before the process exits and none of the graph's own
+    dispatches may be missing. The graph geometry is a floor rather than an exact count:
+    a run can also contain dispatches the workload did not launch itself."""
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+    dispatches = sdk_data["buffer_records"]["kernel_dispatch"]
+
+    assert (
+        len(dispatches) >= expected_dispatches
+    ), f"expected at least {expected_dispatches} dispatches, got {len(dispatches)}"
+
+
+def test_dispatch_records_well_formed(input_data):
+    """Each captured dispatch has ordered timestamps within the session bounds
+    and valid correlation ids."""
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+    init_time = sdk_data["metadata"]["init_time"]
+    fini_time = sdk_data["metadata"]["fini_time"]
+
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
+        assert itr["start_timestamp"] < itr["end_timestamp"], f"{itr}"
+        assert itr["correlation_id"]["internal"] > 0, f"{itr}"
+        assert init_time < itr["start_timestamp"], f"{itr}"
+        assert fini_time > itr["end_timestamp"], f"{itr}"
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
