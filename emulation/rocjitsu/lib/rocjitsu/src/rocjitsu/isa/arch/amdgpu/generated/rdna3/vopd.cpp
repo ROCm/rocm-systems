@@ -95,6 +95,24 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
+Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEmitter &emit_error) {
+  const auto *words = reinterpret_cast<const uint32_t *>(inst);
+  const uint32_t word0 = words[0];
+  const uint32_t word1 = words[1];
+
+  const uint16_t opx = static_cast<uint16_t>((word0 >> 22) & 0xF);
+  const uint16_t opy = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+  if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]]
+    return emit_error.emit() << "invalid VOPD X opcode";
+  if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]]
+    return emit_error.emit() << "invalid VOPD Y opcode";
+  const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+  const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+  if (srcx0 == 254 || srcy0 == 254) [[unlikely]]
+    return emit_error.emit() << "VOPD does not support 64-bit literals";
+  return Result::success();
+}
+
 Vopd::Vopd(const MachineInst *inst)
     : IsaInstruction<Isa>("vopd", selected_exec_fn(InstructionExecutionId::Vopd)),
       dstx_(32, OperandType::OPR_VGPR, 0), dsty_(32, OperandType::OPR_VGPR, 0),
@@ -110,10 +128,6 @@ Vopd::Vopd(const MachineInst *inst)
   encoding_id_ = 0x32;
   opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
   opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-  if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
-    throw util::InvalidInst("invalid VOPD X opcode", "");
-  if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
-    throw util::InvalidInst("invalid VOPD Y opcode", "");
   uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
   uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
   uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);

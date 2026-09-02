@@ -6,10 +6,10 @@
 
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -45,7 +45,7 @@ constexpr uint16_t kMaxOrdinarySgpr = 105;
 /// @brief Complete any producer of the aliased s102:s103 state before reading
 /// the architectural flat-scratch selectors.
 [[nodiscard]] uint32_t flat_scratch_selector_wait() {
-  return gfx1250::build_sopp(gfx1250::kSWaitAluSopp, {.simm16 = 0})[0];
+  return cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0})[0];
 }
 
 /// @brief Width of a vector source field wide enough to name a scalar value.
@@ -369,6 +369,30 @@ bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   return false;
 }
 
+bool gfx1250_flat_scratch_base_residual(const Instruction &inst) {
+  const uint32_t *raw = inst.raw_encoding();
+  if (raw == nullptr)
+    return false;
+  const std::optional<EncodingSourceFields> layout = source_fields(raw[0]);
+  if (!layout)
+    return instruction_names_selector_in_any_64bit_source(inst);
+
+  const size_t available =
+      inst.size() > 0 ? static_cast<size_t>(inst.size()) / sizeof(uint32_t) : 0;
+  const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
+  const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
+  for (int source_index = 0; source_index < sources; ++source_index) {
+    if (!is_flat_scratch_base_64bit_source(inst, source_index, *layout, words))
+      continue;
+    if (layout->vector)
+      return true;
+    const Operand *operand = inst.src_operand(source_index);
+    if (operand != nullptr && operand->encoding_value() == kFlatScratchBaseHi)
+      return true;
+  }
+  return false;
+}
+
 ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uint64_t offset,
                                                     std::span<const uint8_t> source_text,
                                                     const LivenessAnalysis &liveness,
@@ -416,9 +440,9 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       // the legacy granulated field for it, so raising a requirement here would
       // change nothing. The bound that matters is that the pair stays inside the
       // architecturally addressable range, which the check above enforces.
-      const auto move = gfx1250::build_sop1(gfx1250::kSMovB64Sop1,
-                                            {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
-                                             .sdst = static_cast<uint8_t>(*borrowed_pair)});
+      const auto move =
+          cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = static_cast<uint8_t>(kFlatScratchBaseLo),
+                                                  .sdst = static_cast<uint8_t>(*borrowed_pair)});
       // Appended one word at a time rather than as an iterator range: the
       // range form of insert() reduces to a bulk copy whose bounds GCC cannot
       // relate back to a single-element std::array, and it reports the
@@ -455,11 +479,11 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
     std::vector<uint32_t> replacement;
     using Pipeline = HazardTracker::Pipeline;
     HazardTracker hazards;
-    const auto low = gfx1250::build_vop1(
-        gfx1250::kVMovB32Vop1,
-        {.src0 = kFlatScratchBaseLo, .vdst = static_cast<uint8_t>(*staged_vgpr_pair)});
-    const auto high = gfx1250::build_vop1(
-        gfx1250::kVMovB32Vop1,
+    const auto low =
+        cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = kFlatScratchBaseLo,
+                                                .vdst = static_cast<uint8_t>(*staged_vgpr_pair)});
+    const auto high = cdna5::build_vop1(
+        cdna5::kVMovB32Vop1,
         {.src0 = kFlatScratchBaseHi, .vdst = static_cast<uint8_t>(*staged_vgpr_pair + 1)});
     replacement.push_back(flat_scratch_selector_wait());
     hazards.emit_raw(replacement, low[0]);

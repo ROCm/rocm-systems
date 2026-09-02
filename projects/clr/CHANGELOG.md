@@ -2,6 +2,15 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.1.0 for ROCm 10.1.0
+
+### Added
+* New HIP APIs
+    - Device Management: support for querying a device identifier.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+    - Device Management: support for API parity with corresponding CUDA API.
+      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+
 ## HIP 10.0.0 for ROCm 10.0.0
 
 ### Added
@@ -11,8 +20,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.
       * `cooperative_groups::exclusive_scan` performs an exclusive prefix scan across the threads in a cooperative group. For each thread, the result is computed from the values of all preceding threads using a binary operation (addition by default), excluding the current thread's own value.
       * `cooperative_groups::inclusive_scan` performs an inclusive prefix scan across the threads in a cooperative group. For each thread, the result includes the current thread's value in addition to the values of all preceding threads.
-* HIP Record and Replay (HRR) is now available as an initial implementation. HRR captures HIP API calls made by an application and stores them in a binary archive (.hrr). The recorded workload can then be replayed on a GPU, reproducing application behavior, including multi-threaded execution, graph launches, and GPU memory transfers.
-This capability enables efficient bug reproduction, performance regression testing, and kernel benchmarking without requiring access to the original application. To help developers get started, documentation is provided that describes HRR's architecture, design, implementation details, and replay workflow, along with a comprehensive README guide.
 * Added stream capture support for the following APIs, enabling `BatchMemOp` operations to be captured as graph nodes instead of executing immediately. Also improved `BatchMemOp` graph replay reliability through fixes to parameter handling and operation ordering, aligning behavior more closely with CUDA.
     - `hipStreamWaitValue32`
     - `hipStreamWaitValue64`
@@ -157,6 +164,7 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 
 ### Removed
 * roc-obj* tools and Perl dependency.

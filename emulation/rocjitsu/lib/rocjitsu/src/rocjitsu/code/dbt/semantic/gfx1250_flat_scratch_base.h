@@ -33,6 +33,14 @@ class LivenessAnalysis;
 /// mistaken for the selectors they collide with.
 [[nodiscard]] bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst);
 
+/// @brief True when a final A0 instruction still needs the 64-bit
+/// FLAT_SCRATCH_BASE operand rewrite.
+///
+/// @details Scalar A0 reads are canonical with selector 230, while selector
+/// 231 remains actionable. Vector ALU source fields cannot retain either
+/// selector and must name the ordinary SGPR pair produced by the lowering.
+[[nodiscard]] bool gfx1250_flat_scratch_base_residual(const Instruction &inst);
+
 /// @brief Rewrite a 64-bit FLAT_SCRATCH_BASE source for the A0 profile.
 ///
 /// @details Scalar reads keep their instruction and change the selector to 230.

@@ -8,9 +8,9 @@
 
 #include <concepts>
 #include <cstdint>
+#include <fmt/format.h>
 #include <memory>
 #include <optional>
-#include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
 
@@ -356,8 +356,8 @@ private:
             {
                 std::uint64_t delta_usage =
                     current_cumulative - m_sdma_state.prev_cumulative;
-                std::uint64_t delta_time = timestamp - m_sdma_state.prev_timestamp;
-                std::uint32_t pct =
+                std::uint64_t       delta_time = timestamp - m_sdma_state.prev_timestamp;
+                const std::uint32_t pct =
                     static_cast<std::uint32_t>((delta_usage * 100000ULL) / delta_time);
                 out.sdma_usage = (pct > 100) ? 100 : pct;
             }

@@ -152,26 +152,26 @@ class ElfSurgery:
         return cls(data, path)
 
     @staticmethod
-    def has_fatbin_section(file_path: Path) -> bool:
-        """Fast check for .hip_fatbin section without loading the full binary.
+    def _section_location(file_path: Path, section_name: str) -> tuple[int, int] | None:
+        """Find a section's file range without loading the full binary.
 
         Reads only the ELF header, section header table, and section name
         string table — typically a few KB total even for multi-GB binaries.
-        Returns False for non-ELF files (wrong magic, too small, 32-bit).
+        Returns None for non-ELF files (wrong magic, too small, 32-bit).
         Raises on I/O errors or corrupt ELF headers.
         """
         file_size = os.path.getsize(file_path)
         if file_size < ELF64_EHDR_SIZE:
-            return False
+            return None
 
         with open(file_path, "rb") as f:
             ehdr = f.read(ELF64_EHDR_SIZE)
             if len(ehdr) < ELF64_EHDR_SIZE:
-                return False
+                return None
             if ehdr[:4] != b"\x7fELF":
-                return False
-            if ehdr[4] != 2:  # ELFCLASS64
-                return False
+                return None
+            if ehdr[4] != 2 or ehdr[5] != 1:  # ELFCLASS64, ELFDATA2LSB
+                return None
 
             # All offsets and sizes below follow the System V ABI for ELF64.
             # e_shoff:    offset 40 — file offset to section header table
@@ -183,8 +183,13 @@ class ElfSurgery:
             e_shnum = struct.unpack_from("<H", ehdr, 60)[0]
             e_shstrndx = struct.unpack_from("<H", ehdr, 62)[0]
 
-            if e_shoff == 0 or e_shnum == 0 or e_shstrndx >= e_shnum:
-                return False
+            if (
+                e_shoff == 0
+                or e_shentsize < ELF64_SHDR_SIZE
+                or e_shnum == 0
+                or e_shstrndx >= e_shnum
+            ):
+                return None
 
             # Bounds check section header table against file size
             total_sht_size = e_shentsize * e_shnum
@@ -193,13 +198,13 @@ class ElfSurgery:
                 or total_sht_size > file_size
                 or e_shoff + total_sht_size > file_size
             ):
-                return False
+                return None
 
             # Read section header table
             f.seek(e_shoff)
             shtab = f.read(total_sht_size)
             if len(shtab) < total_sht_size:
-                return False
+                return None
 
             # Read .shstrtab
             strtab_entry = e_shstrndx * e_shentsize
@@ -212,23 +217,53 @@ class ElfSurgery:
                 or sh_size > file_size
                 or sh_offset + sh_size > file_size
             ):
-                return False
+                return None
 
             f.seek(sh_offset)
             shstrtab = f.read(sh_size)
+            if len(shstrtab) < sh_size:
+                return None
 
-            # Search for ".hip_fatbin" in section names
-            target = b".hip_fatbin\x00"
-            if target not in shstrtab:
-                return False
-
-            target_offset = shstrtab.index(target)
+            target = section_name.encode()
             for i in range(e_shnum):
-                sh_name = struct.unpack_from("<I", shtab, i * e_shentsize)[0]
-                if sh_name == target_offset:
-                    return True
+                entry = i * e_shentsize
+                sh_name = struct.unpack_from("<I", shtab, entry)[0]
+                if sh_name >= len(shstrtab):
+                    continue
+                name_end = shstrtab.find(b"\x00", sh_name)
+                if name_end < 0 or shstrtab[sh_name:name_end] != target:
+                    continue
+                section_type = struct.unpack_from("<I", shtab, entry + 4)[0]
+                if section_type == SHT_NOBITS:
+                    return None
+                section_offset = struct.unpack_from("<Q", shtab, entry + 24)[0]
+                section_size = struct.unpack_from("<Q", shtab, entry + 32)[0]
+                if (
+                    section_offset > file_size
+                    or section_size > file_size
+                    or section_offset + section_size > file_size
+                ):
+                    return None
+                return section_offset, section_size
 
-            return False
+            return None
+
+    @staticmethod
+    def has_fatbin_section(file_path: Path) -> bool:
+        """Fast check for .hip_fatbin without loading the full binary."""
+        return ElfSurgery._section_location(file_path, ".hip_fatbin") is not None
+
+    @staticmethod
+    def read_section(file_path: Path, section_name: str) -> bytes | None:
+        """Read one ELF section without retaining the rest of the ELF image."""
+        location = ElfSurgery._section_location(file_path, section_name)
+        if location is None:
+            return None
+        offset, size = location
+        with open(file_path, "rb") as f:
+            f.seek(offset)
+            content = f.read(size)
+        return content if len(content) == size else None
 
     # =========================================================================
     # Properties

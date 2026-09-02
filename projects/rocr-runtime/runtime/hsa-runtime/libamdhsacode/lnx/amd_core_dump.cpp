@@ -45,6 +45,7 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
+#include <signal.h>
 #include <libgen.h>
 #include <limits.h>
 #include <elf.h>
@@ -869,6 +870,48 @@ build_core_dump(const std::string& filename, const SegmentsInfo& segments,
                                         size_t size_limit, bool show_progress);
 // Handle pipe pattern - fork/exec handler and pipe dump to it
 namespace {
+// RAII guard that blocks SIGPIPE on the calling thread for the duration of a
+// pipe write. On scope exit (including exception unwind) it drains a SIGPIPE
+// that this thread's own write raised - but only when the caller had not
+// already blocked SIGPIPE, so a signal the caller was managing is never stolen
+// - and then restores the exact prior signal mask. This keeps a failed pipe
+// write returning EPIPE instead of the default SIGPIPE action terminating the
+// whole process, without changing any process-wide signal disposition.
+class ScopedSigpipeBlock {
+ public:
+  ScopedSigpipeBlock() {
+    sigemptyset(&pipe_sigset_);
+    sigaddset(&pipe_sigset_, SIGPIPE);
+    blocked_ = (pthread_sigmask(SIG_BLOCK, &pipe_sigset_, &prev_sigset_) == 0);
+  }
+  ~ScopedSigpipeBlock() {
+    if (!blocked_) return;
+    // If SIGPIPE was already blocked before we entered, a SIGPIPE could have
+    // been pending beforehand; consuming it here would steal a signal the
+    // caller expects to remain pending once prev_sigset_ (which keeps SIGPIPE
+    // blocked) is restored. When SIGPIPE was not previously blocked, restoring
+    // prev_sigset_ unblocks it, so any SIGPIPE our write raised must be drained
+    // first to avoid the default action terminating the process.
+    if (!sigismember(&prev_sigset_, SIGPIPE)) {
+      sigset_t pending_sigset;
+      sigemptyset(&pending_sigset);
+      if (sigpending(&pending_sigset) == 0 &&
+          sigismember(&pending_sigset, SIGPIPE)) {
+        int drained_signum;
+        (void)sigwait(&pipe_sigset_, &drained_signum);
+      }
+    }
+    (void)pthread_sigmask(SIG_SETMASK, &prev_sigset_, nullptr);
+  }
+  ScopedSigpipeBlock(const ScopedSigpipeBlock&) = delete;
+  ScopedSigpipeBlock& operator=(const ScopedSigpipeBlock&) = delete;
+
+ private:
+  sigset_t pipe_sigset_;
+  sigset_t prev_sigset_;
+  bool blocked_;
+};
+
 hsa_status_t write_to_pipe_handler(const std::string& pattern,
                                           const SegmentsInfo& segments,
                                           size_t size_limit,
@@ -937,11 +980,21 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
     sigaction(SIGPIPE, &ign_sigpipe, &old_sigpipe);
 
     close(pipefd[0]);  // Close read end
-    // Write core dump data to pipe
-    status = write_core_dump_to_fd(pipefd[1], segments, -1, show_progress);
-    close(pipefd[1]);
 
-    sigaction(SIGPIPE, &old_sigpipe, nullptr);
+    {
+      // Block SIGPIPE on this thread for the duration of the pipe write. If the
+      // reader exits or closes its end before the whole dump is consumed, the
+      // write then fails with EPIPE (reported as an error below) instead of the
+      // default SIGPIPE action terminating the entire process. The guard drains
+      // a self-raised SIGPIPE and restores the prior signal mask on scope exit,
+      // even if an exception unwinds through this block.
+      ScopedSigpipeBlock sigpipe_guard;
+      // Write core dump data to pipe
+      status = write_core_dump_to_fd(pipefd[1], segments, -1, show_progress);
+      close(pipefd[1]);
+  
+      sigaction(SIGPIPE, &old_sigpipe, nullptr);
+    }
 
     // Wait for child to finish
     int child_status;

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace amd {
 static void checkPrintf(FILE* stream, int* outCount, const char* fmt, ...) {
@@ -259,8 +260,11 @@ bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfIn
       return false;
     }
 
-    auto InsertResult = strMap.emplace(HashVal, info.fmtString_.substr(Delim + 1));
-    if (!InsertResult.second) {
+    // A repeated hash is only a real collision if it maps to a different string; try_emplace leaves
+    // FmtStr intact when no insert happens, keeping the check valid.
+    auto FmtStr = info.fmtString_.substr(Delim + 1);
+    auto InsertResult = strMap.try_emplace(HashVal, std::move(FmtStr));
+    if (!InsertResult.second && InsertResult.first->second != FmtStr) {
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }

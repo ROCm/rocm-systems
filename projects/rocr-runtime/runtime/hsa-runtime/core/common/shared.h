@@ -47,7 +47,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
-
+#include "core/util/os.h"
 #include "core/util/utils.h"
 
 namespace rocr {
@@ -84,7 +84,7 @@ template <typename T> class PageAllocator : private BaseShared {
  public:
   __forceinline static T* alloc(int flags = 0) {
     T* ret = reinterpret_cast<T*>(
-                        allocate_()(AlignUp(sizeof(T), 4096), 4096, flags, 0));
+                        allocate_()(AlignUp(sizeof(T), os::PageSize()), os::PageSize(), flags, 0));
     if (ret == nullptr) throw std::bad_alloc();
 
     MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(ret); });
@@ -97,7 +97,7 @@ template <typename T> class PageAllocator : private BaseShared {
 
   __forceinline static T* alloc(int agent_node_id, int flags) {
     T* ret = reinterpret_cast<T*>(
-            allocate_()(AlignUp(sizeof(T), 4096), 4096, flags, agent_node_id));
+            allocate_()(AlignUp(sizeof(T), os::PageSize()), os::PageSize(), flags, agent_node_id));
     if (ret == nullptr) throw std::bad_alloc();
 
     MAKE_NAMED_SCOPE_GUARD(throwGuard, [&]() { free_()(ret); });

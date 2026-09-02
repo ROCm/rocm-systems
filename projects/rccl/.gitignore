@@ -1,13 +1,45 @@
 # Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
 # Modifications Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 *.gcov
+# llvm source-based coverage: the instrumented binaries drop these wherever
+# they are run from, and rccl-HostUnitTests is built with coverage by default.
+*.profraw
+*.profdata
 /coverage/
+compile_commands.json
 build*/
+/build*
 install*/
 ext/
 src/transport/net_ib_rocm.cc
 plugins/profiler/inspector/librccl-profiler-inspector.so
 plugins/profiler/inspector/version.cc
+failed/
+junits/
+*.xml
+/plugins/net/ib_sharp/build/
+/plugins/net/example/*.so
+/plugins/mixed/example/*.so
+/plugins/net/mock/*.so
+tags
+*.swp
+.cache/
 
 # Visual Studio Code
 .vscode
+
+# Example build artifacts
+*.o
+examples/**/multiple_devices_single_process
+examples/**/one_device_per_pthread
+examples/**/one_device_per_process_mpi
+examples/**/ring_pattern
+examples/**/allreduce
+examples/**/allreduce_ub
+examples/**/allreduce_sm
+examples/**/allgather_ce
+examples/**/allreduce_device_api
+examples/**/rmsnorm_lsa
+examples/**/rmsnorm_multimem
+examples/**/rmsnorm_gin
+examples/**/rmsnorm_hybrid

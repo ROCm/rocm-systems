@@ -13,9 +13,11 @@ on:
       - 'projects/amdsmi/**'
   workflow_dispatch:
 
+# Runs untrusted fork code on pull_request events: no write permissions here.
+# PR labeling is handled by abi-compliance-report.yml via workflow_run on the
+# trusted base ref where pull-requests: write is safe to hold.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   major_abi_check:
@@ -28,31 +30,50 @@ jobs:
           sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq perl build-essential git universal-ctags
-          git clone https://github.com/lvc/abi-compliance-checker.git
+          git clone --branch 2.3 --depth 1 https://github.com/lvc/abi-compliance-checker.git
           cd abi-compliance-checker
           sudo make install
           abi-compliance-checker --version
 
       - name: Checkout current code (new version)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            projects/amdsmi/include/amd_smi/amdsmi.h
+            projects/amdsmi/tests/abi_check
+
+      # Vendor abi_check.py from the trusted base ref so the fork's copy is never executed.
+      - name: Checkout base ref to vendor ABI check script
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.base_ref || github.ref_name }}
+          persist-credentials: false
+          path: _base
+          sparse-checkout: projects/amdsmi/tests/abi_check
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          echo "Fetching base branch: ${{ github.base_ref }}"
-          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          echo "Fetching base branch: $BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
         id: base_ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
@@ -60,41 +81,45 @@ jobs:
       - name: Run Major ABI Compliance Check
         id: run_major
         if: steps.base_ref.outputs.ref != ''
+        env:
+          BASE_REF: ${{ steps.base_ref.outputs.ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
-          python3 projects/amdsmi/tests/abi_check/abi_check.py \
-            --base-ref "${{ steps.base_ref.outputs.ref }}" \
-            --head-ref "${{ github.head_ref || github.ref_name }}" \
+          python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
+            --base-ref "$BASE_REF" \
+            --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode major
         continue-on-error: true
 
-      - name: Label PR on Major ABI Breakage
+      - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
-        run: |
-          if [[ "${{ steps.run_major.outcome }}" == "failure" ]]; then
-            echo "Major ABI check failed, adding MAJOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
-          else
-            echo "Major ABI check passed, removing MAJOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MAJOR ABI BREAKAGE" || true
-          fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "$RUN_MAJOR_OUTCOME" > outcome.txt
+          echo "$PR_NUMBER" > pr_number.txt
 
       - name: Upload Major ABI Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: major-abi-report
-          path: abi_report.html
+          path: |
+            abi_report.html
+            outcome.txt
+            pr_number.txt
           if-no-files-found: warn
 
       - name: Report Major ABI Check Results
         if: always()
+        env:
+          RUN_MAJOR_OUTCOME: ${{ steps.run_major.outcome }}
         run: |
-          if [[ "${{ steps.run_major.outcome }}" == "failure" ]]; then
+          if [[ "$RUN_MAJOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MAJOR ABI BREAKAGE FOUND. Check Run Major ABI Compliance Check logs or the major-abi-report artifact."
-          elif [[ "${{ steps.run_major.outcome }}" == "success" ]]; then
+          elif [[ "$RUN_MAJOR_OUTCOME" == "success" ]]; then
             echo "Major ABI check succeeded."
           else
             echo "Major ABI check was skipped (no baseline ref available)."
@@ -102,7 +127,6 @@ jobs:
 
   minor_abi_check:
     name: Minor ABI Compliance Check
-    needs: major_abi_check
     runs-on: ubuntu-22.04
     steps:
       - name: Setup Environment
@@ -111,73 +135,93 @@ jobs:
           sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq perl build-essential git universal-ctags
-          git clone https://github.com/lvc/abi-compliance-checker.git
+          git clone --branch 2.3 --depth 1 https://github.com/lvc/abi-compliance-checker.git
           cd abi-compliance-checker
           sudo make install
           abi-compliance-checker --version
 
       - name: Checkout current code (new version)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            projects/amdsmi/include/amd_smi/amdsmi.h
+            projects/amdsmi/tests/abi_check
+
+      # Vendor abi_check.py from the trusted base ref so the fork's copy is never executed.
+      - name: Checkout base ref to vendor ABI check script
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          ref: ${{ github.base_ref || github.ref_name }}
+          persist-credentials: false
+          path: _base
+          sparse-checkout: projects/amdsmi/tests/abi_check
 
       - name: Fetch base branch for PR
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          echo "Fetching base branch: ${{ github.base_ref }}"
-          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          echo "Fetching base branch: $BASE_REF"
+          git fetch origin -- "$BASE_REF:$BASE_REF"
           git branch -a
 
       - name: Determine Base Ref
         id: base_ref_minor
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "ref=${{ github.base_ref }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "ref=$BASE_REF" >> $GITHUB_OUTPUT
+          elif [[ "$EVENT_NAME" == "push" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$EVENT_BEFORE" >> $GITHUB_OUTPUT
           else
             echo "ref=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run Minor ABI Compliance Check (Strict)
+      - name: Run Minor ABI Compliance Check
         id: run_minor
         if: steps.base_ref_minor.outputs.ref != ''
+        env:
+          BASE_REF: ${{ steps.base_ref_minor.outputs.ref }}
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
         run: |
-          python3 projects/amdsmi/tests/abi_check/abi_check.py \
-            --base-ref "${{ steps.base_ref_minor.outputs.ref }}" \
-            --head-ref "${{ github.head_ref || github.ref_name }}" \
+          python3 _base/projects/amdsmi/tests/abi_check/abi_check.py \
+            --base-ref "$BASE_REF" \
+            --head-ref "$HEAD_REF" \
             --project-path projects/amdsmi \
             --mode minor
         continue-on-error: true
 
-      - name: Label PR on Minor ABI Breakage
+      - name: Save outcome for PR labeling
         if: always() && github.event_name == 'pull_request'
-        run: |
-          if [[ "${{ steps.run_minor.outcome }}" == "failure" ]]; then
-            echo "Minor ABI check failed, adding MINOR ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-            gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
-          else
-            echo "Minor ABI check passed, removing MINOR ABI BREAKAGE label if present"
-            gh pr edit ${{ github.event.pull_request.number }} --remove-label "MINOR ABI BREAKAGE" || true
-          fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
+        run: |
+          echo "$RUN_MINOR_OUTCOME" > outcome.txt
 
       - name: Upload Minor ABI Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: minor-abi-report
-          path: abi_report.html
+          path: |
+            abi_report.html
+            outcome.txt
           if-no-files-found: warn
 
       - name: Report Minor ABI Check Results
         if: always()
+        env:
+          RUN_MINOR_OUTCOME: ${{ steps.run_minor.outcome }}
         run: |
-          if [[ "${{ steps.run_minor.outcome }}" == "failure" ]]; then
+          if [[ "$RUN_MINOR_OUTCOME" == "failure" ]]; then
             echo "::warning::MINOR ABI CHANGES FOUND (STRICT CHECK). Check Run Minor ABI Compliance Check logs or the minor-abi-report artifact."
-          elif [[ "${{ steps.run_minor.outcome }}" == "success" ]]; then
+          elif [[ "$RUN_MINOR_OUTCOME" == "success" ]]; then
             echo "Minor ABI check (Strict) succeeded."
           else
             echo "Minor ABI check was skipped (no baseline ref available)."

@@ -17,7 +17,7 @@ endif()
 
 set(_required_symbols
     "rj_test_narrow_target_count"
-    "rocjitsu::gfx1250::Decoder::decode(unsigned int const*)"
+    "rocjitsu::cdna5::Decoder::decode(unsigned int const*, util::DiagnosticEmitter const&)"
 )
 foreach(_required IN LISTS _required_symbols)
     string(FIND "${_symbols}" "${_required}" _match)
@@ -36,7 +36,7 @@ set(_forbidden_symbols
     "rocjitsu::rdna3::"
     "rocjitsu::rdna3_5::"
     "rocjitsu::rdna4::"
-    "rocjitsu::gfx1250::execution_backend()"
+    "rocjitsu::cdna5::execution_backend()"
     "::execute_impl("
     "rocjitsu::amdgpu::ComputeUnitCore"
 )

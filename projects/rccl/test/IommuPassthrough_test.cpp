@@ -8,6 +8,7 @@
 #include "gtest/gtest.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <unistd.h>
@@ -69,6 +70,30 @@ TEST_F(IommuPassthroughTest, ReadFileFindsOption) {
 TEST_F(IommuPassthroughTest, IommuPassthroughOkWithCmdline) {
   EXPECT_TRUE(ncclIommuPassthroughOk("quiet splash iommu=pt amd_iommu=on"));
   EXPECT_TRUE(ncclIommuPassthroughOk("iommu=pt"));
+}
+
+TEST_F(IommuPassthroughTest, ContentHasOptionNullOrEmptyOption) {
+  const std::string content = "CONFIG_IOMMU_DEFAULT_PASSTHROUGH=y\n";
+  EXPECT_FALSE(ncclKernelConfigContentHasOption(content, nullptr));
+  EXPECT_FALSE(ncclKernelConfigContentHasOption(content, ""));
+}
+
+TEST_F(IommuPassthroughTest, ReadFileNullArgs) {
+  std::string content;
+  EXPECT_FALSE(ncclKernelConfigReadFile(nullptr, &content));
+  EXPECT_FALSE(ncclKernelConfigReadFile(tempPath.c_str(), nullptr));
+}
+
+TEST_F(IommuPassthroughTest, ReadFileNonexistentPath) {
+  // PID-scoped so a stale path from a parallel CI job on the same node cannot
+  // make this test silently exercise the success path instead.
+  const std::string missingPath =
+      std::filesystem::temp_directory_path().string() +
+      "/rccl_kernel_config_missing_" + std::to_string(getpid());
+  ASSERT_FALSE(std::filesystem::exists(missingPath));
+
+  std::string content;
+  EXPECT_FALSE(ncclKernelConfigReadFile(missingPath.c_str(), &content));
 }
 
 TEST_F(IommuPassthroughTest, ReadFileMissingOption) {

@@ -12,9 +12,11 @@ namespace rdna2 {
 
 enum class OperandType {
   OPR_ATTR,
+  OPR_CLAUSE,
   OPR_DSMEM,
   OPR_EXEC,
   OPR_FLAT_SCRATCH,
+  OPR_GPUMEM,
   OPR_HWREG,
   OPR_LABEL,
   OPR_PARAM,
@@ -92,6 +94,10 @@ enum OpSelExec {
 
 enum OpSelFlatScratch {
   OPR_FLAT_SCRATCH_FLAT_SCRATCH = 0,
+};
+
+enum OpSelGpumem {
+  OPR_GPUMEM_GPUMEM = 0,
 };
 
 enum OpSelParam {
@@ -343,6 +349,7 @@ enum OpSelSsrcLanesel {
   OPR_SSRC_LANESEL_NULL = 125,
   OPR_SSRC_LANESEL_M0 = 124,
   OPR_SSRC_LANESEL_POS_INT_MIN = 128,
+  OPR_SSRC_LANESEL_POS_INT_MAX = 191,
 };
 
 enum OpSelSsrcNolds {
@@ -453,6 +460,7 @@ enum OpSelVgprOrLds {
 [[nodiscard]] constexpr bool is_vgpr_operand_type(OperandType t) {
   switch (t) {
   case OperandType::OPR_SRC:
+  case OperandType::OPR_SRC_NOLDS:
   case OperandType::OPR_SRC_SIMPLE:
   case OperandType::OPR_SRC_VGPR:
   case OperandType::OPR_VGPR:

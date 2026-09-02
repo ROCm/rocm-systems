@@ -55,6 +55,8 @@ static ncclResult_t IbCastGinIbGdrGpuSupport(bool gdaki) {
 }
 
 NCCL_PARAM(CastGinType, "GIN_TYPE", -1);
+NCCL_PARAM(CastGinIbTc, "GIN_IB_TC", -1);
+extern int64_t ncclParamIbCastTc();
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 static std::mutex IbCastGinGdakiLockMutex;
@@ -77,74 +79,48 @@ ncclResult_t IbCastGinIbGdakiInit() {
 }
 #endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
-extern ncclGin_t IbCastGinIb;
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 extern ncclGin_t IbCastGinIbGdaki;
 #endif
-extern ncclGin_t IbCastGinIbProxy;
 
-// Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
-// If provided, overwrite ginIb with the backend (generic ginIb case).
-ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int ginType,
-                                 ncclGin_t* ginIb) {
+// Initialize the IB-CAST backend devices and net comm config. Under the v14
+// GIN/RMA split this shared helper is used both by the device-initiated GDAKI GIN
+// backend and by the IB-CAST RMA proxy backend (IbCastRmaIbProxy). Proxy GIN over
+// IB-CAST is provided generically by ncclGinProxy layered on top of the RMA
+// backend, so there is no bespoke IB-CAST GIN proxy vtable anymore.
+ncclResult_t IbCastGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int type) {
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
   if (IbCastNDevs <= 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
-  if (ginType == NCCL_GIN_TYPE_GDAKI) goto try_gdaki;
-#endif
-  if (ginType == NCCL_GIN_TYPE_PROXY) goto try_proxy;
-  if (ginType != -1) {
-    INFO(NCCL_INIT | NCCL_NET, "NET_IB: no support for GIN type %ld", ncclParamCastGinType());
-    return ncclInternalError;
+  if (type == NCCL_GIN_TYPE_GDAKI) {
+    NCCLCHECK(IbCastGinIbGdakiInit());
+    if (IbCastGinGdakiNDevs == 0) return ncclInternalError;
   }
-
-  bool gdrSupport;
-
-#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
-  // First try GDAKI
-try_gdaki:
-  NCCLCHECK(IbCastGinIbGdakiInit());
-  if (IbCastGinGdakiNDevs == 0 && ginType == -1) goto try_proxy;
-  NCCLCHECK(IbCastGinIbGdrSupport(&gdrSupport, /*gdaki*/ true));
-  if (!gdrSupport && ginType == -1) goto try_proxy;
-  if (!gdrSupport) return ncclInternalError;
-  if (ginIb) memcpy(ginIb, &IbCastGinIbGdaki, sizeof(IbCastGinIb));
-  goto end;
 #endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
-  // Then Proxy
-try_proxy:
-  NCCLCHECK(IbCastGinIbGdrSupport(&gdrSupport, /*gdaki*/ false));
+  bool gdrSupport;
+  NCCLCHECK(IbCastGinIbGdrSupport(&gdrSupport, type == NCCL_GIN_TYPE_GDAKI));
   if (!gdrSupport) return ncclInternalError;
-  if (ginIb) memcpy(ginIb, &IbCastGinIbProxy, sizeof(IbCastGinIb));
 
-end:
   ncclNetCommConfig_t* netCommConfig = nullptr;
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));
   netCommConfig->trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
   *ctx = netCommConfig;
   return ncclSuccess;
 }
-ncclResult_t IbCastGinIbInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  return IbCastGinIbInitType(ctx, commId, logFunction, ncclParamCastGinType(), &IbCastGinIb);
-}
-
-// GIN Entry point, which will then morph into either the GDAKI or PROXY backend
-ncclGin_t IbCastGinIb = {"GIN_IB", IbCastGinIbInit,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL};
 
 ncclResult_t IbCastGinIbFinalize(void* ctx) {
   if (ctx) free(ctx);
   return IbCastFinalizeDevices();
+}
+
+// v14 GIN plugins expose GIN capability flags via getGinProperties. IB-CAST's
+// IB proxy/GDAKI backends support both strong and VA signals.
+ncclResult_t IbCastGinIbGetGinProperties(ncclGinProperties_v14_t* ginProps) {
+  ginProps->supportsStrongSignals = true;
+  ginProps->supportsVASignals = true;
+  return ncclSuccess;
 }
 
 static ncclResult_t IbCastGinIbAllGather(struct CastIbGinCollComm* cComm, void* srcBuf, void* recvBuf, size_t len) {
@@ -234,7 +210,8 @@ ncclResult_t IbCastGinIbConnect(void* ctx, void* handles[], int nranks, int rank
   next = (cComm->rank + 1) % nranks;
   do {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(netIbCast.connect(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL));
+      NCCLCHECK(IbCastConnectImpl(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL,
+                                  ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()));
     }
     if (cComm->recvComm == NULL) NCCLCHECK(netIbCast.accept(lComm, &cComm->recvComm, NULL));
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
@@ -277,7 +254,7 @@ ncclResult_t IbCastGinIbCloseColl(void* collComm) {
 #include "gdaki/gin_host_gdaki.h"
 
 ncclResult_t IbCastGinIbGdakiInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  return IbCastGinIbInitType(ctx, commId, logFunction, NCCL_GIN_TYPE_GDAKI, NULL);
+  return IbCastGinIbInitType(ctx, commId, logFunction, NCCL_GIN_TYPE_GDAKI);
 }
 
 ncclResult_t IbCastGinIbGdakiDevices(int* ndev) {
@@ -317,9 +294,12 @@ ncclResult_t IbCastGinIbGdakiConnect(void* ctx, void* handles[], int nranks, int
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbGdakiCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** ginCtx,
+ncclResult_t IbCastGinIbGdakiCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** ginCtx,
                                            ncclNetDeviceHandle_t** devHandle) {
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
+
+  if (ncclParamCastGinIbTc() != -1) config->trafficClass = ncclParamCastGinIbTc();
+  else if (ncclParamIbCastTc() != -1) config->trafficClass = ncclParamIbCastTc();
 
   NCCLCHECK(ncclGinGdakiCreateContext(cComm, config->nSignals, config->nCounters, config->nContexts, config->queueDepth,
                                       config->trafficClass, ginCtx, devHandle));
@@ -351,6 +331,7 @@ ncclResult_t IbCastGinIbGdakiQueryLastError(void* ginCtx, bool* hasError) {
 ncclGin_t IbCastGinIbGdaki = {"GIN_IB_GDAKI",
                               IbCastGinIbGdakiInit,
                               IbCastGinIbGdakiDevices,
+                              IbCastGinIbGetGinProperties,
                               IbCastGinIbGdakiGetProperties,
                               IbCastGinIbGdakiListen,
                               IbCastGinIbGdakiConnect,
@@ -361,33 +342,28 @@ ncclGin_t IbCastGinIbGdaki = {"GIN_IB_GDAKI",
                               IbCastGinIbGdakiDestroyContext,
                               IbCastGinIbCloseColl,
                               IbCastCloseListen,
-                              NULL,
-                              NULL,
-                              NULL,
-                              NULL,
-                              NULL,
                               IbCastGinIbGdakiProgress,
                               IbCastGinIbGdakiQueryLastError,
                               IbCastGinIbFinalize};
 #endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
-struct IbCastGinProxyMrHandle {
+struct IbCastRmaProxyMrHandle {
   struct ncclIbMrHandle* mrHandle;
   uintptr_t* base_vas;
   uint32_t* rkeys;
 };
 
-ncclResult_t IbCastGinIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  return IbCastGinIbInitType(ctx, commId, logFunction, NCCL_GIN_TYPE_PROXY, NULL);
+ncclResult_t IbCastRmaIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
+  return IbCastGinIbInitType(ctx, commId, logFunction, ncclParamCastGinType());
 }
 
-ncclResult_t IbCastGinIbProxyGetProperties(int dev, ncclNetProperties_t* props) {
+ncclResult_t IbCastRmaIbProxyGetProperties(int dev, ncclNetProperties_t* props) {
   NCCLCHECK(netIbCast.getProperties(dev, props));
   props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
+ncclResult_t IbCastRmaIbProxyConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
                                      void** collComm) {
   // Check the current GPU supports GDR
   NCCLCHECK(IbCastGinIbGdrGpuSupport(/*gdaki*/ false));
@@ -398,27 +374,27 @@ ncclResult_t IbCastGinIbProxyConnect(void* ctx, void* handles[], int nranks, int
   return ncclSuccess;
 }
 
-struct IbCastGinIbProxyCtx {
+struct IbCastRmaIbProxyCtx {
   void** fullRecvComm;
   void** fullSendComm;
   int rank, nranks;
   int nContexts;
 };
 
-ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** ginCtx,
-                                           ncclNetDeviceHandle_v11_t** devHandle) {
+ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** ginCtx) {
   ncclResult_t ret = ncclSuccess;
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
   // Make sure all QP we create use the provided traffic class.
   IbCastSetTrafficClass(cComm->ctx, config->trafficClass);
 
-  if (config->queueDepth != 0) {
-    WARN("GIN_IB_PROXY does not support specifying qp depth");
-    return ncclInvalidUsage;
+  if (config->rankStride <= 0 || (cComm->nranks % config->rankStride) != 0) {
+    WARN("RMA_IB_PROXY create context: invalid rank stride %d, must be > 0 and nranks (%d) must be a multiple of it",
+         config->rankStride, cComm->nranks);
+    return ncclInternalError;
   }
 
   int nranks;
-  struct IbCastGinIbProxyCtx* ginProxyCtx = NULL;
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = NULL;
   *ginCtx = NULL;
   NCCLCHECK(ncclCalloc(&ginProxyCtx, config->nContexts));
   ginProxyCtx[0].nContexts = config->nContexts;
@@ -438,18 +414,19 @@ ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* 
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
 
   for (int c = 0; c < config->nContexts; c++) {
-    struct IbCastGinIbProxyCtx* gc = ginProxyCtx + c;
+    struct IbCastRmaIbProxyCtx* gc = ginProxyCtx + c;
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
 
-    for (int i = 0; i < nranks; i++) {
+    for (int i = 0; i < nranks; i += config->rankStride) {
       int connectPeer = (cComm->rank + i) % nranks;
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
       do {
         if (gc->fullSendComm[connectPeer] == NULL)
-          NCCLCHECKGOTO(netIbCast.connect(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
-                                          &gc->fullSendComm[connectPeer], NULL),
+          NCCLCHECKGOTO(IbCastConnectImpl(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
+                                          &gc->fullSendComm[connectPeer], NULL,
+                                          ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
                         ret, end);
         if (gc->fullRecvComm[acceptPeer] == NULL)
           NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
@@ -466,8 +443,8 @@ end:
   return ret;
 }
 
-ncclResult_t IbCastGinIbProxyDestroyContext(void* ginCtx) {
-  struct IbCastGinIbProxyCtx* gc = (struct IbCastGinIbProxyCtx*)ginCtx;
+ncclResult_t IbCastRmaIbProxyDestroyContext(void* ginCtx) {
+  struct IbCastRmaIbProxyCtx* gc = (struct IbCastRmaIbProxyCtx*)ginCtx;
   int nContexts = gc[0].nContexts;
   int nranks = gc[0].nranks;
   for (int c = 0; c < nContexts; c++) {
@@ -490,10 +467,10 @@ ncclResult_t IbCastGinIbProxyDestroyContext(void* ginCtx) {
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
-                                            uint64_t mr_flags, void** mhandle, void** ginHandle) {
+ncclResult_t IbCastRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                            uint64_t mr_flags, void** mhandle) {
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
-  struct IbCastGinProxyMrHandle* ginMrHandle;
+  struct IbCastRmaProxyMrHandle* ginMrHandle;
   NCCLCHECK(ncclCalloc(&ginMrHandle, 1));
 
   NCCLCHECKNOWARN(IbCastRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags,
@@ -507,19 +484,18 @@ ncclResult_t IbCastGinIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t s
   NCCLCHECK(cComm->allGather(cComm, &ginMrHandle->mrHandle->mrs[0]->rkey, ginMrHandle->rkeys, sizeof(uint32_t)));
 
   *mhandle = ginMrHandle;
-  *ginHandle = ginMrHandle;
 
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mr_flags,
-                                      void** mhandle, void** ginHandle) {
-  return IbCastGinIbProxyRegMrSymDmaBuf(collComm, data, size, type, 0, -1, mr_flags, mhandle, ginHandle);
+ncclResult_t IbCastRmaIbProxyRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mr_flags,
+                                      void** mhandle) {
+  return IbCastRmaIbProxyRegMrSymDmaBuf(collComm, data, size, type, 0, -1, mr_flags, mhandle);
 }
 
-ncclResult_t IbCastGinIbProxyDeregMrSym(void* collComm, void* mhandle) {
+ncclResult_t IbCastRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
-  struct IbCastGinProxyMrHandle* ginMrHandle = (struct IbCastGinProxyMrHandle*)mhandle;
+  struct IbCastRmaProxyMrHandle* ginMrHandle = (struct IbCastRmaProxyMrHandle*)mhandle;
 
   NCCLCHECK(netIbCast.deregMr(cComm->recvComm, ginMrHandle->mrHandle));
   free(ginMrHandle->base_vas);
@@ -528,17 +504,17 @@ ncclResult_t IbCastGinIbProxyDeregMrSym(void* collComm, void* mhandle) {
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyCloseColl(void* collComm) {
+ncclResult_t IbCastRmaIbProxyCloseColl(void* collComm) {
   free(collComm);
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
+ncclResult_t IbCastRmaIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                   uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
-  struct IbCastGinIbProxyCtx* ginProxyCtx = &((struct IbCastGinIbProxyCtx*)ginCtx)[context];
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
-  struct IbCastGinProxyMrHandle* srcMrHandle = (struct IbCastGinProxyMrHandle*)srcMhandle;
-  struct IbCastGinProxyMrHandle* dstMrHandle = (struct IbCastGinProxyMrHandle*)dstMhandle;
+  struct IbCastRmaProxyMrHandle* srcMrHandle = (struct IbCastRmaProxyMrHandle*)srcMhandle;
+  struct IbCastRmaProxyMrHandle* dstMrHandle = (struct IbCastRmaProxyMrHandle*)dstMhandle;
 
   void* srcPtr = (void*)(srcMrHandle->base_vas[ginProxyCtx->rank] + srcOff);
   void* dstPtr = (void*)(dstMrHandle->base_vas[rank] + dstOff);
@@ -584,12 +560,12 @@ ncclResult_t IbCastGinIbProxyIPut(void* ginCtx, int context, uint64_t srcOff, vo
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
+ncclResult_t IbCastRmaIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
                                   uint64_t localOffset, void* localMhandle, uint32_t rank, void** request) {
-  struct IbCastGinIbProxyCtx* ginProxyCtx = &((struct IbCastGinIbProxyCtx*)ginCtx)[context];
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
-  struct IbCastGinProxyMrHandle* remoteMrHandle = (struct IbCastGinProxyMrHandle*)remoteMhandle;
-  struct IbCastGinProxyMrHandle* localMrHandle = (struct IbCastGinProxyMrHandle*)localMhandle;
+  struct IbCastRmaProxyMrHandle* remoteMrHandle = (struct IbCastRmaProxyMrHandle*)remoteMhandle;
+  struct IbCastRmaProxyMrHandle* localMrHandle = (struct IbCastRmaProxyMrHandle*)localMhandle;
 
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)ginProxyCtx->fullSendComm[rank];
   struct ncclIbQp* qp = &comm->base.qps[0];
@@ -635,19 +611,21 @@ ncclResult_t IbCastGinIbProxyIGet(void* ginCtx, int context, uint64_t remoteOffs
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
+ncclResult_t IbCastRmaIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                         uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
-                                        void* signalMhandle, uint64_t signalValue, uint32_t signalOp, void** request) {
+                                        void* signalMhandle, uint64_t signalValue, uint32_t signalOp,
+                                        bool isStrongSignal, void** request) {
+  (void)isStrongSignal;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
-    WARN("IbCastGinIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
+    WARN("IbCastRmaIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
   }
 
-  struct IbCastGinIbProxyCtx* ginProxyCtx = &((struct IbCastGinIbProxyCtx*)ginCtx)[context];
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
 
-  struct IbCastGinProxyMrHandle* srcMrHandle = (struct IbCastGinProxyMrHandle*)srcMhandle;
-  struct IbCastGinProxyMrHandle* dstMrHandle = (struct IbCastGinProxyMrHandle*)dstMhandle;
-  struct IbCastGinProxyMrHandle* signalMrHandle = (struct IbCastGinProxyMrHandle*)signalMhandle;
+  struct IbCastRmaProxyMrHandle* srcMrHandle = (struct IbCastRmaProxyMrHandle*)srcMhandle;
+  struct IbCastRmaProxyMrHandle* dstMrHandle = (struct IbCastRmaProxyMrHandle*)dstMhandle;
+  struct IbCastRmaProxyMrHandle* signalMrHandle = (struct IbCastRmaProxyMrHandle*)signalMhandle;
 
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)ginProxyCtx->fullSendComm[rank];
   struct ncclIbQp* qp = &comm->base.qps[0];
@@ -716,9 +694,9 @@ ncclResult_t IbCastGinIbProxyIPutSignal(void* ginCtx, int context, uint64_t srcO
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyTest(void* collComm, void* request, int* done) {
+ncclResult_t IbCastRmaIbProxyTest(void* collComm, void* request, int* done) {
   struct ncclIbRequest* req = (struct ncclIbRequest*)request;
-  struct IbCastGinIbProxyCtx* ginProxyCtx = (struct IbCastGinIbProxyCtx*)req->ginProxyCtx;
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = (struct IbCastRmaIbProxyCtx*)req->ginProxyCtx;
   int rank = req->iput.rank;
   *done = 0;
 
@@ -774,10 +752,10 @@ ncclResult_t IbCastGinIbProxyTest(void* collComm, void* request, int* done) {
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbProxyIFlush(void* ginCtx, int context, void* mhandle, uint32_t rank, void** request) {
-  struct IbCastGinIbProxyCtx* ginProxyCtx = &((struct IbCastGinIbProxyCtx*)ginCtx)[context];
+ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, uint32_t rank, void** request) {
+  struct IbCastRmaIbProxyCtx* ginProxyCtx = &((struct IbCastRmaIbProxyCtx*)ginCtx)[context];
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)ginProxyCtx->fullRecvComm[rank];
-  struct IbCastGinProxyMrHandle* ginMrHandle = (struct IbCastGinProxyMrHandle*)mhandle;
+  struct IbCastRmaProxyMrHandle* ginMrHandle = (struct IbCastRmaProxyMrHandle*)mhandle;
   struct ncclIbQp* qp = &comm->devs[0].gpuFlush.qp;
 
   struct ncclIbRequest* req;
@@ -819,24 +797,29 @@ ncclResult_t IbCastGinIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
-ncclGin_t IbCastGinIbProxy = {"GIN_IB_PROXY",
-                              IbCastGinIbProxyInit,
+// RMA_IB_PROXY: host/proxy-initiated RMA backend for the IB-CAST transport.
+// Under the v14 GIN/RMA split, the iput/iputSignal/iget/iflush/test data-path ops
+// live in the ncclRma_t vtable (they were part of the old v13 ncclGin_t vtable).
+// GIN over IB-CAST is provided by the generic ncclGinProxy layered on top of this
+// backend (see gin_host_proxy.cc). rmaProgress/queryLastError stay NULL.
+ncclRma_t IbCastRmaIbProxy = {"RMA_IB_PROXY",
+                              IbCastRmaIbProxyInit,
                               IbCastDevices,
-                              IbCastGinIbProxyGetProperties,
+                              IbCastRmaIbProxyGetProperties,
                               IbCastListen,
-                              IbCastGinIbProxyConnect,
-                              IbCastGinIbProxyCreateContext,
-                              IbCastGinIbProxyRegMrSym,
-                              IbCastGinIbProxyRegMrSymDmaBuf,
-                              IbCastGinIbProxyDeregMrSym,
-                              IbCastGinIbProxyDestroyContext,
+                              IbCastRmaIbProxyConnect,
+                              IbCastRmaIbProxyCreateContext,
+                              IbCastRmaIbProxyRegMrSym,
+                              IbCastRmaIbProxyRegMrSymDmaBuf,
+                              IbCastRmaIbProxyDeregMrSym,
+                              IbCastRmaIbProxyDestroyContext,
                               IbCastGinIbCloseColl,
                               IbCastCloseListen,
-                              IbCastGinIbProxyIPut,
-                              IbCastGinIbProxyIPutSignal,
-                              IbCastGinIbProxyIGet,
-                              IbCastGinIbProxyIFlush,
-                              IbCastGinIbProxyTest,
+                              IbCastRmaIbProxyIPut,
+                              IbCastRmaIbProxyIPutSignal,
+                              IbCastRmaIbProxyIGet,
+                              IbCastRmaIbProxyIFlush,
+                              IbCastRmaIbProxyTest,
                               NULL,
                               NULL,
                               IbCastGinIbFinalize};

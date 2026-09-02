@@ -213,8 +213,8 @@ backtrace::get_period(std::uint64_t _units)
 {
     using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
 
-    double       _period = 1.0 / 1000.0;
-    std::int64_t _period_nsec =
+    const double       _period = 1.0 / 1000.0;
+    const std::int64_t _period_nsec =
         static_cast<std::int64_t>(_period * units::sec) % units::sec;
     return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
 }

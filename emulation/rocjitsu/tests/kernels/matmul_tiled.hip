@@ -10,8 +10,9 @@
 ///   global_id = workgroup_id * 64 + thread_id
 ///   row = global_id / N,  col = global_id % N
 ///
-/// With N=128 and 256 workgroups of 64 threads each, all 16384 output elements
-/// are covered, distributing one workgroup per compute unit across 256 CUs.
+/// With N=128, the first 256 workgroups cover all 16384 output elements. A
+/// 288-workgroup MI350X topology stress dispatch gives each physical CU a group;
+/// the final 32 groups exit through the gid bounds check.
 ///
 /// Kernel arguments (passed via the argument buffer):
 ///   A        - pointer to input matrix A  (N*N floats, row-major)
@@ -19,8 +20,7 @@
 ///   C        - pointer to output matrix C (N*N floats, row-major)
 ///   N        - matrix dimension
 
-extern "C" __global__ void matmul_tiled(const float *__restrict__ A,
-                                        const float *__restrict__ B,
+extern "C" __global__ void matmul_tiled(const float *__restrict__ A, const float *__restrict__ B,
                                         float *__restrict__ C, unsigned N) {
   // blockDim.x is always 64 (one wavefront per workgroup).
   constexpr unsigned BLOCK_SIZE = 64;

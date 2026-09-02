@@ -140,6 +140,16 @@ RCCL package install requires sudo/root access because it installs under `/opt/r
 
 Refer to [docker/README.md](docker/README.md "docker/README.md")
 
+Python wheel :
+```shell
+$ # Install uv to create the Python wheel (uv manages Python deps in a venv)
+$ # See: https://docs.astral.sh/uv/getting-started/installation/
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
+$ # Build NCCL Python wheel (this also builds the .txz archive as an intermediate)
+$ make pkg.python_wheel.build
+$ ls build/pkg/python_wheel/
+```
+
 ## Tests
 
 There are rccl unit tests implemented with the Googletest framework in RCCL.  The rccl unit tests require Googletest 1.10 or higher to build and execute properly (installed with the -d option to install.sh).

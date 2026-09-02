@@ -68,6 +68,13 @@ testResult_t  AllReduceGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t
   return testSuccess;
 }
 
+testResult_t  AllReduceGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncAllReduce, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void AllReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
@@ -548,7 +555,8 @@ struct testColl allReduceTest = {
   AllReduceGetBw,
   AllReduceRunColl,
   AllReduceGetAlgoProtoChannels,
-  AllReduceGetSymkInfo
+  AllReduceGetSymkInfo,
+  AllReduceGetCollImplInfo
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

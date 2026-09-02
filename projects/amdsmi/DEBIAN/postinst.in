@@ -71,6 +71,36 @@ do_ldconfig() {
   fi
 }
 
+# Pip-era package removal is best-effort, so a stale /usr/local amdsmi may
+# remain after upgrade and shadow the module installed in the system sitelib.
+do_warn_shadowed_python_module() {
+  local packaged_sitelib="@AMDSMI_SYSTEM_PYTHON_SITELIB@"
+  local imported_sitelib
+
+  if [ -z "${packaged_sitelib}" ]; then
+    return 0
+  fi
+
+  if ! command -v python3 &>/dev/null; then
+    return 0
+  fi
+
+  imported_sitelib="$(python3 -c 'import amdsmi, os; print(os.path.dirname(os.path.dirname(os.path.realpath(amdsmi.__file__))))' 2>/dev/null)" || return 0
+  if [ -z "${imported_sitelib}" ]; then
+    return 0
+  fi
+
+  if [ "${imported_sitelib}" != "${packaged_sitelib}" ]; then
+    cat << EOF
+[WARNING] A pip-installed amdsmi copy at ${imported_sitelib} takes precedence over
+the packaged module at ${packaged_sitelib} for plain 'import amdsmi'.
+Remove the shadowing copy with: python3 -m pip uninstall amdsmi
+EOF
+  fi
+
+  return 0
+}
+
 do_activate_argcomplete() {
   # python3-argcomplete is recommended but optional; activate global bash
   # completion when its helper is present, otherwise continue gracefully.
@@ -89,6 +119,7 @@ do_activate_argcomplete() {
 case "$1" in
   ( configure )
     do_ldconfig
+    do_warn_shadowed_python_module
     do_activate_argcomplete
     do_configureLogrotate || exit 0
   ;;

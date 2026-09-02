@@ -467,7 +467,7 @@ pause(ScopeT)
     {
         if(!_thread_paused) _thread_paused = false;
 
-        bool _paused_v = *_thread_paused;
+        const bool _paused_v = *_thread_paused;
         if(!_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
@@ -480,7 +480,7 @@ pause(ScopeT)
     {
         if(!_process_paused) _process_paused = false;
 
-        bool _paused_v = *_process_paused;
+        const bool _paused_v = *_process_paused;
         if(!_paused_v)
         {
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)
@@ -503,7 +503,7 @@ resume(ScopeT)
     {
         if(!_thread_paused) _thread_paused = true;
 
-        bool _paused_v = *_thread_paused;
+        const bool _paused_v = *_thread_paused;
         if(_paused_v)
         {
             auto& _causal_perf = perf::get_instance(threading::get_id());
@@ -516,7 +516,7 @@ resume(ScopeT)
     {
         if(!_process_paused) _process_paused = true;
 
-        bool _paused_v = *_process_paused;
+        const bool _paused_v = *_process_paused;
         if(_paused_v)
         {
             for(auto i = 0; i < ROCPROFSYS_MAX_THREADS; ++i)

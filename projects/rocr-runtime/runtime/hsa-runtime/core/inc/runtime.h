@@ -817,7 +817,15 @@ class Runtime {
   static __forceinline std::mutex& bootstrap_lock() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-    static std::mutex* bootstrap_lock_ = new std::mutex;
+    // Built with -fno-threadsafe-statics, so a function-local static with a
+    // dynamic initializer is NOT thread-safe: concurrent first-time hsa_init()
+    // callers could each run 'new std::mutex' and serialize on different mutex
+    // objects, defeating Acquire/Release mutual exclusion. Guard the one-time
+    // init with a constant-initialized std::once_flag (its constexpr ctor makes
+    // it immune to -fno-threadsafe-statics) so all callers share one mutex.
+    static std::once_flag bootstrap_once;
+    static std::mutex* bootstrap_lock_ = nullptr;
+    std::call_once(bootstrap_once, []() { bootstrap_lock_ = new std::mutex; });
     return *bootstrap_lock_;
   }
   Runtime();
@@ -845,7 +853,7 @@ class Runtime {
   /// loaded library.
   void LoadTools();
 
-  /// @brief Load the rocjitsu hotswap backend as the first HSA tool.
+  /// @brief Load the rocjitsu hotswap hook as the first HSA tool.
   hsa_status_t LoadHotswapTool();
 
   /// @brief Call OnUnload method of each tool library.
@@ -873,6 +881,9 @@ class Runtime {
 
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
+
+  // GPU matching libhsakmt first_gpu_mem (KFD GTT anchor for host memory).
+  Agent* KfdGttAnchorGpu();
 
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking

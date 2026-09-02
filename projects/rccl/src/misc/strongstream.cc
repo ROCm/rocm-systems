@@ -246,6 +246,62 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, stru
   return ncclSuccess;
 }
 
+// Add `event` as a record node on `stream` with stream's current capture frontier
+// as explicit dependencies. If updateFrontier is true, advance stream's capture
+// pointer to that node (needed for captureStream so subsequent NCCL work on the
+// same stream depends on the record). For the graph origin stream pass false —
+// the origin's frontier must not be modified or nodes captured on it after NCCL
+// will get unexpected topology that breaks cudaGraphExecUpdate.
+#if ROCM_VERSION >= 60100
+static ncclResult_t recordEventOnStream(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream,
+                                        bool updateFrontier) {
+  cudaGraphNode_t recordNode;
+  CUDACHECK(cudaGraphAddEventRecordNode(&recordNode, graph.graph, nullptr, 0, event));
+
+  cudaStreamCaptureStatus status;
+  cudaGraphNode_t const* nodes;
+  size_t count = 0;
+#if CUDART_VERSION >= 13000
+  cudaError_t res = hipStreamGetCaptureInfo_v3(stream, &status, nullptr, nullptr, &nodes, nullptr, &count);
+#else
+  cudaError_t res = hipStreamGetCaptureInfo_v2(stream, &status, nullptr, nullptr, &nodes, &count);
+#endif
+
+#if CUDART_VERSION >= 12030
+  if (res == cudaErrorLossyQuery) {
+    cudaGraphEdgeData const* edges;
+    CUDACHECK(hipStreamGetCaptureInfo_v3(stream, &status, nullptr, nullptr, &nodes, &edges, &count));
+    for (int i = 0; i < (int)count; i++) {
+      CUDACHECK(cudaGraphAddDependencies_v2(graph.graph, &nodes[i], &recordNode, &edges[i], 1));
+    }
+  }
+#else
+  if (false) {
+  }
+#endif
+  else {
+    CUDACHECK(res);
+    for (int i = 0; i < (int)count; i++) {
+#if CUDART_VERSION >= 13000
+      CUDACHECK(cudaGraphAddDependencies_v2(graph.graph, &nodes[i], &recordNode, nullptr, 1));
+#else
+      CUDACHECK(cudaGraphAddDependencies(graph.graph, &nodes[i], &recordNode, 1));
+#endif
+    }
+  }
+
+  if (updateFrontier) {
+#if CUDART_VERSION >= 13000
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(stream, &recordNode, nullptr, 1,
+                                                     cudaStreamSetCaptureDependencies));
+#else
+    CUDACHECK(cudaStreamUpdateCaptureDependencies(stream, &recordNode, 1, cudaStreamSetCaptureDependencies));
+#endif
+  }
+  return ncclSuccess;
+}
+#endif
+
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent) {
 #if ROCM_VERSION >= 60100
   bool mixing = graph.graphUsageMode == 2;
@@ -265,61 +321,25 @@ ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStro
       while (cap->graphId != graph.graphId) cap = cap->next;
       if (concurrent) lock.unlock();
 
-        // Add event record node with dependencies added further down.
-      cudaGraphNode_t recordNode;
-      CUDACHECK(cudaGraphAddEventRecordNode(&recordNode, graph.graph, nullptr, 0, ss->serialEvent));
-
-        // Get current nodes from work stream so we can add them as dependencies.
-      cudaStreamCaptureStatus status;
-      cudaGraphNode_t const* nodes;
-      size_t count = 0;
-#if CUDART_VERSION >= 13000
-      cudaError_t res =
-        hipStreamGetCaptureInfo_v3(cap->captureStream, &status, nullptr, nullptr, &nodes, nullptr, &count);
-#else
-      cudaError_t res = hipStreamGetCaptureInfo_v2(cap->captureStream, &status, nullptr, nullptr, &nodes, &count);
-#endif
-
-#if CUDART_VERSION >= 12030
-      if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
-        cudaGraphEdgeData const* edges;
-        CUDACHECK(cudaStreamGetCaptureInfo_v3(cap->captureStream, &status, nullptr, nullptr, &nodes, &edges, &count));
-        for (int i = 0; i < (int)count; i++) {
-          CUDACHECK(cudaGraphAddDependencies_v2(graph.graph, &nodes[i], &recordNode, &edges[i], 1));
-        }
-      }
-#else
-      if (false) {
-      }
-#endif
-      else {
-        CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
-        for (int i = 0; i < (int)count; i++) {
-#if CUDART_VERSION >= 13000
-          CUDACHECK(cudaGraphAddDependencies_v2(graph.graph, &nodes[i], &recordNode, nullptr, 1));
-#else
-          CUDACHECK(cudaGraphAddDependencies(graph.graph, &nodes[i], &recordNode, 1));
-#endif
-        }
-      }
-
-        // Make every future operation captured on cap->captureStream depend on 'recordNode'.
-#if CUDART_VERSION >= 13000
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(cap->captureStream,
-                                                       &recordNode,          /* dependencies                */
-                                                       /*edges =*/nullptr,  /* no edge annotations         */
-                                                       1,                    /* count                       */
-                                                       cudaStreamSetCaptureDependencies));
-#else
-      CUDACHECK(cudaStreamUpdateCaptureDependencies(cap->captureStream, &recordNode, 1,
-                                                    cudaStreamSetCaptureDependencies));
-#endif
+      NCCLCHECK(recordEventOnStream(graph, ss->serialEvent, cap->captureStream, /*updateFrontier=*/true));
 
       if (cap->acquiredBy != localThreadId() && ncclParamLaunchRaceFatal()) {
         ERROR("%s", launchRaceFatalMsg);
         return ncclInvalidUsage;
       }
     }
+  }
+#endif
+  return ncclSuccess;
+}
+
+// Record `event` on `stream` as a graph node with the stream's current capture
+// frontier as dependencies. Used when GRAPH_STREAM_ORDERING=0 to serialize
+// collectives across graph launches without an ss-owned captureStream.
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream) {
+#if ROCM_VERSION >= 60100
+  if (graph.graphId != ULLONG_MAX) {
+    NCCLCHECK(recordEventOnStream(graph, event, stream, /*updateFrontier=*/false));
   }
 #endif
   return ncclSuccess;
