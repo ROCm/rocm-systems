@@ -50,6 +50,7 @@
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
@@ -904,6 +905,11 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
+            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // and buffer machinery next, so no callback-capable signal-less completion
+            // may survive. On timeout this abandons+disables signal-less process-wide
+            // (correct here -- the client is going away). No-op with the feature off.
+            kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
@@ -956,6 +962,11 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
+                // F23 terminal fail-closed fence: the client finalizer frees the
+                // tool's callback/buffer machinery next, so no callback-capable
+                // signal-less completion may survive. On timeout abandon+disable
+                // process-wide. No-op with the feature off.
+                kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
@@ -1130,6 +1141,14 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+
+        // Signal-less teardown steps 1-6, in the one order that strands no
+        // EOP-proven completion. Must precede the sequence below:
+        // queue_controller_fini joins the task group, and correlation_id_finalize
+        // consults the loss ledger this populates. No-op unless signal-less is
+        // active.
+        kfd::signal_less_teardown();
+
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();

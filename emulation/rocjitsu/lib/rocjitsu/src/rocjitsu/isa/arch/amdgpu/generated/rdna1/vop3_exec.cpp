@@ -255,82 +255,6 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> rel_src_base =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  uint64_t rel_src_index =
-      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
-                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
-}
-
-void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> rel_dst_base =
-      Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  std::optional<uint32_t> rel_src_base =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  uint32_t rel_src_offset = wf.m0();
-  uint32_t rel_dst_offset = wf.m0();
-  uint64_t rel_src_index =
-      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
-  uint64_t rel_dst_index =
-      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
-  if (!rel_dst_valid)
-    return;
-  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
-                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
-  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
-}
-
-void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> rel_dst_base =
-      Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  std::optional<uint32_t> rel_src_base =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  uint32_t rel_src_offset = wf.m0() & 0x3ffu;
-  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;
-  uint64_t rel_src_index =
-      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
-  uint64_t rel_dst_index =
-      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
-  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
-                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
-  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
-                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
-  if (!rel_dst_valid)
-    return;
-  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
-                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
-  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
-}
-
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cvt_f16_u16_vop3(*this, wf);
 }
@@ -407,10 +331,6 @@ void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_cndmask_b32_vop3(*this, wf);
 }
 
-void VDot2cF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2c_f32_f16_vop3(*this, wf);
-}
-
 void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f32_vop3(*this, wf); }
 
 void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f32_vop3(*this, wf); }
@@ -482,10 +402,6 @@ void VMulU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VMulHiU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_mul_hi_u32_u24_vop3(*this, wf);
-}
-
-void VDot4cI32I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4c_i32_i8_vop3(*this, wf);
 }
 
 void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f32_vop3(*this, wf); }

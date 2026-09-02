@@ -13,14 +13,13 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "hw_counter_query.hpp"
 
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 
 #include <timemory/components.hpp>

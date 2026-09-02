@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Core shared infrastructure for the AMD SMI Python test suite.
 
 Owns three responsibilities:
@@ -26,8 +10,8 @@ Owns three responsibilities:
     sys.path, and guards against a shadowing site-packages copy
     (see ROCM-1552 / PR #6359).
   * the ``Common`` helper base -- enum tables, ``Test_API_*`` drivers,
-    ``check_ret`` and friends, held as ``self.common`` by the API tests
-    (intentionally NOT a unittest.TestCase).
+    ``expect_status``/``status_sweep`` and the legacy ``check_ret``, held as
+    ``self.common`` by the API tests (intentionally NOT a unittest.TestCase).
   * the unittest runner machinery -- ``run_test_dir``,
     ``GTestSummaryRunner``, verbosity/-k/-l parsing and the help/legend
     printers used by the three top-level runners.
@@ -44,6 +28,7 @@ import os
 import pathlib
 import sys
 import time
+import types
 import unittest
 
 
@@ -826,6 +811,8 @@ class Common:
         self.PASS = PASS
         self.FAIL = FAIL
         self.ANY_FAIL = "ANY_FAIL"
+        # Non-None only inside status_sweep(), see expect_status.
+        self._status_failures = None
 
         # Tests marked with either of these flags will be skipped
         # and need to be implemented later.
@@ -951,6 +938,15 @@ class Common:
             error_code = -1
         return error_code
 
+    @staticmethod
+    def _normalize_expected(expected):
+        """Resolve AmdSmiStatus enum members to their ERROR_MAP string name."""
+        if isinstance(expected, list):
+            return [ERROR_MAP.get(str(v.value), v) if hasattr(v, "value") else v for v in expected]
+        if hasattr(expected, "value"):
+            return ERROR_MAP.get(str(expected.value), expected)
+        return expected
+
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
@@ -1015,6 +1011,150 @@ class Common:
                 print(f"{msg}\n", end="")
             print(f"{status_msg}", flush=True)
         return status_ret
+
+    # TODO(amdsmi_team): migrate the suite off check_ret, which tolerates NOT_SUPPORTED,
+    # NOT_YET_IMPLEMENTED and NO_HSMP_MSG_SUP for every call no matter what the caller
+    # expected. test_set_gpu_power_profile & test_gpu_counter are the first conversions.
+    @contextlib.contextmanager
+    def expect_status(self, msg, accept):
+        """Judge one amdsmi call against the statuses the caller declares correct.
+
+        Nothing is tolerated implicitly, unlike ``check_ret``: a status outside
+        *accept* fails, NOT_SUPPORTED included. Leaving ``PASS`` out (that is,
+        amdsmi.AmdSmiStatus.SUCCESS) is how a negative case is written, since
+        the call then fails by succeeding::
+
+            accept = [common.PASS, "AMDSMI_STATUS_NOT_SUPPORTED", amdsmi.AmdSmiStatus.NO_PERM]
+            with self.common.expect_status(msg, accept):
+                amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
+
+        An open ``status_sweep`` collects the failure and reports every one at
+        the end. Without one, it is raised here.
+
+        Args:
+            msg (str): header printed above the verdict, and the name a sweep
+                reports the call under. Keep it specific.
+            accept (str | list): every status treated as correct, as
+                ``AMDSMI_STATUS_*`` names or AmdSmiStatus members.
+
+        Raises:
+            AssertionError: when no sweep is open to collect the failure.
+            ValueError: when *accept* names a status outside AMDSMI_STATUS_*.
+            Exception: anything the block raised without a status code, which is
+                a bug in the test body rather than an API result.
+        """
+        outcome = self._new_status_outcome(msg, accept)
+        try:
+            yield
+        except Exception as exc:
+            if not hasattr(exc, "get_error_code"):
+                raise  # no status attached: a bug in the test body, not a result
+            self._record_raised_status(outcome, exc)
+        else:
+            self._record_returned_status(outcome)
+        self._print_status_outcome(outcome)
+        if outcome.failed:
+            self._note_status_failure(outcome)
+
+    @contextlib.contextmanager
+    def status_sweep(self):
+        """Collect every ``expect_status`` failure in the block and fail once at the end.
+
+        Without a sweep, an unaccepted status fails at the call that produced
+        it. Wrapping the loop lets it visit every device and parameter, so one
+        bad device cannot hide the rest::
+
+            with self.common.status_sweep():
+                for i, gpu in enumerate(self.common.processors):
+                    for name, mask, _ in common.POWER_PROFILE_PRESET_MASKS:
+                        with self.common.expect_status(msg, accept):
+                            amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
+
+        An exception raised by the block itself propagates instead, discarding
+        the collected failures.
+
+        Raises:
+            AssertionError: naming every failed call, its status, and the
+                statuses it would have accepted. The first failure is chained,
+                so the traceback reaches the call that produced it.
+        """
+        outer = self._status_failures
+        self._status_failures = []
+        try:
+            yield
+        finally:
+            collected = self._status_failures
+            self._status_failures = outer
+        # Only reached when the body did not raise on its own.
+        if collected:
+            # Chain the first failure so the traceback reaches the call itself;
+            # a call that wrongly succeeded has no exception to chain.
+            cause = next((o.exception for o in collected if o.exception), None)
+            raise self._sweep_failure(collected) from cause
+
+    def _note_status_failure(self, outcome):
+        """Hand the failure to the active sweep, or fail now when there is none."""
+        if self._status_failures is None:
+            raise self._sweep_failure([outcome]) from outcome.exception
+        self._status_failures.append(outcome)
+
+    @staticmethod
+    def _sweep_failure(collected):
+        """Name every failed call, its status, and the statuses it would have accepted."""
+        plural = "call" if len(collected) == 1 else "calls"
+        lines = [f"{len(collected)} {plural} did not return an accepted status:"]
+        for out in collected:
+            lines.append(f"  {out.msg.strip().rstrip(':')} -> {out.status_code} {out.status_name}")
+            lines.append(f"      accepted: {', '.join(out.accepted)}")
+        return AssertionError("\n".join(lines))
+
+    def _new_status_outcome(self, msg, accept):
+        """Blank ``expect_status`` result for one call."""
+        # list() cannot split a bare name or enum member into its characters.
+        if not isinstance(accept, (list, tuple)):
+            accept = [accept]
+        accepted = self._normalize_expected(list(accept))
+        # A misspelled name normalizes untouched and would simply never match,
+        # failing the test for the wrong reason.
+        unknown = [name for name in accepted if name not in self.error_map.values()]
+        if unknown:
+            raise ValueError(f"expect_status got unknown status name(s): {unknown}")
+        return types.SimpleNamespace(
+            msg=msg,
+            status_code=None,
+            status_name=None,
+            accepted=accepted,
+            failed=False,
+            exception=None,
+        )
+
+    def _record_raised_status(self, outcome, exc):
+        """The call raised: keep the exception when its status is not accepted."""
+        outcome.status_code, outcome.status_name = self.get_error_code(exc)
+        outcome.failed = outcome.status_name not in outcome.accepted
+        if outcome.failed:
+            outcome.exception = exc
+
+    def _record_returned_status(self, outcome):
+        """The call returned, so name the success from the map the raised path uses."""
+        outcome.status_name = PASS
+        outcome.status_code = str(self.get_error_code_from_name(PASS))
+        outcome.failed = PASS not in outcome.accepted
+
+    def _print_status_outcome(self, outcome):
+        """Verdict line, then one line per accepted status."""
+        if self.verbose <= VERBOSITY_QUIET:
+            return
+        if outcome.msg:
+            print(f"{outcome.msg}\n", end="")
+        verdict = "TEST FAILURE" if outcome.failed else "TEST SUCCESS"
+        lines = [
+            f"\t{verdict}, AMDSMI API Returned {outcome.status_code:>2s}, {outcome.status_name}"
+        ]
+        for name in outcome.accepted:
+            code = str(self.get_error_code_from_name(name))
+            lines.append(f"\t              AMDSMI API Accepted {code:>2s}, {name}")
+        print("\n".join(lines), flush=True)
 
     def _check_amdgpu_driver(self):
         """Returns true if amdgpu is found in the list of initialized modules"""

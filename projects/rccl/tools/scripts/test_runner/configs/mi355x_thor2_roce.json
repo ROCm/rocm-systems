@@ -2184,6 +2184,29 @@
         }
       ]
     },
+    "symmetric_abort_checkmode_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1"
+      },
+      "tests": [
+        { "name": "SymCheckMode_Local_DebugLocal", "description": "NCCL_CHECK_MODE=DEBUG_LOCAL rejects a host pointer where a device pointer is required.", "test_filter": "SymCheckMode_Local.DebugLocal_HostPointer_Rejected" },
+        { "name": "SymCheckMode_Local_DebugGlobal", "description": "NCCL_CHECK_MODE=DEBUG_GLOBAL keeps the local host-pointer check active.", "test_filter": "SymCheckMode_Local.DebugGlobal_HostPointer_Rejected" },
+        { "name": "SymCheckMode_Registration_Match", "description": "DEBUG_GLOBAL is transparent when every rank registers matching symmetric windows.", "test_filter": "SymCheckMode_Registration.DebugGlobal_MatchingRegistration_Succeeds" },
+        { "name": "SymCheckMode_Registration_Mismatch", "description": "DEBUG_GLOBAL rejects a collective when one rank's buffer is outside any window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_RegistrationMismatch_Rejected" },
+        { "name": "SymCheckMode_Registration_OffsetMismatch", "description": "DEBUG_GLOBAL rejects a user-offset mismatch inside the window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_UserOffsetMismatch_Rejected" },
+        { "name": "SymCheckMode_Registration_DefaultAccepts", "description": "Without NCCL_CHECK_MODE the same mismatch is accepted on the fast path.", "test_filter": "SymCheckMode_Registration.Default_RegistrationMismatch_Accepted" }
+      ]
+    },
     "net_ib_branch_coverage": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -2509,7 +2532,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         }
@@ -2551,7 +2574,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations over IB transport; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations over IB transport, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         },
@@ -4883,6 +4906,12 @@
       "name": "Symmetric Window Tests - Single Node",
       "description": "Symmetric window registration tests for relaxed one-buffer path validation",
       "config": "symmetric_window_tests",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Abort + CheckMode Tests - Single Node",
+      "description": "NCCL_CHECK_MODE validation and symmetric-kernel abort (AICOMRCCL-806)",
+      "config": "symmetric_abort_checkmode_tests",
       "enabled": true
     }
   ]

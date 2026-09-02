@@ -3,7 +3,7 @@
 
 #include "core/config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"

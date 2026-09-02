@@ -182,7 +182,6 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
-  simm32.apply_fieldless_caps(true, false, false);
 }
 
 namespace detail {

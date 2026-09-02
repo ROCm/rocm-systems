@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
@@ -22,6 +23,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -192,22 +194,22 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    util::UniqueHandle owned_dbg_fd;
+    UniqueDriverFd owned_dbg_fd;
 
     /// @brief Debugger-authorized access to the target's address space.
     /// @details The ptrace parent opens /proc/<target>/mem and transfers it to
     /// the daemon, which cannot use process_vm_readv/process_vm_writev itself.
-    util::UniqueHandle target_mem_fd;
+    UniqueDriverFd target_mem_fd;
 
     /// @brief Pins the target process identity and reports target exit.
     /// @details Prevents a stale session from being mistaken for a later process
     /// that reuses the same numeric pid.
-    util::UniqueHandle target_pidfd;
+    UniqueDriverFd target_pidfd;
 
     /// @brief Pins the target's procfs directory used for ptrace authorization.
     /// @details Status is opened relative to this descriptor so authorization
     /// cannot silently switch to a process that reuses the numeric pid.
-    util::UniqueHandle target_procfd;
+    UniqueDriverFd target_procfd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
@@ -230,7 +232,7 @@ public:
     /// @brief Pins the debugger process identity and reports debugger exit.
     /// @details Mirrors the kernel's debugger-process notifier: the session is
     /// disabled when the debugger task exits, even if the target remains alive.
-    util::UniqueHandle debugger_pidfd;
+    UniqueDriverFd debugger_pidfd;
 
     /// @brief One programmed hardware address-watch register (TCP_WATCH0..3).
     struct AddressWatch {
@@ -293,6 +295,21 @@ public:
   static constexpr uint64_t kPageShift = 12;
   static constexpr uint64_t kPageSize = 1ULL << kPageShift;
 
+  /// @brief Who owns the host memory behind an extent, and so who may revoke it.
+  ///
+  /// @details The two cannot be treated alike by anything that dereferences the
+  /// extent. Driver memory is a memfd this process mapped read-write and holds
+  /// open; nothing outside can change its protection or take it away, so its
+  /// pointer is valid by construction and checking it would be pure cost on the
+  /// path that moves the most bytes. Application memory is the caller's own
+  /// pages, registered through USERPTR or reached by identity; the application
+  /// may mprotect or munmap them at any time, and dereferencing one without
+  /// checking is how a GPU access becomes a host SIGSEGV.
+  enum class HostExtentOwner : uint8_t {
+    Driver,      ///< A memfd this driver created, mapped and keeps open.
+    Application, ///< The caller's pages; revocable, so validate before use.
+  };
+
   /// @brief One host-backed interval within a GPU page.
   struct HostExtent {
     uint8_t *host_ptr = nullptr;
@@ -300,6 +317,10 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+    /// @brief Defaults to Application, which is the safe direction to be wrong
+    /// in: a driver extent mistaken for an application one is validated
+    /// needlessly, while the reverse is dereferenced without checking.
+    HostExtentOwner owner = HostExtentOwner::Application;
 
     bool operator==(const HostExtent &) const = default;
   };
@@ -452,11 +473,12 @@ public:
   /// unmapping from silently replacing an unrelated sibling.
   struct PageTableEntry {
     PageTableEntry() = default;
-    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype)
-        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0}} {}
+    PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype,
+                   HostExtentOwner owner = HostExtentOwner::Application)
+        : mtype(page_mtype), host_extents{{host_ptr, kPageSize, 0, owner}} {}
     PageTableEntry(uint8_t *host_ptr, amdgpu::Mtype page_mtype, size_t host_backed_bytes,
-                   size_t gpu_page_offset)
-        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset}} {}
+                   size_t gpu_page_offset, HostExtentOwner owner = HostExtentOwner::Application)
+        : mtype(page_mtype), host_extents{{host_ptr, host_backed_bytes, gpu_page_offset, owner}} {}
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
@@ -472,8 +494,13 @@ public:
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
+  /// @param owner Who may revoke the backing; see HostExtentOwner. Defaults to
+  ///        Application so an unannotated caller is validated rather than
+  ///        trusted.
   void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
-                 amdgpu::Mtype mtype = amdgpu::Mtype::RW) {
+                 amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                 HostExtentOwner owner = HostExtentOwner::Application) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
@@ -482,11 +509,13 @@ public:
       const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
       const size_t host_backed_bytes =
           std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
-      auto [page, inserted] = page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset,
-                                                      mtype, host_backed_bytes, gpu_page_offset);
+      auto [page, inserted] =
+          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                  host_backed_bytes, gpu_page_offset, owner);
       if (!inserted) {
         page->second.mtype = mtype;
-        replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset});
+        replace_host_extent(page->second,
+                            {base + host_offset, host_backed_bytes, gpu_page_offset, owner});
       }
       mapped_va += host_backed_bytes;
       host_offset += host_backed_bytes;
@@ -499,6 +528,7 @@ public:
 
   /// @brief Unmap pages from this process's GPU page table.
   void unmap_pages(uint64_t gpu_va, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
@@ -524,6 +554,7 @@ public:
   /// page-table critical section. Only entries still pointing at the expected
   /// old page are changed.
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
@@ -557,6 +588,7 @@ public:
 
   /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
+    std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
     bool changed = false;
     uint64_t mapped_va = gpu_va;
@@ -579,6 +611,11 @@ public:
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
+  /// @brief Return the lease shared by page-table readers and mutations.
+  std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
+    return page_table_request_mutex_;
+  }
+
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
 
@@ -595,6 +632,15 @@ public:
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
   mutable std::mutex alloc_mutex_;
+  /// @brief Serializes scratch-pool backing allocation for this process.
+  /// @details Every XCD of a fanned-out dispatch independently finds the same
+  /// process-wide pool VA unbacked and races to map it; remapping a pool that
+  /// already has live waves spilling into it would drop their data. Per-process
+  /// rather than driver-wide so daemon clients do not serialize against each
+  /// other. Lock order: hw_queue_mutex_ (held by the calling command processor)
+  /// -> scratch_backing_mutex_ -> {alloc_mutex_, owned_fds_mutex_,
+  /// page_table_mutex_}; nothing taken under it reaches a command processor.
+  std::mutex scratch_backing_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;
@@ -631,7 +677,16 @@ public:
     uint32_t ring_size = 0;
     uint32_t queue_type = 0;
     uint32_t gpu_id = 0;
+    uint32_t xcc_id = 0;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+
+    /// @brief Area used by the XCC that owns this queue.
+    uint64_t cwsr_xcc_address() const {
+      return ctx_save_restore_address == 0
+                 ? 0
+                 : ctx_save_restore_address +
+                       static_cast<uint64_t>(xcc_id) * ctx_save_restore_area_size;
+    }
   };
   std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
 
@@ -720,8 +775,11 @@ private:
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
-  ///          this generation; all reads and writes occur while holding
-  ///          page_table_mutex_, so the counter itself does not need atomics.
+  ///          this generation. Mutations hold both page_table_request_mutex_
+  ///          and page_table_mutex_; readers hold at least one of those locks,
+  ///          so the counter itself does not need atomics.
+  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
+      std::make_shared<std::shared_mutex>();
   uint64_t page_table_generation_{1};
 };
 

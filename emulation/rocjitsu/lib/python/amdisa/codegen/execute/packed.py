@@ -24,18 +24,10 @@ def _append_pk_f32_pair_read(
         L.append(f'    const auto {var} = read_pk_f32_words({src}, wf, lane);')
         return
     L.append(
-        f'    uint32_t {var}_lo_w = amdgpu::RegisterAccess(wf).read_lane({src}, lane);'
+        f'    const auto {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32({src}, lane);'
     )
-    L.append(f'    uint32_t {var}_hi_w = {var}_lo_w;')
-    L.append(
-        f'    if ({src}.encoding_value_ >= 256 && {src}.encoding_value_ <= 511) {{'
-    )
-    L.append(
-        f'      uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
-    )
-    L.append(f'      {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
-    L.append(f'      {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);')
-    L.append('    }')
+    L.append(f'    const uint32_t {var}_lo_w = {var}_pair_w.lo;')
+    L.append(f'    const uint32_t {var}_hi_w = {var}_pair_w.hi;')
 
 
 def _pk_f32_word_expr(var: str, half: str, use_cdna5_helpers: bool = False) -> str:
@@ -644,6 +636,44 @@ def gen_pk_ternary_f32(
     )
     L.append('  }')
     return '\n'.join(L)
+
+
+def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
+    """Generate packed U64 shift-left-add over two independent elements.
+
+    V_PK_LSHL_ADD_U64 has two 64-bit values in each 128-bit value/addend
+    operand and two 32-bit shift counts in its 64-bit shift operand. VGPR U64
+    sources supply both elements, while scalar-backed U64 sources broadcast the
+    low 64 bits. Its public LLVM profile explicitly disables clamp and source
+    modifiers, so the body intentionally consumes neither field. The currently
+    proven shift-count range is 0..4; execution fails closed before any
+    destination write if either count of any active lane is outside that range.
+    """
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  std::array<PkU64Pair, 64> results{};',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    const auto values = read_pk_u64_pair({s0}, wf, lane);',
+            f'    const auto shifts = read_pk_u32_pair({s1}, wf, lane);',
+            f'    const auto addends = read_pk_u64_pair({s2}, wf, lane);',
+            '    if (shifts.lo > 4u || shifts.hi > 4u) {',
+            '      wf.report_instruction_execution_error(',
+            '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+            '      return;',
+            '    }',
+            '    const uint64_t result_lo = amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;',
+            '    const uint64_t result_hi = amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;',
+            '    results[lane] = {result_lo, result_hi};',
+            '  }',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    write_pk_u64_pair({d}, wf, lane, results[lane]);',
+            '  }',
+        ]
+    )
 
 
 def gen_pk_mov_b32(
