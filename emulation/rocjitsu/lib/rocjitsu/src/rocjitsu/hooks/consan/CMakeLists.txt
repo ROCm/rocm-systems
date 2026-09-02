@@ -31,6 +31,7 @@ add_library(
         rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
         rj_hsa_dbi_moi_record_replay_report_decoder.cpp
         rj_hsa_dbi_moi_report_decoder.cpp
+        rj_hsa_dbi_moi_sampled_report_decoder.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_decoder

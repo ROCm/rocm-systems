@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace rocjitsu::consan_hook {
@@ -47,5 +48,9 @@ struct AutoMoiSampledDecodedReport {
   std::vector<AutoMoiSampledEvidence> evidence;
   std::vector<AutoMoiSampledEvidenceIssue> issues;
 };
+
+[[nodiscard]] AutoMoiSampledDecodedReport decode_auto_moi_sampled_report(
+    const AutoMoiReportPipelineInput &input, const ConSanMoiReportHeader &header,
+    std::span<const uint8_t> report_bytes, AutoMoiReportSummary &summary);
 
 } // namespace rocjitsu::consan_hook

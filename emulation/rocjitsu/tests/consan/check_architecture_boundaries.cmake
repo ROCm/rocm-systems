@@ -2228,6 +2228,7 @@ set(
     rj_hsa_dbi_moi_report_pipeline.h
     rj_hsa_dbi_moi_sampled_report_analyzer.cpp
     rj_hsa_dbi_moi_sampled_report_analyzer.h
+    rj_hsa_dbi_moi_sampled_report_decoder.cpp
     rj_hsa_dbi_moi_sampled_report_decoder.h
 )
 foreach(_source IN LISTS _runtime_analysis_sources)
@@ -2329,6 +2330,11 @@ if(NOT _runtime_analysis_build MATCHES "rj_hsa_dbi_moi_inline_shadow_report_deco
         "ConSan InlineShadow report decoder lost its physical build owner"
     )
 endif()
+if(NOT _runtime_analysis_build MATCHES "rj_hsa_dbi_moi_sampled_report_decoder[.]cpp")
+    message(FATAL_ERROR
+        "ConSan Sampled report decoder lost its physical build owner"
+    )
+endif()
 foreach(_decoder_contract IN ITEMS rj_hsa_dbi_moi_report_decoder.cpp rj_hsa_dbi_moi_report_decoder.h)
     _consan_assert_no_match(
         "${_hook_dir}/${_decoder_contract}"
@@ -2394,10 +2400,22 @@ _consan_assert_no_match(
     "classify_consan_moi_inline|consan_moi_inline_classify|consan_moi_filter_deferred_inline|ConSanMoiCompactDiagnosticTokenMapping"
     "common report decoding must not reimplement InlineShadow evidence decoding"
 )
+foreach(
+    _sampled_decoder
+    IN ITEMS
+        rj_hsa_dbi_moi_sampled_report_decoder.cpp
+        rj_hsa_dbi_moi_sampled_report_decoder.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_sampled_decoder}"
+        "RecordReplay|InlineShadow"
+        "Sampled decoded evidence must not expose another mode"
+    )
+endforeach()
 _consan_assert_no_match(
-    "${_hook_dir}/rj_hsa_dbi_moi_sampled_report_decoder.h"
-    "RecordReplay|InlineShadow"
-    "Sampled decoded evidence must not expose another mode"
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.cpp"
+    "classify_consan_moi_sampled|consan_moi_sampled_join|ConSanMoiSampledPendingAcquire|AutoMoiSampledEvidence"
+    "common report decoding must not reimplement Sampled evidence decoding"
 )
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.cpp"
