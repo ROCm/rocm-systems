@@ -65,6 +65,9 @@ TEST(SystemUnit, ResolveContainerIdReportsNoIdOutsideAContainer) {
       {{"0::/user.slice/user-1000.slice/session-3.scope"}, "", "ordinary login session"},
       {{"0::/system.slice/docker.service"}, "", "the docker daemon itself"},
       {{"0::/system.slice/containerd.service"}, "", "the containerd daemon itself"},
+      {{"0::/system.slice/docker-storage-setup.service"}, "", "host unit named docker-*"},
+      {{"0::/system.slice/docker-registry.service"}, "", "host unit named docker-*"},
+      {{"0::/system.slice/docker-cleanup.service"}, "", "host unit named docker-*"},
       {{"0::/user.slice/mydocker-notacontainer.scope"}, "", "runtime name as a substring"},
       {{"0::/not-docker-evil/aaaaaaaaaaaaaaaaaaaa"}, "", "path crafted to look like a match"},
       {{"0::/path/to/lxc-tools/extra"}, "", "'lxc-' is not a container prefix"},
@@ -132,4 +135,40 @@ TEST(SystemUnit, ResolveContainerIdZeroCapacityBufferIsNotWritten) {
   EXPECT_EQ(amd::smi::ResolveContainerId({"0::/docker/abc123"}, gb.buf, 0), 0u);
   EXPECT_EQ(gb.buf[0], 'X');
   EXPECT_TRUE(gb.CanariesIntact());
+}
+
+// Resolution order is fixed, and neither scan is reached by accident: the
+// SHA-256 scan runs over every line before any prefix is tried, and the prefix
+// set is walked in its own order rather than the file's.
+TEST(SystemUnit, ResolveContainerIdAppliesScanPrecedence) {
+  const std::string id = amdsmi_test::kDocker64;
+  const std::vector<ResolveCase> cases = {
+      {{"10:memory:/docker/shortid1", "0::/lxc/web01"},
+       "web01",
+       "prefix-set order beats line order"},
+      {{"0::/lxc/web01", "1:name=systemd:/docker/" + id}, id, "SHA-256 scan wins over any prefix"},
+  };
+  for (const auto& c : cases) {
+    EXPECT_EQ(Resolve(c.lines), c.expected) << "precedence: " << c.desc;
+  }
+}
+
+// The refusal contract at the buffer boundary, on a path that returns a
+// non-zero length: an ID needing the whole buffer leaves no room for the NUL,
+// so it is reported as absent rather than as a truncated prefix.
+TEST(SystemUnit, ResolveContainerIdRefusesAnIdThatFillsTheBuffer) {
+  const std::string name(64, 'z');  // 'z' is an ID char but not hex, so the prefix scan resolves it
+  const std::string line = "0::/docker/" + name;
+  {
+    amdsmi_test::GuardedBuffer<64> gb;
+    EXPECT_EQ(amd::smi::ResolveContainerId({line}, gb.buf, sizeof(gb.buf)), 0u);
+    EXPECT_EQ(gb.buf[0], '\0');
+    EXPECT_TRUE(gb.CanariesIntact());
+  }
+  {
+    amdsmi_test::GuardedBuffer<65> gb;
+    EXPECT_EQ(amd::smi::ResolveContainerId({line}, gb.buf, sizeof(gb.buf)), 64u);
+    EXPECT_EQ(std::string(gb.buf), name);
+    EXPECT_TRUE(gb.CanariesIntact());
+  }
 }

@@ -38,8 +38,6 @@ TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
       kDocker64 + ".scope";
   const std::vector<ParseCase> cases = {
       {"0::/docker/" + kDocker64, "docker/", kDocker64, "docker raw cgroup v1"},
-      {"0::/system.slice/docker-" + kDocker64 + ".scope", "docker-", kDocker64,
-       "docker systemd scope"},
       {k8s_line, "docker/", "", "k8s+containerd not in prefix set (docker)"},
       {k8s_line, "lxc/", "", "k8s+containerd not in prefix set (lxc)"},
       {"0::/lxc/" + kDocker64, "lxc/", kDocker64, "lxc name that looks like a sha256"},
@@ -50,8 +48,6 @@ TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
       {"0::/docker/abc123def456", "docker/", "abc123def456", "docker short id"},
       {"0::/docker/", "docker/", "", "empty after prefix"},
       {"0::/docker/abc123", "docker/", "abc123", "short id at end of line"},
-      {"0::/user.slice/user-1000.slice/user@1000.service/app.slice/docker-" + kDocker64 + ".scope",
-       "docker-", kDocker64, "cgroup v2 unified hierarchy"},
   };
   for (const auto& c : cases) {
     EXPECT_EQ(ExtractIdString(c.line, c.prefix), c.expected) << "format: " << c.desc;
@@ -60,22 +56,17 @@ TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
 
 // The original unanchored find("docker") matched inside "/not-docker-evil/", so
 // a prefix now has to sit at a cgroup path-component boundary: '/' (or
-// start-of-line) immediately before it. Docker's "/docker-<id>.scope" format
-// forces "docker-" into the prefix set, which leaves a residual false positive
-// on "/docker-compose-tool/" that the anchor alone cannot distinguish from a
-// real entry.
+// start-of-line) immediately before it.
 TEST(SystemUnit, ContainerIdAnchorBoundaryRules) {
   const std::vector<ParseCase> cases = {
-      {"0::/not-docker-evil/attackerstring", "docker-", "", "no '/' before docker -> rejected"},
-      {"0::/path/to/docker-compose-tool/extra/id", "docker-", "compose-tool",
-       "anchored '/docker-' succeeds; residual false-positive"},
-      {"0::/path/to/lxc-tools/extra", "lxc/", "", "'lxc-' is not a container prefix"},
+      {"0::/not-docker/evil", "docker/", "", "'-' before docker -> rejected"},
       {"0::xdocker/id", "docker/", "", "'x' precedes docker -> rejected"},
       {"docker/abc123", "docker/", "abc123", "start-of-line is a valid prefix"},
       {"0::/path/docker", "docker/", "", "no separator after docker -> rejected"},
       {"0::/system.slice/docker.service", "docker/", "", "docker.service is not a container"},
-      {"0::/system.slice/docker.service", "docker-", "", "docker.service is not a container"},
       {"0::/Docker/abc123", "docker/", "", "case-sensitive: Docker != docker"},
+      {"0::/path/to/lxc-tools/extra", "lxc/", "", "'lxc-' is not a container prefix"},
+      {"0::/mylxc.payload.web", "lxc.payload.", "", "prefix must follow '/'"},
   };
   for (const auto& c : cases) {
     EXPECT_EQ(ExtractIdString(c.line, c.prefix), c.expected) << "prefix case: " << c.desc;
@@ -152,6 +143,8 @@ TEST(SystemUnit, ContainerIdOciAnchorAndLengthRules) {
       {"0::/docker/" + id + "0", "", "", "65 hex digits rejected"},
       {"0::/docker/x" + id, "", "", "run not preceded by '/' or '-'"},
       {"0::/docker/" + id + "x", "", "", "run not followed by '/', '.' or end"},
+      {"0::/docker/" + std::string(30, 'a') + "g" + std::string(33, 'a') + ".scope", "", "",
+       "64-char run containing a non-hex byte is not an OCI id"},
       {"0::/docker/ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789", "", "",
        "uppercase hex is not an OCI id"},
       {"0::/lxc/my-container", "", "", "lxc names carry no sha256"},

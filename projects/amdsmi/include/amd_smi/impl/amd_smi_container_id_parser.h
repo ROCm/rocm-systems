@@ -99,11 +99,15 @@ inline size_t ExtractOciContainerId(const std::string& line, char* out, size_t o
 // matches "/system.slice/docker.service", and "lxc" alone cannot reach the name
 // in "/lxc.payload.<name>", which is how LXC 3+ and LXD name a container cgroup
 // under systemd.
+//
+// There is deliberately no "docker-" entry: Docker's systemd layout is
+// "/system.slice/docker-<64 hex>.scope", which ExtractOciContainerId already
+// resolves, so the only paths left for it to claim are host units such as
+// "docker-storage-setup.service".
 inline constexpr const char* kContainerIdPrefixes[] = {
     "lxc/",          // LXC, classic layout
     "lxc.payload.",  // LXC 3+ / LXD under systemd
     "docker/",       // Docker, cgroupfs driver
-    "docker-",       // Docker, systemd driver
 };
 
 // Locate `prefix` inside `line` at a cgroup path-component boundary: the byte
