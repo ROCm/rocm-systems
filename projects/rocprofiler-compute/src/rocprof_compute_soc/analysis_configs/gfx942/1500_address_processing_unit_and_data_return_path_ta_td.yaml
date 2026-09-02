@@ -140,8 +140,8 @@ Panel Config:
       metric:
         Data-Return Busy:
           avg: 100 * SUM(TD_TD_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN(TD_TD_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          max: 100 * MAX(TD_TD_BUSY_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          min: MIN(BOUND_RATIO(TD_TD_BUSY_sum, $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(BOUND_RATIO(TD_TD_BUSY_sum, $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
           avg: 100 * SUM(TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)

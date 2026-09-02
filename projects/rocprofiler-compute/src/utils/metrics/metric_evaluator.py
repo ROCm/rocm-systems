@@ -14,6 +14,7 @@ import pandas as pd
 from utils.logger import console_debug, console_warning
 from utils.metrics.aggregation import (
     to_avg,
+    to_bound_ratio,
     to_concat,
     to_int,
     to_max,
@@ -65,6 +66,7 @@ class MetricEvaluator:
                 "to_mod": to_mod,
                 "to_concat": to_concat,
                 "to_noise_clamp": to_noise_clamp,
+                "to_bound_ratio": to_bound_ratio,
             })
 
             with warnings.catch_warnings(record=True) as caught:

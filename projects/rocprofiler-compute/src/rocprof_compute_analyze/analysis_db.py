@@ -50,6 +50,7 @@ from utils.logger import (
 from utils.metrics.aggregation import (
     calc_pct_of_peak,
     to_avg,
+    to_bound_ratio,
     to_concat,
     to_int,
     to_max,
@@ -899,6 +900,7 @@ class db_analysis(OmniAnalyze_Base):
                         "to_std": to_std,
                         "to_sum": to_sum,
                         "to_noise_clamp": to_noise_clamp,
+                        "to_bound_ratio": to_bound_ratio,
                     },
                 )
             # RuntimeWarnings (e.g. divide-by-zero) are surfaced only under --verbose

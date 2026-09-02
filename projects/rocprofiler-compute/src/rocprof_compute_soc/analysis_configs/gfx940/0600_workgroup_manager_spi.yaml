@@ -25,8 +25,8 @@ Panel Config:
           unit: Percent
         Workgroup Manager Utilization:
           avg: 100 * SUM($GRBM_SPI_BUSY_PER_XCD) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-          min: 100 * MIN($GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
-          max: 100 * MAX($GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+          min: MIN(BOUND_RATIO($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD))
+          max: MAX(BOUND_RATIO($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Percent
         Shader Engine Utilization:
           avg: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
