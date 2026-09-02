@@ -256,6 +256,7 @@ jobs:
     if: always()
     needs:
       - ci-gate
+      - configure
       - setup
       - linux_build_and_test
       - windows_build_and_test
