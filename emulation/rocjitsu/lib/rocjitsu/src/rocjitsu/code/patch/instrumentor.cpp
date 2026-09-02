@@ -15,6 +15,7 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -686,6 +687,19 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
     if (!callable)
       return std::nullopt;
+    // Inputs the probe reads that its convention does not supply. Typically a
+    // value only the kernel prologue produces -- workitem_id_x in v31, say --
+    // which a trampoline at an arbitrary site cannot reproduce, so the probe
+    // would read whatever the instrumented kernel left behind. An ordinary
+    // uninitialized read lands here too, and is equally unusable.
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->cc, &perr);
+    if (!live_ins)
+      return std::nullopt;
+    if (!live_ins->none()) {
+      perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
+             " before defining it, and the calling convention does not supply it";
+      return std::nullopt;
+    }
     out.probes.push_back(std::move(*callable));
     probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
     return out.probes.size() - 1;

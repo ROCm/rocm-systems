@@ -97,6 +97,24 @@ struct LivenessAnalysisOptions {
   uint16_t max_free_vgpr = static_cast<uint16_t>(
       std::min(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF));
 
+  /// @brief Treat an EXEC-masked vector def as a kill.
+  ///
+  /// @details Defaults to false: a masked vector def preserves inactive lanes'
+  /// old values, so it is a kill only where an ExecMaskAnalysis proves EXEC
+  /// full, and a scope with no such analysis kills no VGPR at all. That is the
+  /// right conservatism for a whole kernel, whose divergence the caller does not
+  /// control while allocating registers around it.
+  ///
+  /// Set this when the analyzed body is responsible for its own EXEC. The
+  /// obligation that carries is that no read sees lanes no def in the body
+  /// wrote: narrowing EXEC keeps it, widening between a def and a read of that
+  /// register breaks it, and either way this option calls the register dead.
+  ///
+  /// An ExecMaskAnalysis, if supplied, takes precedence — where it reports
+  /// `Unknown` the result is the conservative one, so do not supply one
+  /// alongside this flag.
+  bool exec_masked_defs_kill = false;
+
   /// @brief Restrict instruction-level live-before materialization to selected instructions.
   ///
   /// @details When a query first requests CFG liveness, block-level dataflow
@@ -288,6 +306,7 @@ private:
 
   bool available_ = true;
   mutable bool analyzed_ = false;
+  bool exec_masked_defs_kill_ = false;
   bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
