@@ -11967,3 +11967,47 @@ then prove one arm unreachable from the actual mode pipeline, delete it, and
 narrow the surviving product.  The result makes exact entry identity a true
 Sampled emission invariant rather than a preference with an undocumented
 legacy escape hatch.
+
+### 16.181 Convergence checkpoint 180: delete duplicate capture policy
+
+After checkpoints 177--179 removed the last consumers,
+`ConSanMoiModePolicy::requires_entry_workgroup_capture` had become pure
+duplication.  It remained in the shared schema and all three mode
+registrations, but no production path read it.  The actual requirement is
+already executable in each mode's `persistent_state_demand` operation:
+Record/Replay and Sampled produce `needs_entry_workgroup_tuple` for admitted
+sites, while InlineShadow produces its different workgroup-key demand.
+
+The dead policy field and its three initializers are deleted.  The hypothetical
+fifth-mode registry test no longer teaches an extension author to initialize a
+flag that cannot affect behavior, and the cross-runtime policy test no longer
+asserts duplicate state.  The existing `EachEngineOwnsPersistentStateDemand`
+test remains the behavioral contract: it directly proves the Record/Replay,
+Sampled, and InlineShadow demand products.  The architecture gate now rejects
+restoration of the retired field anywhere in production.
+
+| Signal | Checkpoint 180 | Cumulative change | Slice change from checkpoint 179 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,144 | **-2,832** | **-4** |
+| Nonblank production lines | 95,737 | **-3,347** | **-4** |
+| Production implementation lines | 88,003 | **-3,447** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Cross-runtime mode-policy fields | **4** | n/a | **-1** |
+| Dead mode-registration initializers | **0 / 3** | n/a | **-3** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `903a313babd`.  Validation includes a
+successful full `-j16` build and **883/883** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+This checkpoint corrects an intermediate design decision from checkpoint 172.
+Localizing a fact in a registry was useful while common code still consumed
+it, but once mode-owned demand became the sole authority, retaining the flag
+would make adding a mode harder and permit two answers to drift.  The
+refactoring contract favors the one executable authority, not the historical
+shape of an earlier slice.
