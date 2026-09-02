@@ -300,36 +300,21 @@ enum class ConSanEvidenceRequirementReason : uint8_t {
 };
 
 /// Complete iterable set of evidence-requirement construction reasons.
-inline constexpr std::array<ConSanEvidenceRequirementReason, 6> kConSanEvidenceRequirementReasons =
-    {
-        ConSanEvidenceRequirementReason::None,
-        ConSanEvidenceRequirementReason::InvalidObservationPlan,
-        ConSanEvidenceRequirementReason::WrongEngine,
-        ConSanEvidenceRequirementReason::UnexpectedIntentKind,
-        ConSanEvidenceRequirementReason::InvalidIntentPayload,
-        ConSanEvidenceRequirementReason::MissingInventoryFact,
-};
+inline constexpr auto kConSanEvidenceRequirementReasons = [] {
+  using E = ConSanEvidenceRequirementReason;
+  return make_consan_enum_vocabulary(
+      "invalid-evidence-requirement-reason", consan_enum(E::None, "none"),
+      consan_enum(E::InvalidObservationPlan, "invalid-observation-plan"),
+      consan_enum(E::WrongEngine, "wrong-engine"),
+      consan_enum(E::UnexpectedIntentKind, "unexpected-intent-kind"),
+      consan_enum(E::InvalidIntentPayload, "invalid-intent-payload"),
+      consan_enum(E::MissingInventoryFact, "missing-inventory-fact"));
+}();
 
 /// Return the stable diagnostic spelling of a requirement-construction reason.
 [[nodiscard]] constexpr std::string_view
 consan_evidence_requirement_reason_name(ConSanEvidenceRequirementReason reason) {
-  switch (reason) {
-  case ConSanEvidenceRequirementReason::None:
-    return "none";
-  case ConSanEvidenceRequirementReason::InvalidObservationPlan:
-    return "invalid-observation-plan";
-  case ConSanEvidenceRequirementReason::WrongEngine:
-    return "wrong-engine";
-  case ConSanEvidenceRequirementReason::UnexpectedIntentKind:
-    return "unexpected-intent-kind";
-  case ConSanEvidenceRequirementReason::InvalidIntentPayload:
-    return "invalid-intent-payload";
-  case ConSanEvidenceRequirementReason::MissingInventoryFact:
-    return "missing-inventory-fact";
-  case ConSanEvidenceRequirementReason::Count:
-    break;
-  }
-  return "invalid-evidence-requirement-reason";
+  return kConSanEvidenceRequirementReasons.name(reason);
 }
 
 static_assert(kConSanEvidenceRequirementReasons.size() ==
@@ -362,32 +347,19 @@ enum class ConSanEvidenceIntentKind : uint8_t {
 };
 
 /// Complete iterable set of buffer-independent evidence-intent kinds.
-inline constexpr std::array<ConSanEvidenceIntentKind, 6> kConSanEvidenceIntentKinds = {
-    ConSanEvidenceIntentKind::Access,         ConSanEvidenceIntentKind::Barrier,
-    ConSanEvidenceIntentKind::Atomic,         ConSanEvidenceIntentKind::Fence,
-    ConSanEvidenceIntentKind::AddressCapture, ConSanEvidenceIntentKind::StickyMarker,
-};
+inline constexpr auto kConSanEvidenceIntentKinds = [] {
+  using E = ConSanEvidenceIntentKind;
+  return make_consan_enum_vocabulary(
+      "invalid-evidence-intent-kind", consan_enum(E::Access, "access"),
+      consan_enum(E::Barrier, "barrier"), consan_enum(E::Atomic, "atomic"),
+      consan_enum(E::Fence, "fence"), consan_enum(E::AddressCapture, "address-capture"),
+      consan_enum(E::StickyMarker, "sticky-marker"));
+}();
 
 /// Return the stable diagnostic spelling of an evidence-intent kind.
 [[nodiscard]] constexpr std::string_view
 consan_evidence_intent_kind_name(ConSanEvidenceIntentKind kind) {
-  switch (kind) {
-  case ConSanEvidenceIntentKind::Access:
-    return "access";
-  case ConSanEvidenceIntentKind::Barrier:
-    return "barrier";
-  case ConSanEvidenceIntentKind::Atomic:
-    return "atomic";
-  case ConSanEvidenceIntentKind::Fence:
-    return "fence";
-  case ConSanEvidenceIntentKind::AddressCapture:
-    return "address-capture";
-  case ConSanEvidenceIntentKind::StickyMarker:
-    return "sticky-marker";
-  case ConSanEvidenceIntentKind::Count:
-    break;
-  }
-  return "invalid-evidence-intent-kind";
+  return kConSanEvidenceIntentKinds.name(kind);
 }
 
 static_assert(kConSanEvidenceIntentKinds.size() ==
@@ -595,36 +567,24 @@ revalidate_consan_moi_report_layout(const ConSanMoiReportBufferLayout &candidate
 
 [[nodiscard]] constexpr std::string_view
 consan_moi_auto_report_plan_outcome_name(ConSanMoiAutoReportPlanOutcome outcome) {
-  switch (outcome) {
-  case ConSanMoiAutoReportPlanOutcome::Complete:
-    return "complete";
-  case ConSanMoiAutoReportPlanOutcome::InsufficientReportCapacity:
-    return "insufficient_report_capacity";
-  case ConSanMoiAutoReportPlanOutcome::Overflow:
-    return "overflow";
-  case ConSanMoiAutoReportPlanOutcome::Count:
-    break;
-  }
-  return "invalid_auto_report_plan_outcome";
+  using E = ConSanMoiAutoReportPlanOutcome;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "invalid_auto_report_plan_outcome", consan_enum(E::Complete, "complete"),
+      consan_enum(E::InsufficientReportCapacity, "insufficient_report_capacity"),
+      consan_enum(E::Overflow, "overflow"));
+  return vocabulary.name(outcome);
 }
 
 [[nodiscard]] constexpr std::string_view
 consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
-  switch (reason) {
-  case ConSanMoiAutoReportPlanReason::None:
-    return "none";
-  case ConSanMoiAutoReportPlanReason::PerBufferCeiling:
-    return "per_buffer_ceiling";
-  case ConSanMoiAutoReportPlanReason::AbiCapacityOverflow:
-    return "abi_capacity_overflow";
-  case ConSanMoiAutoReportPlanReason::AbiGeometryCapacityOverflow:
-    return "abi_geometry_capacity_overflow";
-  case ConSanMoiAutoReportPlanReason::ByteSizeOverflow:
-    return "byte_size_overflow";
-  case ConSanMoiAutoReportPlanReason::Count:
-    break;
-  }
-  return "invalid_auto_report_plan_reason";
+  using E = ConSanMoiAutoReportPlanReason;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "invalid_auto_report_plan_reason", consan_enum(E::None, "none"),
+      consan_enum(E::PerBufferCeiling, "per_buffer_ceiling"),
+      consan_enum(E::AbiCapacityOverflow, "abi_capacity_overflow"),
+      consan_enum(E::AbiGeometryCapacityOverflow, "abi_geometry_capacity_overflow"),
+      consan_enum(E::ByteSizeOverflow, "byte_size_overflow"));
+  return vocabulary.name(reason);
 }
 
 /// Computes an exact ABI layout from explicit inventory without allocating,

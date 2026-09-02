@@ -421,47 +421,27 @@ enum class ConSanFenceAssociation : uint8_t {
 };
 
 /// Complete iterable set of fence-association outcomes.
-inline constexpr std::array<ConSanFenceAssociation, 10> kConSanFenceAssociations = {
-    ConSanFenceAssociation::Qualified,
-    ConSanFenceAssociation::MissingOrAmbiguousSequence,
-    ConSanFenceAssociation::NotAddressedCommunication,
-    ConSanFenceAssociation::InsufficientConfidence,
-    ConSanFenceAssociation::AcquirePairPrefixCoveredByTail,
-    ConSanFenceAssociation::UnsupportedCacheOperation,
-    ConSanFenceAssociation::MemoryRoleMismatch,
-    ConSanFenceAssociation::MissingOrAmbiguousCommunicationEvent,
-    ConSanFenceAssociation::UnsupportedAddressSource,
-    ConSanFenceAssociation::UnsupportedScope,
-};
+inline constexpr auto kConSanFenceAssociations = [] {
+  using E = ConSanFenceAssociation;
+  return make_consan_enum_vocabulary(
+      "invalid-fence-association", consan_enum(E::Qualified, "qualified"),
+      consan_enum(E::MissingOrAmbiguousSequence, "missing-or-ambiguous-sequence-membership"),
+      consan_enum(E::NotAddressedCommunication,
+                  "fence-not-associated-with-addressed-communication-sequence"),
+      consan_enum(E::InsufficientConfidence, "communication-sequence-confidence-insufficient"),
+      consan_enum(E::AcquirePairPrefixCoveredByTail, "paired-acquire-prefix-covered-by-tail"),
+      consan_enum(E::UnsupportedCacheOperation, "unsupported-cache-operation"),
+      consan_enum(E::MemoryRoleMismatch, "cache-role-not-carried-by-communication-sequence"),
+      consan_enum(E::MissingOrAmbiguousCommunicationEvent,
+                  "missing-or-ambiguous-communication-event"),
+      consan_enum(E::UnsupportedAddressSource, "communication-address-source-unsupported"),
+      consan_enum(E::UnsupportedScope, "communication-scope-unsupported"));
+}();
 
 /// Return the stable diagnostic spelling of a fence-association outcome.
 [[nodiscard]] constexpr std::string_view
 consan_fence_association_name(ConSanFenceAssociation association) {
-  switch (association) {
-  case ConSanFenceAssociation::Qualified:
-    return "qualified";
-  case ConSanFenceAssociation::MissingOrAmbiguousSequence:
-    return "missing-or-ambiguous-sequence-membership";
-  case ConSanFenceAssociation::NotAddressedCommunication:
-    return "fence-not-associated-with-addressed-communication-sequence";
-  case ConSanFenceAssociation::InsufficientConfidence:
-    return "communication-sequence-confidence-insufficient";
-  case ConSanFenceAssociation::AcquirePairPrefixCoveredByTail:
-    return "paired-acquire-prefix-covered-by-tail";
-  case ConSanFenceAssociation::UnsupportedCacheOperation:
-    return "unsupported-cache-operation";
-  case ConSanFenceAssociation::MemoryRoleMismatch:
-    return "cache-role-not-carried-by-communication-sequence";
-  case ConSanFenceAssociation::MissingOrAmbiguousCommunicationEvent:
-    return "missing-or-ambiguous-communication-event";
-  case ConSanFenceAssociation::UnsupportedAddressSource:
-    return "communication-address-source-unsupported";
-  case ConSanFenceAssociation::UnsupportedScope:
-    return "communication-scope-unsupported";
-  case ConSanFenceAssociation::Count:
-    break;
-  }
-  return "invalid-fence-association";
+  return kConSanFenceAssociations.name(association);
 }
 
 static_assert(kConSanFenceAssociations.size() ==

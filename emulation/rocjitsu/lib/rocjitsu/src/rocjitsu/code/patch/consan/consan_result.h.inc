@@ -164,13 +164,11 @@ enum class ConSanTransformFailureCause : uint8_t {
 
 [[nodiscard]] constexpr std::string_view
 consan_transform_failure_cause_name(ConSanTransformFailureCause cause) {
-  switch (cause) {
-  case ConSanTransformFailureCause::PatchedImageGrowthLimit:
-    return "patched-image-growth-limit";
-  case ConSanTransformFailureCause::OverlappingPatchRanges:
-    return "overlapping-patch-ranges";
-  }
-  return "unknown";
+  using E = ConSanTransformFailureCause;
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "unknown", consan_enum(E::PatchedImageGrowthLimit, "patched-image-growth-limit"),
+      consan_enum(E::OverlappingPatchRanges, "overlapping-patch-ranges"));
+  return vocabulary.name(cause);
 }
 
 /// Counts one validation-only mutation domain as it moves from a user request
