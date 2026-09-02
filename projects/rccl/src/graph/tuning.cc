@@ -1881,7 +1881,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used
     4ULL*1024*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
     0,                    // [3] ReduceScatter   -- no suppression (placeholder)
-    256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
+    4ULL*1024*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
