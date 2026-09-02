@@ -692,3 +692,75 @@ does not clear the 3,000-line review floor, and supplies evidence against
 revisiting mirrored final-validation construction unless a materially smaller
 proof representation is found. Candidate selection returns to the whole
 production codebase.
+
+### 10.5 Macro-slice 5: one direct relay-reservoir authority
+
+The post-abort scan rejected the shared MOI access-application layer as a
+deletion candidate. Its roughly 800 implementation lines are not an abandoned
+adapter from Macro-slice 1: Record/Replay, Sampled, and InlineShadow actively
+share its attribution, dense-host, anchor/island, preservation, descriptor,
+and appended-body mechanics. Removing it would recreate those mechanics in
+three mode owners. Deep reads of placement, synchronization analysis, and
+fault injection also found large but predominantly distinct policy, rather
+than a replacement with 500 identified deletable lines.
+
+The stronger finding is that ConSan still has two implementations of a direct
+relay reservoir. SuperCollider FLAT and the three MOI access engines use
+`BranchOnlyRelayRouter::plan_direct_reservoirs`,
+`BranchOnlyDirectRelayReservoirSet`, the common direct emitter, and the common
+independent direct-execution-path validator. SuperCollider LDS instead owns an
+older private subsystem inside its 4,000-line lowerer: it discovers overlapping
+reservoir candidates, proves endpoint scratch registers, constructs an
+indirect entry/return normal-execution path, iteratively ranks and replays
+reservoir combinations against a max-flow cut, converges a second optimistic
+branch-only routing loop, emits a different reservoir body, publishes a
+SuperCollider-only route effect, and validates that separate representation.
+
+This is not an essential LDS protocol distinction. A reservoir's semantic job
+is to relocate a proven straight-line pristine instruction sequence, preserve
+its ordinary execution, and expose its vacated words as capacity-one branch
+vertices. The common direct reservoir already provides exactly that contract
+with a simpler SOPP entry/return path; it needs no borrowed scalar state and is
+already exercised by SuperCollider FLAT as well as every MOI access mode. LDS
+still needs its own selection of protected ranges, relay demand, generated
+islands, and probe-body placement, but it does not need another relocation
+representation or execution mechanism.
+
+The deletion thesis is:
+
+- make `BranchOnlyDirectRelayReservoirSet` the sole direct-instruction
+  reservoir representation for SuperCollider LDS, SuperCollider FLAT, and
+  every MOI mode;
+- let LDS supply its selected-container, synchronization/probe, preapplied,
+  dense-host, and already-selected patch ranges to the common discovery
+  transaction, while retaining LDS policy for when extra relay capacity is
+  requested;
+- reuse the common router ownership, transitive used-reservoir marking,
+  transactional placement, recursive frontier extension, emitter, patch
+  metadata, and direct-path validator;
+- remove LDS endpoint scratch-register discovery, special indirect reservoir
+  geometry, candidate/ranking/replay machinery, optimistic materialization
+  loop, bespoke emission, descriptor-growth consequences, route-effect type,
+  target helpers, and validation branch; and
+- retain the genuinely different wide composite donor only if focused
+  evidence shows that the common reservoir cannot replace its capacity. It is
+  otherwise deleted in this slice as a second relocation mechanism.
+
+The conservative estimate is at least 1,300 gross production implementation
+lines removed and no more than 350 lines of common planner generalization and
+LDS policy/adaptation, for at least 950 net deleted lines. This includes the
+large LDS selection loops, not merely its small route-effect type. The attempt
+is abandoned and reverted if the common planner must learn LDS probe or mode
+vocabulary, if preserving coverage requires rebuilding the old indirect
+reservoir as callbacks, if the cutover loses a supported extreme-pressure
+case, or if complete convergence cannot realize at least 500 net deleted
+implementation lines.
+
+Focused validation covers the existing maximum-cardinality, wave32, wave64,
+skipped-kernel, degraded-partial-route, owner-minimization, full-register-
+pressure, and corrupted-reservoir SuperCollider tests, plus the common direct
+reservoir transaction and all five emulated targets. Representation-specific
+assertions may move from the removed borrowed-scratch route to the common
+direct execution contract, but corruption detection and admitted-site
+coverage may not weaken. The cutover gate is the complete nonphysical
+RocJitsu matrix.
