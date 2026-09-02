@@ -78,6 +78,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/direct_a2a/all_reduce/direct_a2a_all_reduce.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/fabric/fabric_init.h"
 #include <cpuid.h>
@@ -450,6 +451,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL) return ncclSuccess;
 
+  NCCLCHECK(rcclDirectA2aAllReduceCommFini(comm));
   NCCLCHECK(ncclCeFinalize(comm));
 
   if (comm->nNodes == 1) {
@@ -701,6 +703,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaFabricMaxBlocks = 0;
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->directA2aScratch = nullptr;
+  comm->directA2aScratchBytes = 0;
 
   comm->rank = rank;
   comm->nRanks = ndev;
@@ -2808,6 +2812,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
   if (!job->parent && !job->isGrow) {
+    NCCLCHECKGOTO(rcclDirectA2aAllReduceCommInit(comm), res, fail);
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
     } else if (comm->nNodes == 1 && comm->nRanks == 8) {

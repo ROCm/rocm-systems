@@ -44,6 +44,9 @@ ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
+// Called unconditionally from init.cc, unlike DDA which is gated.
+ncclResult_t rcclDirectA2aAllReduceCommInit(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t rcclDirectA2aAllReduceCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }

@@ -555,6 +555,7 @@ if(BUILD_TESTS)
       BootstrapBidirTests.cpp
       ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
+      DirectA2aAllReduceEligibilityTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp

@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include "info.h"
 #include "ce_coll.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/direct_a2a/all_reduce/direct_a2a_all_reduce.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "group.h"
@@ -626,6 +627,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DDA_IPC:
       *algoName = "DDA-IPC";
       break;
+    case rcclAddonAlgos_t::RCCL_DIRECT_A2A:
+      *algoName = "DIRECT_A2A";
+      break;
     default:
       WARN("Invalid algorithm value: %d", algo);
       return ncclInvalidArgument;
@@ -859,8 +863,8 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm) {
 // Single source of truth for AllReduce implementation selection. See the header
 // comment on rcclSelectAllReduce(). The priority chain and every gate below are a
 // faithful consolidation of what was previously split between ncclAllReduce_impl()
-// (symmetric / CE 2-shot / DDA) and taskAppend() (CE registered / kernel); the
-// outcome for any given operands is identical.
+// (symmetric / CE 2-shot / DIRECT_A2A / DDA) and taskAppend() (CE registered /
+// kernel); the outcome for any given operands is identical.
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision) {
@@ -923,6 +927,15 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     decision->algo = RCCL_CE_2SHOT;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
+    return ncclSuccess;
+  }
+
+  // gfx1151 full-mesh NET fast path. Matches the pre-refactor collectives.cc
+  // guards: not symmetric, not graph-captured, not implicit launch order, not
+  // inside a group, plus the standalone eligibility check (arch/ranks/op/scratch).
+  if (!symEligible && !ceCapturing && !ncclParamLaunchOrderImplicit() && ncclGroupDepth == 0 &&
+      rcclDirectA2aAllReduceEligible(comm, count, datatype, op)) {
+    decision->algo = RCCL_DIRECT_A2A;
     return ncclSuccess;
   }
 
