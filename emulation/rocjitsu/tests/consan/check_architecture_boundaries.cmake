@@ -841,9 +841,10 @@ if(NOT _moi_barrier_planning MATCHES
     )
 endif()
 if(NOT _moi_barrier_planning MATCHES "moi_barrier_body_indirect_jump" OR
+   NOT _moi_barrier_planning MATCHES "struct PlannedBarrierLowering" OR
    NOT _moi_barrier_planning MATCHES "uses_scalar_epoch[(][)] const" OR
    _moi_barrier_planning MATCHES
-       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedInlineEpochBarrier[^}]*std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets")
+       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|PlannedInlineEpochBarrier|plan_inline_barrier_patch_abi|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedBarrierLowering[^}]*std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets")
     message(FATAL_ERROR
         "planned barriers must derive routing, scalar-epoch, and owner facts from their retained products"
     )
@@ -878,8 +879,12 @@ if(NOT _moi_barrier_source MATCHES
        "build_inline_shadow_barrier_epoch_cave_words" OR
    NOT _inline_barrier_owner MATCHES
        "append_inline_shadow_barrier_epilogue" OR
+   NOT _inline_barrier_owner MATCHES
+       "append_inline_barrier_return" OR
    NOT _inline_private_barrier_owner MATCHES
        "append_inline_shadow_barrier_epilogue" OR
+   _moi_barrier_planning MATCHES
+       "append_inline_barrier_return" OR
    _inline_private_barrier_owner MATCHES "scalar_spill->restore_words[.]begin")
     message(FATAL_ERROR
         "InlineShadow barrier emission must remain in its mode-named owners"
@@ -894,6 +899,16 @@ if(NOT _record_replay_barrier_owner MATCHES
        "prune_unused_record_replay_direct_reservoirs")
     message(FATAL_ERROR
         "the Record/Replay barrier owner must retain its complete mode transaction"
+    )
+endif()
+if(NOT _record_replay_barrier_owner MATCHES
+       "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
+   NOT _inline_barrier_owner MATCHES
+       "try_apply_inline_shadow_barrier_patch[^}]*moi_track_barriers" OR
+   _moi_barrier_planning MATCHES
+       "try_apply_shared_barrier_patch[^}]*moi_track_barriers")
+    message(FATAL_ERROR
+        "mode entry points, rather than their shared barrier mechanism, must own enablement policy"
     )
 endif()
 if(NOT _moi_barrier_contract MATCHES

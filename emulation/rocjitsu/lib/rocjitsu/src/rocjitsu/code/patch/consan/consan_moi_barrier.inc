@@ -227,10 +227,9 @@ moi_barrier_body_indirect_jump(const MoiBarrierBodyPlan &body) {
 }
 
 [[nodiscard]] ConSanPatchAbiEffects
-plan_inline_barrier_patch_abi(std::span<const uint64_t> owners,
-                              std::optional<uint16_t> scratch_vgpr,
-                              std::optional<ConSanMoiPrivateStateLayout> private_state_layout,
-                              const VgprSpillSequence *spill, uint32_t required_private_bytes) {
+plan_barrier_patch_abi(std::span<const uint64_t> owners, std::optional<uint16_t> scratch_vgpr,
+                       std::optional<ConSanMoiPrivateStateLayout> private_state_layout,
+                       const VgprSpillSequence *spill, uint32_t required_private_bytes) {
   ConSanPatchAbiEffects abi;
   abi.scratch_vgpr = scratch_vgpr;
   abi.private_state_layout = std::move(private_state_layout);
@@ -279,27 +278,6 @@ plan_inline_shadow_barrier_epoch_emission(const BoundRuntimeResources &bound_res
     return std::nullopt;
   }
   return plan;
-}
-
-[[nodiscard]] bool
-append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
-                             uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
-                             const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
-                             rj_code_arch_t arch) {
-  const uint64_t branch_pc =
-      cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
-  if (call_return_sgpr) {
-    words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
-    return true;
-  }
-  if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
-    words.push_back(build_s_branch(*direct, arch));
-    return true;
-  }
-  return indirect_jump && append_moi_scc_preserving_indirect_jump(
-                              words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
-                              indirect_jump->scc_save_sgpr,
-                              /*capture_scc=*/true, arch);
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_barrier_epoch_cave_words(
@@ -367,8 +345,6 @@ void try_apply_shared_barrier_patch(
     MoiResourcePlanningState &resource_state,
     const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
     const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
-  if (!options.moi_track_barriers)
-    return;
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr) {
     result.warnings.emplace_back(
@@ -455,7 +431,7 @@ void try_apply_shared_barrier_patch(
     return;
   }
 
-  struct PlannedInlineEpochBarrier {
+  struct PlannedBarrierLowering {
     MoiBarrierEvidenceSitePlan candidate;
     std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
     MoiBarrierBodyPlan body;
@@ -469,7 +445,7 @@ void try_apply_shared_barrier_patch(
       return inline_epoch != nullptr && inline_epoch->persistent_epoch_sgpr.has_value();
     }
   };
-  std::vector<PlannedInlineEpochBarrier> planned_candidates;
+  std::vector<PlannedBarrierLowering> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
   MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
   MoiSpillManagers visible_evidence_spill_managers;
@@ -579,9 +555,9 @@ void try_apply_shared_barrier_patch(
         }
         note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
         ConSanPatchAbiEffects patch_abi =
-            plan_inline_barrier_patch_abi(owners, resources->base, private_state_layout,
-                                          spill ? &*spill : nullptr, required_private_bytes);
-        planned_candidates.push_back(PlannedInlineEpochBarrier{
+            plan_barrier_patch_abi(owners, resources->base, private_state_layout,
+                                   spill ? &*spill : nullptr, required_private_bytes);
+        planned_candidates.push_back(PlannedBarrierLowering{
             .candidate = candidate,
             .derived_owner = derived_owner,
             .body = *record_emission,
@@ -617,11 +593,11 @@ void try_apply_shared_barrier_patch(
           std::max(access_patch->required_private_segment_size, spill->total_private_bytes);
       note_maximum_descriptor_extents(private_requirements, owners, required_private_bytes);
       ConSanPatchAbiEffects patch_abi =
-          plan_inline_barrier_patch_abi(owners, access_patch->scratch_vgpr, private_state_layout,
-                                        &*spill, required_private_bytes);
+          plan_barrier_patch_abi(owners, access_patch->scratch_vgpr, private_state_layout, &*spill,
+                                 required_private_bytes);
       const MoiScalarAbiPlan scalar_abi =
           plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(owner_point));
-      planned_candidates.push_back(PlannedInlineEpochBarrier{
+      planned_candidates.push_back(PlannedBarrierLowering{
           .candidate = candidate,
           .derived_owner = std::nullopt,
           .body =
@@ -779,9 +755,9 @@ void try_apply_shared_barrier_patch(
         return;
       body = std::move(*inline_epoch);
     }
-    ConSanPatchAbiEffects patch_abi = plan_inline_barrier_patch_abi(
+    ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);
-    planned_candidates.push_back(PlannedInlineEpochBarrier{
+    planned_candidates.push_back(PlannedBarrierLowering{
         .candidate = candidate,
         .derived_owner = std::nullopt,
         .body = std::move(*body),
@@ -827,7 +803,7 @@ void try_apply_shared_barrier_patch(
   std::vector<size_t> dense_fallback_indices;
   const ConSanMoiReportBufferLayout &record_layout = semantics.report_layout;
   const auto build_engine_barrier_body =
-      [&](const PlannedInlineEpochBarrier &planned, uint32_t original_barrier_word,
+      [&](const PlannedBarrierLowering &planned, uint32_t original_barrier_word,
           uint64_t body_offset, uint64_t return_offset, std::optional<uint16_t> call_return_sgpr,
           std::optional<uint16_t> selectable_vgpr_bank_mode)
       -> std::optional<std::vector<uint32_t>> {
@@ -858,7 +834,7 @@ void try_apply_shared_barrier_patch(
   };
 
   for (size_t planned_index = 0; planned_index < planned_candidates.size(); ++planned_index) {
-    const PlannedInlineEpochBarrier &planned = planned_candidates[planned_index];
+    const PlannedBarrierLowering &planned = planned_candidates[planned_index];
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
     const auto indirect_jump = moi_barrier_body_indirect_jump(planned.body);
@@ -1191,7 +1167,7 @@ void try_apply_shared_barrier_patch(
       staged_barriers.reserve(indices.size());
       uint64_t staged_body_bytes = 0u;
       for (size_t index : indices) {
-        const PlannedInlineEpochBarrier &planned = planned_candidates[index];
+        const PlannedBarrierLowering &planned = planned_candidates[index];
         const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
         const ConSanBarrierSite &site = candidate.site;
         uint32_t original_barrier_word = 0;
@@ -1408,7 +1384,7 @@ void try_apply_shared_barrier_patch(
       std::vector<DenseBarrierBody> bodies;
       bodies.reserve(indices.size());
       for (size_t index : indices) {
-        const PlannedInlineEpochBarrier &planned = planned_candidates[index];
+        const PlannedBarrierLowering &planned = planned_candidates[index];
         const ConSanBarrierSite &site = planned.candidate.site;
         uint32_t original_barrier_word = 0;
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
@@ -1564,7 +1540,7 @@ void try_apply_shared_barrier_patch(
       patches.push_back(std::move(dispatcher_info));
 
       for (const DenseBarrierBody &body : bodies) {
-        const PlannedInlineEpochBarrier &planned = planned_candidates[body.planned_index];
+        const PlannedBarrierLowering &planned = planned_candidates[body.planned_index];
         const ConSanBarrierSite &site = planned.candidate.site;
         const auto call_delta = compute_sopp_branch_simm16(site.text_offset, island_offset);
         const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;

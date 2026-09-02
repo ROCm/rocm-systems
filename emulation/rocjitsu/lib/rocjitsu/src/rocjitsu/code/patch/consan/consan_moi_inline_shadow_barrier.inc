@@ -3,6 +3,27 @@
 
 /// InlineShadow scalar- and VGPR-epoch barrier body emission. This fragment
 /// is included by the shared barrier transaction after its common helpers.
+[[nodiscard]] bool
+append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_offset,
+                             uint64_t return_text_offset, std::optional<uint16_t> call_return_sgpr,
+                             const std::optional<ConSanIndirectJumpSgprs> &indirect_jump,
+                             rj_code_arch_t arch) {
+  const uint64_t branch_pc =
+      cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
+  if (call_return_sgpr) {
+    words.push_back(build_s_setpc_b64(*call_return_sgpr, arch));
+    return true;
+  }
+  if (const auto direct = compute_sopp_branch_simm16(branch_pc, return_text_offset)) {
+    words.push_back(build_s_branch(*direct, arch));
+    return true;
+  }
+  return indirect_jump && append_moi_scc_preserving_indirect_jump(
+                              words, cave_text_offset, return_text_offset, indirect_jump->pc_sgpr,
+                              indirect_jump->scc_save_sgpr,
+                              /*capture_scc=*/true, arch);
+}
+
 [[nodiscard]] bool append_inline_shadow_barrier_epilogue(
     std::vector<uint32_t> &words, const VgprSpillSequence *spill,
     const SgprSpillSequence *scalar_spill, std::optional<uint16_t> selectable_vgpr_bank_mode,
