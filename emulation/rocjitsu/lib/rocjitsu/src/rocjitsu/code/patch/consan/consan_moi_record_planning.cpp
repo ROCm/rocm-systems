@@ -41,7 +41,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
   if (!consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
                                                                                private_offsets))
     return false;
-  if (!consan_moi_detail::record_replay_requires_entry_workgroup_capture(request.moi_engine) ||
+  if (!moi_mode_operations(request.moi_engine).prologue.requires_entry_workgroup_capture ||
       consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }

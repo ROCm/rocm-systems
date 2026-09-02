@@ -597,6 +597,25 @@ foreach(_report_capacity_mode IN ITEMS record_replay sampled inline_shadow)
         )
     endif()
 endforeach()
+foreach(_entry_capture_mode IN ITEMS record_replay sampled)
+    file(
+        READ "${_consan_dir}/consan_moi_${_entry_capture_mode}.cpp"
+        _entry_capture_mode_owner
+    )
+    if(NOT _entry_capture_mode_owner MATCHES
+       "[.]requires_entry_workgroup_capture[ ]*=[ ]*true")
+        message(FATAL_ERROR
+            "ConSan ${_entry_capture_mode} must own its entry workgroup capture requirement"
+        )
+    endif()
+endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "record_replay_requires_entry_workgroup_capture"
+        "retired common RR/Sampled entry-capture predicate must not return"
+    )
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_core_types.h.inc"
     "kConSanMoiRecordReplayAutoReportBufferCeilingBytes|engine[ ]*==[ ]*ConSanMoiEngine"

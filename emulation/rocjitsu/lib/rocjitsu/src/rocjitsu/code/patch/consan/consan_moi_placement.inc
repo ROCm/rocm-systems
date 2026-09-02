@@ -362,7 +362,7 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources> record_replay_persistent_workgroup_sources(
     ConSanMoiEngine engine, const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {
-  if (!record_replay_requires_entry_workgroup_capture(engine) ||
+  if (!moi_mode_operations(engine).prologue.requires_entry_workgroup_capture ||
       !record_replay_has_entry_workgroup_capture(point, private_offsets) ||
       !record_replay_entry_workgroup_capture_is_unambiguous(point, private_offsets)) {
     return std::nullopt;

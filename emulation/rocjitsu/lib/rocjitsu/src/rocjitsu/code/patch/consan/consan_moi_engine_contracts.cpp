@@ -29,10 +29,6 @@ bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
              request, resources.moi_report_layout->record_replay_dispatch_token_capacity);
 }
 
-bool record_replay_requires_entry_workgroup_capture(ConSanMoiEngine engine) {
-  return engine == ConSanMoiEngine::RecordReplay || engine == ConSanMoiEngine::Sampled;
-}
-
 bool record_replay_has_entry_workgroup_capture(
     const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets) {

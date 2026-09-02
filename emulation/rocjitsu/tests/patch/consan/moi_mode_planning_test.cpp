@@ -642,6 +642,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_TRUE(record_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(record_policy.one_based_owner_ids);
   EXPECT_FALSE(record_policy.persistent_state_requires_in_place_entry);
+  EXPECT_TRUE(record_policy.requires_entry_workgroup_capture);
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
@@ -652,6 +653,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_FALSE(sampled_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_FALSE(sampled_policy.one_based_owner_ids);
   EXPECT_FALSE(sampled_policy.persistent_state_requires_in_place_entry);
+  EXPECT_TRUE(sampled_policy.requires_entry_workgroup_capture);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   plan = plan_moi_object_mode(request, resources, policy, point, facts, observation);
@@ -662,6 +664,7 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsProloguePublicationPolicy) {
   EXPECT_FALSE(inline_policy.backup_compact_spill_for_runtime_sampling);
   EXPECT_TRUE(inline_policy.one_based_owner_ids);
   EXPECT_TRUE(inline_policy.persistent_state_requires_in_place_entry);
+  EXPECT_FALSE(inline_policy.requires_entry_workgroup_capture);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {

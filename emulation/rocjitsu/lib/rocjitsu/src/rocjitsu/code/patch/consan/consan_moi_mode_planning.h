@@ -41,6 +41,7 @@ struct MoiPrologueModePolicy {
   bool backup_compact_spill_for_runtime_sampling = false;
   bool one_based_owner_ids = false;
   bool persistent_state_requires_in_place_entry = false;
+  bool requires_entry_workgroup_capture = false;
 };
 
 /// Effective mode demand consumed by common resource solving. This deliberately

@@ -60,7 +60,6 @@ using consan_moi_detail::append_store_u32_literal;
 using consan_moi_detail::ConSanMoiRecordEmitter;
 using consan_moi_detail::kAccessRecordLayout;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
-using consan_moi_detail::record_replay_requires_entry_workgroup_capture;
 using consan_moi_detail::record_replay_uses_automatic_banked_capture;
 
 namespace consan_moi_impl {

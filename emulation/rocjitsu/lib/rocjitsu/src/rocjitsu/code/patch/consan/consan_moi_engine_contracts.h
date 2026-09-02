@@ -23,8 +23,6 @@ record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
 [[nodiscard]] bool record_replay_uses_automatic_banked_capture(const ConSanRequest &request,
                                                                uint32_t dispatch_token_capacity);
 
-[[nodiscard]] bool record_replay_requires_entry_workgroup_capture(ConSanMoiEngine engine);
-
 [[nodiscard]] bool record_replay_has_entry_workgroup_capture(
     const ConSanMoiOperatingPoint &point,
     const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr);
