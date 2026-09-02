@@ -428,6 +428,9 @@ TEST(ConSanMoiModePlanning, DenseRouterPlanOwnsModeSpecificCallMechanics) {
   ASSERT_TRUE(plan);
   EXPECT_TRUE(plan->explicit_key);
   EXPECT_TRUE(plan->collapse_spill_router);
+  EXPECT_EQ(plan->indirect_jump, (ConSanIndirectJumpSgprs{40u, 42u}));
+  EXPECT_EQ(plan->dispatch_key_sgpr, 44u);
+  EXPECT_EQ(plan->call_return_sgpr, 40u);
 
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;

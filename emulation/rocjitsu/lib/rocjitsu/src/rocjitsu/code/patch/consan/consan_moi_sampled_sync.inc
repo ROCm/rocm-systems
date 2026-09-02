@@ -1241,29 +1241,19 @@ void try_apply_sampled_barrier_sync_patch(
                                      ": owners do not share one transient scalar assignment");
         continue;
       }
-      const MoiScalarAbiPlan scalar_abi =
-          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
-      const ConSanMoiRouterCallSgprs *call_state =
-          moi_scalar_router_call(group_point.moi_scalar_router);
-      if ((!spill_backed_router &&
-           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
-          !scalar_abi.indirect_jump || (spill_backed_router && !call_state)) {
+      const auto dense_router =
+          plan_moi_dense_router(options.moi_engine, moi_scalar_routing_state(group_point), arch);
+      if (!dense_router || !dense_router->call_return_sgpr) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
                                      ": incomplete scalar router state");
         continue;
       }
-      const uint16_t jump_pc_sgpr =
-          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      const uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
-                                                          : scalar_abi.special_state->scc_save_sgpr;
-      const uint16_t key_sgpr = spill_backed_router
-                                    ? call_state->dispatch_key_sgpr
-                                    : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
-      const uint16_t call_return_sgpr =
-          spill_backed_router ? call_state->call_return_sgpr
-                              : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
+      const uint16_t jump_pc_sgpr = dense_router->indirect_jump.pc_sgpr;
+      const uint16_t saved_scc_sgpr = dense_router->indirect_jump.scc_save_sgpr;
+      const uint16_t key_sgpr = dense_router->dispatch_key_sgpr;
+      const uint16_t call_return_sgpr = *dense_router->call_return_sgpr;
       // The S_CALL_I64 route uses an explicit key in a clone-local entry stub.
       // S_CALL_B64 routes retain the call-return-derived entry key when their
       // scalar assignment is spill backed.
@@ -2224,13 +2214,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         continue;
       }
       const bool spill_backed_router = group_point.has_compact_moi_scalar_spill();
-      MoiScalarAbiPlan scalar_abi =
-          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
-      const ConSanMoiRouterCallSgprs *call_state =
-          moi_scalar_router_call(group_point.moi_scalar_router);
-      if ((!spill_backed_router &&
-           (!group_point.moi_exec_save_sgpr || !scalar_abi.special_state)) ||
-          !scalar_abi.indirect_jump || (spill_backed_router && !call_state)) {
+      auto dense_router =
+          plan_moi_dense_router(options.moi_engine, moi_scalar_routing_state(group_point), arch);
+      if (!dense_router || !dense_router->call_return_sgpr) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container + ": incomplete scalar router state");
         continue;
@@ -2261,16 +2247,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                !range_overlaps(key, 1u, call_return, 2u) && ranges_are_safe(ranges);
       };
 
-      uint16_t jump_pc_sgpr =
-          spill_backed_router ? scalar_abi.indirect_jump->pc_sgpr : *group_point.moi_exec_save_sgpr;
-      uint16_t saved_scc_sgpr = spill_backed_router ? scalar_abi.indirect_jump->scc_save_sgpr
-                                                    : scalar_abi.special_state->scc_save_sgpr;
-      uint16_t key_sgpr = spill_backed_router
-                              ? call_state->dispatch_key_sgpr
-                              : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 5u);
-      uint16_t call_return_sgpr = spill_backed_router
-                                      ? call_state->call_return_sgpr
-                                      : static_cast<uint16_t>(*group_point.moi_exec_save_sgpr + 6u);
+      uint16_t jump_pc_sgpr = dense_router->indirect_jump.pc_sgpr;
+      uint16_t saved_scc_sgpr = dense_router->indirect_jump.scc_save_sgpr;
+      uint16_t key_sgpr = dense_router->dispatch_key_sgpr;
+      uint16_t call_return_sgpr = *dense_router->call_return_sgpr;
       if (spill_backed_router &&
           !tuple_is_safe(jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr)) {
         bool found = false;
@@ -2299,10 +2279,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                     .jump = ConSanIndirectJumpSgprs{jump_pc_sgpr, saved_scc_sgpr},
                     .call = ConSanMoiRouterCallSgprs{key_sgpr, call_return_sgpr},
                 };
-                scalar_abi =
-                    plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(group_point));
-                found =
-                    scalar_abi.special_state.has_value() && scalar_abi.indirect_jump.has_value();
+                dense_router = plan_moi_dense_router(options.moi_engine,
+                                                     moi_scalar_routing_state(group_point), arch);
+                found = dense_router && dense_router->call_return_sgpr;
                 break;
               }
             }
