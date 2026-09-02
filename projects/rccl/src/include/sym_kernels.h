@@ -29,6 +29,18 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
+// Widest LL block the gfx950 reduce kernels launch, worth 5 to 10% below 256 KB since an LL epoch
+// carries one element per thread. Host code cannot test __gfx950__ so it selects on comm->archName.
+constexpr int ncclSymkGfx950LLThreads = 512;
+
+// The same width resolved at device compile time, where it also serves as the LL slot pitch. The
+// host sizes the shared slot buffer to match and never launches a reduce kernel wider than this.
+#if defined(__gfx950__)
+constexpr int ncclSymkReduceLLMaxThreads = ncclSymkGfx950LLThreads;
+#else
+constexpr int ncclSymkReduceLLMaxThreads = ncclSymkMaxThreads;
+#endif
+
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
   return ncclSymkMaxThreads * ncclSymkLLMaxEltSize / eltSize;
 }
