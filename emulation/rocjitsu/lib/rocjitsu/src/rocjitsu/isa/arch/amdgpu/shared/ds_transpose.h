@@ -137,12 +137,23 @@ inline void transpose_cdna5_ds_tr_b8(std::vector<uint8_t> &response_data, uint32
 
 /// @brief Return the lanes that issue a transpose-load memory request.
 /// @details Wave64 B8 transpose loads issue through lanes 0-31; other forms use all active lanes.
-inline uint64_t transpose_request_lane_mask(const VectorMemState &d) {
+/// @param d Vector-memory state of the access.
+/// @param wf_size Width of the issuing wavefront. Taken separately because
+///        VectorMemState::wf_size is set by the pipeline, and a caller that
+///        runs before the pipeline has it would take the wave64 branch for a
+///        wave32 access.
+inline uint64_t transpose_request_lane_mask(const VectorMemState &d, uint32_t wf_size) {
   const auto kind = static_cast<TransposeKind>(d.transpose);
-  if (d.wf_size == 64 && (kind == TransposeKind::WMMA_TR_B8 ||
-                          (d.tag() == GLOBAL_MEM && kind == TransposeKind::TR16_B128)))
+  if (wf_size == 64 && (kind == TransposeKind::WMMA_TR_B8 ||
+                        (d.tag() == GLOBAL_MEM && kind == TransposeKind::TR16_B128)))
     return d.lane_mask & 0xFFFF'FFFFULL;
   return d.lane_mask;
+}
+
+/// @brief Return the lanes that issue a transpose-load memory request, using
+///        the width recorded in @p d.
+inline uint64_t transpose_request_lane_mask(const VectorMemState &d) {
+  return transpose_request_lane_mask(d, d.wf_size);
 }
 
 /// @brief TR16_B128: 16-bit element transpose for B128 transpose loads

@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 
@@ -98,10 +99,24 @@ public:
                                                amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
+  /// Fires BEFORE routing decides anything: the instruction still carries the
+  /// space it decoded as and the addresses it computed. For what the memory
+  /// system will actually see, use onAmdgpuMemoryAccessRouted().
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/,
                                               amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called once routing has settled, with the pipeline the access was issued
+  /// to and the addresses it was issued with. Fires for every routed memory
+  /// instruction, including one no pipeline accepted, which is reported with
+  /// an UNKNOWN route rather than dropped.
+  ///
+  /// The observation's spans point into the instruction's own state and are
+  /// valid only for the duration of this callback.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
 
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
@@ -194,6 +209,14 @@ public:
   /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+
+  /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
+  /// observation is real work on the per-instruction path, so a plugin that
+  /// does not override the hook should not pay for it. The group samples this
+  /// policy once when the plugin is added, so implementations must return a
+  /// stable value from construction onward. The conservative default is false:
+  /// a plugin that wants the hook says so.
+  virtual bool observes_memory_routing() const { return false; }
 
   /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
   /// The group samples this policy once when the plugin is added. The
