@@ -5,7 +5,6 @@
 
 #include <array>
 #include <cstddef>
-#include <optional>
 #include <string_view>
 #include <type_traits>
 
@@ -47,13 +46,6 @@ public:
     return invalid_name_;
   }
 
-  [[nodiscard]] constexpr std::optional<Enum> parse(std::string_view name) const {
-    for (size_t i = 0; i < Size; ++i)
-      if (names_[i] == name)
-        return values_[i];
-    return std::nullopt;
-  }
-
 private:
   std::array<Enum, Size> values_{};
   std::array<std::string_view, Size> names_{};
@@ -61,9 +53,9 @@ private:
 };
 
 template <typename Enum, typename... Entries>
-[[nodiscard]] constexpr auto
-make_consan_enum_vocabulary(std::string_view invalid_name,
-                            ConSanEnumVocabularyEntry<Enum> first, Entries... rest) {
+[[nodiscard]] constexpr auto make_consan_enum_vocabulary(std::string_view invalid_name,
+                                                         ConSanEnumVocabularyEntry<Enum> first,
+                                                         Entries... rest) {
   static_assert((std::is_same_v<ConSanEnumVocabularyEntry<Enum>, Entries> && ...));
   return ConSanEnumVocabulary(std::array{first, rest...}, invalid_name);
 }

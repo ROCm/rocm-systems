@@ -16,6 +16,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <initializer_list>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -64,6 +65,22 @@ extern "C" void OnUnload();
 extern "C" void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root);
 
 namespace {
+
+template <typename Vocabulary, typename NameFunction>
+void expect_hook_vocabulary(const Vocabulary &vocabulary, NameFunction name,
+                            std::initializer_list<std::string_view> expected_names) {
+  ASSERT_EQ(vocabulary.size(), expected_names.size());
+  size_t index = 0;
+  for (std::string_view expected : expected_names) {
+    const auto value = vocabulary[index++];
+    EXPECT_EQ(vocabulary.name(value), expected);
+    EXPECT_EQ(std::string_view{name(value)}, expected);
+  }
+  using Enum = decltype(vocabulary[0]);
+  const auto invalid = static_cast<Enum>(255);
+  EXPECT_EQ(vocabulary.name(invalid), "unknown");
+  EXPECT_EQ(std::string_view{name(invalid)}, "unknown");
+}
 
 using ExpectedQueueInterceptPacketWriter = void (*)(const void *, uint64_t);
 using ExpectedQueueInterceptHandler = void (*)(const void *, uint64_t, uint64_t, void *,
@@ -156,6 +173,52 @@ TEST(HsaHooksUnitTest, ConSanHookConfigConstructsSeparatedSlice2Contracts) {
   EXPECT_FALSE(static_cast<const rocjitsu::TransformPolicy &>(config).max_patches_is_expert_limit);
   EXPECT_FALSE(static_cast<const rocjitsu::MutationRequest &>(config).has_mutation());
   EXPECT_FALSE(static_cast<const rocjitsu::BoundRuntimeResources &>(config).bound());
+}
+
+TEST(HsaHooksUnitTest, ConSanHookDiagnosticVocabulariesPreserveEveryStableSpelling) {
+  using namespace rocjitsu::consan_hook;
+  expect_hook_vocabulary(kFaultSiteKinds, fault_site_kind_name,
+                         {"barrier", "atomic", "lds-access", "ordinary-memory"});
+  expect_hook_vocabulary(kOrdinaryMemorySupportReasons, ordinary_memory_support_reason_name,
+                         {"not-applicable", "supported", "supported-synchronization-only",
+                          "unsupported-architecture", "unsupported-encoding-size",
+                          "malformed-encoding", "missing-address-vgpr", "missing-destination-vgpr",
+                          "missing-value-vgpr"});
+  expect_hook_vocabulary(
+      kFaultMutationKinds, fault_mutation_kind_name,
+      {"drop-barrier", "move-barrier-pair", "barrier-id-scope", "barrier-participant-count",
+       "atomic-wrong-address", "atomic-weaken-order", "atomic-weaken-scope", "lds-wrong-address",
+       "ordinary-weaken-order", "ordinary-wrong-address", "ordinary-weaken-scope"});
+  expect_hook_vocabulary(kBarrierMoveDirections, barrier_move_direction_name,
+                         {"legacy-marker", "earlier", "later"});
+  expect_hook_vocabulary(
+      kBarrierMoveCfgContracts, barrier_move_cfg_contract_name,
+      {"same-block", "completing-structured-diamond", "destructive-structured-exec-diamond"});
+  expect_hook_vocabulary(kSyncSequenceKinds, sync_sequence_kind_name,
+                         {"barrier", "fence", "atomic", "ordinary-memory"});
+  expect_hook_vocabulary(kSyncOperations, sync_operation_name,
+                         {"unknown", "barrier-signal", "barrier-wait", "barrier-full",
+                          "barrier-init", "barrier-join", "barrier-leave", "barrier-wakeup",
+                          "barrier-state-query", "fence", "atomic-rmw", "atomic-compare-exchange",
+                          "ordinary-load", "ordinary-store"});
+  expect_hook_vocabulary(kSyncAddressSources, sync_address_source_name,
+                         {"not-applicable", "unknown", "lds-vector", "flat-vector",
+                          "global-scalar-vector", "buffer-resource", "scratch-vector"});
+  expect_hook_vocabulary(
+      kSyncMemoryRoles, sync_memory_role_name,
+      {"unknown", "none", "acquire", "release", "acquire-release", "sequentially-consistent"});
+  expect_hook_vocabulary(
+      kSyncRmwOutcomes, sync_rmw_outcome_name,
+      {"not-applicable", "unknown", "no-return", "returns-old-value", "compare-exchange"});
+  expect_hook_vocabulary(kSyncConfidences, sync_confidence_name,
+                         {"exact", "conservative", "ambiguous", "unsupported"});
+  expect_hook_vocabulary(kOwnerProofs, owner_proof_name,
+                         {"kernel-local", "direct-call", "recovered-indirect-call"});
+  expect_hook_vocabulary(kPatchedImageGrowthLimitKinds, patched_image_growth_limit_kind_name,
+                         {"absolute-bytes", "input-percent"});
+  expect_hook_vocabulary(kOwnerSources, owner_source_name, {"automatic", "workitem_id", "hw_id"});
+  expect_hook_vocabulary(kFlatProvenanceModes, flat_provenance_mode_name, {"likely", "strict"});
+  expect_hook_vocabulary(kCheckTrapModes, check_trap_mode_name, {"all", "lds", "flat"});
 }
 
 TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
