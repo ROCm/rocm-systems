@@ -2109,6 +2109,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
   InlineExecMaskEmission exec_masks(words, narrow_save, arch);
+  InstructionSequence sequence(words);
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
   const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
@@ -2118,11 +2119,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const auto require_field = [&](size_t offset, uint16_t expected) -> bool {
     if (!append_load_u32_vgpr_at_offset(words, slot_address, offset, temporary, arch))
       return false;
-    const auto equal = instrumentation::build_v_cmp_eq_u32_vcc(expected, temporary, arch);
-    if (!equal)
-      return false;
-    words.push_back(*equal);
-    return narrow_vcc();
+    return exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(expected, temporary, arch));
   };
   const auto require_dispatch_field = [&](size_t offset, bool high_word) -> bool {
     // `cas_new` has no live value before the claim. `claim_new` below
@@ -2168,14 +2165,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       return false;
     }
     const uint16_t compare_vgpr = static_cast<uint16_t>(*candidate.site.data_vgpr + 1u);
-    const auto compare_succeeded = instrumentation::build_v_cmp_eq_u32_vcc(
-        vector_source_vgpr(compare_vgpr), *candidate.site.dst_vgpr, arch);
-    if (!compare_succeeded) {
+    if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+            vector_source_vgpr(compare_vgpr), *candidate.site.dst_vgpr, arch))) {
       errors.emplace_back("ConSan MOI inline release CAS could not compare its dynamic outcome");
       return false;
     }
-    words.push_back(*compare_succeeded);
-    return narrow_vcc();
+    return true;
   };
   failure.stage = "guest CAS qualification";
   if (predicate_on_compare_exchange_success && !emit_guest_instruction &&
@@ -2213,95 +2208,68 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!require_literal(prior_version, 0, /*equal=*/true) || !save_exec(empty_exec) ||
       !restore_exec(eligible_exec) || !require_literal(prior_version, 0, /*equal=*/false))
     return false;
-  const auto parity = instrumentation::build_v_and_b32_literal(temporary, 1u, prior_version, arch);
-  const auto terminal = instrumentation::build_v_mov_b32_literal(
-      temporary, std::numeric_limits<uint32_t>::max() - 1u, arch);
-  if (!parity)
+  if (!sequence.emit(instrumentation::build_v_and_b32_literal(temporary, 1u, prior_version, arch)))
     return false;
-  words.insert(words.end(), parity->begin(), parity->end());
-  if (!require_literal(temporary, 0, /*equal=*/true) || !terminal)
+  if (!require_literal(temporary, 0, /*equal=*/true) ||
+      !sequence.emit(instrumentation::build_v_mov_b32_literal(
+          temporary, std::numeric_limits<uint32_t>::max() - 1u, arch)))
     return false;
-  words.insert(words.end(), terminal->begin(), terminal->end());
-  const auto below_terminal =
-      instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(temporary), prior_version, arch);
-  if (!below_terminal)
-    return false;
-  words.push_back(*below_terminal);
   // This is a direct-mapped object table: any stable even record is a legal
   // replacement candidate. Identity is checked by acquire lookup, not by a
   // publisher, so stale records from earlier dispatches and ordinary hash
   // collisions cannot permanently pin a slot.
-  if (!narrow_vcc() || !append_atomic_load_u32(words, slot_address, temporary, arch))
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(temporary),
+                                                                 prior_version, arch)) ||
+      !append_atomic_load_u32(words, slot_address, temporary, arch))
     return false;
-  const auto version_unchanged =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(prior_version), temporary, arch);
-  if (!version_unchanged)
-    return false;
-  words.push_back(*version_unchanged);
-  if (!narrow_vcc() || !save_exec(ready_exec))
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(prior_version),
+                                                                 temporary, arch)) ||
+      !save_exec(ready_exec))
     return false;
 
-  const auto valid_union =
-      instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch);
-  const auto claim_new =
-      instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(1), prior_version, arch);
-  if (!valid_union || !claim_new ||
-      !append_add_literal_field(words, slot_address,
+  if (!append_add_literal_field(words, slot_address,
                                 offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                arch))
+                                arch) ||
+      !sequence.emit_all(
+          instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch),
+          instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(1), prior_version,
+                                           arch)))
     return false;
-  words.push_back(*valid_union);
-  words.insert(words.end(), claim_new->begin(), claim_new->end());
   words.push_back(build_v_mov_b32_e32(cas_expected, vector_source_vgpr(prior_version), arch));
-  const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-      slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
-  if (!claim)
+  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
+          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
     return false;
-  words.insert(words.end(), claim->begin(), claim->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return false;
-  const auto claim_won =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
-  if (!claim_won)
-    return false;
-  words.push_back(*claim_won);
-  if (!narrow_vcc() || !save_exec(claimed_exec))
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected),
+                                                                 cas_new, arch)) ||
+      !save_exec(claimed_exec))
     return false;
 
-  const auto select_failed_attempt =
-      instrumentation::build_s_andn2_b64(committed_exec, eligible_exec, claimed_exec, arch);
-  const auto inspect_claimed = instrumentation::build_s_mov_b64(kAmdGpuExecLo, claimed_exec, arch);
-  const auto restore_failed = instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec, arch);
-  const auto decrement_retry = instrumentation::build_s_sub_u32(
-      retry_count_sgpr, retry_count_sgpr, scalar_positive_inline_u32(1), arch);
-  const auto retries_remain =
-      instrumentation::build_s_cmp_lg_u32(retry_count_sgpr, scalar_positive_inline_u32(0), arch);
-  if (!select_failed_attempt || !inspect_claimed || !restore_failed || !decrement_retry ||
-      !retries_remain)
+  if (!sequence.emit_all(
+          instrumentation::build_s_andn2_b64(committed_exec, eligible_exec, claimed_exec, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, claimed_exec, arch)))
     return false;
-  words.push_back(*select_failed_attempt);
-  words.push_back(*inspect_claimed);
   const size_t claimed_exit_branch = words.size();
   words.push_back(build_s_branch(/*offset_dwords=*/0, arch));
-  words.push_back(*restore_failed);
-  words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
-  words.push_back(*decrement_retry);
-  words.push_back(*retries_remain);
-  const auto retries_exhausted = instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch);
-  if (!retries_exhausted)
+  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec, arch)))
     return false;
-  words.push_back(*retries_exhausted);
+  words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
+  if (!sequence.emit_all(instrumentation::build_s_sub_u32(retry_count_sgpr, retry_count_sgpr,
+                                                          scalar_positive_inline_u32(1), arch),
+                         instrumentation::build_s_cmp_lg_u32(retry_count_sgpr,
+                                                             scalar_positive_inline_u32(0), arch),
+                         instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch)))
+    return false;
   const size_t retry_branch = words.size();
   const int64_t retry_delta =
       static_cast<int64_t>(retry_begin) - static_cast<int64_t>(retry_branch + 1u);
   if (retry_delta < std::numeric_limits<int16_t>::min() ||
       retry_delta > std::numeric_limits<int16_t>::max())
     return false;
-  const auto retry =
-      instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(retry_delta), arch);
-  if (!retry)
+  if (!sequence.emit(
+          instrumentation::build_s_cbranch_execnz(static_cast<int16_t>(retry_delta), arch)))
     return false;
-  words.push_back(*retry);
   const int64_t claimed_exit_delta =
       static_cast<int64_t>(words.size()) - static_cast<int64_t>(claimed_exit_branch + 1u);
   if (claimed_exit_delta < std::numeric_limits<int16_t>::min() ||
@@ -2318,11 +2286,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!restore_exec(claimed_exec) || !save_exec(failed_exec))
       return false;
   } else {
-    const auto preguest_failed =
-        instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch);
-    if (!preguest_failed)
+    if (!sequence.emit(
+            instrumentation::build_s_andn2_b64(kAmdGpuExecLo, eligible_exec, claimed_exec, arch)))
       return false;
-    words.push_back(*preguest_failed);
     if (!save_exec(failed_exec))
       return false;
   }
@@ -2346,10 +2312,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     words.insert(words.end(), trailing_guest_words.begin(), trailing_guest_words.end());
     if (!append_moi_flat_load_wait(words, arch))
       return false;
-    const auto guest_store_drain = instrumentation::build_s_wait_flat_store0(arch);
-    if (!guest_store_drain)
+    if (!sequence.emit(instrumentation::build_s_wait_flat_store0(arch)))
       return false;
-    words.push_back(*guest_store_drain);
     // The token transaction journals its source version in scratch+8, but an
     // empty predecessor narrows EXEC before that transaction is entered. Seed
     // the same journal slot here so both the empty and nonempty paths retain
@@ -2535,17 +2499,14 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     return false;
 
   failure.stage = "release metadata publication";
-  const auto epoch_mask = instrumentation::build_v_and_b32_literal(
-      temporary, consan_moi_exact_shadow::max_epoch, plan.owner_epoch_vgprs.epoch, arch);
-  const auto epoch_increment =
-      instrumentation::build_v_add_u32(temporary, scalar_positive_inline_u32(1), temporary, arch);
-  const auto epoch_saturate = instrumentation::build_v_min_u32_literal(
-      temporary, consan_moi_exact_shadow::max_epoch, temporary, arch);
-  if (!epoch_mask || !epoch_increment || !epoch_saturate)
+  if (!sequence.emit_all(
+          instrumentation::build_v_and_b32_literal(temporary, consan_moi_exact_shadow::max_epoch,
+                                                   plan.owner_epoch_vgprs.epoch, arch),
+          instrumentation::build_v_add_u32(temporary, scalar_positive_inline_u32(1), temporary,
+                                           arch),
+          instrumentation::build_v_min_u32_literal(temporary, consan_moi_exact_shadow::max_epoch,
+                                                   temporary, arch)))
     return false;
-  words.insert(words.end(), epoch_mask->begin(), epoch_mask->end());
-  words.insert(words.end(), epoch_increment->begin(), epoch_increment->end());
-  words.insert(words.end(), epoch_saturate->begin(), epoch_saturate->end());
   if (!append_store_u32_vgpr_at_offset(words, slot_address,
                                        offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
                                        plan.owner_epoch_vgprs.owner, arch) ||
@@ -2582,10 +2543,8 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                                            sizeof(uint32_t),
                                        temporary, arch))
     return false;
-  const auto stage_drain = instrumentation::build_s_wait_global_store0(arch);
-  if (!stage_drain)
+  if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
     return false;
-  words.push_back(*stage_drain);
 
   // A wave can issue the same release RMW from several lanes. The direct
   // object table can publish only one representative at a time, but the
@@ -2608,11 +2567,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
                      vector_source_vgpr(static_cast<uint16_t>(stable_guest_address + 1u))) ||
       !save_exec(committed_exec))
     return false;
-  const auto select_distinct_collision =
-      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, failed_exec, committed_exec, arch);
-  if (!select_distinct_collision)
+  if (!sequence.emit(
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, failed_exec, committed_exec, arch)))
     return false;
-  words.push_back(*select_distinct_collision);
   if (!append_atomic_fetch_add_one_u32(words,
                                        plan.report_buffer_address +
                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
@@ -2633,45 +2590,33 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   }
   if (!append_moi_flat_load_wait(words, arch))
     return false;
-  const auto guest_store_drain = instrumentation::build_s_wait_flat_store0(arch);
-  if (!guest_store_drain)
+  if (!sequence.emit(instrumentation::build_s_wait_flat_store0(arch)))
     return false;
-  words.push_back(*guest_store_drain);
 
   failure.stage = "release commit";
   if (!append_save_moi_special_state(words, plan.special_state, arch) ||
       !restore_exec(claimed_exec))
     return false;
-  const auto commit_new =
-      instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(2), prior_version, arch);
-  const auto commit_expected = instrumentation::build_v_add_u32(
-      cas_expected, scalar_positive_inline_u32(1), prior_version, arch);
-  if (!commit_new || !commit_expected ||
-      !append_add_literal_field(words, slot_address,
+  if (!append_add_literal_field(words, slot_address,
                                 offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                arch))
+                                arch) ||
+      !sequence.emit_all(instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(2),
+                                                          prior_version, arch),
+                         instrumentation::build_v_add_u32(
+                             cas_expected, scalar_positive_inline_u32(1), prior_version, arch)))
     return false;
-  words.insert(words.end(), commit_new->begin(), commit_new->end());
-  words.insert(words.end(), commit_expected->begin(), commit_expected->end());
-  const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
-      slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
-  if (!commit)
+  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
+          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
     return false;
-  words.insert(words.end(), commit->begin(), commit->end());
   if (!append_moi_global_atomic_wait(words, arch))
     return false;
-  const auto commit_won =
-      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
-  if (!commit_won)
+  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected),
+                                                                 cas_new, arch)) ||
+      !save_exec(committed_exec))
     return false;
-  words.push_back(*commit_won);
-  if (!narrow_vcc() || !save_exec(committed_exec))
+  if (!sequence.emit(
+          instrumentation::build_s_andn2_b64(kAmdGpuExecLo, claimed_exec, committed_exec, arch)))
     return false;
-  const auto postguest_failed =
-      instrumentation::build_s_andn2_b64(kAmdGpuExecLo, claimed_exec, committed_exec, arch);
-  if (!postguest_failed)
-    return false;
-  words.push_back(*postguest_failed);
   if (!append_atomic_fetch_add_one_u32(words,
                                        plan.report_buffer_address +
                                            offsetof(ConSanMoiReportHeader, inline_overflow_count),
