@@ -518,7 +518,6 @@ struct ConSanMoiModePolicy {
   uint32_t default_runtime_sample_stride = 1;
   bool initialize_owner_epoch_by_default = false;
   bool owner_source_applies_without_initialization = false;
-  bool requires_entry_workgroup_capture = false;
 };
 
 [[nodiscard]] ConSanMoiModePolicy consan_moi_mode_policy(ConSanMoiEngine engine);

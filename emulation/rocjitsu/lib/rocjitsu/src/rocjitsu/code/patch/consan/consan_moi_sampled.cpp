@@ -352,7 +352,6 @@ const MoiModeOperations kSampledModeOperations = {
             .default_runtime_sample_stride = 256u,
             .initialize_owner_epoch_by_default = true,
             .owner_source_applies_without_initialization = false,
-            .requires_entry_workgroup_capture = true,
         },
     .plan_report_layout = plan_sampled_report_layout,
     .reconstruct_report_inventory = reconstruct_sampled_report_inventory,

@@ -61,8 +61,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   operations.policy = {.auto_report_buffer_ceiling_bytes = 96u * 1024u * 1024u,
                        .default_runtime_sample_stride = 32u,
                        .initialize_owner_epoch_by_default = true,
-                       .owner_source_applies_without_initialization = true,
-                       .requires_entry_workgroup_capture = true};
+                       .owner_source_applies_without_initialization = true};
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
@@ -75,7 +74,6 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   EXPECT_EQ(selected->policy.default_runtime_sample_stride, 32u);
   EXPECT_TRUE(selected->policy.initialize_owner_epoch_by_default);
   EXPECT_TRUE(selected->policy.owner_source_applies_without_initialization);
-  EXPECT_TRUE(selected->policy.requires_entry_workgroup_capture);
   const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {});
   EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
@@ -678,7 +676,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsCrossRuntimePolicy) {
   EXPECT_EQ(record_replay.default_runtime_sample_stride, 65536u);
   EXPECT_TRUE(record_replay.initialize_owner_epoch_by_default);
   EXPECT_FALSE(record_replay.owner_source_applies_without_initialization);
-  EXPECT_TRUE(record_replay.requires_entry_workgroup_capture);
 
   const ConSanMoiModePolicy sampled = consan_moi_mode_policy(ConSanMoiEngine::Sampled);
   EXPECT_EQ(sampled.auto_report_buffer_ceiling_bytes,
@@ -686,7 +683,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsCrossRuntimePolicy) {
   EXPECT_EQ(sampled.default_runtime_sample_stride, 256u);
   EXPECT_TRUE(sampled.initialize_owner_epoch_by_default);
   EXPECT_FALSE(sampled.owner_source_applies_without_initialization);
-  EXPECT_TRUE(sampled.requires_entry_workgroup_capture);
 
   const ConSanMoiModePolicy inline_shadow = consan_moi_mode_policy(ConSanMoiEngine::InlineShadow);
   EXPECT_EQ(inline_shadow.auto_report_buffer_ceiling_bytes,
@@ -694,7 +690,6 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsCrossRuntimePolicy) {
   EXPECT_EQ(inline_shadow.default_runtime_sample_stride, 1u);
   EXPECT_FALSE(inline_shadow.initialize_owner_epoch_by_default);
   EXPECT_TRUE(inline_shadow.owner_source_applies_without_initialization);
-  EXPECT_FALSE(inline_shadow.requires_entry_workgroup_capture);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsPersistentStateDemand) {

@@ -416,7 +416,6 @@ const MoiModeOperations kInlineShadowModeOperations = {
             .default_runtime_sample_stride = 1u,
             .initialize_owner_epoch_by_default = false,
             .owner_source_applies_without_initialization = true,
-            .requires_entry_workgroup_capture = false,
         },
     .plan_report_layout = plan_inline_shadow_report_layout,
     .reconstruct_report_inventory = reconstruct_inline_shadow_report_inventory,

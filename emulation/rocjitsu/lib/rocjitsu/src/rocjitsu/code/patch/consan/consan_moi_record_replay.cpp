@@ -273,7 +273,6 @@ const MoiModeOperations kRecordReplayModeOperations = {
             .default_runtime_sample_stride = 65536u,
             .initialize_owner_epoch_by_default = true,
             .owner_source_applies_without_initialization = false,
-            .requires_entry_workgroup_capture = true,
         },
     .plan_report_layout = plan_record_replay_report_layout,
     .reconstruct_report_inventory = reconstruct_record_replay_report_inventory,

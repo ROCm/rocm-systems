@@ -598,27 +598,18 @@ foreach(_report_capacity_mode IN ITEMS record_replay sampled inline_shadow)
        NOT _report_capacity_mode_owner MATCHES
            "[.]initialize_owner_epoch_by_default[ ]*=" OR
        NOT _report_capacity_mode_owner MATCHES
-           "[.]owner_source_applies_without_initialization[ ]*=" OR
-       NOT _report_capacity_mode_owner MATCHES
-           "[.]requires_entry_workgroup_capture[ ]*=")
+           "[.]owner_source_applies_without_initialization[ ]*=")
         message(FATAL_ERROR
             "ConSan ${_report_capacity_mode} must own its complete cross-runtime policy"
         )
     endif()
 endforeach()
-foreach(_entry_capture_mode IN ITEMS record_replay sampled)
-    file(
-        READ "${_consan_dir}/consan_moi_${_entry_capture_mode}.cpp"
-        _entry_capture_mode_owner
-    )
-    if(NOT _entry_capture_mode_owner MATCHES
-       "[.]requires_entry_workgroup_capture[ ]*=[ ]*true")
-        message(FATAL_ERROR
-            "ConSan ${_entry_capture_mode} must own its entry workgroup capture requirement"
-        )
-    endif()
-endforeach()
 foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "requires_entry_workgroup_capture"
+        "retired duplicate entry-capture policy field must not return"
+    )
     _consan_assert_no_match(
         "${_file}"
         "record_replay_requires_entry_workgroup_capture"
