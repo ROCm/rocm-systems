@@ -124,6 +124,7 @@ endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
 
 # Default GPU architectures to build
 #==================================================================================================

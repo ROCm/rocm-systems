@@ -29,6 +29,7 @@ log_trace=false
 num_parallel_jobs=$(nproc)
 openmp_test_enabled=false
 enable_mpi_tests=false
+enable_rccl_ep_tests=false
 kernel_resource_use=false
 roctx_enabled=true
 run_tests=false
@@ -84,6 +85,7 @@ function display_help()
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
+    echo "       --enable-rccl-ep-tests  Build the rccl_ep multi-GPU tests (requires --enable-mpi-tests and a runtime with working cuMem symmetric memory)"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
@@ -137,7 +139,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -167,6 +169,7 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
+         --enable-rccl-ep-tests)     enable_rccl_ep_tests=true;                                                                        shift ;;
     -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
@@ -418,6 +421,15 @@ if [[ "${enable_mpi_tests}" == true ]]; then
         exit 1
     fi
     cmake_common_options="${cmake_common_options} -DENABLE_MPI_TESTS=ON"
+fi
+
+# rccl_ep's multi-GPU tests live in the MPI test binary, so they need it built too.
+if [[ "${enable_rccl_ep_tests}" == true ]]; then
+    if [[ "${enable_mpi_tests}" != true ]]; then
+        echo "ERROR: --enable-rccl-ep-tests requires --enable-mpi-tests. Please re-run with both."
+        exit 1
+    fi
+    cmake_common_options="${cmake_common_options} -DENABLE_RCCL_EP_TESTS=ON"
 fi
 
 # Force Reduce pipeline
