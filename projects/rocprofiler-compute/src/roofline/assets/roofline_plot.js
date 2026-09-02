@@ -70,6 +70,7 @@
   var roofCountEl = document.getElementById("roofline-roof-count");
   var showAllRoofsBtn = document.getElementById("roofline-show-all-roofs");
   var resetViewBtn = document.getElementById("roofline-reset-view");
+  var fitDataBtn = document.getElementById("roofline-fit-data");
   var exportPngBtn = document.getElementById("roofline-export-png");
   var themeToggleBtn = document.getElementById("roofline-theme-toggle");
   var plotColumn = gd ? gd.closest(".roofline-plot-col") : null;
@@ -596,13 +597,12 @@
     );
   }
 
-  // A one-shot look at a kernel the canonical frame does not reach. Reset zoom
-  // and double-click still return to the frame.
-  function zoomToKernel(kernel) {
+  // A one-shot look at some points; never a mode. Reset zoom and double-click
+  // still return to the canonical frame, and a resize leaves the zoom alone.
+  function zoomToPoints(points) {
     if (!plotlyReady()) {
       return;
     }
-    var points = pointsForCurrentPeak(kernel);
     var x = loggedExtent(
       points.map(function (point) {
         return point.ai;
@@ -617,6 +617,24 @@
       return;
     }
     applyRange({ x: x, y: y }, false);
+  }
+
+  function zoomToKernel(kernel) {
+    zoomToPoints(pointsForCurrentPeak(kernel));
+  }
+
+  function drawnPoints() {
+    var points = [];
+    kernels.forEach(function (kernel) {
+      if (kernelIsDrawn(kernel)) {
+        points = points.concat(pointsForCurrentPeak(kernel));
+      }
+    });
+    return points;
+  }
+
+  function fitToData() {
+    zoomToPoints(drawnPoints());
   }
 
   function exportTextWidth(text) {
@@ -1389,11 +1407,12 @@
           : colors[0] || FALLBACK_COLOR;
       }
     });
+    var drawnCount = kernels.filter(kernelIsDrawn).length;
     if (kernelCountEl) {
-      kernelCountEl.textContent = formatCount(
-        kernels.filter(kernelIsDrawn).length,
-        kernels.length
-      );
+      kernelCountEl.textContent = formatCount(drawnCount, kernels.length);
+    }
+    if (fitDataBtn) {
+      fitDataBtn.disabled = drawnCount === 0;
     }
     if (offPlotCountEl) {
       offPlotCountEl.textContent = offPlotCount
@@ -1443,6 +1462,9 @@
     }
     if (resetViewBtn) {
       resetViewBtn.addEventListener("click", resetView);
+    }
+    if (fitDataBtn) {
+      fitDataBtn.addEventListener("click", fitToData);
     }
     if (exportPngBtn) {
       exportPngBtn.addEventListener("click", exportPng);

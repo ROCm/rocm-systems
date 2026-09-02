@@ -54,6 +54,7 @@ _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Li
 DEFAULT_PEAK = "HBM"
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
+_SUBTITLE_FONT_SIZE = 11
 TRACE_COLORS: dict[str, dict[str, str]] = {
     "l0": {"html": "#F0E442", "cli": "brown+"},
     "l1": {"html": "#0072B2", "cli": "red+"},
@@ -84,6 +85,30 @@ def get_color(category: str, backend: str = "html") -> str:
         raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
     return TRACE_COLORS[key][backend]
+
+
+def _decade_label(value: float) -> str:
+    """A frame bound in the compact 1e<n> form the bounds are snapped to."""
+    exponent = math.log10(value) if value > 0 else None
+    if exponent is not None and float(exponent).is_integer():
+        return f"1e{int(exponent)}"
+    return f"{value:g}"
+
+
+def _frame_subtitle(frame: tuple[float, float, float, float]) -> str:
+    """The frame spelled out under the title.
+
+    Comparing two runs is done by looking at two plots, so the axes they were
+    drawn on have to travel with the picture: into a screenshot, and into the
+    exported PNG.
+    """
+    x_lo, x_hi, y_lo, y_hi = frame
+    # A literal middle dot: named HTML entities are not safe in Plotly's SVG text.
+    return (
+        f"Axes fixed to this GPU · "
+        f"AI {_decade_label(x_lo)} to {_decade_label(x_hi)} · "
+        f"performance {_decade_label(y_lo)} to {_decade_label(y_hi)}"
+    )
 
 
 def _off_plot_phrase(
@@ -985,7 +1010,11 @@ class Roofline:
         fig.update_layout(
             template="plotly_white",
             title=dict(
-                text=f"Empirical Roofline Analysis ({dtype})",
+                text=(
+                    f"Empirical Roofline Analysis ({dtype})"
+                    f'<br><span style="font-size:{_SUBTITLE_FONT_SIZE}px">'
+                    f"{_frame_subtitle(view_bounds)}</span>"
+                ),
                 x=0.5,
                 xanchor="center",
                 font=dict(size=15),
@@ -993,7 +1022,8 @@ class Roofline:
             autosize=True,
             dragmode="pan",
             hovermode="closest",
-            margin=dict(l=82, r=40, b=62, t=62, pad=4, autoexpand=False),
+            # Top margin leaves room for the title and the frame subtitle under it.
+            margin=dict(l=82, r=40, b=62, t=80, pad=4, autoexpand=False),
             showlegend=True,
             hoverlabel=dict(
                 bgcolor="white",
@@ -1004,15 +1034,21 @@ class Roofline:
         )
 
     def _extend_stacked_title(self, fig: go.Figure, dtype: str) -> None:
-        """Extend an existing figure's title to list every stacked datatype."""
+        """Extend an existing figure's title to list every stacked datatype.
+
+        Only the heading names datatypes; the frame subtitle under it is carried
+        through untouched, since the frame is the same for every datatype.
+        """
         if not fig.layout.title.text:
             return
-        title_text = fig.layout.title.text
-        if "(" in title_text and ")" in title_text:
-            prefix = title_text.split("(")[0]
-            existing_types = title_text.split("(")[1].split(")")[0]
+        heading, separator, subtitle = fig.layout.title.text.partition("<br>")
+        if "(" in heading and ")" in heading:
+            prefix = heading.split("(")[0]
+            existing_types = heading.split("(")[1].split(")")[0]
             if dtype not in existing_types.split(", "):
-                fig.layout.title.text = f"{prefix}({existing_types}, {dtype})"
+                fig.layout.title.text = (
+                    f"{prefix}({existing_types}, {dtype}){separator}{subtitle}"
+                )
 
     def cli_generate_plot(
         self,

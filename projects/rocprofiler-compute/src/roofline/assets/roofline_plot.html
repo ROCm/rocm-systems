@@ -32,7 +32,11 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
       double-click to reset</span>
     <button type="button" id="roofline-reset-view"
             class="roofline-btn roofline-btn-sm"
-            title="Frame the kernels currently shown">Reset zoom</button>
+            title="Return to this GPU's fixed axes">Reset zoom</button>
+    <button type="button" id="roofline-fit-data"
+            class="roofline-btn roofline-btn-sm"
+            title="Zoom once to the kernels currently shown. Reset zoom or
+double-click returns to the fixed axes.">Fit to data</button>
     <button type="button" id="roofline-export-png"
             class="roofline-btn roofline-btn-sm"
             title="Download the current chart as a PNG image">Export PNG</button>
