@@ -85,20 +85,8 @@ Ensure ROCm is installed and follow the steps:
 .. _same-rocm-as-workload:
 
 3. The profiler and the workload must use the same ROCm. A pip package can
-   install a second ROCm. For example, to profile TheRock torch, install
-   ROCm Compute Profiler (``rocm[profiler]``) and torch from the same index
-   in one command. Those torch packages depend on ``rocm[libraries]`` and
-   install the matching ROCm. Do not install ROCm and then torch; that can
-   downgrade ROCm. Replace ``device-gfx950`` with your GPU target:
-
-   .. code-block:: shell-session
-
-      python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
-          "rocm[profiler,libraries,device-gfx950]" "torch[device-gfx950]"
-
-   See :doc:`/install/core-install` for the ``rocm[profiler]`` pip option, and
-   `TheRock releases <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`__
-   for other targets and packages.
+   install a second ROCm. TheRock torch from pip is one example. See
+   `TheRock releases <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`__.
 
 4. Check the installation dependencies. These are required for analyze mode
    only; profile mode uses the standard library and needs no extra packages.
