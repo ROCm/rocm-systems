@@ -661,6 +661,23 @@ foreach(_common_banked_capture_owner IN ITEMS
         "common planning must consume selected banked-capture semantics"
     )
 endforeach()
+foreach(_shared_record_replay_emitter_owner IN ITEMS
+    consan_moi_shared_lowering.cpp
+    consan_moi_shared_lowering.h
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_shared_record_replay_emitter_owner}"
+        "build_first_light_access_record_words"
+        "Record/Replay access emission must remain in its mode owner"
+    )
+endforeach()
+file(READ
+    "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
+    _record_replay_access_emission
+)
+if(NOT _record_replay_access_emission MATCHES "build_first_light_access_record_words")
+    message(FATAL_ERROR "Record/Replay access emission lost its physical mode owner")
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sampled.cpp"
     "automatic_banked_record_capture[ ]*="
@@ -2630,12 +2647,15 @@ foreach(_recipe IN ITEMS
         )
     endif()
 endforeach()
-file(READ "${_consan_dir}/consan_moi_shared_lowering.cpp" _moi_shared_lowering_owner)
+file(READ
+    "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
+    _moi_record_replay_access_emission_owner
+)
 string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"
     _moi_record_replay_indexed_address_calls
-    "${_moi_shared_lowering_owner}"
+    "${_moi_record_replay_access_emission_owner}"
 )
 list(LENGTH _moi_record_replay_indexed_address_calls _moi_record_replay_indexed_address_call_count)
 if(NOT _moi_record_replay_indexed_address_call_count EQUAL 2)
@@ -2647,6 +2667,7 @@ foreach(
     _record_replay_owner
     IN ITEMS
         consan_moi_record_replay.h
+        consan_moi_record_replay_access_emission.cpp
         consan_moi_record_replay.inc
         consan_moi_record_atomic.inc
         consan_moi_record_fence.inc

@@ -93,6 +93,7 @@ rj_add_object_library(
         consan_moi_record_event_emission.cpp
         consan_moi_record_planning.cpp
         consan_moi_record_replay.cpp
+        consan_moi_record_replay_access_emission.cpp
         consan_moi_record_replay_model.cpp
         consan_moi_record_replay_report_plan.cpp
         consan_moi_runtime_workgroup_gate.cpp

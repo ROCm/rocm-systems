@@ -25,6 +25,17 @@ struct MoiRecordReplayAccessOutput {
   std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
 };
 
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
+    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
+    const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
+    const ConSanMoiOperatingPoint &point, uint16_t scratch_vgpr, rj_code_arch_t arch,
+    uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
+    const ConSanMoiReportBufferLayout &layout, bool spill_overlaps_guest_operands,
+    const VgprSpillSequence *spill, const ConSanMoiPrivateStateLayout *private_layout,
+    const std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan> &owner_derivation,
+    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    uint32_t *guest_instruction_word_count = nullptr);
+
 void try_apply_first_light_access_record_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     const ConSanMoiOperatingPoint &operating_point, const ConSanTargetProfile &target,
