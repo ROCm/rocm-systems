@@ -73,8 +73,14 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
   // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
   // PM4 path.
-  if (dxg_runtime->use_pm4_)
-    device_info_.compute_schedid = kSchedulerIdCompute0;
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
   pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
            " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
