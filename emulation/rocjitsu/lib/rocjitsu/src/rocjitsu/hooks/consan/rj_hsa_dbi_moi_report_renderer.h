@@ -29,8 +29,7 @@ struct AutoMoiReportRenderInput {
   const AutoMoiReportPipelineInput &pipeline;
   const AutoMoiDecodedReport &decoded;
   const AutoMoiReportSummary &summary;
-  const AutoMoiSampledConflictAnalysis *sampled_analysis = nullptr;
-  const AutoMoiRecordReplayAnalysis *record_replay_analysis = nullptr;
+  const AutoMoiModeAnalysis *mode_analysis = nullptr;
 };
 
 inline constexpr uint32_t kAutoMoiReportDetailLimit = 4;

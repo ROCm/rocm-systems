@@ -2215,10 +2215,15 @@ set(
     _runtime_analysis_sources
     rj_hsa_dbi_moi_report_analyzer.cpp
     rj_hsa_dbi_moi_report_analyzer.h
+    rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
+    rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+    rj_hsa_dbi_moi_record_replay_report_analyzer.h
     rj_hsa_dbi_moi_report_decoder.cpp
     rj_hsa_dbi_moi_report_decoder.h
     rj_hsa_dbi_moi_report_pipeline.cpp
     rj_hsa_dbi_moi_report_pipeline.h
+    rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+    rj_hsa_dbi_moi_sampled_report_analyzer.h
 )
 foreach(_source IN LISTS _runtime_analysis_sources)
     _consan_assert_no_match(
@@ -2252,6 +2257,63 @@ _consan_assert_no_match(
     "entry[.](access_record_capacity|barrier_record_capacity|atomic_record_capacity|fence_record_capacity|diagnostic_capacity|exact_shadow_entry_capacity|inline_atomic_release_capacity|inline_acquired_epoch_token_capacity|inline_causal_snapshot_capacity|sampled_watchpoint_capacity|direct_sampled|inline_shadow)"
     "runtime report registry entries must retain one layout authority"
 )
+
+# Host analysis has one narrow mode-composition point. Algorithms and summary
+# projection belong to mode-named owners, while the pipeline transports only
+# the selected discriminated product.
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_analyzer.cpp"
+    "consan_moi_sampled_watchpoints_conflict|consan_moi_record_replay_access_records|RecordReplayPressureTelemetry"
+    "common report analysis must compose mode owners rather than implement their algorithms"
+)
+_consan_assert_match_count_at_most(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_analyzer.cpp"
+    "ConSanMoiEngine::"
+    6
+    "common report analysis has one reviewed dispatch and one exhaustiveness check"
+)
+foreach(
+    _mode_analyzer
+    IN ITEMS
+        rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+        rj_hsa_dbi_moi_record_replay_report_analyzer.h
+        rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+        rj_hsa_dbi_moi_sampled_report_analyzer.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_mode_analyzer}"
+        "ConSanMoiEngine::"
+        "a selected mode analyzer must not redispatch on the engine"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_record_replay_report_analyzer.h"
+    "NotRecordReplay"
+    "Record/Replay analysis must not model calls for another mode"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_pipeline.cpp"
+    "analyze_auto_moi_sampled_conflicts|analyze_auto_moi_record_replay"
+    "the report pipeline must transport one selected analysis rather than run every mode"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.h"
+    "sampled_analysis|record_replay_analysis"
+    "the renderer input must carry one discriminated mode-analysis product"
+)
+file(READ "${_hook_dir}/CMakeLists.txt" _runtime_analysis_build)
+foreach(
+    _mode_analyzer_source
+    IN ITEMS
+        rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+        rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+)
+    if(NOT _runtime_analysis_build MATCHES "${_mode_analyzer_source}")
+        message(FATAL_ERROR
+            "ConSan mode report analyzer lost its physical build owner: ${_mode_analyzer_source}"
+        )
+    endif()
+endforeach()
 
 # Every active implementation fragment has one reviewed textual owner. No
 # implementation fragment may include another except the three coherent

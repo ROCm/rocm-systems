@@ -3,81 +3,29 @@
 
 #pragma once
 
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_decoder.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_inline_shadow_report_analyzer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_record_replay_report_analyzer.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_sampled_report_analyzer.h"
 
-#include <cstdint>
-#include <optional>
-#include <span>
-#include <string_view>
-#include <utility>
-#include <vector>
+#include <variant>
 
 namespace rocjitsu::consan_hook {
 
-struct AutoMoiSampledConflictAnalysis {
-  uint32_t conflict_count = 0;
-  std::optional<std::pair<AutoMoiSampledEvidence, AutoMoiSampledEvidence>> first_conflict;
+using AutoMoiModeAnalysis = std::variant<AutoMoiRecordReplayAnalysis, AutoMoiInlineShadowAnalysis,
+                                         AutoMoiSampledConflictAnalysis>;
+
+/// One mode-selected analysis and its complete summary projection. The common
+/// analyzer is a composition point only; each alternative owns its algorithm
+/// and summary fields in its mode-named component.
+struct AutoMoiReportAnalysis {
+  AutoMoiReportSummary summary;
+  AutoMoiModeAnalysis mode;
 };
 
-[[nodiscard]] AutoMoiSampledConflictAnalysis
-analyze_auto_moi_sampled_conflicts(std::span<const AutoMoiSampledEvidence> evidence,
-                                   bool synchronization_evidence_complete);
+[[nodiscard]] AutoMoiReportAnalysis analyze_auto_moi_report(const AutoMoiReportPipelineInput &input,
+                                                            const AutoMoiDecodedReport &decoded);
 
-struct RecordReplayPressureTelemetry {
-  bool available = false;
-  bool saturated = false;
-  enum class UnavailableReason : uint8_t {
-    None,
-    NotRecordReplay,
-    NoDispatchDirectory,
-    NoAccessTable,
-    NoLogicalAccessRanges,
-  } unavailable_reason = UnavailableReason::None;
-  uint64_t occupied_access_record_count = 0;
-  uint64_t access_record_capacity = 0;
-  uint64_t observed_site_count = 0;
-  uint64_t maximum_site_owner_address_group_count = 0;
-  uint32_t address_group_headroom = 0;
-  uint32_t logical_access_range_count = 0;
-  uint32_t maximum_site_token = 0;
-  uint64_t invalid_site_token_count = 0;
-};
-
-[[nodiscard]] uint64_t record_replay_bank_saturation_count(const ConSanMoiReportHeader &header,
-                                                           ConSanMoiEngine engine);
-[[nodiscard]] std::string_view record_replay_pressure_unavailable_reason_name(
-    RecordReplayPressureTelemetry::UnavailableReason reason);
-[[nodiscard]] RecordReplayPressureTelemetry
-record_replay_pressure_telemetry(const ConSanMoiReportHeader &header, ConSanMoiEngine engine,
-                                 std::span<const ConSanMoiAccessRecord> records,
-                                 uint32_t logical_access_range_count,
-                                 uint32_t address_group_headroom);
-
-struct AutoMoiRecordReplayAnalysis {
-  bool replay_performed = false;
-  bool shadow_bounded = false;
-  bool effective_conflict = false;
-  uint64_t required_shadow_entry_count = 0;
-  uint64_t replay_shadow_entry_count = 0;
-  uint32_t effective_diagnostic_count = 0;
-  uint32_t disjoint_owner_suppressed_count = 0;
-  ConSanMoiReportHeader replay_header;
-  ConSanMoiRecordReplayResult replay;
-  ConSanMoiReplayProvenanceRepair provenance;
-  RecordReplayPressureTelemetry pressure;
-  std::vector<ConSanMoiDiagnosticRecord> diagnostics;
-};
-
-[[nodiscard]] AutoMoiRecordReplayAnalysis
-analyze_auto_moi_record_replay(const ConSanMoiReportHeader &header, ConSanMoiEngine engine,
-                               std::span<const ConSanMoiAccessRecord> access_records,
-                               std::span<const ConSanMoiBarrierRecord> barrier_records,
-                               std::span<const ConSanMoiAtomicRecord> atomic_records,
-                               std::span<const ConSanMoiFenceRecord> fence_records,
-                               std::span<const AutoMoiRecordReplayStaticMapping> static_mappings,
-                               bool static_mapping_malformed, uint32_t logical_access_range_count,
-                               uint32_t address_group_headroom);
+[[nodiscard]] bool auto_moi_analysis_matches_engine(const AutoMoiModeAnalysis &analysis,
+                                                    ConSanMoiEngine engine);
 
 } // namespace rocjitsu::consan_hook

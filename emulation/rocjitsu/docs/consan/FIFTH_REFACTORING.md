@@ -7509,3 +7509,65 @@ files, and the one shared layout-flag check warrants normalization in a later
 layout trace. Broad lowering mutation surfaces, larger legacy harvesting,
 material whole-refactoring shrinkage, and the independent completion audit
 remain open. The goal therefore remains active.
+
+### 16.104 Convergence checkpoint 103: one selected runtime mode analysis
+
+The host report-analysis trace found a semantic rather than merely physical
+mode violation. For every complete report, the pipeline ran both the Sampled
+conflict analyzer and the Record/Replay pressure and replay analyzer. It then
+required the renderer to receive both products even when one or both protocols
+were inactive. Record/Replay APIs consequently accepted an engine argument and
+carried a `NotRecordReplay` unavailability state. The common analyzer was a
+253-line two-mode implementation rather than an analysis composition point.
+
+Record/Replay and Sampled now own their analysis algorithms, result contracts,
+and summary projections in mode-named source/header pairs. InlineShadow owns an
+explicit empty analysis product because its evidence is completely classified
+by decoding; it no longer receives fabricated empty products from the other
+two protocols. The common analyzer is a 53-line exhaustive composition point
+returning one `AutoMoiModeAnalysis` alternative and one projected summary. The
+pipeline calls that composition point once and contains no direct mode-analyzer
+call. The renderer accepts one discriminated product, verifies that it matches
+the decoded protocol, and preserves the established all-field summary text
+without requiring inactive analysis objects.
+
+The Record/Replay analyzer no longer accepts an engine argument, and
+`NotRecordReplay` has been deleted from its state space. A focused regression
+seeds simultaneously valid Sampled and replay inputs, selects each protocol in
+turn, and proves that only the selected analysis and summary projection run.
+Boundary checks keep mode algorithms out of the common analyzer, prohibit
+engine redispatch inside selected mode owners, prevent direct per-mode calls
+from returning to the pipeline, require one discriminated renderer input, and
+require both compiled mode owners in the analyzer build target.
+
+| Signal | Checkpoint 103 | Cumulative change | Slice change from checkpoint 102 |
+| --- | ---: | ---: | ---: |
+| Production files | 282 | +53 | +5 mode owners |
+| Physical production lines | 102,797 | **-2,179** | **+107** |
+| Nonblank production lines | 96,532 | **-2,552** | **+75** |
+| Production implementation lines | 88,820 | **-2,630** | **+58** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Direct mode-analyzer calls in the report pipeline | **0** | n/a | **-2** |
+| Inactive-mode states in Record/Replay analysis | **0** | n/a | **-1** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild, all **40/40** report, analyzer,
+decoder, pipeline, renderer, and live-hook tests, and all **1,295/1,295**
+`ConSan.*` and `ConSanMoi.*` host/component tests. The focused analyzer test was
+strengthened in place; no test was removed, disabled, or replaced. No physical
+gfx1201 test was run.
+
+This slice strengthens Sections 14.1, 14.3, 14.5, and 14.6, but its five
+physical owners and discriminated composition contract introduce 58 temporary
+implementation lines. The selected product is specifically intended to unlock
+deletion from the still-mixed runtime decoder and renderer. The next
+runtime-report convergence checkpoint must pay back this migration by bringing
+the production implementation count below checkpoint 102's 88,762 lines; adding
+mode renderer/decoder facades without deleting their mixed common
+implementation is not an acceptable payoff. Broad lowering mutation surfaces,
+the remaining runtime mode mixture, material whole-refactoring shrinkage, and
+the independent completion audit remain open. The goal therefore remains
+active.

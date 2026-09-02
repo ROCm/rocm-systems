@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::consan_hook {
@@ -49,7 +50,8 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
     return rendered;
   }
 
-  if (render_input.sampled_analysis == nullptr || render_input.record_replay_analysis == nullptr) {
+  if (render_input.mode_analysis == nullptr ||
+      !auto_moi_analysis_matches_engine(*render_input.mode_analysis, decoded.engine)) {
     log_message(kLogFailure, "ConSan MOI auto report reader=%llu has missing typed analysis",
                 static_cast<unsigned long long>(input.reader));
     return rendered;
@@ -91,11 +93,23 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
   const ConSanMoiAccessRecord *records = decoded.visible_access_slots.data();
   const ConSanMoiDiagnosticRecord *diagnostics = decoded.diagnostics.data();
 
-  const AutoMoiSampledConflictAnalysis &sampled_analysis = *render_input.sampled_analysis;
+  static const AutoMoiSampledConflictAnalysis kNoSampledAnalysis;
+  static const AutoMoiRecordReplayAnalysis kNoRecordReplayAnalysis;
+  const AutoMoiSampledConflictAnalysis *selected_sampled_analysis =
+      std::get_if<AutoMoiSampledConflictAnalysis>(render_input.mode_analysis);
+  const AutoMoiRecordReplayAnalysis *selected_record_replay_analysis =
+      std::get_if<AutoMoiRecordReplayAnalysis>(render_input.mode_analysis);
+  const AutoMoiSampledConflictAnalysis &sampled_analysis =
+      selected_sampled_analysis ? *selected_sampled_analysis : kNoSampledAnalysis;
   const uint32_t sampled_conflicts = sampled_analysis.conflict_count;
   const auto &first_sampled_conflict = sampled_analysis.first_conflict;
-  const AutoMoiRecordReplayAnalysis &record_replay_analysis = *render_input.record_replay_analysis;
+  const AutoMoiRecordReplayAnalysis &record_replay_analysis =
+      selected_record_replay_analysis ? *selected_record_replay_analysis : kNoRecordReplayAnalysis;
   const RecordReplayPressureTelemetry &record_replay_pressure = record_replay_analysis.pressure;
+  const std::string_view record_replay_pressure_reason =
+      selected_record_replay_analysis ? record_replay_pressure_unavailable_reason_name(
+                                            record_replay_pressure.unavailable_reason)
+                                      : "not_record_replay";
 
   if (decoded.deferred_token_qualified_diagnostic_count != 0) {
     log_message(kLogEvidence,
@@ -224,11 +238,7 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
       expected_engine == ConSanMoiEngine::RecordReplay ? header->flags : 0u,
       summary.record_replay_bank_saturation_count != 0 ? "true" : "false",
       record_replay_pressure.available ? "true" : "false",
-      static_cast<int>(
-          record_replay_pressure_unavailable_reason_name(record_replay_pressure.unavailable_reason)
-              .size()),
-      record_replay_pressure_unavailable_reason_name(record_replay_pressure.unavailable_reason)
-          .data(),
+      static_cast<int>(record_replay_pressure_reason.size()), record_replay_pressure_reason.data(),
       static_cast<unsigned long long>(record_replay_pressure.occupied_access_record_count),
       static_cast<unsigned long long>(record_replay_pressure.access_record_capacity),
       static_cast<unsigned long long>(record_replay_pressure.observed_site_count),
