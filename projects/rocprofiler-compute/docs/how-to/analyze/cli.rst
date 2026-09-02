@@ -66,7 +66,11 @@ There are three high-level GPU analysis views:
 The memory chart is a wide terminal diagram (at least 240 columns). If the
 terminal is narrower than the chart, or the terminal wraps long lines, the
 boxes, arrows, and bandwidth labels break across lines and the chart is hard to
-read.
+read:
+
+.. image:: ../../data/analyze/cli/mem_chart_wrapped.png
+   :align: left
+   :alt: Memory chart wrapped in a narrow terminal
 
 To keep the original layout in a terminal, pipe the analyze command into
 ``less`` with raw ANSI colors and no wrap. ``-R`` preserves color, and ``-S``
