@@ -45,7 +45,6 @@ namespace rocjitsu::consan_moi_impl {
 
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
-using consan_detail::MoiEntryScalarBackup;
 using consan_detail::MoiOwnerEpochPrologueEmissionPlan;
 using consan_detail::MoiPrivateEpochPrologueEmissionPlan;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
@@ -76,8 +75,8 @@ using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 }
 
 [[nodiscard]] bool append_moi_entry_scalar_backup(std::vector<uint32_t> &words,
-                                                  const MoiEntryScalarBackup &backup, bool restore,
-                                                  rj_code_arch_t arch,
+                                                  const ConSanMoiEntryScalarBackup &backup,
+                                                  bool restore, rj_code_arch_t arch,
                                                   std::vector<std::string> &errors) {
   if (!consan_is_capability_arch(arch) ||
       !backup.is_well_formed(kMaxVgprs, moi_ordinary_sgpr_limit(arch))) {
@@ -1039,7 +1038,7 @@ build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t origina
   const uint32_t runtime_sample_stride = plan.runtime_sample_stride;
   const uint32_t runtime_sample_offset = plan.runtime_sample_offset;
   const uint64_t runtime_report_dispatch_id = plan.runtime_report_dispatch_id;
-  const std::optional<MoiEntryScalarBackup> &entry_scalar_backup = plan.entry_scalar_backup;
+  const std::optional<ConSanMoiEntryScalarBackup> &entry_scalar_backup = plan.entry_scalar_backup;
   const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow = plan.workgroup_shadow;
   const bool has_quad_zero_tuple = plan.has_quad_zero_tuple;
   const std::optional<ConSanMoiWorkgroupSources> &workgroup_sources = plan.workgroup_sources;
@@ -2530,7 +2529,7 @@ void try_apply_owner_epoch_prologue_patch(
                                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
         .workgroup_sources = std::move(workgroup_sources),
     };
-    std::optional<MoiEntryScalarBackup> entry_scalar_backup;
+    std::optional<ConSanMoiEntryScalarBackup> entry_scalar_backup;
     const bool needs_branch_only_scalar_backup = kernel_point.moi_branch_only_spill.has_value();
     const bool needs_dynamic_stack_scalar_backup =
         kernel_point.moi_branch_only_spill &&
@@ -2644,7 +2643,7 @@ void try_apply_owner_epoch_prologue_patch(
                                              "VGPR carrier");
           return;
         }
-        entry_scalar_backup = MoiEntryScalarBackup{
+        entry_scalar_backup = ConSanMoiEntryScalarBackup{
             .vgpr = *backup_vgpr,
             .sgpr_base = sgpr_base,
             .sgpr_count = sgpr_count,
@@ -3052,11 +3051,7 @@ void try_apply_owner_epoch_prologue_patch(
     info.persistent_vgpr_state_is_abi = !prologue_plan.persistent_sgprs.complete();
     info.persistent_sgpr_state = prologue_plan.persistent_sgprs;
     info.required_sgpr_count = item.required_sgpr_count;
-    if (prologue_plan.entry_scalar_backup) {
-      info.entry_scalar_backup_vgpr = prologue_plan.entry_scalar_backup->vgpr;
-      info.entry_scalar_backup_sgpr_base = prologue_plan.entry_scalar_backup->sgpr_base;
-      info.entry_scalar_backup_sgpr_count = prologue_plan.entry_scalar_backup->sgpr_count;
-    }
+    info.entry_scalar_backup = prologue_plan.entry_scalar_backup;
     info.workgroup_shadow = prologue_plan.workgroup_shadow;
     if (prologue_plan.dispatch_plan && prologue_plan.dispatch_capture.present())
       note_dispatch_id_patch_info(info, *prologue_plan.dispatch_plan,

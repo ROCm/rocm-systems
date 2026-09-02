@@ -2734,21 +2734,11 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
   const rj_code_arch_t arch = environment.arch();
 
   for (const ConSanPatchInfo &patch : result.patches) {
-    const bool has_vgpr = patch.entry_scalar_backup_vgpr.has_value();
-    const bool has_sgpr_base = patch.entry_scalar_backup_sgpr_base.has_value();
-    const bool has_sgpr_count = patch.entry_scalar_backup_sgpr_count != 0u;
-    if (has_vgpr != has_sgpr_base || has_vgpr != has_sgpr_count) {
-      errors.emplace_back("ConSan final validation found incomplete entry scalar backup metadata");
+    if (!patch.entry_scalar_backup)
       continue;
-    }
-    if (!has_vgpr)
-      continue;
+    const ConSanMoiEntryScalarBackup &backup = *patch.entry_scalar_backup;
     if (patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
-        *patch.entry_scalar_backup_vgpr >= kConSanOrdinaryVgprLimit ||
-        patch.entry_scalar_backup_sgpr_count > 64u ||
-        static_cast<uint32_t>(*patch.entry_scalar_backup_sgpr_base) +
-                patch.entry_scalar_backup_sgpr_count >
-            REGISTER_SET_ALLOCATABLE_SGPRS) {
+        !backup.is_well_formed(kConSanOrdinaryVgprLimit, REGISTER_SET_ALLOCATABLE_SGPRS)) {
       errors.emplace_back("ConSan final validation found invalid entry scalar backup resources");
       continue;
     }
@@ -2775,12 +2765,10 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
 
     std::vector<uint32_t> expected_save;
     std::vector<uint32_t> expected_restore;
-    for (uint16_t index = 0; index < patch.entry_scalar_backup_sgpr_count; ++index) {
-      const uint16_t sgpr = static_cast<uint16_t>(*patch.entry_scalar_backup_sgpr_base + index);
-      const auto save = instrumentation::build_v_writelane_b32(*patch.entry_scalar_backup_vgpr,
-                                                               sgpr, index, arch);
-      const auto restore =
-          instrumentation::build_v_readlane_b32(sgpr, *patch.entry_scalar_backup_vgpr, index, arch);
+    for (uint16_t index = 0; index < backup.sgpr_count; ++index) {
+      const uint16_t sgpr = static_cast<uint16_t>(backup.sgpr_base + index);
+      const auto save = instrumentation::build_v_writelane_b32(backup.vgpr, sgpr, index, arch);
+      const auto restore = instrumentation::build_v_readlane_b32(sgpr, backup.vgpr, index, arch);
       if (!save || !restore) {
         expected_save.clear();
         expected_restore.clear();
@@ -2919,7 +2907,7 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       capture_prefix.insert(capture_prefix.end(), successor->begin(), successor->end());
     }
     const uint64_t scalar_backup_prefix_words =
-        patch.entry_scalar_backup_vgpr ? 2u * patch.entry_scalar_backup_sgpr_count : 0u;
+        patch.entry_scalar_backup ? 2u * patch.entry_scalar_backup->sgpr_count : 0u;
     const uint64_t patch_end = patch.trampoline_offset + patch.trampoline_size;
     if (entry_offset > patch_end || patch_end > replacement_text.size() ||
         (patch_end - entry_offset) % sizeof(uint32_t) != 0) {
@@ -3887,10 +3875,10 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*workgroup_key_vgpr + 1u));
           }
-          if (patch.entry_scalar_backup_vgpr) {
+          if (patch.entry_scalar_backup) {
             requirement.required_vgpr_count =
                 std::max<uint16_t>(requirement.required_vgpr_count,
-                                   static_cast<uint16_t>(*patch.entry_scalar_backup_vgpr + 1u));
+                                   static_cast<uint16_t>(patch.entry_scalar_backup->vgpr + 1u));
           }
           const ConSanMoiPersistentWorkgroupRegisters &workgroup_vgprs =
               patch.persistent_record_replay_workgroup_vgprs;

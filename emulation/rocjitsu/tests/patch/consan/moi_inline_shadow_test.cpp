@@ -1696,9 +1696,9 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     const auto prologue = std::ranges::find(
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
-    ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-    EXPECT_GE(*prologue->entry_scalar_backup_vgpr, 1u);
-    EXPECT_LT(*prologue->entry_scalar_backup_vgpr, 29u);
+    ASSERT_TRUE(prologue->entry_scalar_backup);
+    EXPECT_GE(prologue->entry_scalar_backup->vgpr, 1u);
+    EXPECT_LT(prologue->entry_scalar_backup->vgpr, 29u);
 
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
@@ -3299,9 +3299,9 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
+  ASSERT_TRUE(prologue->entry_scalar_backup);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_count, kInitializedEntrySgprCount);
   ASSERT_EQ(prologue->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(prologue->owner_descriptor_file_offsets.front(), assignment.descriptor_file_offset);
   const auto branch_only =
@@ -3320,18 +3320,18 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto first_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u,
+      prologue->entry_scalar_backup->vgpr, assignment.exec_save_sgpr, /*lane=*/0u,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto last_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr,
+      prologue->entry_scalar_backup->vgpr,
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
       kInitializedEntrySgprCount - 1u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto first_restore = instrumentation::build_v_readlane_b32(
-      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u,
+      assignment.exec_save_sgpr, prologue->entry_scalar_backup->vgpr, /*lane=*/0u,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto last_restore = instrumentation::build_v_readlane_b32(
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
-      *prologue->entry_scalar_backup_vgpr, kInitializedEntrySgprCount - 1u,
+      prologue->entry_scalar_backup->vgpr, kInitializedEntrySgprCount - 1u,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_wait =
       instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
@@ -3367,7 +3367,8 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
       std::ranges::find(invalid_resources.patches,
                         ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(invalid_prologue, invalid_resources.patches.end());
-  invalid_prologue->entry_scalar_backup_vgpr = kConSanOrdinaryVgprLimit;
+  ASSERT_TRUE(invalid_prologue->entry_scalar_backup);
+  invalid_prologue->entry_scalar_backup->vgpr = kConSanOrdinaryVgprLimit;
   const std::vector<std::string> resource_errors =
       validate_consan_modified_elf(bytes, invalid_resources);
   EXPECT_TRUE(std::ranges::any_of(resource_errors, [](const std::string &error) {
@@ -3428,9 +3429,9 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  ASSERT_TRUE(prologue->entry_scalar_backup_vgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
+  ASSERT_TRUE(prologue->entry_scalar_backup);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_count, kInitializedEntrySgprCount);
   const auto branch_only =
       std::ranges::find(result.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, result.patches.end());
@@ -3442,16 +3443,16 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto first_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr, assignment.exec_save_sgpr, /*lane=*/0u, arch);
+      prologue->entry_scalar_backup->vgpr, assignment.exec_save_sgpr, /*lane=*/0u, arch);
   const auto last_save = instrumentation::build_v_writelane_b32(
-      *prologue->entry_scalar_backup_vgpr,
+      prologue->entry_scalar_backup->vgpr,
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
       kInitializedEntrySgprCount - 1u, arch);
   const auto first_restore = instrumentation::build_v_readlane_b32(
-      assignment.exec_save_sgpr, *prologue->entry_scalar_backup_vgpr, /*lane=*/0u, arch);
+      assignment.exec_save_sgpr, prologue->entry_scalar_backup->vgpr, /*lane=*/0u, arch);
   const auto last_restore = instrumentation::build_v_readlane_b32(
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
-      *prologue->entry_scalar_backup_vgpr, kInitializedEntrySgprCount - 1u, arch);
+      prologue->entry_scalar_backup->vgpr, kInitializedEntrySgprCount - 1u, arch);
   ASSERT_TRUE(first_save);
   ASSERT_TRUE(last_save);
   ASSERT_TRUE(first_restore);
@@ -3538,8 +3539,9 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kInitializedEntrySgprCount);
+  ASSERT_TRUE(prologue->entry_scalar_backup);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_base, assignment.exec_save_sgpr);
+  EXPECT_EQ(prologue->entry_scalar_backup->sgpr_count, kInitializedEntrySgprCount);
 }
 
 TEST(ConSanMoi, Rdna4InlineFixedStackPrefersBranchOnlyOverAvailableScalarRouter) {
@@ -4290,9 +4292,7 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   ASSERT_TRUE(owner_init);
   ASSERT_TRUE(prologue->dispatch_id_prologue->capture.sgpr());
   ASSERT_GE(prologue_words.size(), 11u);
-  EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
-  EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
+  EXPECT_FALSE(prologue->entry_scalar_backup);
   const std::array<uint32_t, 6> owner_sequence = {
       *owner_init,
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),

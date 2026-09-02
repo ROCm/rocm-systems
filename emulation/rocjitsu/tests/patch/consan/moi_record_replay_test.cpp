@@ -5600,9 +5600,7 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillSkipsUninitializedScalarWindow) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
-  EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
-  EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
+  EXPECT_FALSE(prologue->entry_scalar_backup);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -5673,9 +5671,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     const auto prologue = std::ranges::find(
         result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
     ASSERT_NE(prologue, result.patches.end());
-    EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
-    EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
-    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
+    EXPECT_FALSE(prologue->entry_scalar_backup);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }

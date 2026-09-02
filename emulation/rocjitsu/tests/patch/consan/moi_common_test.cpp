@@ -763,18 +763,17 @@ TEST(ConSanMoi, OwnerEpochProloguePlanValidatesResolvedOwnerAndEntrySources) {
 }
 
 TEST(ConSanMoi, EntryScalarBackupValidatesCarrierAndScalarWindow) {
-  using consan_detail::MoiEntryScalarBackup;
   constexpr uint16_t kVgprLimit = 256u;
   constexpr uint16_t kSgprLimit = 106u;
-  EXPECT_TRUE((MoiEntryScalarBackup{.vgpr = 255u, .sgpr_base = 42u, .sgpr_count = 64u})
+  EXPECT_TRUE((ConSanMoiEntryScalarBackup{.vgpr = 255u, .sgpr_base = 42u, .sgpr_count = 64u})
                   .is_well_formed(kVgprLimit, kSgprLimit));
-  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 256u, .sgpr_base = 42u, .sgpr_count = 1u})
+  EXPECT_FALSE((ConSanMoiEntryScalarBackup{.vgpr = 256u, .sgpr_base = 42u, .sgpr_count = 1u})
                    .is_well_formed(kVgprLimit, kSgprLimit));
-  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 42u, .sgpr_count = 0u})
+  EXPECT_FALSE((ConSanMoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 42u, .sgpr_count = 0u})
                    .is_well_formed(kVgprLimit, kSgprLimit));
-  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 0u, .sgpr_count = 65u})
+  EXPECT_FALSE((ConSanMoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 0u, .sgpr_count = 65u})
                    .is_well_formed(kVgprLimit, kSgprLimit));
-  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 43u, .sgpr_count = 64u})
+  EXPECT_FALSE((ConSanMoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 43u, .sgpr_count = 64u})
                    .is_well_formed(kVgprLimit, kSgprLimit));
 }
 
@@ -2790,9 +2789,7 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   const auto verify_entry = [&](uint64_t entry_offset) {
     const char *text = patched.text_sections().front()->data();
     uint64_t cursor = entry_offset;
-    EXPECT_FALSE(prologue->entry_scalar_backup_vgpr);
-    EXPECT_FALSE(prologue->entry_scalar_backup_sgpr_base);
-    EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, 0u);
+    EXPECT_FALSE(prologue->entry_scalar_backup);
     const auto expect_write = [&](uint32_t expected) {
       uint32_t word = 0;
       std::memcpy(&word, text + cursor, sizeof(word));

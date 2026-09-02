@@ -620,14 +620,10 @@ struct ConSanPatchAbiEffects {
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.
   ConSanMoiPersistentSgprState persistent_sgpr_state;
-  /// Entry-local VGPR whose lanes preserve a runtime-selected transient SGPR
-  /// window while persistent vector state is initialized. The register is
-  /// dead again before any displaced guest instruction executes.
-  std::optional<uint16_t> entry_scalar_backup_vgpr;
-  /// First transient SGPR preserved in entry_scalar_backup_vgpr.
-  std::optional<uint16_t> entry_scalar_backup_sgpr_base;
-  /// Number of consecutive transient SGPRs preserved in fixed VGPR lanes.
-  uint16_t entry_scalar_backup_sgpr_count = 0;
+  /// Entry-local carrier and contiguous guest-SGPR window preserved while
+  /// persistent vector state is initialized. The carrier is dead again before
+  /// any displaced guest instruction executes.
+  std::optional<ConSanMoiEntryScalarBackup> entry_scalar_backup;
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;

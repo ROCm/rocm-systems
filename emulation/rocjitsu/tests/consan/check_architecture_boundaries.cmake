@@ -1124,6 +1124,46 @@ foreach(_dispatch_effect_consumer IN ITEMS consan_moi_prologue.cpp consan_valida
     )
 endforeach()
 
+# Entry-local scalar preservation is one inseparable carrier/window tuple.
+# Planning, emission, patch proof, descriptor accounting, and independent
+# validation must retain that value rather than representing partial tuples.
+file(READ
+    "${_consan_dir}/consan_moi_entry_scalar_backup.h"
+    _entry_scalar_backup_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_moi_entry_scalar_backup[.]h" OR
+   NOT _entry_scalar_backup_contract MATCHES
+       "struct ConSanMoiEntryScalarBackup" OR
+   NOT _patch_proof_contract MATCHES
+       "std::optional<ConSanMoiEntryScalarBackup>[ \t]+entry_scalar_backup")
+    message(FATAL_ERROR
+        "ConSan patch proof lost its typed entry scalar-backup effect"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_code_object_types.h.inc"
+    "(std::optional<uint16_t>|uint16_t)[ \t]+entry_scalar_backup_(vgpr|sgpr_base|sgpr_count)[ \t]*(=|;)"
+    "patch proof must not flatten the typed entry scalar-backup effect"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_internal.h"
+    "struct[ \t]+MoiEntryScalarBackup"
+    "entry scalar-backup proof must remain in its narrow contract"
+)
+foreach(_entry_backup_consumer IN ITEMS consan_moi_prologue.cpp consan_validation.inc)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_entry_backup_consumer}"
+        "entry_scalar_backup_(vgpr|sgpr_base|sgpr_count)"
+        "entry scalar-backup consumers must retain the typed effect"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_entry_scalar_backup.h"
+    "ConSanMoi(Sampled|RecordReplay|Inline|Report)|consan_moi_(sampled|record_replay|inline|report|shadow)|ConSanMoiShadow"
+    "entry scalar-backup effects must remain independent of mode and report policy"
+)
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(
