@@ -583,6 +583,12 @@ gfx1150/gfx1151/RDNA3.5, and gfx12 object-visible wait behavior including:
 
 - split `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `samplecnt`, `bvhcnt`, and
   `expcnt` hazards;
+- CDNA3/CDNA4 counter-capacity backpressure for local DS and non-FLAT VMEM
+  operations, which retires the oldest provably completed event before its
+  hardware counter could overflow, including when a different event class
+  triggers the full-counter issue stall;
+- all-ones legacy wait fields as no-wait operands (`lgkmcnt(15)` and
+  `vmcnt(63)` on CDNA), independently of capacity-forced progress;
 - out-of-order RDNA4 scalar-memory completion, which requires `kmcnt(0)` for
   dependencies on a particular SMEM result;
 - `s_waitcnt` and combined gfx12 wait encodings;

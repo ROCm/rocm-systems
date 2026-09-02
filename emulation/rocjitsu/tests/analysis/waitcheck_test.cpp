@@ -755,6 +755,10 @@ void append_gfx950_s_waitcnt_lgkmcnt_2(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC27Fu);
 }
 
+void append_gfx950_s_waitcnt_lgkmcnt_15(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8CCF7Fu);
+}
+
 void append_gfx950_s_waitcnt_expcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CCF0Fu);
 }
@@ -762,6 +766,23 @@ void append_gfx950_s_waitcnt_expcnt_0(std::vector<uint32_t> &program) {
 void append_gfx950_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &program) {
   program.push_back(0xE0501000u);
   program.push_back(0x80000008u);
+}
+
+void append_gfx950_buffer_load_dword(std::vector<uint32_t> &program, uint32_t vdst,
+                                     uint32_t vaddr = 8) {
+  program.push_back(0xE0501000u);
+  program.push_back(0x80000000u | (vdst << 8u) | vaddr);
+}
+
+void append_gfx950_buffer_store_dword(std::vector<uint32_t> &program, uint32_t vdata) {
+  program.push_back(0xE0700000u);
+  program.push_back(vdata << 8u);
+}
+
+void append_gfx950_flat_load_dword(std::vector<uint32_t> &program, uint32_t vdst,
+                                   uint32_t vaddr = 8) {
+  program.push_back(0xDC500000u);
+  program.push_back((vdst << 24u) | vaddr);
 }
 
 void append_gfx950_global_atomic_add_x2(std::vector<uint32_t> &program, uint32_t vdst,
@@ -890,6 +911,12 @@ void append_gfx950_ds_read_b32_v0_v4(std::vector<uint32_t> &program) {
   program.push_back(0x00000004u);
 }
 
+void append_gfx950_ds_read_b32(std::vector<uint32_t> &program, uint32_t vdst, uint32_t addr = 4,
+                               bool gds = false) {
+  program.push_back(0xD86C0000u | (static_cast<uint32_t>(gds) << 16u));
+  program.push_back((vdst << 24u) | addr);
+}
+
 void append_gfx950_s_load_dword_s4_s0(std::vector<uint32_t> &program) {
   program.push_back(0xC0020100u);
   program.push_back(0x00000000u);
@@ -954,6 +981,11 @@ void append_gfx942_global_load_dword_v4_v2(std::vector<uint32_t> &program) {
 void append_gfx942_ds_read_b32_v4_v0(std::vector<uint32_t> &program) {
   program.push_back(0xD86C0000u);
   program.push_back(0x04000000u);
+}
+
+void append_gfx942_ds_read_b32(std::vector<uint32_t> &program, uint32_t vdst, uint32_t addr = 0) {
+  program.push_back(0xD86C0000u);
+  program.push_back((vdst << 24u) | addr);
 }
 
 void append_gfx942_v_mov_b32_v5_v4(std::vector<uint32_t> &program) {
@@ -1282,6 +1314,32 @@ TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeDsReadUse) {
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+}
+
+TEST(WaitcheckTest, Gfx942CounterCapacityRetiresOldestOrderedDsRead) {
+  std::vector<uint32_t> program;
+  append_gfx942_ds_read_b32(program, 4);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx942_ds_read_b32(program, i + 6);
+  append_gfx942_v_mov_b32_v5_v4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942CounterCapacityRetiresOldestOrderedBufferLoad) {
+  std::vector<uint32_t> program;
+  append_gfx942_buffer_load_dword(program, 4, 100);
+  for (uint32_t i = 0; i < 63; ++i)
+    append_gfx942_buffer_load_dword(program, static_cast<uint8_t>(i + 6), 100);
+  append_gfx942_v_mov_b32_v5_v4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
 TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeDsReadOverwrite) {
@@ -1649,6 +1707,331 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, Gfx950ReportsOldestDsReadBeforeLgkmCounterCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].required_count, 14u);
+}
+
+TEST(WaitcheckTest, Gfx950LgkmcntAllOnesDoesNotRetireBeforeCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_gfx950_s_waitcnt_lgkmcnt_15(program);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].required_count, 14u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterCapacityRetiresOldestOrderedDsRead) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950LgkmBackpressurePrecedesDependencyCheck) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  // This is the sixteenth outstanding LDS operation and consumes v0 as its
+  // address. Issue stalls until the oldest read into v0 has completed.
+  append_gfx950_ds_read_b32(program, 20, 0);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950LgkmBelowCapacityDoesNotRetireBeforeDependencyCheck) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 13; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  // This is only the fifteenth outstanding LDS operation, so it can issue
+  // while the read into v0 remains pending.
+  append_gfx950_ds_read_b32(program, 20, 0);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950LgkmcntAllOnesIsRedundantAfterCapacityRetirement) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_gfx950_s_waitcnt_lgkmcnt_15(program);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950CounterCapacityRetiresOldestDsReadWithPendingSmem) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ScalarIssueAdvancesFullOrderedLdsClass) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950MultiTokenScalarIssueAdvancesNearlyFullOrderedLdsClass) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 13; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_gfx950_s_buffer_load_dwordx8_s0_s28_imm16(program);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950MixedCounterCapacityDoesNotGuaranteeOldestDsRead) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterCapacityDoesNotOrderScalarMemory) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_load_dword_s4_s0(program);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx950_ds_read_b32(program, i);
+  append_gfx950_s_mov_b32_s8_s4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950GdsOperationsDoNotAdvanceLdsCounterCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 15; ++i)
+    append_gfx950_ds_read_b32(program, i + 1, /*addr=*/4, /*gds=*/true);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950GdsIssueAdvancesFullOrderedLdsClass) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32(program, 0);
+  for (uint32_t i = 0; i < 14; ++i)
+    append_gfx950_ds_read_b32(program, i + 1);
+  append_gfx950_ds_read_b32(program, 20, /*addr=*/4, /*gds=*/true);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ReportsOldestBufferLoadBeforeVmCounterCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 62; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].required_count, 62u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterCapacityRetiresOldestOrderedBufferLoad) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 63; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950LegacyVmemStoresAdvanceVmCounterCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 63; ++i)
+    append_gfx950_buffer_store_dword(program, /*vdata=*/127);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950BufferLoadRemainsPendingBeforeStoreCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 62; ++i)
+    append_gfx950_buffer_store_dword(program, /*vdata=*/127);
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950VmBackpressurePrecedesDependencyCheck) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 62; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  // This is the sixty-fourth outstanding VMEM load and consumes v0 as its
+  // address. Issue stalls until the oldest load into v0 has completed.
+  append_gfx950_buffer_load_dword(program, 70, 0);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950VmBelowCapacityDoesNotRetireBeforeDependencyCheck) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 61; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  // This is only the sixty-third outstanding VMEM load, so it can issue while
+  // the load into v0 remains pending.
+  append_gfx950_buffer_load_dword(program, 70, 0);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950VmcntAllOnesDoesNotRetireBeforeCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 62; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  append_gfx950_s_waitcnt_lgkmcnt_15(program); // All wait fields are one.
+  append_inst(program, v_mov_b32(100, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].required_count, 62u);
+}
+
+TEST(WaitcheckTest, Gfx950FlatLoadsDoNotAdvanceOrderedVmCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 63; ++i)
+    append_gfx950_flat_load_dword(program, i + 1, 100);
+  append_inst(program, v_mov_b32(101, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950FlatIssueAdvancesFullOrderedVmClass) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword(program, 0);
+  for (uint32_t i = 0; i < 62; ++i)
+    append_gfx950_buffer_load_dword(program, i + 1);
+  append_gfx950_flat_load_dword(program, 70, 100);
+  append_inst(program, v_mov_b32(101, 0));
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
 TEST(WaitcheckTest, Gfx950NonReturningFlatAtomicDoesNotDefineVdst) {
   std::vector<uint32_t> program;
   append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
@@ -1752,6 +2135,41 @@ TEST(WaitcheckTest, Gfx950ExactDirectToLdsVmcnt16BoundaryReportsHazard) {
   EXPECT_NE(report.diagnostics[0].producer_instruction.find("buffer_load_dwordx4"),
             std::string::npos);
   EXPECT_NE(report.diagnostics[0].instruction.find("ds_read_b128"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx950DirectToLdsRemainsPendingBelowVmCounterCapacity) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 62);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].required_count, 62u);
+}
+
+TEST(WaitcheckTest, Gfx950VmCounterCapacityCompletesDirectToLdsBeforeBarrier) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 63);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_TRUE(report.passed());
 }
 
 TEST(WaitcheckTest, Gfx950ExactDisjointDirectToLdsRangeIsClean) {
