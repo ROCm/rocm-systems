@@ -80,6 +80,15 @@ void TestDeviceCuidRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) { std::cout << "\t**CUID not supported on this device." << std::endl; }
+    } else if (err == AMDSMI_STATUS_NO_PERM) {
+      // Documented: a caller that may not read a field the snapshot has to
+      // report gets NO_PERM rather than a partial answer. On a node whose
+      // record store has been generated that is the ordinary unprivileged
+      // result, because the auxiliary flag comes out of priv_cuid, which is
+      // 0600.
+      IF_VERB(STANDARD) {
+        std::cout << "\t**CUID needs privilege on this node; run as root." << std::endl;
+      }
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
