@@ -1322,6 +1322,28 @@ if(_exact_entry_source_contract MATCHES
         "ConSan exact-entry storage resolution must not reopen mode policy"
     )
 endif()
+file(READ "${_consan_dir}/consan_moi_record_planning.cpp" _moi_record_planning)
+string(FIND "${_moi_record_planning}"
+       "apply_record_replay_entry_workgroup_assignment"
+       _record_entry_assignment_begin)
+string(FIND "${_moi_record_planning}" "void note_moi_sgpr_requirements"
+       _record_entry_assignment_end)
+if(_record_entry_assignment_begin LESS 0 OR
+   _record_entry_assignment_end LESS_EQUAL _record_entry_assignment_begin)
+    message(FATAL_ERROR
+        "ConSan Record/Replay entry-assignment boundary could not be located"
+    )
+endif()
+math(EXPR _record_entry_assignment_length
+     "${_record_entry_assignment_end} - ${_record_entry_assignment_begin}")
+string(SUBSTRING "${_moi_record_planning}" ${_record_entry_assignment_begin}
+       ${_record_entry_assignment_length} _record_entry_assignment_contract)
+if(_record_entry_assignment_contract MATCHES
+   "ConSanRequest|moi_mode_operations|requires_entry_workgroup_capture")
+    message(FATAL_ERROR
+        "ConSan Record/Replay entry assignment must not reopen selected-mode policy"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "moi_persistent_or_descriptor_workgroup_sources|sampled_workgroup_sources"

@@ -30,8 +30,8 @@ struct MoiScalarAbiPlan;
 /// entry-captured workgroup source. A scalar tuple is already global and needs
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    MoiOwnerAssignments assignments, std::span<const uint64_t> owner_descriptor_offsets,
+    ConSanMoiOperatingPoint &point, MoiOwnerAssignments assignments,
+    std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout = nullptr);
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,

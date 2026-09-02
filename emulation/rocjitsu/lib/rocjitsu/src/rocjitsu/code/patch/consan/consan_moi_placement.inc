@@ -4745,7 +4745,7 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
   if (!moi_exact_entry_workgroup_capture_is_unambiguous(options)) {
     update.rejection = ConSanMoiPlacementRejection::AmbiguousWorkgroupCapture;
     diagnostics.emplace_back(
-        "ConSan MOI Record/Replay has multiple persistent workgroup-tuple representations");
+        "ConSan MOI has multiple persistent workgroup-tuple representations");
     return update;
   }
   if (debug.requested_moi_owner_vgpr.has_value() != debug.requested_moi_epoch_vgpr.has_value()) {

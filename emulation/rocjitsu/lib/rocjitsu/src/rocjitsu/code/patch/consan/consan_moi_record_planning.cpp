@@ -33,7 +33,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
 }
 
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
-    const ConSanRequest &request, ConSanMoiOperatingPoint &point, MoiOwnerAssignments assignments,
+    ConSanMoiOperatingPoint &point, MoiOwnerAssignments assignments,
     std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
@@ -41,8 +41,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
   if (!consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous(point,
                                                                                private_offsets))
     return false;
-  if (!moi_mode_operations(request.moi_engine).policy.requires_entry_workgroup_capture ||
-      consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets)) {
+  if (consan_moi_detail::moi_has_exact_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }
   return apply_moi_persistent_vgpr_assignment(point, assignments, owner_descriptor_offsets) &&
@@ -153,7 +152,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
       return std::nullopt;
   }
   if (!apply_record_replay_entry_workgroup_assignment(
-          request, event_point, allocation, resources.owner_descriptor_file_offsets,
+          event_point, allocation, resources.owner_descriptor_file_offsets,
           private_layout ? &*private_layout : nullptr)) {
     warnings.emplace_back(std::string(warning_context) +
                           " found no common entry workgroup assignment");

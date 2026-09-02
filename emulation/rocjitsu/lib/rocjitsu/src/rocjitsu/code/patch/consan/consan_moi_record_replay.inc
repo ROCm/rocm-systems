@@ -569,7 +569,7 @@ void try_apply_first_light_access_record_patch(
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_operating_point, resources->owner_descriptor_file_offsets);
     if (!apply_record_replay_entry_workgroup_assignment(
-            options, candidate_point, result.moi_operating_point,
+            candidate_point, result.moi_operating_point,
             resources->owner_descriptor_file_offsets,
             private_layout ? &*private_layout : nullptr)) {
       result.warnings.emplace_back(
@@ -1097,7 +1097,7 @@ void try_apply_first_light_access_record_patch(
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
     if (!apply_record_replay_entry_workgroup_assignment(
-            options, candidate_point, result.moi_operating_point,
+            candidate_point, result.moi_operating_point,
             planned_patch.resources.owner_descriptor_file_offsets,
             planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr))
       continue;
@@ -1140,7 +1140,7 @@ void try_apply_first_light_access_record_patch(
               options, candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
-              options, candidate_point, result.moi_operating_point,
+              candidate_point, result.moi_operating_point,
               planned_patch.resources.owner_descriptor_file_offsets,
               planned_patch.private_state_layout ? &*planned_patch.private_state_layout
                                                  : nullptr) ||
@@ -1510,7 +1510,7 @@ void try_apply_first_light_access_record_patch(
                     options, candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
-                    options, candidate_point, result.moi_operating_point,
+                    candidate_point, result.moi_operating_point,
                     planned_patch.resources.owner_descriptor_file_offsets,
                     planned_patch.private_state_layout ? &*planned_patch.private_state_layout
                                                        : nullptr))

@@ -635,8 +635,7 @@ void try_apply_record_replay_barrier_record_patch(
     const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr, MoiOwnerAssignments assignments,
     std::span<const uint64_t> owners, rj_code_arch_t arch,
     const ConSanMoiPrivateStateLayout *private_layout = nullptr) {
-  return apply_record_replay_entry_workgroup_assignment(options, point, assignments, owners,
-                                                         private_layout)
+  return apply_record_replay_entry_workgroup_assignment(point, assignments, owners, private_layout)
              ? resolve_moi_record_event_emission_plan(options, options, point, scalar_abi,
                                                       scratch_vgpr, arch, private_layout)
              : std::nullopt;
