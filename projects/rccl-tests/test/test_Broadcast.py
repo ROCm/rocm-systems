@@ -113,7 +113,7 @@ def test_BroadcastSingleProcess(
 # GIN-SDMA Broadcast multi-segment regression tests (parity with AllGather /
 # AllToAll in test_AllGather.py / test_AllToAll.py).
 #
-# These drive the real GinHybridBroadcastKernel (deviceImpl 3, NCCL_GIN_TYPE=5)
+# These drive the real GinHybridBroadcastKernel (deviceImpl 3, NCCL_GIN_TYPE=6)
 # at message sizes that cross the 128 MiB SDMA copy clamp in the Anvil-SDMA
 # backend Put. For Broadcast the root issues one gin.put() per peer with the
 # full message, so -b/-e is the broadcast payload size (not total/NP as in
@@ -167,7 +167,7 @@ def _launch_bcast_gin_sdma(request, msg_bytes, dtype, *, force_flat_gin):
     size = str(int(msg_bytes))
     gin_env = [
         "NCCL_GIN_ENABLE=1",
-        "NCCL_GIN_TYPE=5",
+        "NCCL_GIN_TYPE=6",
         "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
         "NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST=0",
     ]
