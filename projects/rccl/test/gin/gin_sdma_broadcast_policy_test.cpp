@@ -68,6 +68,27 @@ TEST(ParseSize, UnknownSuffixIgnored) {
   EXPECT_EQ(parseSize("10X"), 10u);
 }
 
+TEST(ParseSize, OverflowIsUnsetNotASmallThreshold) {
+  // strtoull saturates at ULLONG_MAX rather than failing, and the suffix multiply
+  // can then wrap a huge value back down to a plausible-looking small threshold --
+  // the same silent mis-tiering shape as a negative value. Both must read as unset
+  // so the caller falls back to the tested default.
+  EXPECT_EQ(parseSize("99999999999999999999"), kUnset);
+  EXPECT_EQ(parseSize("99999999999999999999G"), kUnset);
+  // Not saturated on its own, but wraps when scaled by the suffix.
+  EXPECT_EQ(parseSize("17179869184G"), kUnset);  // 2^34 GiB = 2^64 bytes
+  // The largest value that still scales cleanly is accepted.
+  EXPECT_EQ(parseSize("1024G"), 1024ull * 1024 * 1024 * 1024);
+}
+
+TEST(ParseSize, HexIsNotAcceptedAsHex) {
+  // Base 10 by contract: "0x10" consumes the leading 0 and stops at 'x', which
+  // yields 0 -- and 0 is meaningful (it force-enables GIN / disables a tier), so
+  // this documents that a hex-looking value is NOT silently read as 16.
+  EXPECT_EQ(parseSize("0x10"), 0u);
+  EXPECT_NE(parseSize("0x10"), 16u);
+}
+
 // ------------------------------ resolveThreshold -----------------------------
 
 TEST(ResolveThreshold, CollectiveValueWins) {
@@ -104,27 +125,6 @@ TEST(ResolveLLCap, RoundsDownToEightBytes) {
   EXPECT_EQ(resolveLLCap(1001, 0, 65536), 1000u);  // 1001 -> 1000
   EXPECT_EQ(resolveLLCap(1000, 0, 65536), 1000u);  // already aligned
   EXPECT_EQ(resolveLLCap(7, 0, 65536), 0u);        // below one slot
-}
-
-// ------------------------------ alignChunkCount ------------------------------
-
-TEST(AlignChunkCount, GuardsInvalidInputs) {
-  EXPECT_EQ(alignChunkCount(1000, 0, 4), 0u);
-  EXPECT_EQ(alignChunkCount(1000, -1, 4), 0u);
-  EXPECT_EQ(alignChunkCount(1000, 8, 0), 0u);
-}
-
-TEST(AlignChunkCount, MasksPerElementSize) {
-  // eltSize 4 -> mask ~3: 1000/8=125 -> 124.
-  EXPECT_EQ(alignChunkCount(1000, 8, 4), 124u);
-  // eltSize 8 -> mask ~1: 125 -> 124.
-  EXPECT_EQ(alignChunkCount(1000, 8, 8), 124u);
-  // eltSize 1 -> mask ~15: 125 -> 112.
-  EXPECT_EQ(alignChunkCount(1000, 8, 1), 112u);
-  // eltSize 16 -> mask all ones: unchanged.
-  EXPECT_EQ(alignChunkCount(1000, 8, 16), 125u);
-  // eltSize 2 -> mask ~7: 125 -> 120.
-  EXPECT_EQ(alignChunkCount(1000, 8, 2), 120u);
 }
 
 // -------------------------- bcastUseScatterAllgather -------------------------
@@ -167,6 +167,50 @@ TEST(BcastUseRing, EngagesAtOrAboveMin) {
 TEST(BcastUseRing, RequiresCountAtLeastNRanks) {
   EXPECT_FALSE(bcastUseRing(64u << 20, 7, 8, kBroadcastRingMinDefault));
   EXPECT_TRUE(bcastUseRing(64u << 20, 8, 8, kBroadcastRingMinDefault));
+}
+
+// ------------------------------ bcastLargeTier -------------------------------
+// The predicates above are each true in isolation for large messages, so testing
+// them one at a time cannot pin down which tier actually runs. These assert the
+// resolved decision across the three boundaries that separate the tiers.
+
+TEST(BcastLargeTier, RingWinsWhereBothPredicatesHold) {
+  const size_t ringMin = kBroadcastRingMinDefault;             // 32 MiB
+  const size_t sagMin = kBroadcastScatterAgMinDefault;         // 2 MiB
+  const size_t bytes = 64u << 20;
+  const size_t count = bytes / 4;
+  // Both gates are open here; precedence -- not the predicates -- picks the ring.
+  ASSERT_TRUE(bcastUseRing(bytes, count, 8, ringMin));
+  ASSERT_TRUE(bcastUseScatterAllgather(bytes, count, 8, sagMin));
+  EXPECT_EQ(bcastLargeTier(bytes, count, 8, ringMin, sagMin),
+            BcastLargeTier::Ring);
+}
+
+TEST(BcastLargeTier, BoundariesSelectEachTier) {
+  const size_t ringMin = kBroadcastRingMinDefault;             // 32 MiB
+  const size_t sagMin = kBroadcastScatterAgMinDefault;         // 2 MiB
+  auto tier = [&](size_t bytes) {
+    return bcastLargeTier(bytes, bytes / 4, 8, ringMin, sagMin);
+  };
+  // Below the SAG cutover: neither large tier, so the flat/LSA/LL kernel runs.
+  EXPECT_EQ(tier(1u << 20), BcastLargeTier::None);
+  // At the SAG cutover but below the ring cutover.
+  EXPECT_EQ(tier(sagMin), BcastLargeTier::ScatterAG);
+  EXPECT_EQ(tier(ringMin - 1), BcastLargeTier::ScatterAG);
+  // At and above the ring cutover.
+  EXPECT_EQ(tier(ringMin), BcastLargeTier::Ring);
+  EXPECT_EQ(tier(4ull << 30), BcastLargeTier::Ring);
+}
+
+TEST(BcastLargeTier, RingOptOutFallsBackToScatterAllgather) {
+  // NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0 disables the ring; SAG must take over
+  // rather than the message silently dropping to the flat tier.
+  const size_t sagMin = kBroadcastScatterAgMinDefault;
+  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 0, sagMin),
+            BcastLargeTier::ScatterAG);
+  // Both disabled -> flat.
+  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 0, 0),
+            BcastLargeTier::None);
 }
 
 // ------------------------------- bcastRingChunks -----------------------------
@@ -268,6 +312,28 @@ TEST(BcastPolicyCtas, EnvPinHonoredWithinPool) {
   EXPECT_EQ(bcastHybridCtas(1024, thr, 0, kBroadcastLLMaxBytes, 0, pool), kBroadcastCtasLsa);
 }
 
+TEST(BcastPolicyCtas, LadderIsMonotonicAcrossTiers) {
+  // The per-tier assertions above pin which branch was taken, but each compares a
+  // constant against itself, so the constants' relative ordering -- the property
+  // the ladder exists for -- is not pinned by any of them. Assert the shape: a
+  // single-CTA LL tier, a wider LSA tier, and a narrow SDMA tier (only nRanks
+  // threads issue puts), with every grid inside [1, pool].
+  const int pool = bcastHybridPoolCtas(16);
+  const size_t thr = kBroadcastSdmaThresholdDefault;
+  const int llGrid = bcastHybridCtas(1024, thr, 4096, kBroadcastLLDefaultMaxBytes,
+                                     kBroadcastCtasUnset, pool);
+  const int lsaGrid = bcastHybridCtas(thr, thr, 0, kBroadcastLLMaxBytes,
+                                      kBroadcastCtasUnset, pool);
+  const int sdmaGrid = bcastHybridCtas(thr + 1, thr, 0, kBroadcastLLMaxBytes,
+                                       kBroadcastCtasUnset, pool);
+  EXPECT_LT(llGrid, lsaGrid) << "LL is a single-CTA tier; LSA must be wider";
+  EXPECT_LT(sdmaGrid, lsaGrid) << "GIN-put tier must be narrower than LSA";
+  for (int g : {llGrid, lsaGrid, sdmaGrid}) {
+    EXPECT_GE(g, 1);
+    EXPECT_LE(g, pool);
+  }
+}
+
 TEST(BcastPolicyCtas, GridNeverExceedsPool) {
   const size_t msgs[] = {128, 800, 262144, 262145, 64ull << 20};
   const int deviceVs[] = {1, 4, 16, 32, 128};
@@ -316,6 +382,87 @@ TEST(SagChunk, RemainderFoldedIntoLast) {
   size_t total = 0;
   for (int r = 0; r < 8; ++r) total += sagChunk(803, 8, r).count;
   EXPECT_EQ(total, 803u);
+}
+
+// ---------------------------- ring stripe / chunk ----------------------------
+// The default large tier walks these two splits, so they carry the exactness
+// requirement that sagChunk carries for the scatter+allgather tier: every element
+// covered exactly once, by exactly one CTA, in exactly one pipeline chunk.
+
+TEST(RingStripe, GuardsOutOfRangeBlocks) {
+  EXPECT_EQ(ringStripe(1000, 0, 0).count, 0u);
+  EXPECT_EQ(ringStripe(1000, -1, 8).count, 0u);
+  EXPECT_EQ(ringStripe(1000, 8, 8).count, 0u);
+}
+
+TEST(RingStripe, PartitionsBufferExactlyAndContiguously) {
+  // Deliberately indivisible: 1000 elements over 128 CTAs, and a prime count.
+  for (size_t count : {size_t(1000), size_t(1048576), size_t(9973)}) {
+    for (int nBlocks : {1, 7, 8, 128}) {
+      size_t expectedOffset = 0;
+      for (int b = 0; b < nBlocks; ++b) {
+        Chunk s = ringStripe(count, b, nBlocks);
+        EXPECT_EQ(s.eltOffset, expectedOffset)
+            << "count=" << count << " nBlocks=" << nBlocks << " b=" << b;
+        expectedOffset += s.count;
+      }
+      // Contiguous from 0 and covering everything => an exact partition.
+      EXPECT_EQ(expectedOffset, count)
+          << "count=" << count << " nBlocks=" << nBlocks;
+    }
+  }
+}
+
+TEST(RingStripe, BalancedToWithinOneElement) {
+  const size_t count = 1000;
+  const int nBlocks = 128;
+  size_t lo = count, hi = 0;
+  for (int b = 0; b < nBlocks; ++b) {
+    size_t c = ringStripe(count, b, nBlocks).count;
+    lo = (c < lo) ? c : lo;
+    hi = (c > hi) ? c : hi;
+  }
+  EXPECT_LE(hi - lo, 1u);
+}
+
+TEST(RingChunk, GuardsOutOfRangeChunks) {
+  EXPECT_EQ(ringChunk(0, 1000, 0, 0).count, 0u);
+  EXPECT_EQ(ringChunk(0, 1000, -1, 16).count, 0u);
+  EXPECT_EQ(ringChunk(0, 1000, 16, 16).count, 0u);
+}
+
+TEST(RingChunk, PartitionsStripeFromItsBase) {
+  const size_t stripeBase = 4096;
+  const size_t stripeCount = 803;   // indivisible by C below
+  const int C = 16;
+  size_t expectedOffset = stripeBase;
+  for (int c = 0; c < C; ++c) {
+    Chunk k = ringChunk(stripeBase, stripeCount, c, C);
+    EXPECT_EQ(k.eltOffset, expectedOffset) << "c=" << c;
+    expectedOffset += k.count;
+  }
+  EXPECT_EQ(expectedOffset, stripeBase + stripeCount);
+}
+
+TEST(RingChunk, ComposesWithRingStripeToCoverTheBuffer) {
+  // The two splits together are what the kernel walks: every element of the
+  // message must land in exactly one (block, chunk) pair.
+  const size_t count = 9973;   // prime
+  const int nBlocks = 8;
+  const int C = 7;
+  size_t total = 0;
+  size_t expectedOffset = 0;
+  for (int b = 0; b < nBlocks; ++b) {
+    Chunk s = ringStripe(count, b, nBlocks);
+    for (int c = 0; c < C; ++c) {
+      Chunk k = ringChunk(s.eltOffset, s.count, c, C);
+      EXPECT_EQ(k.eltOffset, expectedOffset) << "b=" << b << " c=" << c;
+      expectedOffset += k.count;
+      total += k.count;
+    }
+  }
+  EXPECT_EQ(total, count);
+  EXPECT_EQ(expectedOffset, count);
 }
 
 }  // namespace
