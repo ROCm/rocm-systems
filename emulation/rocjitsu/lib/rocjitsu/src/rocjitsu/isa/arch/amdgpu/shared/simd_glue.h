@@ -119,14 +119,14 @@ inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
   }
 }
 
-/// @brief Add with optional saturation, then select the maximum or minimum operand.
+/// @brief Add with intrinsic saturation, then select the maximum or minimum operand.
 template <typename T, bool SelectMax>
 inline std::make_unsigned_t<T> vop3_integer_add_minmax(std::make_unsigned_t<T> lhs,
                                                        std::make_unsigned_t<T> rhs,
-                                                       std::make_unsigned_t<T> bound, bool clamp) {
+                                                       std::make_unsigned_t<T> bound) {
   static_assert(std::is_integral_v<T> && sizeof(T) == 4);
   using U = std::make_unsigned_t<T>;
-  const U sum_bits = vop3_integer_add<T>(lhs, rhs, clamp);
+  const U sum_bits = vop3_integer_add<T>(lhs, rhs, true);
   if constexpr (std::is_signed_v<T>) {
     const T sum = std::bit_cast<T>(sum_bits);
     const T typed_bound = std::bit_cast<T>(bound);
@@ -3762,16 +3762,17 @@ template <typename Inst, typename Op>
 /// third source's high-half selector op_sel_hi_2 == 1 (per the scalar body
 /// `sel2_hi = inst.inst_.op_sel_hi_2`, which is a single bit — value 1 picks
 /// the high half for the high-output computation). For pk_mad_i16/u16 the
-/// scalar bodies also do not apply neg/neg_hi/clamp; the SIMD path passes
-/// through. Functor receives three u32 packed lane vectors and returns the
-/// per-half-masked packed result.
+/// scalar bodies do not apply neg/neg_hi. Clamped integer MAD falls back to
+/// scalar execution for exact per-half saturation. Functor receives three u32
+/// packed lane vectors and returns the per-half-masked packed result.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &inst, Wavefront &wf, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+  if (inst.inst_.clamp || inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u ||
+      inst.inst_.op_sel_hi_2 != 1u)
     return false;
   using T = uint32_t;
   constexpr std::size_t W = util::native_width_v<T>;

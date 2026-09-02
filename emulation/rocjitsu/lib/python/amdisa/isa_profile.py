@@ -582,11 +582,13 @@ class IsaProfile(ABC):
 
     @property
     def integer_clamp_dtypes(self) -> dict[str, str]:
-        """Integer VOP3 instructions whose CLAMP modifier saturates the result.
+        """Integer instructions that require saturation-aware lowering.
 
         CLAMP is present in the shared VOP3 encoding, but it is not legal for
         every opcode in that encoding. Keep the instruction-level policy here
-        instead of inferring support from the encoding field alone.
+        instead of inferring support from the encoding field alone. ADD_MIN/MAX
+        always saturate their internal addition; the remaining instructions use
+        this policy to apply their encoded CLAMP modifier.
         """
         return {
             'V_ADDC_CO_U32': 'u32',
@@ -608,6 +610,10 @@ class IsaProfile(ABC):
             'V_MAD_I16': 'i16',
             'V_MAD_I32_I16': 'i32',
             'V_MAD_I32_I24': 'i32',
+            'V_MAD_CO_I64_I32': 'i64',
+            'V_MAD_CO_U64_U32': 'u64',
+            'V_MAD_NC_I64_I32': 'i64',
+            'V_MAD_NC_U64_U32': 'u64',
             'V_MAD_U16': 'u16',
             'V_MAD_U32_U16': 'u32',
             'V_MAD_U32_U24': 'u32',
@@ -616,6 +622,8 @@ class IsaProfile(ABC):
             'V_MSAD_U8': 'u32',
             'V_MUL_I32_I24': 'i32',
             'V_MUL_U32_U24': 'u32',
+            'V_PK_MAD_I16': 'i16',
+            'V_PK_MAD_U16': 'u16',
             'V_SAD_HI_U8': 'u32',
             'V_SAD_U8': 'u32',
             'V_SAD_U16': 'u32',

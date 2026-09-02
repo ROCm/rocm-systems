@@ -1754,8 +1754,8 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     body = gen_vector_mad_64_32(['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'u64')
 
     assert 'uint64_t carry = 0;' in body
-    assert 'uint64_t product = s0 * s1;' in body
-    assert 'if (result < product)' in body
+    assert 'unsigned __int128 wide' in body
+    assert 'if (wide > std::numeric_limits<uint64_t>::max())' in body
     assert 'carry |= 1ULL << lane;' in body
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
     assert 'wf.set_vcc' not in body
@@ -1768,6 +1768,29 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     )
     assert 'commit_result(carry);' in callback_body
     assert 'write_wave_mask_scalar' not in callback_body
+
+
+def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
+    unsigned = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'u64',
+        integer_clamp=True,
+    )
+    signed = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'i64',
+        integer_clamp=True,
+    )
+
+    assert 'unsigned __int128 wide' in unsigned
+    assert 'inst_.clamp && wide > std::numeric_limits<uint64_t>::max()' in unsigned
+    assert unsigned.index('if (wide >') < unsigned.index('if (inst_.clamp')
+    assert '__int128 wide' in signed
+    assert 'wide < std::numeric_limits<int64_t>::min()' in signed
+    assert 'if (inst_.clamp)' in signed
+    assert signed.index('carry |= 1ULL << lane') < signed.index('if (inst_.clamp)')
 
 
 def test_vector_cmp_class_writes_explicit_sdst_mask():
@@ -4077,7 +4100,7 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'src0.clear_delegate();' not in body
 
 
-def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
+def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
     isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna5.xml'
     parser = Parser(str(isa_xml), Cdna5Profile())
     spec = parser.parse()
@@ -4123,7 +4146,25 @@ def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
     for name, helper in expected_helpers.items():
         body = generated_body(name, 'ENC_VOP3')
         assert helper in body
+        assert 'inst_.clamp' not in body
+
+    for name, enc_name, result_writer in (
+        ('V_MAD_NC_U64_U32', 'ENC_VOP3', None),
+        ('V_MAD_NC_I64_I32', 'ENC_VOP3', None),
+        ('V_MAD_CO_U64_U32', 'VOP3_SDST_ENC', 'commit_result'),
+        ('V_MAD_CO_I64_I32', 'VOP3_SDST_ENC', 'commit_result'),
+    ):
+        body = generated_body(name, enc_name, result_writer=result_writer)
+        assert '__int128 wide' in body
         assert 'inst_.clamp' in body
+
+    for name, helper in (
+        ('V_PK_MAD_I16', 'vop3_integer_mad<int16_t, 16>'),
+        ('V_PK_MAD_U16', 'vop3_integer_mad<uint16_t, 16>'),
+    ):
+        body = generated_body(name, 'ENC_VOP3P')
+        assert body.count(helper) == 2
+        assert body.count('inst_.clamp') == 2
 
     for name in ('V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'):
         body = generated_body(name, 'ENC_VOP3')

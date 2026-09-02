@@ -121,6 +121,32 @@ def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
     assert 'std::min(sum_lo, c_lo)' in unsigned
 
 
+def test_pk_mad_integer_clamp_saturates_both_selected_halves():
+    signed = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'i16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+    unsigned = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'u16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+
+    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
+    assert signed.count('inst_.clamp') == 2
+    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
+    assert unsigned.count('inst_.clamp') == 2
+
+
 def test_dot8_iu4_uses_operand_signedness_modifiers():
     cpp = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_i32_iu4')
 

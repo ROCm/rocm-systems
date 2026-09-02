@@ -1772,8 +1772,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     if ctx.integer_saturation_dtype is not None and callee in add_minmax_calls:
         cpp_type, select_max = add_minmax_calls[callee]
         return (
-            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>('
-            f'{args_str}, inst_.clamp)'
+            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>(' f'{args_str})'
         )
 
     saturating_calls = {
