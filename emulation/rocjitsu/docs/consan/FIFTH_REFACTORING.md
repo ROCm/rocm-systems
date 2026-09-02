@@ -11728,3 +11728,58 @@ It demonstrates why extension-surface tracing must include negative reachability
 proofs: otherwise a prototype can look like required architecture variability
 and keep multiplying obligations across planning, emission, validation, ABI,
 and runtime layers.
+
+### 16.176 Convergence checkpoint 175: shared exact-entry workgroup identity
+
+The entry-capture trace from checkpoint 172 exposed a deeper naming boundary.
+Record/Replay and Sampled do not merely request similar state: they share one
+exact x/y/z plus optional cluster-coordinate identity, the same three mutually
+exclusive storage domains, and the same planning, placement, prologue, spill,
+load, validation, and emission contracts.  Nevertheless, all common fields and
+helpers still called that identity `record_replay_workgroup`.  Sampled lowering
+therefore appeared to reach into another mode's state in 21 production files,
+and a future mode author could reasonably mistake the shared mechanism for a
+Record/Replay implementation detail.
+
+The complete production and test surface now names the component by semantics:
+`exact_workgroup`, `moi_exact_workgroup_vgprs`,
+`ConSanMoiPrivateStateLayout::exact_workgroup_offsets`, and
+`moi_exact_entry_workgroup_sources`.  Capture presence and exclusivity are the
+mode-neutral `moi_has_exact_entry_workgroup_capture` and
+`moi_exact_entry_workgroup_capture_is_unambiguous` contracts.  Genuinely
+Record/Replay-local behavior, including automatic banked capture and native
+record-event planning, keeps its mode name.  This is a boundary correction,
+not a merger of the two mode implementations.
+
+The structural gate rejects restoration of the old Record/Replay-owned field
+and helper vocabulary anywhere in production.  Existing mode-policy tests
+continue to prove that Record/Replay and Sampled require this capture while
+InlineShadow does not, and the typed storage-domain test now names the shared
+exact-entry invariant directly.
+
+| Signal | Checkpoint 175 | Cumulative change | Slice change from checkpoint 174 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,179 | **-2,797** | 0 |
+| Nonblank production lines | 95,770 | **-3,314** | 0 |
+| Production implementation lines | 88,035 | **-3,415** | 0 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Shared exact-entry identifiers falsely owned by Record/Replay | **0 / 161** | n/a | **-161** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `ff621c8abe9`.  Validation includes a
+successful full `-j16` build and **828/828** nonphysical MOI host and
+architecture-boundary tests.  The first run found one assertion that pinned a
+Record/Replay-only diagnostic phrase in a shared placement path; the assertion
+was updated to the mode-neutral diagnostic and the complete gate then passed.
+All invocations used `-LE physical`; no physical GPU test was run.
+
+This checkpoint is intentionally line-neutral.  It pays down a mental-map and
+mode-locality defect across an already shared mechanism without cloning code or
+inventing a forwarding adapter.  More importantly, the neutral boundary makes
+the next deep read sharper: any remaining Record/Replay/Sampled interaction can
+now be judged as a real mode-specific dependency, an exact-coordinate subset,
+or a candidate for deletion rather than being obscured by inherited names.
