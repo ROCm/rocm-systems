@@ -270,8 +270,16 @@ void ceProfilerRegisterContext(struct context* ctx) {
   ctx->ceEvents.ceSyncHead = NULL;
   ctx->ceEvents.ceBatchHead = NULL;
 
-  if (pthread_mutex_trylock(&ceProfilerCtxt.mutex) != 0) {
+  if (pthread_mutex_lock(&ceProfilerCtxt.mutex) != 0) {
     pthread_mutex_destroy(&ctx->ceEvents.mutex);
+    return;
+  }
+
+  // Non-CE activation masks do not initialize the global poller. Keep the
+  // per-context mutex valid for unconditional cleanup, but do not register
+  // the context or make finalize attempt to join an uninitialized thread.
+  if (ceProfilerCtxt.contextRegistry == NULL) {
+    pthread_mutex_unlock(&ceProfilerCtxt.mutex);
     return;
   }
 
@@ -286,7 +294,7 @@ void ceProfilerRegisterContext(struct context* ctx) {
   }
 
   // Resize registry if needed
-  if (ceProfilerCtxt.contextCount > ceProfilerCtxt.contextCapacity) {
+  if (ceProfilerCtxt.contextCount >= ceProfilerCtxt.contextCapacity) {
     int newCapacity = ceProfilerCtxt.contextCapacity * 2;
     struct context** newRegistry = (struct context**)calloc(newCapacity, sizeof(struct context*));
     if (newRegistry) {
@@ -305,7 +313,7 @@ void ceProfilerRegisterContext(struct context* ctx) {
 
 // Deregister context from CE poller
 void ceProfilerDeregisterContext(struct context* ctx) {
-  if (pthread_mutex_trylock(&ceProfilerCtxt.mutex) != 0) {
+  if (pthread_mutex_lock(&ceProfilerCtxt.mutex) != 0) {
     return;
   }
 
@@ -322,7 +330,7 @@ void ceProfilerDeregisterContext(struct context* ctx) {
 }
 
 void ceProfilerCleanupPendingEvents(struct context* ctx) {
-  if (pthread_mutex_trylock(&ctx->ceEvents.mutex) != 0) {
+  if (pthread_mutex_lock(&ctx->ceEvents.mutex) != 0) {
     return;
   }
 
@@ -406,11 +414,10 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    if (pthread_mutex_trylock(&ctx->ceEvents.mutex) == 0) {
-      event->pollerNext = ctx->ceEvents.ceCollHead;
-      ctx->ceEvents.ceCollHead = event;
-      pthread_mutex_unlock(&ctx->ceEvents.mutex);
-    }
+    pthread_mutex_lock(&ctx->ceEvents.mutex);
+    event->pollerNext = ctx->ceEvents.ceCollHead;
+    ctx->ceEvents.ceCollHead = event;
+    pthread_mutex_unlock(&ctx->ceEvents.mutex);
 
     *eHandle = event;
     debugEvent(*eHandle, "CeCollStartEvent");
@@ -475,11 +482,10 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    if (pthread_mutex_trylock(&ctx->ceEvents.mutex) == 0) {
-      event->pollerNext = ctx->ceEvents.ceSyncHead;
-      ctx->ceEvents.ceSyncHead = event;
-      pthread_mutex_unlock(&ctx->ceEvents.mutex);
-    }
+    pthread_mutex_lock(&ctx->ceEvents.mutex);
+    event->pollerNext = ctx->ceEvents.ceSyncHead;
+    ctx->ceEvents.ceSyncHead = event;
+    pthread_mutex_unlock(&ctx->ceEvents.mutex);
 
     *eHandle = event;
     debugEvent(*eHandle, "CeSyncStartEvent");
@@ -544,11 +550,10 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
     // Record start event to stream
     cudaEventRecord(event->startEvent, event->stream);
 
-    if (pthread_mutex_trylock(&ctx->ceEvents.mutex) == 0) {
-      event->pollerNext = ctx->ceEvents.ceBatchHead;
-      ctx->ceEvents.ceBatchHead = event;
-      pthread_mutex_unlock(&ctx->ceEvents.mutex);
-    }
+    pthread_mutex_lock(&ctx->ceEvents.mutex);
+    event->pollerNext = ctx->ceEvents.ceBatchHead;
+    ctx->ceEvents.ceBatchHead = event;
+    pthread_mutex_unlock(&ctx->ceEvents.mutex);
 
     *eHandle = event;
     debugEvent(*eHandle, "CeBatchStartEvent");

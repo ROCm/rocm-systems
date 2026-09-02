@@ -91,7 +91,7 @@ $(HIPIFY_STAMP): $(wildcard $(SRCDIR)/*.cc) $(wildcard $(SRCDIR)/*.h) $(wildcard
 	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/nccl/*.h \
 	  `ls $(HIPIFY_DIR)/*.h | grep -v inspector_gpu_compat.h`
 	@sed -i 's/\bpfn_cu/pfn_hip/g; s/\bPFN_cu/PFN_hip/g' $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h
-	@sed -i 's/"libcuda\.so\.1"/"libamdhip64.so.6"/g; s/"libcuda\.so"/"libamdhip64.so"/g' $(HIPIFY_DIR)/*.cc
+	@sed -i 's/"libcuda\.so\.1"/"libamdhip64.so"/g; s/"libcuda\.so"/"libamdhip64.so"/g' $(HIPIFY_DIR)/*.cc
 	@touch $@
 
 $(HIPIFY_DIR)/%.cc: $(HIPIFY_STAMP)

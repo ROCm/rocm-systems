@@ -11,8 +11,8 @@
 #include <string>
 #include <sys/types.h>
 
-#include "proxy_trace/proxy_trace.h"
-#include "nccl_profiler.h"
+#include "proxy_trace.h"
+#include "nccl/nccl_profiler.h"
 
 struct CommCtx {
   uint64_t commHash;

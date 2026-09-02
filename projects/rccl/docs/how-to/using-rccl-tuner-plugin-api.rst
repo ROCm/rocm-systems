@@ -65,13 +65,16 @@ Structure: ncclTuner_v6_t
 
    *  **Parameters**:
 
+      * ``commId`` (``uint64_t``): A unique identifier for the communicator.
       * ``nRanks`` (``size_t``): The number of devices (GPUs).
       * ``nNodes`` (``size_t``): The number of operating system nodes (physical nodes or VMs).
       * ``logFunction`` (``ncclDebugLogger_t``): A log function for certain debugging info.
+      * ``nvlDomainInfo`` (``ncclNvlDomainInfo_v6_t*``): NVLink domain information for the communicator.
+      * ``constants`` (``ncclTunerConstants_v6_t*``): RCCL tuning constants (bandwidth, latency tables).
 
    *  **Outputs**:
 
-      * ``context`` (``void**``): The tuner context object, passed back to ``getCollInfo`` and ``finalize``.
+      * ``context`` (``void**``): The tuner context object, passed back to ``getCollInfo``, ``getChunkSize``, and ``finalize``.
         A plugin that keeps no per-communicator state may set it to ``NULL``.
 
    *  **Return**:
@@ -118,9 +121,13 @@ Structure: ncclTuner_v6_t
 
    Terminates the plugin and cleans up any resources allocated by the tuner.
 
+   *  **Parameters**:
+
+      * ``context`` (``void*``): The tuner context returned by ``init``.
+
    *  **Return**:
 
-      *  **Type**: ``ncclResult_t`` 
+      *  **Type**: ``ncclResult_t``
       *  **Description**: The result of the cleanup process.
 
 *  ``getChunkSize`` (optional, called after the algorithm and protocol are chosen)
@@ -130,6 +137,7 @@ Structure: ncclTuner_v6_t
 
    *  **Parameters**:
 
+      * ``context`` (``void*``): The tuner context returned by ``init``.
       * ``collType`` (``ncclFunc_t``): The collective being tuned.
       * ``nBytes`` (``size_t``): The collective size in bytes.
       * ``algo`` (``int``): The selected algorithm (``NCCL_ALGO_*``).
