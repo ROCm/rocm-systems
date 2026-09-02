@@ -188,15 +188,6 @@ struct MoiTransientScalarPlacementTraits {
   uint16_t compact_spill_scalar_count = 0u;
 };
 
-/// Semantic synchronization operations selected by one mode for common
-/// resource solving. A new mode may compose existing evidence operations
-/// without adding mode branches to the solver.
-struct MoiOperationalEvidenceKinds {
-  ConSanProbeIntentKind barrier = ConSanProbeIntentKind::Count;
-  ConSanProbeIntentKind atomic = ConSanProbeIntentKind::Count;
-  bool fence = false;
-};
-
 /// Exact target-neutral facts used by a mode to size one barrier probe. The
 /// common resource solver projects these facts but does not interpret them.
 struct MoiBarrierScratchFacts {
@@ -309,7 +300,6 @@ struct MoiModeOperations {
                 const MoiObjectFacts &, const MoiObjectModeSemantics &, ConSanTransformArtifacts &);
   uint16_t (*access_scratch_vgpr_count)(const ConSanRequest &, const BoundRuntimeResources &,
                                         const MoiAccessResourceFacts &, const ConSanMoiCandidate &);
-  MoiOperationalEvidenceKinds operational_evidence;
   uint16_t (*barrier_scratch_vgpr_count)(const MoiBarrierScratchFacts &);
   uint16_t (*atomic_scratch_vgpr_count)(const ConSanAtomicLoweringForm &, const MoiTargetFacts &);
   std::optional<uint16_t> dynamic_stack_frame_save_sgpr_offset;

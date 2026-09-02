@@ -337,8 +337,6 @@ const MoiModeOperations kSampledModeOperations = {
     .plan = plan_sampled_object_mode,
     .apply = apply_sampled_mode_patches,
     .access_scratch_vgpr_count = sampled_access_scratch_vgpr_count,
-    .operational_evidence = {ConSanProbeIntentKind::SampledBarrierEpoch,
-                             ConSanProbeIntentKind::SampledAtomicOrdering, false},
     .barrier_scratch_vgpr_count = sampled_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = sampled_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 8u,

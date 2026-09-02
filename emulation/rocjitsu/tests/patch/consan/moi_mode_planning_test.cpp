@@ -44,8 +44,6 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   enum class HypotheticalModeKey : uint8_t { FifthMode };
   consan_moi_impl::MoiModeOperations operations{};
   operations.plan = plan_hypothetical_mode;
-  operations.operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
-                                     ConSanProbeIntentKind::SampledAtomicOrdering, false};
   operations.barrier_scratch_vgpr_count =
       [](const consan_moi_impl::MoiBarrierScratchFacts &facts) -> uint16_t {
     return facts.has_report_buffer ? 4u : 2u;
@@ -69,8 +67,6 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {});
   EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
-  EXPECT_EQ(selected->operational_evidence.barrier, ConSanProbeIntentKind::BarrierRecord);
-  EXPECT_EQ(selected->operational_evidence.atomic, ConSanProbeIntentKind::SampledAtomicOrdering);
   EXPECT_EQ(selected->barrier_scratch_vgpr_count({.has_report_buffer = true}), 4u);
   EXPECT_EQ(selected->atomic_scratch_vgpr_count(
                 {}, {.requires_aligned_flat_compare_swap_data_pair = true}),

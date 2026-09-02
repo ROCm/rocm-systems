@@ -842,7 +842,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
   }
 
   const MoiModeOperations &mode = moi_mode_operations(options.moi_engine);
-  const ConSanProbeIntentKind evidence_kind = mode.operational_evidence.barrier;
+  const ConSanEngineProbeVocabulary &evidence =
+      *consan_engine_probe_vocabulary(result.observation_plan().engine);
+  const ConSanProbeIntentKind evidence_kind = evidence.barrier;
   const bool emits_barrier_record = evidence_kind == ConSanProbeIntentKind::BarrierRecord;
   const bool updates_exact_epoch = evidence_kind == ConSanProbeIntentKind::ExactBarrierEpoch;
   if (!emits_barrier_record && !updates_exact_epoch) {

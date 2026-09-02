@@ -256,8 +256,6 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .plan = plan_record_replay_object_mode,
     .apply = apply_record_replay_mode_patches,
     .access_scratch_vgpr_count = record_replay_access_scratch_vgpr_count,
-    .operational_evidence = {ConSanProbeIntentKind::BarrierRecord,
-                             ConSanProbeIntentKind::AtomicRecord, true},
     .barrier_scratch_vgpr_count = record_replay_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = record_replay_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 5u,

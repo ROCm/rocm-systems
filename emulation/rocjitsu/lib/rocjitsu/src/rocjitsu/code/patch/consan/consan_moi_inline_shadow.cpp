@@ -394,8 +394,6 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .plan = plan_inline_shadow_object_mode,
     .apply = apply_inline_shadow_mode_patches,
     .access_scratch_vgpr_count = inline_shadow_access_scratch_vgpr_count,
-    .operational_evidence = {ConSanProbeIntentKind::ExactBarrierEpoch,
-                             ConSanProbeIntentKind::ExactAtomicOrdering, false},
     .barrier_scratch_vgpr_count = inline_shadow_barrier_scratch_vgpr_count,
     .atomic_scratch_vgpr_count = inline_shadow_atomic_scratch_vgpr_count,
     .dynamic_stack_frame_save_sgpr_offset = 24u,

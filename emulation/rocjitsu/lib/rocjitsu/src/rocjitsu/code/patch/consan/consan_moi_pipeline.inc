@@ -8,7 +8,8 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   const BoundRuntimeResources &bound_resources = problem.resources();
   const MoiObjectModeSemantics &mode_semantics = problem.mode_semantics();
   const MoiModeOperations &mode = moi_mode_operations(request.moi_engine);
-  const MoiOperationalEvidenceKinds &evidence = mode.operational_evidence;
+  const ConSanEngineProbeVocabulary &evidence =
+      *consan_engine_probe_vocabulary(problem.observation_plan().engine);
   if (request.moi_track_barriers) {
     std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), evidence.barrier, errors);
@@ -58,7 +59,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
       plans.push_back(std::move(plan));
     }
   }
-  if (request.moi_track_atomics && evidence.fence) {
+  if (request.moi_track_atomics && evidence.fence != ConSanProbeIntentKind::Count) {
     std::vector<MoiFenceEvidenceSitePlan> candidates = build_moi_fence_evidence_site_plans(
         problem.inventory(), problem.observation_plan(), errors);
     if (!errors.empty())

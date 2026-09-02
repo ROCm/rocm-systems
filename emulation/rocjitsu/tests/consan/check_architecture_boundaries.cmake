@@ -656,6 +656,18 @@ foreach(_policy_owner IN ITEMS
         "semantic policy must consume the common engine probe vocabulary"
     )
 endforeach()
+foreach(_mode_registry_owner IN ITEMS
+    consan_moi_mode_planning.h
+    consan_moi_record_replay.cpp
+    consan_moi_sampled.cpp
+    consan_moi_inline_shadow.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_mode_registry_owner}"
+        "operational_evidence|MoiOperationalEvidenceKinds"
+        "MOI mode operations must not duplicate the semantic engine probe vocabulary"
+    )
+endforeach()
 
 # Dispatch placement composes one mode-owned demand with one target-owned
 # capability. The shared register search must not rediscover either axis from
