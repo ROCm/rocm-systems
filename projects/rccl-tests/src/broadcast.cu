@@ -1207,7 +1207,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3: {
         // Broadcast-specific LSA<->GIN threshold. Default = 256 KiB (full
-        // message): on 8x MI355X (NCCL_GIN_TYPE=5) LSA wins <=256K and GIN wins
+        // message): on 8x MI355X (NCCL_GIN_TYPE=6) LSA wins <=256K and GIN wins
         // >=512K (measured 2026-07-24). Override with
         // NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST, or the shared
         // NCCL_GIN_ANVIL_SDMA_THRESHOLD.
