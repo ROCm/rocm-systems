@@ -7757,3 +7757,71 @@ rendering through the same owned alternatives and harvest common fallback
 objects and mode-inapplicable formatting rather than merely adding renderer
 facades. The independent completion audit also remains open, so the goal stays
 active.
+
+### 16.108 Convergence checkpoint 107: active-mode-owned report rendering
+
+The renderer deep read found the decoder's former union shape reconstructed in
+local variables. Three static empty decoded products and two empty analyses
+made every report appear to contain all modes. One 602-line function rendered
+all six issue forms, every mode's summary fields, and every mode's detailed
+evidence regardless of which alternative was active. Even the generic
+diagnostic loop redispatched on backend enum values to rename one raw key.
+
+Record/Replay, InlineShadow, and Sampled now each own a mode-named renderer
+source and header. Each consumes only its decoded product and analysis, emits
+its stable mode-specific summary keys, and renders its own evidence and detail.
+The common renderer consumes one `AutoMoiModeRendering` projection containing
+the effective diagnostic count, one active-mode summary fragment, evidence,
+and detail. It owns only failure rendering, universal stream summary fields,
+bounded universal record detail, and one variant composition visit. The three
+empty fallback decoded products and two fallback analyses are deleted, and
+inactive-mode summary fields are no longer formatted as misleading zeroes.
+
+The first header split accidentally let each mode header include the common
+renderer and thereby acquire every other mode transitively. That peephole was
+closed before commit: neutral diagnostic kinds, formatting, and the composition
+product live in `rj_hsa_dbi_moi_report_rendering.h`; each mode renderer header
+includes that neutral contract plus only its own decoder and analyzer. Mode
+functions receive the common validated header rather than the full
+cross-mode decoded variant. The common renderer is now 213 lines. Boundary
+checks require all three mode sources in the build, forbid cross-mode names in
+each source and header, require exhaustive issue switches, and reject the old
+fallback and policy mechanisms from the common renderer.
+
+The initial focused run exposed four behavioral log regressions caused by
+shortening established Sampled key names during the move. The mode owner now
+retains every established external key, and the existing live-hook assertions
+pass. A new regression constructs all three decoded/analysis alternatives and
+proves that each summary contains its own family of keys and neither inactive
+family.
+
+| Signal | Checkpoint 107 | Cumulative change | Slice change from checkpoint 106 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | +7 renderer owners/contracts |
+| Physical production lines | 102,917 | **-2,059** | +117 |
+| Nonblank production lines | 96,572 | **-2,512** | +78 |
+| Production implementation lines | 88,840 | **-2,610** | +61 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Common renderer physical lines | **213** | n/a | **-389** |
+| Inactive-mode fallback decoded/analysis objects | **0** | n/a | **-5** |
+| Inactive-mode summary families rendered per report | **0** | n/a | **-2** |
+| Test inventory | **5,412** | **+67** | **+1** |
+
+Validation includes a complete `-j16` rebuild, the focused runtime-rendering
+and live-hook gate **22/22**, and all **1,295/1,295** `ConSan.*` and
+`ConSanMoi.*` host/component tests. The final neutral-header narrowing then
+passed the three renderer regressions and architecture boundary gate **4/4**.
+No test was removed, renamed, disabled, or replaced, and no physical gfx1201
+test was run.
+
+This slice satisfies the runtime-renderer portion of Sections 14.1, 14.3,
+14.5, 14.6, and 14.7. It removes the parallel union and inactive rendering but
+spends 61 implementation lines on seven physically skippable owners/contracts;
+the runtime-report migration as a whole therefore improved locality rather
+than production size. The next work must return to the much larger lowering
+mutation surfaces and harvest superseded state, with material whole-refactoring
+shrinkage and the independent completion audit still open. The goal remains
+active.
