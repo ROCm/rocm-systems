@@ -57,17 +57,26 @@ struct spm_set_dest_buffer_args
 
 struct spm_state_t : public spm_set_dest_buffer_args
 {
+    static constexpr size_t NUM_SLOTS = 6;
+
+    struct slot_t
+    {
+        void*  buf         = nullptr;
+        size_t size_copied = 0;
+        bool   data_loss   = false;
+    };
+
     aqlprofile_agent_handle_t aql_agent{};
     std::thread*              manager_thread{nullptr};
     std::mutex                work_mutex{};
     std::condition_variable   work_cond{};
-    std::atomic<bool>         data_ready{};
 
     std::atomic<int>   signal_data_loss{};
     std::atomic<bool>  stop_prod_thread{};
     std::atomic<bool>  stop_cons_thread{};
-    std::atomic<void*> prod_buf{nullptr};
-    std::atomic<void*> cons_buf{nullptr};
+    slot_t             slots[NUM_SLOTS];
+    std::atomic<size_t> ring_head{0};
+    std::atomic<size_t> ring_tail{0};
     uint32_t           num_xcc{0};
     size_t             buf_size_xcc{0};
 
@@ -75,6 +84,12 @@ struct spm_state_t : public spm_set_dest_buffer_args
     size_t                                                 output_buffer_size{0};
     std::unique_ptr<SPMMemoryManager>                      memory{nullptr};
     std::array<size_t, AQLPROFILE_SPM_PARAMETER_TYPE_LAST> parameters;
+
+    bool ring_empty() const
+    {
+        return ring_head.load(std::memory_order_acquire) ==
+               ring_tail.load(std::memory_order_relaxed);
+    }
 };
 
 inline static hsa_status_t
@@ -202,7 +217,7 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
 }
 
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
-    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 26},      // 64MB
+    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 27},      // 128MB
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1 << 13},  // 4us
     {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 0},                // 0ms
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}};
@@ -438,7 +453,7 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 
     // The first page of output_buffer is reserved for SpmBufferDesc
     char*          buf_ptr  = (char*) (s->output_buffer_ptr) + SPM_DESC_SIZE;
-    size_t         buf_size = (s->output_buffer_size - SPM_DESC_SIZE) / 3;
+    size_t         buf_size = (s->output_buffer_size - SPM_DESC_SIZE) / spm_state_t::NUM_SLOTS;
     SpmBufferDesc* desc     = (SpmBufferDesc*) s->output_buffer_ptr;
     size_t         seg_size = (desc->global_num_line + desc->se_num_line * desc->num_se) * 32;
     // Align buf_size to the exact multiples of segments, so that every HsaSpmSetDestBuffer
@@ -456,12 +471,15 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
     // Args for hsa_amd_spm_set_dest_buffer
     s->buf_size = buf_size;
     s->timeout  = s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT);
-    s->dest_buf = buf_ptr;
-
-    s->prod_buf     = buf_ptr + buf_size;
-    s->cons_buf     = buf_ptr + buf_size * 2;
     s->num_xcc      = desc->num_xcc;
     s->buf_size_xcc = s->buf_size / desc->num_xcc;
+
+    // Initialize ring buffer slots
+    for(size_t i = 0; i < spm_state_t::NUM_SLOTS; i++)
+        s->slots[i].buf = buf_ptr + i * buf_size;
+    s->ring_head.store(0, std::memory_order_relaxed);
+    s->ring_tail.store(0, std::memory_order_relaxed);
+    s->dest_buf = s->slots[0].buf;
 
     try
     {
@@ -500,29 +518,22 @@ struct consumer_thread_handle_t
         s->stop_cons_thread = true;
         s->work_cond.notify_one();
     }
-    void notify()
-    {
-        s->data_ready = true;
-        s->work_cond.notify_one();
-    }
     std::shared_ptr<spm_state_t> s;
 };
 
 static void
 producer(std::shared_ptr<spm_state_t> s)
 {
-    hsa_status_t             status     = HSA_STATUS_SUCCESS;
-    spm_set_dest_buffer_args args       = *s;
+    spm_set_dest_buffer_args args = *s;
     bool                     exiting    = false;
     int                      count_down = 0;
+    size_t                   write_idx  = 0;
 
     consumer_thread_handle_t consumer_handle(s);
 
     args.timeout = s->timeout;
     while(true)
     {
-        args.size_copied = 0;
-        args.dest_buf    = s->prod_buf;
         // s->stop_prod_thread should be set after SPM End() sequence is submitted, this is the
         // handshake protocol between app/library and aqlprofile.
         // If s->stop_prod_thread is set in current loop, producer thread will exit after all
@@ -530,45 +541,53 @@ producer(std::shared_ptr<spm_state_t> s)
         // HsaSpmSetDestBuffer() call or maybe more than one.
         if(s->stop_prod_thread) exiting = true;
 
+        // Get the next write slot
+        size_t next = (write_idx + 1) % spm_state_t::NUM_SLOTS;
+        if(next == s->ring_tail.load(std::memory_order_acquire))
+        {
+            // Ring full — yield and retry
+            sched_yield();
+            continue;
+        }
+
+        auto& slot       = s->slots[write_idx];
+        args.size_copied = 0;
+        args.dest_buf    = slot.buf;
+
         if(HsaSpmSetDestBuffer(args) != HSA_STATUS_SUCCESS)
         {
-            std::unique_lock<std::mutex> lock(s->work_mutex);
             std::cerr << "hsa_amd_spm_set_dest_buffer() error" << std::endl;
-            s->size_copied = 0;
-            consumer_handle.notify();
             return;
         }
 
+        slot.size_copied = 0;
+        slot.data_loss   = false;
+        // In the initial XCC SPM design, 'size_copied' and 'is_data_loss' are stored in
+        // kfd_ioctl_spm_buffer_header. They are no longer stored in kfd_ioctl_spm_args.
+        // But we still need accumulated version for some quick checks and KFD will add
+        // them back to kfd_ioctl_spm_args.
+        // This is only a temporary patch as KFD will fix this in ROCm 6.5
+        char* base       = (char*) slot.buf;
+        for(uint32_t i = 0; i < s->num_xcc; i++)
         {
-            std::unique_lock<std::mutex> lock(s->work_mutex);
-            s->dest_buf = s->prod_buf.exchange(s->cons_buf.exchange(s->dest_buf));
-
-            // In the initial XCC SPM design, 'size_copied' and 'is_data_loss' are stored in
-            // kfd_ioctl_spm_buffer_header. They are no longer stored in kfd_ioctl_spm_args.
-            // But we still need accumulated version for some quick checks and KFD will add
-            // them back to kfd_ioctl_spm_args.
-            // This is only a temporary patch as KFD will fix this in ROCm 6.5
-            char* base      = (char*) s->cons_buf.load();
-            s->size_copied  = 0;
-            s->is_data_loss = false;
-            for(int i = 0; i < s->num_xcc; i++)
-            {
-                auto buf_info = (kfd_ioctl_spm_buffer_header*) base;
-                s->size_copied += buf_info->bytes_copied;
-                s->is_data_loss |= buf_info->has_data_loss;
-                base += s->buf_size_xcc;
-            }
-            s->signal_data_loss.fetch_or(s->is_data_loss);
-
-            consumer_handle.notify();
+            auto* buf_info = (kfd_ioctl_spm_buffer_header*) base;
+            slot.size_copied += buf_info->bytes_copied;
+            slot.data_loss |= buf_info->has_data_loss;
+            base += s->buf_size_xcc;
         }
+        s->signal_data_loss.fetch_or(slot.data_loss);
 
+        // Publish slot to consumer
+        write_idx = next;
+        s->ring_head.store(next, std::memory_order_release);
+        s->work_cond.notify_one();
+
+        // Forced exit: This happens when we want to stop SPM but not the app. This should be
+        // improved by getting the hint from caller instead of a hardcoded number. Will consider
+        // this in the new SPM api design.
         if(exiting)
         {
-            // Forced exit: This happens when we want to stop SPM but not the app. This should be
-            // improved by getting the hint from caller instead of a hardcoded number. Will consider
-            // this in the new SPM api design
-            if(s->size_copied)
+            if(slot.size_copied)
             {
                 if(count_down++ < 5) continue;
                 printf("Forced exit after %d extra hsa_amd_spm_set_dest_buffer() calls\n",
@@ -576,8 +595,7 @@ producer(std::shared_ptr<spm_state_t> s)
             }
             // We cannot directly use s->stop_prod_thread here, otherwise we might miss the last
             // HsaSpmSetDestBuffer() call if s->stop_prod_thread is set after the
-            // HsaSpmSetDestBuffer() call from this loop!
-            //
+            // HsaSpmSetDestBuffer() call from this loop.
             break;
         }
         if(s->stop_cons_thread) break;
@@ -587,25 +605,37 @@ producer(std::shared_ptr<spm_state_t> s)
 static void
 consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata)
 {
+    // Wait for data from producer or shutdown signal.
+    // Producer destructor sets stop_cons_thread; exit without processing stale work.
     while(true)
     {
-        std::unique_lock<std::mutex> lock(s->work_mutex);
-        // Wait for data or producer shutdown; do not wait on data_ready alone (see spm_data.cpp).
-        s->work_cond.wait(lock, [&s]() { return s->data_ready || s->stop_cons_thread; });
-        // Producer destructor set stop_cons_thread; exit without processing stale work.
-        if(!s->data_ready) return;
-        s->data_ready = false;
-
-        char* base  = (char*) s->cons_buf.load();
-        int   flags = s->signal_data_loss.exchange(0) << AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS;
-
-        for(int i = 0; i < s->num_xcc; i++)
         {
-            auto buf_info = (kfd_ioctl_spm_buffer_header*) base;
-            if(buf_info->bytes_copied)
-                callback(i, (void*) (buf_info + 1), buf_info->bytes_copied, flags, userdata);
+            std::unique_lock<std::mutex> lock(s->work_mutex);
+            s->work_cond.wait(lock, [&s]() {
+                return !s->ring_empty() || s->stop_cons_thread;
+            });
+            if(s->ring_empty() && s->stop_cons_thread) return;
+        }
 
-            base += s->buf_size_xcc;
+        // Drain all available slots
+        while(!s->ring_empty())
+        {
+            size_t t    = s->ring_tail.load(std::memory_order_relaxed);
+            auto&  slot = s->slots[t];
+            int    flags =
+                s->signal_data_loss.exchange(0) << AQLPROFILE_SPM_DATA_FLAGS_DATA_LOSS;
+
+            char* base = (char*) slot.buf;
+            for(uint32_t i = 0; i < s->num_xcc; i++)
+            {
+                auto* buf_info = (kfd_ioctl_spm_buffer_header*) base;
+                if(buf_info->bytes_copied)
+                    callback(
+                        i, (void*) (buf_info + 1), buf_info->bytes_copied, flags, userdata);
+                base += s->buf_size_xcc;
+            }
+
+            s->ring_tail.store((t + 1) % spm_state_t::NUM_SLOTS, std::memory_order_release);
         }
     }
 }
