@@ -11426,3 +11426,52 @@ disappears, and production shrinks.  The next audit should distinguish other
 true transaction operations from helpers merely located near them, then
 either keep the former private to orchestration or give the latter a narrow
 owner that has more than one real consumer.
+
+### 16.170 Convergence checkpoint 169: mode-owned report-layout flags
+
+The mode-locality audit found that common report-header construction and
+matching still named InlineShadow to derive its exact-shadow ABI version flags.
+That decision is not common geometry: Record/Replay and Sampled deliberately
+publish zero flags, while InlineShadow's flag set versions four mode-private
+table and provenance contracts.  Although the byte-region layout itself was
+already selected through the mode registry, common code retained this one
+mode-specific after-the-fact correction.
+
+`ConSanMoiReportBufferLayout` now carries the flags selected by its mode owner.
+Both InlineShadow layout producers—the explicit byte-size contract and the
+automatic report planner—publish the known exact-shadow flag set.  The common
+header builder copies the field, and header matching compares against the
+canonical layout without naming InlineShadow.  Canonical revalidation still
+reconstructs the layout through the selected mode planner, so clearing or
+changing the flags cannot make a stale InlineShadow layout valid.  The
+structural gate forbids restoring an InlineShadow branch in either common
+helper and requires both mode-owned producers to publish the flag set.
+
+| Signal | Checkpoint 169 | Cumulative change | Slice change from checkpoint 168 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,596 | **-2,380** | 0 |
+| Nonblank production lines | 96,178 | **-2,906** | 0 |
+| Production implementation lines | 88,384 | **-3,066** | 0 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Common report-layout helpers branching on InlineShadow | **0 / 2** | n/a | **-2** |
+| Test inventory | **5,427** | **+82** | **+1** |
+
+The implementation is committed as `59eae68e75b`.  Validation includes a
+successful full `-j16` build; **33/33** focused report-layout, header, and
+architecture-boundary tests; and **68/68** broader MOI report planning,
+lowering, runtime-hook, and boundary tests.  The new regression checks all
+three MOI layout producers, header construction from the mode-owned fact, and
+rejection of a stale InlineShadow layout with cleared flags.  All invocations
+used `-LE physical`; no test was removed, renamed, disabled, or replaced, and
+no physical GPU test was run.
+
+The production change is line-neutral: two explicit mode-owned assignments and
+one typed field replace two common branches.  This is an acceptable locality
+slice after checkpoints 167 and 168 deleted 43 implementation lines.  The next
+mode-locality trace should seek a similar common after-the-fact mode decision
+whose owner product can also make duplicated validation or compatibility code
+disappear.
