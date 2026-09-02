@@ -86,6 +86,7 @@ partially written data. This framework automates that process:
 | `scratch_access.hip` | Scratch (private) | RAW via scratch spills | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `lds_reduce.hip` | LDS (shared memory) | RAW via shared memory | `s_wait_dscnt`, `s_wait_kmcnt` |
 | `lds_war_pattern.hip` | LDS (shared memory) | WAR (`ds_read` then `ds_write`, same slot) | `s_wait_dscnt`, `s_wait_kmcnt` |
+| `lds_dual_addr.hip` | LDS (dual-address DS) | RAW on the second address and second destination of `ds_store_2addr`/`ds_load_2addr` | `s_wait_dscnt`, `s_wait_kmcnt` |
 | `tensor_lds.hip` | Tensor DMA → LDS | RAW (TDM write→LDS read) | `s_wait_tensorcnt`, `s_wait_dscnt` |
 | `tensor_lds_offset.hip` | Tensor DMA → LDS at a nonzero descriptor base | RAW (TDM write→LDS read away from offset zero) | `s_wait_tensorcnt`, `s_wait_dscnt` |
 | `fa_barrier_epoch.hip` | Tensor DMA + LDS + barriers | Cross-wave LDS reuse across barrier epochs | `s_wait_tensorcnt`, `s_wait_dscnt` |
@@ -105,7 +106,10 @@ shader whose `requires:` list does not contain the target architecture.
 `tensor_lds.hip`, `tensor_lds_offset.hip` and `wmma_exp.hip` declare
 `// requires: gfx1250` because their builtins need the `gfx1250-insts` target
 feature; `fa_barrier_epoch.hip` declares it because its inline asm uses the
-gfx12 mnemonics `ds_store_b16`, `ds_load_u16` and `s_wait_dscnt`; and
+gfx12 mnemonics `ds_store_b16`, `ds_load_u16` and `s_wait_dscnt`;
+`lds_dual_addr.hip` declares it because earlier targets name the dual-address
+DS instructions `ds_read2`/`ds_write2` rather than `ds_load_2addr`/
+`ds_store_2addr`; and
 `wmma_rocwmma.hip` declares it because its 32-thread launch is only a whole
 wave on a wave32 target. The `wavegroup_*.hip` kernels likewise declare
 `// requires: gfx1260`. A shader without that comment is treated as portable

@@ -637,6 +637,33 @@ void DataHazardPlugin::route_scalar_memory(const Instruction &inst, amdgpu::Wave
   adapter_.on_memory_route(route);
 }
 
+// The dual-address DS instructions — ds_load2addr, ds_store2addr and the
+// returning 2addr exchanges — make two accesses of one instruction, the second
+// at an address of its own and, where the instruction returns data, into a
+// destination register of its own. Both halves carry the instruction the
+// simulator gave the first, so the DS counter still sees the single operation
+// it counts and the wait depths stay as the hardware states them.
+void DataHazardPlugin::route_second_local_access(const amdgpu::VectorMemState &vmem,
+                                                 const amdgpu::Wavefront &wf,
+                                                 const MemoryRouteView &first, size_t lanes) {
+  if (!vmem.ds2_active)
+    return;
+
+  MemoryRouteView second = first;
+  // A store names no destination, so the register the first half reported is
+  // the one to keep: only a returning access has a second of its own.
+  if (vmem.is_load)
+    second.register_base = logical_vgpr_base(wf, vmem.ds2_dst_reg_base);
+
+  second.per_lane_addresses.clear();
+  second.per_lane_addresses.reserve(lanes);
+  for (size_t lane = 0; lane < lanes; ++lane)
+    second.per_lane_addresses.push_back(
+        normalize_lds_addr(wf, static_cast<uint32_t>(vmem.ds2_per_lane_addr[lane])));
+
+  adapter_.on_memory_route(second);
+}
+
 void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wavefront &wf,
                                            const InstructionView &current) {
   const auto *vmem = inst.data_as<amdgpu::VectorMemState>();
@@ -670,6 +697,7 @@ void DataHazardPlugin::route_vector_memory(const Instruction &inst, amdgpu::Wave
     for (auto &addr : route.per_lane_addresses)
       addr = normalize_lds_addr(wf, static_cast<uint32_t>(addr));
     adapter_.on_memory_route(route);
+    route_second_local_access(*vmem, wf, route, lanes);
     return;
   }
 

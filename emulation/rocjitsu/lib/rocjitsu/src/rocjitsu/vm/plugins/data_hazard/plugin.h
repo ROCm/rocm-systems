@@ -38,6 +38,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace rocjitsu::amdgpu {
+struct VectorMemState;
+}
+
 namespace rocjitsu::amdgpu::tensor_dma_detail {
 struct TensorDmaDescriptor;
 }
@@ -217,6 +221,10 @@ private:
                            const InstructionView &current);
   void route_vector_memory(const Instruction &inst, amdgpu::Wavefront &wf,
                            const InstructionView &current);
+  /// Routes the second access of a dual-address DS instruction, which @p first
+  /// describes the first half of.
+  void route_second_local_access(const amdgpu::VectorMemState &vmem, const amdgpu::Wavefront &wf,
+                                 const MemoryRouteView &first, size_t lanes);
 
   PluginConfig config_;
   hazard_core::DataHazardEngine engine_;
