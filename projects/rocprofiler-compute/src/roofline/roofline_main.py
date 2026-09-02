@@ -12,7 +12,7 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from roofline.roofline_frame import FrameAnchors, frame_bounds
+from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
@@ -44,6 +44,7 @@ from utils.roofline_calc import (
     XMIN,
     OpsSupport,
     construct_roof,
+    machine_ceilings,
     sanitize_mem_level,
 )
 from utils.specs import MachineSpecs
@@ -51,7 +52,7 @@ from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_PEAK = "HBM"
-DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 100000.0)
+DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
 TRACE_COLORS: dict[str, dict[str, str]] = {
     "l0": {"html": "#F0E442", "cli": "brown+"},
@@ -109,6 +110,7 @@ class Roofline:
         self.__view_models: dict[str, RooflineViewModel] = {}
         self.__compute_peaks: dict[str, list[tuple[str, float]]] = {}
         self.__ceiling_by_dtype: dict[str, dict[str, Any]] = {}
+        self.__frame_bounds: Optional[tuple[float, float, float, float]] = None
 
     def _ceiling_for_dtype(self, dtype: str) -> dict[str, Any]:
         if dtype not in self.__ceiling_by_dtype:
@@ -116,7 +118,6 @@ class Roofline:
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype,
                 mspec=self.__mspec,
-                ai_data=self.__ai_data,
             )
         return self.__ceiling_by_dtype[dtype]
 
@@ -200,51 +201,6 @@ class Roofline:
         if cap == float("inf") or not bandwidth > 0:
             return None
         return (cap / bandwidth, cap)
-
-    def _frame_anchors(
-        self,
-        sanitized_cache_hierarchy: list[str],
-        compute_peaks: list[tuple[str, float]],
-        ops_flops: str,
-    ) -> FrameAnchors:
-        """What the opening frame has to hold, read off the geometry this figure
-        draws: the knee each diagonal is really capped at, every stacked
-        datatype's ceiling, and the kernel dots the page opens with."""
-        anchors = FrameAnchors()
-        cap, _ = self._envelope_compute_cap(compute_peaks)
-        for level in sanitized_cache_hierarchy:
-            bandwidth = self._peak_value(self.__ceiling_data, level.lower())
-            if not bandwidth or bandwidth <= 0:
-                continue
-            anchors.bandwidths.append(bandwidth)
-            knee = self._roof_knee(bandwidth, cap)
-            if knee:
-                anchors.points.append(knee)
-        anchors.throughputs.extend(peak for _, peak in compute_peaks if peak > 0)
-        anchors.points.extend(self._opening_kernel_points(ops_flops))
-        return anchors
-
-    def _opening_kernel_points(self, ops_flops: str) -> list[tuple[float, float]]:
-        """The kernel dots the page opens with: one memory level's points, or
-        every level's when the kernel panel opens on all peaks."""
-        peak = self.__view_models[ops_flops].default_peak
-        levels = (
-            [f"ai_{peak.lower()}"]
-            if peak and peak != ALL_PEAKS_VALUE
-            else list(CACHE_LEVELS)
-        )
-        ai_data = self.__ai_data or {}
-        points: list[tuple[float, float]] = []
-        for level in levels:
-            level_points = ai_data.get(level)
-            if not level_points or len(level_points) < 2:
-                continue
-            points.extend(
-                (float(ai), float(perf))
-                for ai, perf in zip(level_points[0], level_points[1])
-                if ai is not None and perf is not None
-            )
-        return points
 
     def _add_compute_ceiling(
         self,
@@ -497,6 +453,10 @@ class Roofline:
         self.__view_models = {}
         self.__compute_peaks = {}
         self.__ceiling_by_dtype = {}
+        self.__frame_bounds = (
+            canonical_frame(*machine_ceilings(self.__run_parameters, self.__mspec))
+            or DEFAULT_AXIS_BOUNDS
+        )
 
         console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
 
@@ -724,10 +684,12 @@ class Roofline:
                 compute_peaks,
             )
 
-        bounds = frame_bounds(
-            self._frame_anchors(sanitized_cache_hierarchy, compute_peaks, ops_flops)
-        )
-        x_lo, x_hi, y_lo, y_hi = bounds if bounds else DEFAULT_AXIS_BOUNDS
+        if self.__frame_bounds is None:
+            self.__frame_bounds = (
+                canonical_frame(*machine_ceilings(self.__run_parameters, self.__mspec))
+                or DEFAULT_AXIS_BOUNDS
+            )
+        x_lo, x_hi, y_lo, y_hi = self.__frame_bounds
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
         roof_dense_lo = x_lo / ROOF_DENSE_PAD_FACTOR
