@@ -752,6 +752,10 @@ function(rj_add_consan_device_conformance_cases)
             # This workload is sub-second in isolation but can exceed the
             # default while the full -j16 gate runs the large LDS pipelines.
             set(_baseline_workload_timeout 120)
+        elseif(_workload_name STREQUAL "FenceBarrierPublication")
+            # The body is sub-second in isolation, but a simulator process can
+            # exceed the default during teardown under a broad -j16 gate.
+            set(_baseline_workload_timeout 120)
         endif()
         foreach(_outcome IN ITEMS Correct Incorrect)
             string(TOLOWER "${_outcome}" _outcome_label)
