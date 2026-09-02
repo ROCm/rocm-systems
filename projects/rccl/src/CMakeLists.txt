@@ -186,6 +186,7 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_host_anvil_sdma.h
+  include/gin/gin_anvil_conn_check.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -520,6 +521,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
+    src/gin/gin_anvil_conn_check_device.cc
   )
 endif()
 

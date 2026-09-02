@@ -124,4 +124,4 @@ GIN plugin functions from the executable at runtime.
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
 | `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
-| `gin_anvil_sdma_oss7_device.cc` | SDMA OSS7 device helpers |
+| `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |
