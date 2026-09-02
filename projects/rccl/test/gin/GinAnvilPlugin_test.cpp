@@ -58,6 +58,7 @@ struct GinAnvilMockComm {
   void reset() {
     std::memset(&comm, 0, sizeof(comm));
     comm.bootstrap = &bootstrapPlaceholder;
+    comm.commHash = 0xC0FFEEULL;
     comm.devrState.lsaSelf = 0;
     comm.devrState.lsaSize = 2;
     comm.devrState.bigSize = 0x100000;
@@ -94,12 +95,12 @@ class GinAnvilPluginTest : public ::testing::Test {
     ncclGinAnvilSetInitContext(*ictx, mockComm_.get());
   }
 
-  void connectColl(void* ictx, void** coll) {
+  void connectColl(void* ictx, void** coll, int nranks = 1) {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
     void* handles[1] = {handle};
-    ASSERT_EQ(plugin_.connect(ictx, handles, 1, 0, listen, coll), ncclSuccess);
+    ASSERT_EQ(plugin_.connect(ictx, handles, nranks, 0, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
 };
@@ -435,6 +436,86 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  plugin_.finalize(ictx);
+}
+
+// G20: conn-check skipped when nRanks != lsaSize (no gate on single-rank LSA team).
+TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenLsaSizeMismatch) {
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 1;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 1;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSuccess);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// G21: conn-check inject-fail env aborts bind when nRanks>=2.
+TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 1) {
+    GTEST_SKIP() << "GPU required for conn-check device reset path";
+  }
+  void* devLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&devLsa, sizeof(uint64_t) * 2), hipSuccess);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa);
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+
+  ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->devrState.lsaSize = 2;
+  mockComm_.get()->rank = 0;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 1;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSystemError);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+  hipFree(devLsa);
+}
+
+// G22: conn-check bypassed when NCCL_GIN_ANVIL_SDMA_CONN_CHECK=0.
+TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
+  ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  mockComm_.get()->devrState.lsaSize = 2;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 1;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 1), ncclSuccess);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
 
