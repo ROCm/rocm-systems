@@ -33,6 +33,7 @@ function(add_rccl_test TEST)
         PRIVATE
             rccl_common
     )
+    rccl_tests_apply_offload_flags(${TEST_TARGET})
     set_target_properties(
         ${TEST_TARGET}
         PROPERTIES
@@ -135,6 +136,7 @@ add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
 target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl nccl_test_os nccl_tests_options verifiable)
+rccl_tests_apply_offload_flags(rccl_common)
 if(USE_MPI)
   target_link_libraries(rccl_common MPI::MPI_CXX)
 endif()
@@ -180,6 +182,7 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
         roc::rccl -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive
         $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
     target_link_options(gin_rocshmem_gda_factory_test PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    rccl_tests_apply_offload_flags(gin_rocshmem_gda_factory_test)
     set_target_properties(gin_rocshmem_gda_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 add_rccl_test(alltoallv)

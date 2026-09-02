@@ -1048,7 +1048,7 @@ if(CUMEM_DMABUF_EXPORT_ENABLED)
 endif()
 
 ## Set RCCL compile options
-if (HAVE_PARALLEL_JOBS)
+if(HAVE_PARALLEL_JOBS AND NOT ENABLE_THINLTO)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
@@ -1071,6 +1071,15 @@ if(ENABLE_DEVICE_LINKER)
   target_compile_options(rccl PRIVATE --offload-host-only)
 else()
   target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
+
+if(ENABLE_OBJECT_LINKING)
+  target_compile_options(rccl PRIVATE -foffload-object-linking)
+endif()
+
+if(ENABLE_THINLTO)
+  target_compile_options(rccl PRIVATE -foffload-lto=thin)
+  target_link_options(rccl PRIVATE -foffload-lto=thin)
 endif()
 
 if(QUIET_WARNINGS)

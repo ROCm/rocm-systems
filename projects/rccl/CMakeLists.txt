@@ -90,6 +90,8 @@ option(DUMP_ASM                                "Disassemble and dump"           
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
+option(ENABLE_OBJECT_LINKING                   "Enable offload object linking"                  OFF)
+option(ENABLE_THINLTO                          "Enable offload ThinLTO"                         OFF)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
@@ -124,6 +126,11 @@ endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+
+if(ENABLE_DEVICE_LINKER AND (ENABLE_OBJECT_LINKING OR ENABLE_THINLTO))
+  message(FATAL_ERROR
+    "ENABLE_OBJECT_LINKING and ENABLE_THINLTO cannot be used with ENABLE_DEVICE_LINKER")
+endif()
 
 # Default GPU architectures to build
 #==================================================================================================

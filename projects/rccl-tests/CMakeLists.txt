@@ -22,9 +22,27 @@ enable_testing()
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM_GIN         "Build with rocshmem GIN backend support."     OFF)
+option(ENABLE_OBJECT_LINKING       "Enable offload object linking"                OFF)
+option(ENABLE_THINLTO              "Enable offload ThinLTO"                       OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_RCCL_TESTS_HOST_UNIT_TESTS
        "Build CPU-only host unit tests under test/ (standalone builds only)"   ON)
+
+# Apply -foffload-object-linking / -foffload-lto=thin to HIP targets.
+# ThinLTO link flags are skipped for OBJECT libraries; they belong on the
+# executable that consumes the objects.
+function(rccl_tests_apply_offload_flags target)
+  if(ENABLE_OBJECT_LINKING)
+    target_compile_options(${target} PRIVATE -foffload-object-linking)
+  endif()
+  if(ENABLE_THINLTO)
+    target_compile_options(${target} PRIVATE -foffload-lto=thin)
+    get_target_property(_type ${target} TYPE)
+    if(NOT _type STREQUAL "OBJECT_LIBRARY")
+      target_link_options(${target} PRIVATE -foffload-lto=thin)
+    endif()
+  endif()
+endfunction()
 
 if (NOT CMAKE_BUILD_TYPE)
   message(WARNING "CMAKE_BUILD_TYPE is not defined. Setting to Release")

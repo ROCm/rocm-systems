@@ -31,6 +31,10 @@ DEVICE_LIB_PATH := $(if $(wildcard $(ROCM_PATH)/amdgcn/bitcode),,$(if $(wildcard
 MPI ?= 0
 # Set to 1 to enable device API builds (requires NCCL >= 2.28)
 ENABLE_DEVICE_API ?= 0
+# Set to 1 to enable offload object linking (-foffload-object-linking)
+ENABLE_OBJECT_LINKING ?= 0
+# Set to 1 to enable offload ThinLTO (-foffload-lto=thin)
+ENABLE_THINLTO ?= 0
 # e.g. Set to _mpi when using MPI=1
 NAME_SUFFIX ?=
 # Set to 1 to create and use libverifiable.so to reduce binary size
@@ -140,6 +144,15 @@ endif
 
 ifeq ($(ENABLE_DEVICE_API), 1)
 HIPCUFLAGS += -DENABLE_DEVICE_API
+endif
+
+ifeq ($(ENABLE_OBJECT_LINKING), 1)
+HIPCUFLAGS += -foffload-object-linking
+endif
+
+ifeq ($(ENABLE_THINLTO), 1)
+HIPCUFLAGS += -foffload-lto=thin
+HIPLDFLAGS += -foffload-lto=thin
 endif
 
 LIBRARIES += rccl dl
