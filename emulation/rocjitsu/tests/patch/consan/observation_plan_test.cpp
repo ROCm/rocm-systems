@@ -10,9 +10,9 @@
 namespace rocjitsu {
 namespace {
 
-template <typename Enum, size_t N, typename NameFunction>
-void expect_observation_enum_contract(const std::array<Enum, N> &values, Enum count,
-                                      NameFunction name, std::string_view invalid_name) {
+template <typename Values, typename Enum, typename NameFunction>
+void expect_observation_enum_contract(const Values &values, Enum count, NameFunction name,
+                                      std::string_view invalid_name) {
   EXPECT_EQ(values.size(), static_cast<size_t>(count));
   std::set<std::string_view> names;
   for (size_t ordinal = 0; ordinal < values.size(); ++ordinal) {

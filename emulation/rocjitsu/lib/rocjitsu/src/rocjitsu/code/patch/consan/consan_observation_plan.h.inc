@@ -42,26 +42,18 @@ enum class ConSanSiteDecisionKind : uint8_t {
 };
 
 /// Complete iterable set of policy decision kinds.
-inline constexpr std::array<ConSanSiteDecisionKind, 3> kConSanSiteDecisionKinds = {
-    ConSanSiteDecisionKind::NotApplicable,
-    ConSanSiteDecisionKind::Unsupported,
-    ConSanSiteDecisionKind::Admitted,
-};
+inline constexpr auto kConSanSiteDecisionKinds = [] {
+  using E = ConSanSiteDecisionKind;
+  return make_consan_enum_vocabulary("invalid-site-decision-kind",
+                                     consan_enum(E::NotApplicable, "not-applicable"),
+                                     consan_enum(E::Unsupported, "unsupported"),
+                                     consan_enum(E::Admitted, "admitted"));
+}();
 
 /// Return the stable diagnostic spelling of a policy decision kind.
 [[nodiscard]] constexpr std::string_view
 consan_site_decision_kind_name(ConSanSiteDecisionKind kind) {
-  switch (kind) {
-  case ConSanSiteDecisionKind::NotApplicable:
-    return "not-applicable";
-  case ConSanSiteDecisionKind::Unsupported:
-    return "unsupported";
-  case ConSanSiteDecisionKind::Admitted:
-    return "admitted";
-  case ConSanSiteDecisionKind::Count:
-    break;
-  }
-  return "invalid-site-decision-kind";
+  return kConSanSiteDecisionKinds.name(kind);
 }
 
 static_assert(kConSanSiteDecisionKinds.size() ==
@@ -118,74 +110,34 @@ enum class ConSanAccessPolicyReason : uint8_t {
 };
 
 /// Complete iterable set of access-policy reasons, including `None`.
-inline constexpr std::array<ConSanAccessPolicyReason, 19> kConSanAccessPolicyReasons = {
-    ConSanAccessPolicyReason::None,
-    ConSanAccessPolicyReason::AccessFamilyDisabled,
-    ConSanAccessPolicyReason::OperationKindExcluded,
-    ConSanAccessPolicyReason::ReservedForSynchronizationPolicy,
-    ConSanAccessPolicyReason::ContainerFilterExcluded,
-    ConSanAccessPolicyReason::TargetCapabilityUnavailable,
-    ConSanAccessPolicyReason::NonAccessInstruction,
-    ConSanAccessPolicyReason::InvalidInstructionSize,
-    ConSanAccessPolicyReason::InvalidAccessWidth,
-    ConSanAccessPolicyReason::MissingAddressOperand,
-    ConSanAccessPolicyReason::RangeEncodingUnavailable,
-    ConSanAccessPolicyReason::InstructionOutOfBounds,
-    ConSanAccessPolicyReason::UnsupportedMnemonic,
-    ConSanAccessPolicyReason::UnsupportedFlatEncoding,
-    ConSanAccessPolicyReason::NonzeroFlatOffset,
-    ConSanAccessPolicyReason::ReservedFlatAddressRegister,
-    ConSanAccessPolicyReason::NonGroupAddressSpace,
-    ConSanAccessPolicyReason::FlatProvenancePolicyExcluded,
-    ConSanAccessPolicyReason::ConflictingPhysicalAliases,
-};
+inline constexpr auto kConSanAccessPolicyReasons = [] {
+  using E = ConSanAccessPolicyReason;
+  return make_consan_enum_vocabulary(
+      "invalid-access-policy-reason", consan_enum(E::None, "none"),
+      consan_enum(E::AccessFamilyDisabled, "access-family-disabled"),
+      consan_enum(E::OperationKindExcluded, "operation-kind-excluded"),
+      consan_enum(E::ReservedForSynchronizationPolicy, "reserved-for-synchronization-policy"),
+      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
+      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      consan_enum(E::NonAccessInstruction, "non-access-instruction"),
+      consan_enum(E::InvalidInstructionSize, "invalid-instruction-size"),
+      consan_enum(E::InvalidAccessWidth, "invalid-access-width"),
+      consan_enum(E::MissingAddressOperand, "missing-address-operand"),
+      consan_enum(E::RangeEncodingUnavailable, "range-encoding-unavailable"),
+      consan_enum(E::InstructionOutOfBounds, "instruction-out-of-bounds"),
+      consan_enum(E::UnsupportedMnemonic, "unsupported-mnemonic"),
+      consan_enum(E::UnsupportedFlatEncoding, "unsupported-flat-encoding"),
+      consan_enum(E::NonzeroFlatOffset, "nonzero-flat-offset"),
+      consan_enum(E::ReservedFlatAddressRegister, "reserved-flat-address-register"),
+      consan_enum(E::NonGroupAddressSpace, "non-group-address-space"),
+      consan_enum(E::FlatProvenancePolicyExcluded, "flat-provenance-policy-excluded"),
+      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+}();
 
 /// Return the stable diagnostic spelling of an access-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_access_policy_reason_name(ConSanAccessPolicyReason reason) {
-  switch (reason) {
-  case ConSanAccessPolicyReason::None:
-    return "none";
-  case ConSanAccessPolicyReason::AccessFamilyDisabled:
-    return "access-family-disabled";
-  case ConSanAccessPolicyReason::OperationKindExcluded:
-    return "operation-kind-excluded";
-  case ConSanAccessPolicyReason::ReservedForSynchronizationPolicy:
-    return "reserved-for-synchronization-policy";
-  case ConSanAccessPolicyReason::ContainerFilterExcluded:
-    return "container-filter-excluded";
-  case ConSanAccessPolicyReason::TargetCapabilityUnavailable:
-    return "target-capability-unavailable";
-  case ConSanAccessPolicyReason::NonAccessInstruction:
-    return "non-access-instruction";
-  case ConSanAccessPolicyReason::InvalidInstructionSize:
-    return "invalid-instruction-size";
-  case ConSanAccessPolicyReason::InvalidAccessWidth:
-    return "invalid-access-width";
-  case ConSanAccessPolicyReason::MissingAddressOperand:
-    return "missing-address-operand";
-  case ConSanAccessPolicyReason::RangeEncodingUnavailable:
-    return "range-encoding-unavailable";
-  case ConSanAccessPolicyReason::InstructionOutOfBounds:
-    return "instruction-out-of-bounds";
-  case ConSanAccessPolicyReason::UnsupportedMnemonic:
-    return "unsupported-mnemonic";
-  case ConSanAccessPolicyReason::UnsupportedFlatEncoding:
-    return "unsupported-flat-encoding";
-  case ConSanAccessPolicyReason::NonzeroFlatOffset:
-    return "nonzero-flat-offset";
-  case ConSanAccessPolicyReason::ReservedFlatAddressRegister:
-    return "reserved-flat-address-register";
-  case ConSanAccessPolicyReason::NonGroupAddressSpace:
-    return "non-group-address-space";
-  case ConSanAccessPolicyReason::FlatProvenancePolicyExcluded:
-    return "flat-provenance-policy-excluded";
-  case ConSanAccessPolicyReason::ConflictingPhysicalAliases:
-    return "conflicting-physical-aliases";
-  case ConSanAccessPolicyReason::Count:
-    break;
-  }
-  return "invalid-access-policy-reason";
+  return kConSanAccessPolicyReasons.name(reason);
 }
 
 static_assert(kConSanAccessPolicyReasons.size() ==
@@ -228,53 +180,27 @@ enum class ConSanBarrierPolicyReason : uint8_t {
 };
 
 /// Complete iterable set of barrier-policy reasons, including `None`.
-inline constexpr std::array<ConSanBarrierPolicyReason, 12> kConSanBarrierPolicyReasons = {
-    ConSanBarrierPolicyReason::None,
-    ConSanBarrierPolicyReason::TrackingDisabled,
-    ConSanBarrierPolicyReason::EngineMutationOnly,
-    ConSanBarrierPolicyReason::ContainerFilterExcluded,
-    ConSanBarrierPolicyReason::RuntimeKernelExcluded,
-    ConSanBarrierPolicyReason::TargetCapabilityUnavailable,
-    ConSanBarrierPolicyReason::InvalidBarrierEncoding,
-    ConSanBarrierPolicyReason::UnqualifiedSyncSequence,
-    ConSanBarrierPolicyReason::AmbiguousSequenceMembership,
-    ConSanBarrierPolicyReason::MissingCompletingEvent,
-    ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier,
-    ConSanBarrierPolicyReason::ConflictingPhysicalAliases,
-};
+inline constexpr auto kConSanBarrierPolicyReasons = [] {
+  using E = ConSanBarrierPolicyReason;
+  return make_consan_enum_vocabulary(
+      "invalid-barrier-policy-reason", consan_enum(E::None, "none"),
+      consan_enum(E::TrackingDisabled, "tracking-disabled"),
+      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
+      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
+      consan_enum(E::RuntimeKernelExcluded, "runtime-kernel-excluded"),
+      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      consan_enum(E::InvalidBarrierEncoding, "invalid-barrier-encoding"),
+      consan_enum(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
+      consan_enum(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
+      consan_enum(E::MissingCompletingEvent, "missing-completing-event"),
+      consan_enum(E::RedundantAdjacentFullBarrier, "redundant-adjacent-full-barrier"),
+      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+}();
 
 /// Return the stable diagnostic spelling of a barrier-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_barrier_policy_reason_name(ConSanBarrierPolicyReason reason) {
-  switch (reason) {
-  case ConSanBarrierPolicyReason::None:
-    return "none";
-  case ConSanBarrierPolicyReason::TrackingDisabled:
-    return "tracking-disabled";
-  case ConSanBarrierPolicyReason::EngineMutationOnly:
-    return "engine-mutation-only";
-  case ConSanBarrierPolicyReason::ContainerFilterExcluded:
-    return "container-filter-excluded";
-  case ConSanBarrierPolicyReason::RuntimeKernelExcluded:
-    return "runtime-kernel-excluded";
-  case ConSanBarrierPolicyReason::TargetCapabilityUnavailable:
-    return "target-capability-unavailable";
-  case ConSanBarrierPolicyReason::InvalidBarrierEncoding:
-    return "invalid-barrier-encoding";
-  case ConSanBarrierPolicyReason::UnqualifiedSyncSequence:
-    return "unqualified-sync-sequence";
-  case ConSanBarrierPolicyReason::AmbiguousSequenceMembership:
-    return "ambiguous-sequence-membership";
-  case ConSanBarrierPolicyReason::MissingCompletingEvent:
-    return "missing-completing-event";
-  case ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier:
-    return "redundant-adjacent-full-barrier";
-  case ConSanBarrierPolicyReason::ConflictingPhysicalAliases:
-    return "conflicting-physical-aliases";
-  case ConSanBarrierPolicyReason::Count:
-    break;
-  }
-  return "invalid-barrier-policy-reason";
+  return kConSanBarrierPolicyReasons.name(reason);
 }
 
 static_assert(kConSanBarrierPolicyReasons.size() ==
@@ -332,74 +258,34 @@ enum class ConSanAtomicPolicyReason : uint8_t {
 };
 
 /// Complete iterable set of atomic-policy reasons, including `None`.
-inline constexpr std::array<ConSanAtomicPolicyReason, 19> kConSanAtomicPolicyReasons = {
-    ConSanAtomicPolicyReason::None,
-    ConSanAtomicPolicyReason::TrackingDisabled,
-    ConSanAtomicPolicyReason::EngineMutationOnly,
-    ConSanAtomicPolicyReason::ContainerFilterExcluded,
-    ConSanAtomicPolicyReason::MissingExecutionOwner,
-    ConSanAtomicPolicyReason::MissingSampledAccessWindow,
-    ConSanAtomicPolicyReason::TargetCapabilityUnavailable,
-    ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
-    ConSanAtomicPolicyReason::AmbiguousSequenceMembership,
-    ConSanAtomicPolicyReason::UnsupportedMemoryRole,
-    ConSanAtomicPolicyReason::MissingScope,
-    ConSanAtomicPolicyReason::UnsupportedScope,
-    ConSanAtomicPolicyReason::InvalidAccessWidth,
-    ConSanAtomicPolicyReason::UnsupportedAddressSource,
-    ConSanAtomicPolicyReason::MissingOperands,
-    ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable,
-    ConSanAtomicPolicyReason::UnsupportedDynamicOutcome,
-    ConSanAtomicPolicyReason::UnsupportedEncoding,
-    ConSanAtomicPolicyReason::ConflictingPhysicalAliases,
-};
+inline constexpr auto kConSanAtomicPolicyReasons = [] {
+  using E = ConSanAtomicPolicyReason;
+  return make_consan_enum_vocabulary(
+      "invalid-atomic-policy-reason", consan_enum(E::None, "none"),
+      consan_enum(E::TrackingDisabled, "tracking-disabled"),
+      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
+      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
+      consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
+      consan_enum(E::MissingSampledAccessWindow, "missing-sampled-access-window"),
+      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      consan_enum(E::UnqualifiedSyncSequence, "unqualified-sync-sequence"),
+      consan_enum(E::AmbiguousSequenceMembership, "ambiguous-sequence-membership"),
+      consan_enum(E::UnsupportedMemoryRole, "unsupported-memory-role"),
+      consan_enum(E::MissingScope, "missing-scope"),
+      consan_enum(E::UnsupportedScope, "unsupported-scope"),
+      consan_enum(E::InvalidAccessWidth, "invalid-access-width"),
+      consan_enum(E::UnsupportedAddressSource, "unsupported-address-source"),
+      consan_enum(E::MissingOperands, "missing-operands"),
+      consan_enum(E::CompareExchangeOutcomeUnavailable, "compare-exchange-outcome-unavailable"),
+      consan_enum(E::UnsupportedDynamicOutcome, "unsupported-dynamic-outcome"),
+      consan_enum(E::UnsupportedEncoding, "unsupported-encoding"),
+      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+}();
 
 /// Return the stable diagnostic spelling of an atomic-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_atomic_policy_reason_name(ConSanAtomicPolicyReason reason) {
-  switch (reason) {
-  case ConSanAtomicPolicyReason::None:
-    return "none";
-  case ConSanAtomicPolicyReason::TrackingDisabled:
-    return "tracking-disabled";
-  case ConSanAtomicPolicyReason::EngineMutationOnly:
-    return "engine-mutation-only";
-  case ConSanAtomicPolicyReason::ContainerFilterExcluded:
-    return "container-filter-excluded";
-  case ConSanAtomicPolicyReason::MissingExecutionOwner:
-    return "missing-execution-owner";
-  case ConSanAtomicPolicyReason::MissingSampledAccessWindow:
-    return "missing-sampled-access-window";
-  case ConSanAtomicPolicyReason::TargetCapabilityUnavailable:
-    return "target-capability-unavailable";
-  case ConSanAtomicPolicyReason::UnqualifiedSyncSequence:
-    return "unqualified-sync-sequence";
-  case ConSanAtomicPolicyReason::AmbiguousSequenceMembership:
-    return "ambiguous-sequence-membership";
-  case ConSanAtomicPolicyReason::UnsupportedMemoryRole:
-    return "unsupported-memory-role";
-  case ConSanAtomicPolicyReason::MissingScope:
-    return "missing-scope";
-  case ConSanAtomicPolicyReason::UnsupportedScope:
-    return "unsupported-scope";
-  case ConSanAtomicPolicyReason::InvalidAccessWidth:
-    return "invalid-access-width";
-  case ConSanAtomicPolicyReason::UnsupportedAddressSource:
-    return "unsupported-address-source";
-  case ConSanAtomicPolicyReason::MissingOperands:
-    return "missing-operands";
-  case ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable:
-    return "compare-exchange-outcome-unavailable";
-  case ConSanAtomicPolicyReason::UnsupportedDynamicOutcome:
-    return "unsupported-dynamic-outcome";
-  case ConSanAtomicPolicyReason::UnsupportedEncoding:
-    return "unsupported-encoding";
-  case ConSanAtomicPolicyReason::ConflictingPhysicalAliases:
-    return "conflicting-physical-aliases";
-  case ConSanAtomicPolicyReason::Count:
-    break;
-  }
-  return "invalid-atomic-policy-reason";
+  return kConSanAtomicPolicyReasons.name(reason);
 }
 
 static_assert(kConSanAtomicPolicyReasons.size() ==
@@ -435,44 +321,24 @@ enum class ConSanFencePolicyReason : uint8_t {
 };
 
 /// Complete iterable set of fence-policy reasons, including `None`.
-inline constexpr std::array<ConSanFencePolicyReason, 9> kConSanFencePolicyReasons = {
-    ConSanFencePolicyReason::None,
-    ConSanFencePolicyReason::TrackingDisabled,
-    ConSanFencePolicyReason::EngineMutationOnly,
-    ConSanFencePolicyReason::ContainerFilterExcluded,
-    ConSanFencePolicyReason::MissingExecutionOwner,
-    ConSanFencePolicyReason::AssociationUnavailable,
-    ConSanFencePolicyReason::MissingCommunicationEvent,
-    ConSanFencePolicyReason::TargetCapabilityUnavailable,
-    ConSanFencePolicyReason::ConflictingPhysicalAliases,
-};
+inline constexpr auto kConSanFencePolicyReasons = [] {
+  using E = ConSanFencePolicyReason;
+  return make_consan_enum_vocabulary(
+      "invalid-fence-policy-reason", consan_enum(E::None, "none"),
+      consan_enum(E::TrackingDisabled, "tracking-disabled"),
+      consan_enum(E::EngineMutationOnly, "engine-mutation-only"),
+      consan_enum(E::ContainerFilterExcluded, "container-filter-excluded"),
+      consan_enum(E::MissingExecutionOwner, "missing-execution-owner"),
+      consan_enum(E::AssociationUnavailable, "association-unavailable"),
+      consan_enum(E::MissingCommunicationEvent, "missing-communication-event"),
+      consan_enum(E::TargetCapabilityUnavailable, "target-capability-unavailable"),
+      consan_enum(E::ConflictingPhysicalAliases, "conflicting-physical-aliases"));
+}();
 
 /// Return the stable diagnostic spelling of a fence-policy reason.
 [[nodiscard]] constexpr std::string_view
 consan_fence_policy_reason_name(ConSanFencePolicyReason reason) {
-  switch (reason) {
-  case ConSanFencePolicyReason::None:
-    return "none";
-  case ConSanFencePolicyReason::TrackingDisabled:
-    return "tracking-disabled";
-  case ConSanFencePolicyReason::EngineMutationOnly:
-    return "engine-mutation-only";
-  case ConSanFencePolicyReason::ContainerFilterExcluded:
-    return "container-filter-excluded";
-  case ConSanFencePolicyReason::MissingExecutionOwner:
-    return "missing-execution-owner";
-  case ConSanFencePolicyReason::AssociationUnavailable:
-    return "association-unavailable";
-  case ConSanFencePolicyReason::MissingCommunicationEvent:
-    return "missing-communication-event";
-  case ConSanFencePolicyReason::TargetCapabilityUnavailable:
-    return "target-capability-unavailable";
-  case ConSanFencePolicyReason::ConflictingPhysicalAliases:
-    return "conflicting-physical-aliases";
-  case ConSanFencePolicyReason::Count:
-    break;
-  }
-  return "invalid-fence-policy-reason";
+  return kConSanFencePolicyReasons.name(reason);
 }
 
 static_assert(kConSanFencePolicyReasons.size() ==
@@ -514,26 +380,18 @@ enum class ConSanDynamicResultRequirement : uint8_t {
 };
 
 /// Complete iterable set of dynamic-result requirements.
-inline constexpr std::array<ConSanDynamicResultRequirement, 3> kConSanDynamicResultRequirements = {
-    ConSanDynamicResultRequirement::None,
-    ConSanDynamicResultRequirement::ReturnedOldValue,
-    ConSanDynamicResultRequirement::CompareExchangeSuccess,
-};
+inline constexpr auto kConSanDynamicResultRequirements = [] {
+  using E = ConSanDynamicResultRequirement;
+  return make_consan_enum_vocabulary(
+      "invalid-dynamic-result-requirement", consan_enum(E::None, "none"),
+      consan_enum(E::ReturnedOldValue, "returned-old-value"),
+      consan_enum(E::CompareExchangeSuccess, "compare-exchange-success"));
+}();
 
 /// Return the stable diagnostic spelling of a dynamic-result requirement.
 [[nodiscard]] constexpr std::string_view
 consan_dynamic_result_requirement_name(ConSanDynamicResultRequirement requirement) {
-  switch (requirement) {
-  case ConSanDynamicResultRequirement::None:
-    return "none";
-  case ConSanDynamicResultRequirement::ReturnedOldValue:
-    return "returned-old-value";
-  case ConSanDynamicResultRequirement::CompareExchangeSuccess:
-    return "compare-exchange-success";
-  case ConSanDynamicResultRequirement::Count:
-    break;
-  }
-  return "invalid-dynamic-result-requirement";
+  return kConSanDynamicResultRequirements.name(requirement);
 }
 
 static_assert(kConSanDynamicResultRequirements.size() ==
@@ -575,20 +433,23 @@ enum class ConSanProbeIntentKind : uint8_t {
 };
 
 /// Complete iterable set of probe intent kinds.
-inline constexpr std::array<ConSanProbeIntentKind, 12> kConSanProbeIntentKinds = {
-    ConSanProbeIntentKind::RedundantAccessObservation,
-    ConSanProbeIntentKind::AccessRecord,
-    ConSanProbeIntentKind::SampledAccess,
-    ConSanProbeIntentKind::ExactShadowAccess,
-    ConSanProbeIntentKind::BarrierRecord,
-    ConSanProbeIntentKind::SampledBarrierEpoch,
-    ConSanProbeIntentKind::ExactBarrierEpoch,
-    ConSanProbeIntentKind::AtomicAddressCapture,
-    ConSanProbeIntentKind::AtomicRecord,
-    ConSanProbeIntentKind::SampledAtomicOrdering,
-    ConSanProbeIntentKind::ExactAtomicOrdering,
-    ConSanProbeIntentKind::FenceRecord,
-};
+inline constexpr auto kConSanProbeIntentKinds = [] {
+  using E = ConSanProbeIntentKind;
+  return make_consan_enum_vocabulary(
+      "invalid-probe-intent-kind",
+      consan_enum(E::RedundantAccessObservation, "redundant-access-observation"),
+      consan_enum(E::AccessRecord, "access-record"),
+      consan_enum(E::SampledAccess, "sampled-access"),
+      consan_enum(E::ExactShadowAccess, "exact-shadow-access"),
+      consan_enum(E::BarrierRecord, "barrier-record"),
+      consan_enum(E::SampledBarrierEpoch, "sampled-barrier-epoch"),
+      consan_enum(E::ExactBarrierEpoch, "exact-barrier-epoch"),
+      consan_enum(E::AtomicAddressCapture, "atomic-address-capture"),
+      consan_enum(E::AtomicRecord, "atomic-record"),
+      consan_enum(E::SampledAtomicOrdering, "sampled-atomic-ordering"),
+      consan_enum(E::ExactAtomicOrdering, "exact-atomic-ordering"),
+      consan_enum(E::FenceRecord, "fence-record"));
+}();
 
 /// One engine's target-neutral probe and report-facing evidence vocabulary.
 ///
@@ -634,35 +495,7 @@ consan_engine_probe_vocabulary(ConSanCapabilityEngine engine) {
 
 /// Return the stable diagnostic spelling of an access probe intent kind.
 [[nodiscard]] constexpr std::string_view consan_probe_intent_kind_name(ConSanProbeIntentKind kind) {
-  switch (kind) {
-  case ConSanProbeIntentKind::RedundantAccessObservation:
-    return "redundant-access-observation";
-  case ConSanProbeIntentKind::AccessRecord:
-    return "access-record";
-  case ConSanProbeIntentKind::SampledAccess:
-    return "sampled-access";
-  case ConSanProbeIntentKind::ExactShadowAccess:
-    return "exact-shadow-access";
-  case ConSanProbeIntentKind::BarrierRecord:
-    return "barrier-record";
-  case ConSanProbeIntentKind::SampledBarrierEpoch:
-    return "sampled-barrier-epoch";
-  case ConSanProbeIntentKind::ExactBarrierEpoch:
-    return "exact-barrier-epoch";
-  case ConSanProbeIntentKind::AtomicAddressCapture:
-    return "atomic-address-capture";
-  case ConSanProbeIntentKind::AtomicRecord:
-    return "atomic-record";
-  case ConSanProbeIntentKind::SampledAtomicOrdering:
-    return "sampled-atomic-ordering";
-  case ConSanProbeIntentKind::ExactAtomicOrdering:
-    return "exact-atomic-ordering";
-  case ConSanProbeIntentKind::FenceRecord:
-    return "fence-record";
-  case ConSanProbeIntentKind::Count:
-    break;
-  }
-  return "invalid-probe-intent-kind";
+  return kConSanProbeIntentKinds.name(kind);
 }
 
 static_assert(kConSanProbeIntentKinds.size() == static_cast<size_t>(ConSanProbeIntentKind::Count));
@@ -681,22 +514,13 @@ enum class ConSanProbePosition : uint8_t {
 };
 
 /// Complete iterable set of relative probe positions.
-inline constexpr std::array<ConSanProbePosition, 2> kConSanProbePositions = {
-    ConSanProbePosition::Before,
-    ConSanProbePosition::After,
-};
+inline constexpr auto kConSanProbePositions = make_consan_enum_vocabulary(
+    "invalid-probe-position", consan_enum(ConSanProbePosition::Before, "before"),
+    consan_enum(ConSanProbePosition::After, "after"));
 
 /// Return the stable diagnostic spelling of a relative probe position.
 [[nodiscard]] constexpr std::string_view consan_probe_position_name(ConSanProbePosition position) {
-  switch (position) {
-  case ConSanProbePosition::Before:
-    return "before";
-  case ConSanProbePosition::After:
-    return "after";
-  case ConSanProbePosition::Count:
-    break;
-  }
-  return "invalid-probe-position";
+  return kConSanProbePositions.name(position);
 }
 
 static_assert(kConSanProbePositions.size() == static_cast<size_t>(ConSanProbePosition::Count));
@@ -1030,29 +854,19 @@ enum class ConSanLoweringOutcomeKind : uint8_t {
 };
 
 /// Complete iterable set of lowering outcomes.
-inline constexpr std::array<ConSanLoweringOutcomeKind, 4> kConSanLoweringOutcomeKinds = {
-    ConSanLoweringOutcomeKind::Pending,
-    ConSanLoweringOutcomeKind::Instrumented,
-    ConSanLoweringOutcomeKind::ResourceRejected,
-    ConSanLoweringOutcomeKind::PlacementRejected,
-};
+inline constexpr auto kConSanLoweringOutcomeKinds = [] {
+  using E = ConSanLoweringOutcomeKind;
+  return make_consan_enum_vocabulary(
+      "invalid-lowering-outcome-kind", consan_enum(E::Pending, "pending"),
+      consan_enum(E::Instrumented, "instrumented"),
+      consan_enum(E::ResourceRejected, "resource-rejected"),
+      consan_enum(E::PlacementRejected, "placement-rejected"));
+}();
 
 /// Return the stable diagnostic spelling of a lowering outcome.
 [[nodiscard]] constexpr std::string_view
 consan_lowering_outcome_kind_name(ConSanLoweringOutcomeKind kind) {
-  switch (kind) {
-  case ConSanLoweringOutcomeKind::Pending:
-    return "pending";
-  case ConSanLoweringOutcomeKind::Instrumented:
-    return "instrumented";
-  case ConSanLoweringOutcomeKind::ResourceRejected:
-    return "resource-rejected";
-  case ConSanLoweringOutcomeKind::PlacementRejected:
-    return "placement-rejected";
-  case ConSanLoweringOutcomeKind::Count:
-    break;
-  }
-  return "invalid-lowering-outcome-kind";
+  return kConSanLoweringOutcomeKinds.name(kind);
 }
 
 static_assert(kConSanLoweringOutcomeKinds.size() ==

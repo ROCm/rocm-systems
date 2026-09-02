@@ -12,6 +12,7 @@
 #include <optional>
 #include <string_view>
 
+#include "rocjitsu/code/patch/consan/consan_enum_vocabulary.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
