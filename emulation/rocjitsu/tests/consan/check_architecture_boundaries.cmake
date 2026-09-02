@@ -1439,6 +1439,19 @@ _consan_assert_no_match(
     "emit_moi_local_indirect_entry_island[^;]*ConSanMoiOperatingPoint"
     "shared local-island emission must consume projected routing state"
 )
+file(READ "${_consan_dir}/consan_moi_prologue.cpp" _moi_prologue_implementation)
+foreach(_helper IN ITEMS
+    moi_owner_epoch_prologue_required_vgpr_count
+    moi_entry_scalar_backup_preserves_persistent_outputs
+    moi_owner_epoch_prologue_uses_vgpr
+)
+    if(_moi_prologue_implementation MATCHES
+       "${_helper}\\([^)]*ConSanMoiOperatingPoint")
+        message(FATAL_ERROR
+            "ConSan ${_helper} must consume its resolved prologue emission product"
+        )
+    endif()
+endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "GFX90A_ACCUM_OFFSET"
