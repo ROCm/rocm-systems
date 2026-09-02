@@ -282,9 +282,9 @@ def test_the_figure_opens_on_the_machine_frame(
 
 
 def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
-    """The client frames on the knees the model ships, so each one has to be the
-    knee that figure really draws: capped at its tallest ceiling, including the
-    ceilings a stacked datatype brought with it."""
+    """The knee the model ships has to be the knee that figure really draws:
+    capped at its tallest ceiling, including the ceilings a stacked datatype
+    brought with it."""
     roofline, fig = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
     view_model = roofline._Roofline__view_models["FLOP"]
 
@@ -312,6 +312,70 @@ def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
     trace_names = {trace.name for trace in flops_figure.data}
     assert "Peak MFMA-BF16" in trace_names
     assert "Peak VALU-FP64" in trace_names
+
+
+def html_document(roofline: Roofline, ai_data: dict) -> tuple[str, go.Figure, dict]:
+    """The standalone page one AI dataset produces, with the figure and client
+    model it was built from."""
+    ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(
+        ai_data, datatypes=["FP64"]
+    )
+    figure, view_model = roofline._combined_html_figure(ops_figure, flops_figure)
+    document = roofline_html.build_interactive_document(figure, view_model)
+    return document, figure, view_model.frame
+
+
+def embedded_model(document: str) -> dict:
+    """The client model the page ships, read back out of its script tag."""
+    match = re.search(
+        r'<script id="roofline-model" type="application/json">(.*?)</script>',
+        document,
+        re.DOTALL,
+    )
+    assert match, "expected the page to embed a client model"
+    return json.loads(match.group(1).replace("<\\/", "</"))
+
+
+def axis_ranges(figure: go.Figure) -> dict[str, list[float]]:
+    """The figure's axis bounds back in data coordinates."""
+    return {
+        "x": [10**bound for bound in figure.layout.xaxis.range],
+        "y": [10**bound for bound in figure.layout.yaxis.range],
+    }
+
+
+def test_the_page_opens_on_the_frame_the_figure_was_drawn_on(
+    benchmarked_roofline,
+) -> None:
+    """One frame in three places: the figure layout, the client model, and the
+    JSON the page embeds. Any drift between them is an axis that jumps the
+    moment the page loads."""
+    document, figure, frame = html_document(
+        benchmarked_roofline(["FP64"]),
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
+    )
+
+    assert frame is not None
+    assert axis_ranges(figure) == pytest.approx(frame)
+    assert embedded_model(document)["frame"] == frame
+
+
+def test_two_kernel_sets_ship_the_same_axes_in_the_page(benchmarked_roofline) -> None:
+    """The end of the ticket: same GPU, different kernels, same axes on screen,
+    so a before and after plot overlay."""
+    slow_document, slow_figure, _ = html_document(
+        benchmarked_roofline(["FP64"]),
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]},
+    )
+    fast_document, fast_figure, _ = html_document(
+        benchmarked_roofline(["FP64"]),
+        {"ai_hbm": [[40.0], [20000.0]], "kernelNames": ["fast"]},
+    )
+
+    assert axis_ranges(slow_figure) == axis_ranges(fast_figure)
+    assert embedded_model(slow_document)["frame"] == embedded_model(fast_document)[
+        "frame"
+    ]
 
 
 def test_view_model_to_json_escapes_script_close() -> None:
