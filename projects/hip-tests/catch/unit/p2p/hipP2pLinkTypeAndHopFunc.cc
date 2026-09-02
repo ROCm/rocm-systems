@@ -12,7 +12,6 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #endif
-#include <vector>
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0
 
