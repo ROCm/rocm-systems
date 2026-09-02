@@ -2216,14 +2216,17 @@ set(
     rj_hsa_dbi_moi_report_analyzer.cpp
     rj_hsa_dbi_moi_report_analyzer.h
     rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
+    rj_hsa_dbi_moi_inline_shadow_report_decoder.h
     rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
     rj_hsa_dbi_moi_record_replay_report_analyzer.h
+    rj_hsa_dbi_moi_record_replay_report_decoder.h
     rj_hsa_dbi_moi_report_decoder.cpp
     rj_hsa_dbi_moi_report_decoder.h
     rj_hsa_dbi_moi_report_pipeline.cpp
     rj_hsa_dbi_moi_report_pipeline.h
     rj_hsa_dbi_moi_sampled_report_analyzer.cpp
     rj_hsa_dbi_moi_sampled_report_analyzer.h
+    rj_hsa_dbi_moi_sampled_report_decoder.h
 )
 foreach(_source IN LISTS _runtime_analysis_sources)
     _consan_assert_no_match(
@@ -2269,8 +2272,8 @@ _consan_assert_no_match(
 _consan_assert_match_count_at_most(
     "${_hook_dir}/rj_hsa_dbi_moi_report_analyzer.cpp"
     "ConSanMoiEngine::"
-    6
-    "common report analysis has one reviewed dispatch and one exhaustiveness check"
+    3
+    "common report analysis dispatches by the decoded variant and only checks renderer exhaustiveness"
 )
 foreach(
     _mode_analyzer
@@ -2325,6 +2328,40 @@ _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.h"
     "uint32_t (access_record_count|barrier_record_count|atomic_record_count|visible_record_slot_count|effective_diagnostic_count|sampled_watchpoint_capacity|sampled_sync_metadata_capacity|sampled_pending_acquire_capacity|sampled_pending_acquire_owner_bank_count)"
     "decoded reports must not cache values derivable from their header, layout, or vectors"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.h"
+    "ConSanMoiEngine engine|replay_access_records|exact_shadow|inline_atomic_releases|inline_acquired_tokens|std::vector<AutoMoiSampledEvidence> sampled"
+    "the common decoded report must carry one mode-discriminated evidence product"
+)
+file(READ "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.h" _runtime_decoder_contract)
+foreach(
+    _mode_decoded_product
+    IN ITEMS
+        AutoMoiRecordReplayDecodedReport
+        AutoMoiInlineShadowDecodedReport
+        AutoMoiSampledDecodedReport
+)
+    if(NOT _runtime_decoder_contract MATCHES "${_mode_decoded_product}")
+        message(FATAL_ERROR
+            "ConSan decoded report lost mode product: ${_mode_decoded_product}"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_record_replay_report_decoder.h"
+    "InlineShadow|Sampled"
+    "Record/Replay decoded evidence must not expose another mode"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
+    "RecordReplay|Sampled"
+    "InlineShadow decoded evidence must not expose another mode"
+)
+_consan_assert_no_match(
+    "${_hook_dir}/rj_hsa_dbi_moi_sampled_report_decoder.h"
+    "RecordReplay|InlineShadow"
+    "Sampled decoded evidence must not expose another mode"
 )
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_report_renderer.cpp"

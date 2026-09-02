@@ -40,7 +40,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
 
   const auto *header = static_cast<const rocjitsu::ConSanMoiReportHeader *>(report_ptr);
   if (!rocjitsu::consan_moi_report_header_is_current(*header)) {
-    result.engine = expected_engine;
     result.header = *header;
     result.failure = AutoMoiReportDecodeFailure::InvalidHeader;
     return result;
@@ -48,7 +47,6 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const rocjitsu::ConSanMoiReportBufferLayout &expected_layout = input.layout;
   if (!rocjitsu::consan_moi_report_layout_matches_header(*header, expected_layout, expected_engine,
                                                          input.size)) {
-    result.engine = expected_engine;
     result.header = *header;
     result.failure = AutoMoiReportDecodeFailure::LayoutMismatch;
     return result;
@@ -579,12 +577,11 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   const auto *records = reinterpret_cast<const ConSanMoiAccessRecord *>(
       bytes + expected_layout.access_records_offset);
   result.visible_access_slots.assign(records, records + visible_records);
-  const CompactRecordReplayAccessRecords compact_access_records =
+  CompactRecordReplayAccessRecords compact_access_records =
       expected_engine == ConSanMoiEngine::RecordReplay
           ? compact_record_replay_access_records(result.visible_access_slots, header->event_counter)
           : CompactRecordReplayAccessRecords{};
   const uint32_t committed_records = compact_access_records.committed_record_count;
-  result.replay_access_records = compact_access_records.replay_records;
 
   const auto *barriers = reinterpret_cast<const ConSanMoiBarrierRecord *>(
       bytes + expected_layout.barrier_records_offset);
@@ -696,16 +693,29 @@ AutoMoiDecodedReport decode_auto_moi_report(const AutoMoiReportPipelineInput &in
   }
 
   result.failure = AutoMoiReportDecodeFailure::None;
-  result.engine = expected_engine;
   result.header = *header;
-  result.deferred_token_qualified_diagnostic_count = deferred_token_qualified_diagnostics;
-  result.sampled_watchpoint_slots_examined = sampled_watchpoint_slots_examined;
-  result.sampled_pending_release_slots_examined = sampled_pending_release_slots_examined;
-  result.sampled_synchronization_evidence_complete = sampled_sync_evidence_complete;
-  result.exact_shadow = std::move(visible_exact_shadow);
-  result.inline_atomic_releases = std::move(visible_inline_atomic_releases);
-  result.inline_acquired_tokens = std::move(visible_inline_acquired_tokens);
-  result.sampled = std::move(visible_sampled);
+  switch (expected_engine) {
+  case ConSanMoiEngine::RecordReplay:
+    result.mode = AutoMoiRecordReplayDecodedReport{
+        .access_records = std::move(compact_access_records.replay_records)};
+    break;
+  case ConSanMoiEngine::InlineShadow:
+    result.mode = AutoMoiInlineShadowDecodedReport{
+        .deferred_token_qualified_diagnostic_count = deferred_token_qualified_diagnostics,
+        .exact_shadow = std::move(visible_exact_shadow),
+        .atomic_releases = std::move(visible_inline_atomic_releases),
+        .acquired_tokens = std::move(visible_inline_acquired_tokens),
+    };
+    break;
+  case ConSanMoiEngine::Sampled:
+    result.mode = AutoMoiSampledDecodedReport{
+        .watchpoint_slots_examined = sampled_watchpoint_slots_examined,
+        .pending_release_slots_examined = sampled_pending_release_slots_examined,
+        .synchronization_evidence_complete = sampled_sync_evidence_complete,
+        .evidence = std::move(visible_sampled),
+    };
+    break;
+  }
   return result;
 }
 

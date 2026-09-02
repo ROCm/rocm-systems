@@ -51,14 +51,30 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
   }
 
   if (render_input.mode_analysis == nullptr ||
-      !auto_moi_analysis_matches_engine(*render_input.mode_analysis, decoded.engine)) {
+      !auto_moi_analysis_matches_engine(*render_input.mode_analysis, input.layout.engine)) {
     log_message(kLogFailure, "ConSan MOI auto report reader=%llu has missing typed analysis",
                 static_cast<unsigned long long>(input.reader));
     return rendered;
   }
 
-  const ConSanMoiEngine expected_engine = decoded.engine;
+  const ConSanMoiEngine expected_engine = input.layout.engine;
   const ConSanMoiReportHeader *header = &decoded.header;
+  static const AutoMoiRecordReplayDecodedReport kNoRecordReplayDecodedReport;
+  static const AutoMoiInlineShadowDecodedReport kNoInlineShadowDecodedReport;
+  static const AutoMoiSampledDecodedReport kNoSampledDecodedReport;
+  const auto *selected_record_replay_decoded =
+      std::get_if<AutoMoiRecordReplayDecodedReport>(&decoded.mode);
+  const auto *selected_inline_shadow_decoded =
+      std::get_if<AutoMoiInlineShadowDecodedReport>(&decoded.mode);
+  const auto *selected_sampled_decoded = std::get_if<AutoMoiSampledDecodedReport>(&decoded.mode);
+  const AutoMoiRecordReplayDecodedReport &record_replay_decoded =
+      selected_record_replay_decoded ? *selected_record_replay_decoded
+                                     : kNoRecordReplayDecodedReport;
+  const AutoMoiInlineShadowDecodedReport &inline_shadow_decoded =
+      selected_inline_shadow_decoded ? *selected_inline_shadow_decoded
+                                     : kNoInlineShadowDecodedReport;
+  const AutoMoiSampledDecodedReport &sampled_decoded =
+      selected_sampled_decoded ? *selected_sampled_decoded : kNoSampledDecodedReport;
   const uint32_t access_record_count = header->access_record_count;
   const uint32_t barrier_record_count = header->barrier_record_count;
   const uint32_t atomic_record_count = header->atomic_record_count;
@@ -68,8 +84,9 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
   const uint32_t visible_fences = static_cast<uint32_t>(decoded.fence_records.size());
   const uint32_t visible_diagnostics = static_cast<uint32_t>(decoded.diagnostics.size());
   const uint32_t effective_diagnostic_count =
-      header->diagnostic_count >= decoded.deferred_token_qualified_diagnostic_count
-          ? header->diagnostic_count - decoded.deferred_token_qualified_diagnostic_count
+      header->diagnostic_count >= inline_shadow_decoded.deferred_token_qualified_diagnostic_count
+          ? header->diagnostic_count -
+                inline_shadow_decoded.deferred_token_qualified_diagnostic_count
           : 0u;
   const uint32_t dropped_records = static_cast<uint32_t>(summary.dropped_access_record_count);
   const uint32_t dropped_barriers = static_cast<uint32_t>(summary.dropped_barrier_record_count);
@@ -79,16 +96,16 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
       static_cast<uint32_t>(summary.dropped_diagnostic_record_count);
   const uint32_t sampled_watchpoint_capacity = input.layout.sampled_watchpoint_capacity;
   const uint32_t sampled_sync_metadata_capacity = input.layout.sampled_sync_metadata_capacity;
-  const uint64_t sampled_watchpoint_slots_examined = decoded.sampled_watchpoint_slots_examined;
+  const uint64_t sampled_watchpoint_slots_examined = sampled_decoded.watchpoint_slots_examined;
   const uint64_t sampled_pending_release_slots_examined =
-      decoded.sampled_pending_release_slots_examined;
+      sampled_decoded.pending_release_slots_examined;
   const uint32_t visible_sampled_sync_metadata =
       static_cast<uint32_t>(summary.visible_sampled_sync_metadata_count);
-  const auto &visible_exact_shadow = decoded.exact_shadow;
-  const auto &visible_inline_atomic_releases = decoded.inline_atomic_releases;
-  const auto &visible_inline_acquired_tokens = decoded.inline_acquired_tokens;
-  const auto &visible_sampled = decoded.sampled;
-  const auto &replay_access_records = decoded.replay_access_records;
+  const auto &visible_exact_shadow = inline_shadow_decoded.exact_shadow;
+  const auto &visible_inline_atomic_releases = inline_shadow_decoded.atomic_releases;
+  const auto &visible_inline_acquired_tokens = inline_shadow_decoded.acquired_tokens;
+  const auto &visible_sampled = sampled_decoded.evidence;
+  const auto &replay_access_records = record_replay_decoded.access_records;
   const uint32_t committed_records = static_cast<uint32_t>(summary.visible_access_record_count);
   const ConSanMoiBarrierRecord *barriers = decoded.barrier_records.data();
   const ConSanMoiAtomicRecord *atomics = decoded.atomic_records.data();
@@ -114,11 +131,11 @@ render_auto_moi_report(const AutoMoiReportRenderInput &render_input) {
                                             record_replay_pressure.unavailable_reason)
                                       : "not_record_replay";
 
-  if (decoded.deferred_token_qualified_diagnostic_count != 0) {
+  if (inline_shadow_decoded.deferred_token_qualified_diagnostic_count != 0) {
     log_message(kLogEvidence,
                 "ConSan MOI deferred-token qualification reader=%llu ordered_diagnostics=%u",
                 static_cast<unsigned long long>(input.reader),
-                decoded.deferred_token_qualified_diagnostic_count);
+                inline_shadow_decoded.deferred_token_qualified_diagnostic_count);
   }
   bool rendered_first_exact_malformed = false;
   for (const AutoMoiReportEvidenceIssue &issue : decoded.issues) {

@@ -3498,10 +3498,10 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
   sampled[1].static_mapping = nullptr;
   rocjitsu::consan_hook::AutoMoiReportPipelineInput pipeline_input;
   rocjitsu::consan_hook::AutoMoiDecodedReport sampled_report;
-  sampled_report.engine = rocjitsu::ConSanMoiEngine::Sampled;
   sampled_report.header.flags = rocjitsu::kConSanMoiReportFlagRecordReplayBankSaturated;
-  sampled_report.sampled.assign(sampled.begin(), sampled.end());
-  sampled_report.replay_access_records.assign(records.begin(), records.end());
+  rocjitsu::consan_hook::AutoMoiSampledDecodedReport sampled_decoded;
+  sampled_decoded.evidence.assign(sampled.begin(), sampled.end());
+  sampled_report.mode = std::move(sampled_decoded);
   const auto sampled_report_analysis =
       rocjitsu::consan_hook::analyze_auto_moi_report(pipeline_input, sampled_report);
   EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledConflictAnalysis>(
@@ -3511,10 +3511,10 @@ TEST(HsaHooksUnitTest, ConSanMoiEngineAnalyzerOwnsSampledAndReplayConflicts) {
   EXPECT_EQ(sampled_report_analysis.summary.replay_conflict_count, 0u);
 
   rocjitsu::consan_hook::AutoMoiDecodedReport record_replay_report;
-  record_replay_report.engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   record_replay_report.header = header;
-  record_replay_report.sampled.assign(sampled.begin(), sampled.end());
-  record_replay_report.replay_access_records.assign(records.begin(), records.end());
+  rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport record_replay_decoded;
+  record_replay_decoded.access_records.assign(records.begin(), records.end());
+  record_replay_report.mode = std::move(record_replay_decoded);
   const auto record_replay_report_analysis =
       rocjitsu::consan_hook::analyze_auto_moi_report(pipeline_input, record_replay_report);
   EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayAnalysis>(
@@ -3668,10 +3668,11 @@ TEST(HsaHooksUnitTest, AutoReportDecoderProducesTypedEventsFailuresAndLoss) {
   const auto decoded =
       rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, initial_summary);
   ASSERT_TRUE(decoded.complete());
-  EXPECT_EQ(decoded.engine, rocjitsu::ConSanMoiEngine::RecordReplay);
   EXPECT_EQ(decoded.visible_access_slots.size(), report.layout.access_record_capacity);
-  ASSERT_EQ(decoded.replay_access_records.size(), 1u);
-  EXPECT_EQ(decoded.replay_access_records.front().instruction_offset, 0x40u);
+  const auto &record_replay =
+      std::get<rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport>(decoded.mode);
+  ASSERT_EQ(record_replay.access_records.size(), 1u);
+  EXPECT_EQ(record_replay.access_records.front().instruction_offset, 0x40u);
   EXPECT_EQ(decoded.summary.visible_access_record_count, 1u);
   EXPECT_EQ(decoded.summary.dropped_access_record_count, 2u);
   EXPECT_EQ(decoded.summary.inline_malformed_count, 1u);
@@ -3716,7 +3717,16 @@ TEST(HsaHooksUnitTest, AutoReportDecoderUsesLayoutAsItsOnlyModeAuthority) {
 
     const auto decoded = rocjitsu::consan_hook::decode_auto_moi_report(input, snapshot, {});
     ASSERT_TRUE(decoded.complete());
-    EXPECT_EQ(decoded.engine, engine);
+    if (engine == rocjitsu::ConSanMoiEngine::RecordReplay) {
+      EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiRecordReplayDecodedReport>(
+          decoded.mode));
+    } else if (engine == rocjitsu::ConSanMoiEngine::InlineShadow) {
+      EXPECT_TRUE(std::holds_alternative<rocjitsu::consan_hook::AutoMoiInlineShadowDecodedReport>(
+          decoded.mode));
+    } else {
+      EXPECT_TRUE(
+          std::holds_alternative<rocjitsu::consan_hook::AutoMoiSampledDecodedReport>(decoded.mode));
+    }
   }
 }
 

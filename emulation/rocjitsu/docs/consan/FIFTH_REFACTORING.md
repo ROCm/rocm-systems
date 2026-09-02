@@ -7633,3 +7633,65 @@ analysis boundary rather than completion of runtime mode locality. Broad
 lowering mutation surfaces, physical decoder/renderer ownership, material
 whole-refactoring shrinkage, and the independent completion audit remain open.
 The goal therefore remains active.
+
+### 16.106 Convergence checkpoint 105: one discriminated decoded mode product
+
+After the dormant evidence projection was removed, the surviving decoded
+report still exposed a union-shaped common contract: replay access records,
+three InlineShadow evidence vectors, Sampled evidence and scan telemetry, and a
+separate engine enum all coexisted in every `AutoMoiDecodedReport`. The pipeline
+constructed only one meaningful subset, but consumers could inspect inactive
+mode state and the analyzer redispatched through the enum before selecting the
+corresponding evidence. The enum and the evidence shape were parallel mode
+authorities.
+
+Record/Replay, InlineShadow, and Sampled now each own a mode-named decoded
+evidence contract. `AutoMoiDecodedReport` carries exactly one alternative in
+`AutoMoiModeDecodedReport`; its common surface retains only the validated ABI
+header, summary, genuinely common record streams, diagnostics, and rendered
+detail issues. Replay access records, InlineShadow exact/release/token evidence,
+and Sampled windows/completeness telemetry cannot coexist in one decoded
+object. The duplicate decoded engine field is deleted: the typed input layout
+selects decoding, and the resulting variant itself selects analysis.
+
+The common analyzer visits the decoded variant rather than switching on an
+engine enum. Mode analyzers now include their own decoded contract directly;
+they no longer acquire the entire common decoder contract transitively merely
+to name their evidence. The renderer still produces the stable universal
+summary, but obtains each optional view from the one decoded alternative.
+Boundary checks require all three alternatives, forbid the old union members
+and engine field in the common contract, and prevent each mode-owned decoded
+header from exposing another mode. The three-mode layout test now proves that
+each valid layout produces exactly its corresponding variant.
+
+| Signal | Checkpoint 105 | Cumulative change | Slice change from checkpoint 104 |
+| --- | ---: | ---: | ---: |
+| Production files | 285 | +56 | +3 mode contracts |
+| Physical production lines | 102,759 | **-2,217** | **+85** |
+| Nonblank production lines | 96,479 | **-2,605** | **+67** |
+| Production implementation lines | 88,761 | **-2,689** | **+61** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 327 / 61 | +37 / +10 | 0 / 0 |
+| Mode-specific evidence members in common decoded report | **0** | n/a | **-9** |
+| Independent decoded engine authorities | **0** | n/a | **-1** |
+| Engine branches selecting the analysis algorithm | **0** | n/a | **-3** |
+| Test inventory | **5,411** | **+66** | 0 |
+
+Validation includes a complete `-j16` rebuild, all **41/41** report, analyzer,
+decoder, pipeline, renderer, live-hook, and architecture-boundary tests, and all
+**1,295/1,295** `ConSan.*` and `ConSanMoi.*` host/component tests. No test was
+added, removed, renamed, disabled, or replaced, and no physical gfx1201 test
+was run.
+
+This slice strengthens Sections 14.1, 14.3, 14.5, and 14.6. Its three physical
+contracts introduce 61 implementation lines, so they are a migration boundary,
+not the decoder-locality destination. The actual InlineShadow and Sampled
+decode algorithms still occupy the common decoder translation unit. The next
+decoder convergence work must move those algorithms behind these exact
+contracts and delete them from the common implementation; it may not introduce
+a parallel decoded representation or stop after adding implementation facades.
+The mixed renderer, broad lowering mutation surfaces, material
+whole-refactoring shrinkage, and the independent completion audit remain open.
+The goal therefore remains active.

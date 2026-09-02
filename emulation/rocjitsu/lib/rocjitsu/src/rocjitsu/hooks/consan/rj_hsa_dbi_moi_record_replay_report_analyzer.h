@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_decoder.h"
+#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_pipeline.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 
 #include <cstdint>
