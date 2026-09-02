@@ -26,6 +26,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <unordered_map>
 #include <algorithm>
 #include <rocshmem/rocshmem.hpp>
@@ -138,6 +139,28 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       if (num_wf <= 0) {
         fprintf(stderr, "--num-wf must be a positive integer.\n");
         exit(-1);
+      }
+    } else if (arg == "-tc") {
+      i++;
+      if (i >= argc) {
+        fprintf(stderr, "-tc requires an argument (minimal|full|type1:type2:...)\n");
+        exit(-1);
+      }
+      std::string val = argv[i];
+      if (val == "full") {
+        type_coverage = TypeCoverage::Full;
+      } else if (val == "minimal") {
+        type_coverage = TypeCoverage::Minimal;
+      } else {
+        type_coverage = TypeCoverage::Custom;
+        std::stringstream ss(val);
+        std::string tok;
+        while (std::getline(ss, tok, ':'))
+          if (!tok.empty()) type_filter.insert(normalize_type_name(tok));
+        if (type_filter.empty()) {
+          fprintf(stderr, "-tc: no types specified in '%s'\n", val.c_str());
+          exit(-1);
+        }
       }
     } else if (arg == "-localbuftype") {
       i++;
@@ -293,6 +316,11 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-b|-batch Set buffer rotation batch size (default: loop count)\n";
   std::cout << "\t-noverif|-nocheck disable buffer verification\n";
   std::cout << "\t--num-wf <number of wave-fronts per workgroup> (detected at runtime via HIP, overwrites -z if used)\n";
+  std::cout << "\t-tc <minimal|full|type1:type2:...>  Type coverage mode (default: minimal)\n";
+  std::cout << "\t    minimal  - run the default type subset for each test\n";
+  std::cout << "\t    full     - run all compiled types for each test\n";
+  std::cout << "\t    t1:t2:... - run only the specified types (e.g. -tc int:float:char)\n";
+  std::cout << "\t                multi-word types may use underscores: -tc unsigned_int:long_long\n";
 }
 
 void TesterArguments::get_arguments() {

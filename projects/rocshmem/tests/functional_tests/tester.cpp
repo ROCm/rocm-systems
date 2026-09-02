@@ -85,6 +85,7 @@
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
+#include "type_lists.hpp"
 #if defined(USE_GDA)
 #include "qp_ping_pong_tester.hpp"
 #include "qp_put_nbi_tester.hpp"
@@ -320,103 +321,119 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TeamReductionTestType:
       test_name = "All-to-All Team-based Reduction";
-      testers.push_back(new TeamReductionTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 1;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReductionTester, float, args, testers)
+      } else {
+        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReductionTester, args, testers)
+      }
       break;
     case TeamReduceScatterTestType:
       test_name = "Team-based Reduce-Scatter";
-      testers.push_back(new TeamReduceScatterTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 0;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterTester, float, args, testers)
+      } else {
+        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReduceScatterTester, args, testers)
+      }
       break;
     case ReduceWaveTestType:
       test_name = "Wave-level Reduction";
-      testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 1;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        ROCSHMEM_PUSH_REDUCTION_FLOAT(ReduceWaveTester, float, args, testers)
+      } else {
+        ROCSHMEM_PUSH_REDUCTION_ALL(ReduceWaveTester, args, testers)
+      }
       break;
     case TeamReduceScatterWaveTestType:
       test_name = "Team-based Reduce-Scatter Wave";
-      testers.push_back(new TeamReduceScatterWaveTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 0;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterWaveTester, float, args, testers)
+      } else {
+        ROCSHMEM_PUSH_REDUCTION_ALL(TeamReduceScatterWaveTester, args, testers)
+      }
       break;
-    case TeamBroadcastTestType:
+    case TeamBroadcastTestType: {
       test_name = "Team Broadcast Test";
-      testers.push_back(new TeamBroadcastTester<int64_t>(args));
-      testers.push_back(new TeamBroadcastTester<int>(args));
-      testers.push_back(new TeamBroadcastTester<long long>(args));
-      testers.push_back(new TeamBroadcastTester<float>(args));
-      testers.push_back(new TeamBroadcastTester<double>(args));
-      testers.push_back(new TeamBroadcastTester<char>(args));
-      testers.push_back(new TeamBroadcastTester<unsigned char>(args));
+      // Full mode: push all 13 compiled types via the full list.
+      // Minimal mode: push the original 7-type subset.
+      // Custom mode: push any requested type from the full compiled set.
+      #define PUSH_BCAST(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TeamBroadcastTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new TeamBroadcastTester<int64_t>(args));
+        testers.push_back(new TeamBroadcastTester<int>(args));
+        testers.push_back(new TeamBroadcastTester<long long>(args));
+        testers.push_back(new TeamBroadcastTester<float>(args));
+        testers.push_back(new TeamBroadcastTester<double>(args));
+        testers.push_back(new TeamBroadcastTester<char>(args));
+        testers.push_back(new TeamBroadcastTester<unsigned char>(args));
+      } else {
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_BCAST)
+      }
+      #undef PUSH_BCAST
       break;
-    case BroadcastWaveTestType:
+    }
+    case BroadcastWaveTestType: {
       test_name = "Broadcast Wave Test";
-      testers.push_back(new BroadcastWaveTester<int>(args));
-      testers.push_back(new BroadcastWaveTester<long long>(args));
-      testers.push_back(new BroadcastWaveTester<float>(args));
-      testers.push_back(new BroadcastWaveTester<double>(args));
+      #define PUSH_BWAVE(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new BroadcastWaveTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new BroadcastWaveTester<int>(args));
+        testers.push_back(new BroadcastWaveTester<long long>(args));
+        testers.push_back(new BroadcastWaveTester<float>(args));
+        testers.push_back(new BroadcastWaveTester<double>(args));
+      } else {
+        ROCSHMEM_BCAST_WAVE_TYPES_FULL(PUSH_BWAVE)
+      }
+      #undef PUSH_BWAVE
       break;
-    case TeamAllToAllTestType:
+    }
+    case TeamAllToAllTestType: {
       test_name = "Alltoall Test";
-      testers.push_back(new TeamAlltoallTester<float>(args));
+      #define PUSH_A2A(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TeamAlltoallTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new TeamAlltoallTester<float>(args));
+      } else {
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2A)
+      }
+      #undef PUSH_A2A
       break;
-    case TeamAllToAllvTestType:
+    }
+    case TeamAllToAllvTestType: {
       test_name = "Alltoallv Test";
-      testers.push_back(new TeamAlltoallvTester<float>(args));
+      #define PUSH_A2AV(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TeamAlltoallvTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new TeamAlltoallvTester<float>(args));
+      } else {
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2AV)
+      }
+      #undef PUSH_A2AV
       break;
+    }
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
       break;
-    case AllToAllWaveTestType:
+    case AllToAllWaveTestType: {
       test_name = "AllToAll Wave Test";
-      testers.push_back(new AlltoallWaveTester<float>(args));
-      testers.push_back(new AlltoallWaveTester<char>(args));
-      testers.push_back(new AlltoallWaveTester<int>(args));
+      #define PUSH_A2AWAVE(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AlltoallWaveTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AlltoallWaveTester<float>(args));
+        testers.push_back(new AlltoallWaveTester<char>(args));
+        testers.push_back(new AlltoallWaveTester<int>(args));
+      } else {
+        ROCSHMEM_ALLTOALL_WAVE_TYPES_FULL(PUSH_A2AWAVE)
+      }
+      #undef PUSH_A2AWAVE
       break;
+    }
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
       testers.push_back(new BarrierAllOnStreamTester(args));
@@ -559,124 +576,310 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Signal_Wait_Until_On_Stream";
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
       break;
-    case TeamFCollectTestType:
+    case TeamFCollectTestType: {
       test_name = "Fcollect Test";
-      testers.push_back(new TeamFcollectTester<int64_t>(args));
-      testers.push_back(new TeamFcollectTester<int>(args));
-      testers.push_back(new TeamFcollectTester<long long>(args));
-      testers.push_back(new TeamFcollectTester<float>(args));
-      testers.push_back(new TeamFcollectTester<double>(args));
-      testers.push_back(new TeamFcollectTester<char>(args));
-      testers.push_back(new TeamFcollectTester<unsigned char>(args));
+      #define PUSH_FCOL(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new TeamFcollectTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new TeamFcollectTester<int64_t>(args));
+        testers.push_back(new TeamFcollectTester<int>(args));
+        testers.push_back(new TeamFcollectTester<long long>(args));
+        testers.push_back(new TeamFcollectTester<float>(args));
+        testers.push_back(new TeamFcollectTester<double>(args));
+        testers.push_back(new TeamFcollectTester<char>(args));
+        testers.push_back(new TeamFcollectTester<unsigned char>(args));
+      } else {
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_FCOL)
+      }
+      #undef PUSH_FCOL
       break;
-    case FcollectWaveTestType:
+    }
+    case FcollectWaveTestType: {
       test_name = "Fcollect Wave Test";
-      testers.push_back(new FcollectWaveTester<int64_t>(args));
-      testers.push_back(new FcollectWaveTester<int>(args));
-      testers.push_back(new FcollectWaveTester<long long>(args));
-      testers.push_back(new FcollectWaveTester<float>(args));
-      testers.push_back(new FcollectWaveTester<double>(args));
-      testers.push_back(new FcollectWaveTester<char>(args));
-      testers.push_back(new FcollectWaveTester<unsigned char>(args));
+      #define PUSH_FWAVE(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new FcollectWaveTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new FcollectWaveTester<int64_t>(args));
+        testers.push_back(new FcollectWaveTester<int>(args));
+        testers.push_back(new FcollectWaveTester<long long>(args));
+        testers.push_back(new FcollectWaveTester<float>(args));
+        testers.push_back(new FcollectWaveTester<double>(args));
+        testers.push_back(new FcollectWaveTester<char>(args));
+        testers.push_back(new FcollectWaveTester<unsigned char>(args));
+      } else {
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_FWAVE)
+      }
+      #undef PUSH_FWAVE
       break;
-    case AMO_FAddTestType:
+    }
+    case AMO_FAddTestType: {
       test_name = "AMO Fetch_Add";
-      testers.push_back(new AMOStandardTester<long long>(args));
-      testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+      #define PUSH_AMO_STD(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOStandardTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOStandardTester<long long>(args));
+        testers.push_back(new AMOStandardTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOStandardTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
+        }
+      }
+      #undef PUSH_AMO_STD
       break;
-    case AMO_FIncTestType:
+    }
+    case AMO_FIncTestType: {
       test_name = "AMO Fetch_Inc";
-      testers.push_back(new AMOStandardTester<long long>(args));
-      testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+      #define PUSH_AMO_STD(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOStandardTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOStandardTester<long long>(args));
+        testers.push_back(new AMOStandardTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOStandardTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
+        }
+      }
+      #undef PUSH_AMO_STD
       break;
-    case AMO_FetchTestType:
+    }
+    case AMO_FetchTestType: {
       test_name = "AMO Fetch";
-      testers.push_back(new AMOExtendedTester<long long>(args));
-      testers.push_back(new AMOExtendedTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOExtendedTester<int>(args));
+      #define PUSH_AMO_EXT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOExtendedTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOExtendedTester<long long>(args));
+        testers.push_back(new AMOExtendedTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOExtendedTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
+        }
+      }
+      #undef PUSH_AMO_EXT
       break;
-    case AMO_FCswapTestType:
+    }
+    case AMO_FCswapTestType: {
       test_name = "AMO Fetch_CSWAP";
-      testers.push_back(new AMOStandardTester<long long>(args));
-      testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+      #define PUSH_AMO_STD(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOStandardTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOStandardTester<long long>(args));
+        testers.push_back(new AMOStandardTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOStandardTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
+        }
+      }
+      #undef PUSH_AMO_STD
       break;
-    case AMO_AddTestType:
+    }
+    case AMO_AddTestType: {
       test_name = "AMO Add";
-      testers.push_back(new AMOStandardTester<long long>(args));
-      testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+      #define PUSH_AMO_STD(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOStandardTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOStandardTester<long long>(args));
+        testers.push_back(new AMOStandardTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOStandardTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
+        }
+      }
+      #undef PUSH_AMO_STD
       break;
-    case AMO_SetTestType:
+    }
+    case AMO_SetTestType: {
       test_name = "AMO Set";
-      testers.push_back(new AMOExtendedTester<long long>(args));
-      testers.push_back(new AMOExtendedTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOExtendedTester<int>(args));
+      #define PUSH_AMO_EXT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOExtendedTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOExtendedTester<long long>(args));
+        testers.push_back(new AMOExtendedTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOExtendedTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
+        }
+      }
+      #undef PUSH_AMO_EXT
       break;
-    case AMO_SwapTestType:
+    }
+    case AMO_SwapTestType: {
       test_name = "AMO Swap";
-      testers.push_back(new AMOExtendedTester<long long>(args));
-      testers.push_back(new AMOExtendedTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOExtendedTester<int>(args));
+      #define PUSH_AMO_EXT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOExtendedTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOExtendedTester<long long>(args));
+        testers.push_back(new AMOExtendedTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOExtendedTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
+        }
+      }
+      #undef PUSH_AMO_EXT
       break;
-    case AMO_FetchAndTestType:
+    }
+    case AMO_FetchAndTestType: {
       test_name = "AMO Fetch And";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_AndTestType:
+    }
+    case AMO_AndTestType: {
       test_name = "AMO And";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_FetchOrTestType:
+    }
+    case AMO_FetchOrTestType: {
       test_name = "AMO Fetch Or";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_OrTestType:
+    }
+    case AMO_OrTestType: {
       test_name = "AMO Or";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_FetchXorTestType:
+    }
+    case AMO_FetchXorTestType: {
       test_name = "AMO Fetch Xor";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_XorTestType:
+    }
+    case AMO_XorTestType: {
       test_name = "AMO Xor";
-      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
-      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      #define PUSH_AMO_BIT(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOBitwiseTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+        testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOBitwiseTester<unsigned int>(args));
+      } else {
+        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
+        }
+      }
+      #undef PUSH_AMO_BIT
       break;
-    case AMO_IncTestType:
+    }
+    case AMO_IncTestType: {
       test_name = "AMO Inc";
-      testers.push_back(new AMOStandardTester<long long>(args));
-      testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+      #define PUSH_AMO_STD(T, name) \
+        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
+          testers.push_back(new AMOStandardTester<T>(args));
+      if (args.type_coverage == TypeCoverage::Minimal) {
+        testers.push_back(new AMOStandardTester<long long>(args));
+        testers.push_back(new AMOStandardTester<long>(args));
+        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
+          testers.push_back(new AMOStandardTester<int>(args));
+      } else {
+        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
+        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
+          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
+        }
+      }
+      #undef PUSH_AMO_STD
       break;
+    }
     case PingPongTestType:
       test_name = (args.num_wgs > 1) ? "PingPong (W>1: bidir BW)"
                                      : "PingPong";
