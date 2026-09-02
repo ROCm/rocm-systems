@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"

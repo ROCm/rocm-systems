@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/exec_state.h"
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
