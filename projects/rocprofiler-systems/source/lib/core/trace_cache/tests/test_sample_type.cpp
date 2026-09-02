@@ -23,54 +23,54 @@ protected:
 
 namespace
 {
-constexpr auto spm_counter_id_0          = std::uint64_t{ 11 };
-constexpr auto spm_counter_id_1          = std::uint64_t{ 12 };
-constexpr auto spm_counter_instance_id_0 = std::uint64_t{ 111 };
-constexpr auto spm_counter_instance_id_1 = std::uint64_t{ 222 };
-constexpr auto spm_timestamp_0           = std::uint64_t{ 1000 };
-constexpr auto spm_timestamp_1           = std::uint64_t{ 1200 };
-constexpr auto spm_value_0               = 123.5;
-constexpr auto spm_value_1               = 456.75;
-constexpr auto spm_value_2               = 789.25;
-constexpr auto spm_agent_id              = std::uint64_t{ 7 };
-constexpr auto spm_dispatch_id           = std::uint64_t{ 42 };
-constexpr auto spm_kernel_id             = std::uint64_t{ 99 };
-constexpr auto spm_queue_id              = std::uint64_t{ 1234 };
-constexpr auto spm_correlation_id        = std::uint64_t{ 5678 };
-constexpr auto spm_ancestor_id           = std::uint64_t{ 9876 };
-constexpr auto spm_stream_handle         = std::uint64_t{ 55 };
+constexpr auto k_spm_counter_id_0          = std::uint64_t{ 11 };
+constexpr auto k_spm_counter_id_1          = std::uint64_t{ 12 };
+constexpr auto k_spm_counter_instance_id_0 = std::uint64_t{ 111 };
+constexpr auto k_spm_counter_instance_id_1 = std::uint64_t{ 222 };
+constexpr auto k_spm_timestamp_0           = std::uint64_t{ 1000 };
+constexpr auto k_spm_timestamp_1           = std::uint64_t{ 1200 };
+constexpr auto k_spm_value_0               = 123.5;
+constexpr auto k_spm_value_1               = 456.75;
+constexpr auto k_spm_value_2               = 789.25;
+constexpr auto k_spm_agent_id              = std::uint64_t{ 7 };
+constexpr auto k_spm_dispatch_id           = std::uint64_t{ 42 };
+constexpr auto k_spm_kernel_id             = std::uint64_t{ 99 };
+constexpr auto k_spm_queue_id              = std::uint64_t{ 1234 };
+constexpr auto k_spm_correlation_id        = std::uint64_t{ 5678 };
+constexpr auto k_spm_ancestor_id           = std::uint64_t{ 9876 };
+constexpr auto k_spm_stream_handle         = std::uint64_t{ 55 };
 
 spm_sample
 make_spm_sample()
 {
     return spm_sample{
-        .agent_id_handle         = spm_agent_id,
-        .dispatch_id             = spm_dispatch_id,
-        .kernel_id               = spm_kernel_id,
-        .queue_id_handle         = spm_queue_id,
-        .correlation_id_internal = spm_correlation_id,
-        .correlation_id_ancestor = spm_ancestor_id,
-        .stream_handle           = spm_stream_handle,
+        .agent_id_handle         = k_spm_agent_id,
+        .dispatch_id             = k_spm_dispatch_id,
+        .kernel_id               = k_spm_kernel_id,
+        .queue_id_handle         = k_spm_queue_id,
+        .correlation_id_internal = k_spm_correlation_id,
+        .correlation_id_ancestor = k_spm_ancestor_id,
+        .stream_handle           = k_spm_stream_handle,
         .data_loss               = true,
         .counters =
             {
-                { .counter_id          = spm_counter_id_0,
-                  .counter_instance_id = spm_counter_instance_id_0 },
-                { .counter_id          = spm_counter_id_1,
-                  .counter_instance_id = spm_counter_instance_id_1 },
+                { .counter_id          = k_spm_counter_id_0,
+                  .counter_instance_id = k_spm_counter_instance_id_0 },
+                { .counter_id          = k_spm_counter_id_1,
+                  .counter_instance_id = k_spm_counter_instance_id_1 },
             },
         .samples =
             {
-                { .timestamp = spm_timestamp_0,
+                { .timestamp = k_spm_timestamp_0,
                   .values =
                       {
-                          { .counter_info_index = 0, .value = spm_value_0 },
-                          { .counter_info_index = 1, .value = spm_value_1 },
+                          { .counter_info_index = 0, .value = k_spm_value_0 },
+                          { .counter_info_index = 1, .value = k_spm_value_1 },
                       } },
-                { .timestamp = spm_timestamp_1,
+                { .timestamp = k_spm_timestamp_1,
                   .values =
                       {
-                          { .counter_info_index = 0, .value = spm_value_2 },
+                          { .counter_info_index = 0, .value = k_spm_value_2 },
                       } },
             },
     };

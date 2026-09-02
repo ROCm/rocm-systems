@@ -1525,17 +1525,17 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle(const spm_sample& _spm)
+perfetto_processor_t::handle(const spm_sample& spm_data)
 {
-    const auto device_id = get_spm_device_id(_spm, m_agent_manager);
+    const auto device_id = get_spm_device_id(spm_data, m_agent_manager);
     if(!device_id)
     {
         return;
     }
 
     const auto tracks =
-        make_spm_tracks(_spm, *device_id, m_metadata, m_missing_spm_counter_metadata);
-    emit_spm_samples(_spm, tracks);
+        make_spm_tracks(spm_data, *device_id, m_metadata, m_missing_spm_counter_metadata);
+    emit_spm_samples(spm_data, tracks);
 }
 
 void

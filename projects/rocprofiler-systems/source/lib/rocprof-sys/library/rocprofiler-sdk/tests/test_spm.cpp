@@ -17,7 +17,7 @@
 
 namespace
 {
-constexpr auto valid_sample_interval = std::uint64_t{ 8192 };
+constexpr auto k_valid_sample_interval = std::uint64_t{ 8192 };
 
 using rocprofsys::rocprofiler_sdk::spm::configuration;
 using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
@@ -27,9 +27,9 @@ namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
 void
 ensure_spm_settings_registered()
 {
-    auto settings = rocprofsys::settings::shared_instance();
+    auto settings            = rocprofsys::settings::shared_instance();
     auto register_if_missing = [&settings](const char* env_name, auto initial_value) {
-        using value_type = decltype(initial_value);
+        using value_type  = decltype(initial_value);
         auto setting_name = std::string{ env_name };
         if(settings->find(setting_name) == settings->end())
         {
@@ -45,17 +45,19 @@ ensure_spm_settings_registered()
                         std::uint64_t{ 0 });
 }
 
+// GoogleTest fixtures inherit an abstract TestBody contract but are not interfaces.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class spm_settings_test : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
         ensure_spm_settings_registered();
-        previous_events = rocprofsys::config::get_setting_value<std::string>(
+        m_previous_events = rocprofsys::config::get_setting_value<std::string>(
             std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS });
-        previous_sample_interval = rocprofsys::config::get_setting_value<std::uint64_t>(
+        m_previous_sample_interval = rocprofsys::config::get_setting_value<std::uint64_t>(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL });
-        previous_dispatch_events = rocprofsys::config::get_setting_value<std::string>(
+        m_previous_dispatch_events = rocprofsys::config::get_setting_value<std::string>(
             std::string{ rocprofsys::env_vars::ROCM_EVENTS });
     }
 
@@ -63,25 +65,25 @@ protected:
     {
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_SPM_EVENTS },
-            previous_events.value_or(std::string{}));
+            m_previous_events.value_or(std::string{}));
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
-            previous_sample_interval.value_or(std::uint64_t{ 0 }));
+            m_previous_sample_interval.value_or(std::uint64_t{ 0 }));
         rocprofsys::config::set_setting_value(
             std::string{ rocprofsys::env_vars::ROCM_EVENTS },
-            previous_dispatch_events.value_or(std::string{}));
+            m_previous_dispatch_events.value_or(std::string{}));
     }
 
-    std::optional<std::string>   previous_events          = std::nullopt;
-    std::optional<std::uint64_t> previous_sample_interval = std::nullopt;
-    std::optional<std::string>   previous_dispatch_events = std::nullopt;
+    std::optional<std::string>   m_previous_events          = std::nullopt;
+    std::optional<std::uint64_t> m_previous_sample_interval = std::nullopt;
+    std::optional<std::string>   m_previous_dispatch_events = std::nullopt;
 };
 
 configuration
 make_valid_requested_spm_config()
 {
     return configuration{ .counter_events  = { "SQ_WAVES" },
-                          .sample_interval = valid_sample_interval };
+                          .sample_interval = k_valid_sample_interval };
 }
 
 void
@@ -101,7 +103,7 @@ TEST_F(spm_settings_test, accessors_reflect_configured_spm_settings)
         std::string{ "SQ_WAVES,TD_TD_BUSY" }));
     ASSERT_TRUE(rocprofsys::config::set_setting_value(
         std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL },
-        valid_sample_interval));
+        k_valid_sample_interval));
 
     const auto events = rocprofsys::rocprofiler_sdk::spm::get_events();
 
@@ -109,7 +111,7 @@ TEST_F(spm_settings_test, accessors_reflect_configured_spm_settings)
     EXPECT_EQ(events.at(0), "SQ_WAVES");
     EXPECT_EQ(events.at(1), "TD_TD_BUSY");
     EXPECT_EQ(rocprofsys::rocprofiler_sdk::spm::get_sample_interval(),
-              valid_sample_interval);
+              k_valid_sample_interval);
 }
 
 TEST(spm_configuration, requested_reflects_events)
@@ -143,7 +145,7 @@ TEST(spm_configuration_parsing, parse_requested_counters_skips_empty_and_invalid
     const auto parsed = spm_detail::parse_requested_counters(
         configuration{ .counter_events  = { " SQ_WAVES:device=0 ", "", "TD_TD_BUSY",
                                             "BAD:device=abc", ":device=1" },
-                       .sample_interval = valid_sample_interval });
+                       .sample_interval = k_valid_sample_interval });
 
     ASSERT_EQ(parsed.size(), 2);
     expect_requested_counter(parsed.at(0), "SQ_WAVES", std::uint64_t{ 0 });
@@ -155,7 +157,7 @@ TEST(spm_configuration_parsing,
 {
     const auto parsed = spm_detail::parse_requested_counters(configuration{
         .counter_events  = { "SQ_WAVES:device=0", "TD_TD_BUSY:device=1", "TCC_HIT" },
-        .sample_interval = valid_sample_interval });
+        .sample_interval = k_valid_sample_interval });
 
     const auto device_zero = spm_detail::requested_counters_for_device(parsed, 0);
     ASSERT_EQ(device_zero.size(), 2);
@@ -172,7 +174,7 @@ TEST(spm_configuration_parsing, requested_counter_names_deduplicates_parsed_name
 {
     const auto parsed = spm_detail::parse_requested_counters(configuration{
         .counter_events  = { "SQ_WAVES:device=0", "SQ_WAVES:device=1", "TD_TD_BUSY" },
-        .sample_interval = valid_sample_interval });
+        .sample_interval = k_valid_sample_interval });
 
     const auto names = spm_detail::requested_counter_names(parsed);
     EXPECT_EQ(names, (std::unordered_set<std::string>{ "SQ_WAVES", "TD_TD_BUSY" }));
@@ -202,7 +204,7 @@ TEST(spm_config_validation, accepts_when_spm_is_not_requested)
 TEST(spm_config_validation, accepts_sample_interval_without_events)
 {
     EXPECT_TRUE(is_config_valid(
-        configuration{ .counter_events = {}, .sample_interval = valid_sample_interval },
+        configuration{ .counter_events = {}, .sample_interval = k_valid_sample_interval },
         {}, {}));
 }
 
@@ -244,7 +246,7 @@ TEST(spm_runtime_configuration, accepts_sample_interval_without_events)
 {
     EXPECT_TRUE(configure_runtime(
         nullptr,
-        configuration{ .counter_events = {}, .sample_interval = valid_sample_interval },
+        configuration{ .counter_events = {}, .sample_interval = k_valid_sample_interval },
         {}, {}));
 }
 

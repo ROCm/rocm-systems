@@ -1224,9 +1224,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& parser) {
-                auto _events =
+                auto events =
                     fmt::format("{}", fmt::join(parser.get<strvec_t>("spm-events"), ","));
-                update_env(_data, env_vars::ROCM_SPM_EVENTS, _events);
+                update_env(_data, env_vars::ROCM_SPM_EVENTS, events);
             });
 
         _data.reg.processed_environs.emplace("spm_events");

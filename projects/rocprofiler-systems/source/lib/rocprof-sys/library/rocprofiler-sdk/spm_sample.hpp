@@ -58,6 +58,8 @@ struct timestamp_sample
  */
 struct sample : trace_cache::cacheable_t
 {
+    // Match the trace-cache serialization protocol used by every sample type.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::spm_sample
     };

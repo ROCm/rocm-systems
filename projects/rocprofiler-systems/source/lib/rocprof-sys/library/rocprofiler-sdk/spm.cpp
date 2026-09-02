@@ -7,7 +7,6 @@
 #include "library/rocprofiler-sdk/spm.hpp"
 #include "library/rocprofiler-sdk/spm_internal.hpp"
 
-#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
@@ -41,6 +40,7 @@
 
 #if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 #    include "backends/rocprofiler_sdk/backend.hpp"
+#    include "backends/rocprofiler_sdk/wrapper.hpp"
 #    include "core/trace_cache/cache_manager.hpp"
 #    include "core/trace_cache/metadata_registry.hpp"
 #    include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -143,7 +143,7 @@ namespace detail
 {
 namespace
 {
-constexpr auto device_qualifier = std::string_view{ ":device=" };
+constexpr auto k_device_qualifier = std::string_view{ ":device=" };
 }
 
 std::optional<std::uint64_t>
@@ -168,7 +168,7 @@ parse_device_id(std::string_view value)
 std::string
 parse_counter_name(std::string_view event)
 {
-    auto name = std::string{ event.substr(0, event.find(device_qualifier)) };
+    auto name = std::string{ event.substr(0, event.find(k_device_qualifier)) };
     utility::trim_str(name);
     return name;
 }
@@ -188,7 +188,7 @@ parse_requested_counters(const configuration& requested_config)
         }
 
         auto       name = parse_counter_name(trimmed_event);
-        const auto pos  = trimmed_event.find(device_qualifier);
+        const auto pos  = trimmed_event.find(k_device_qualifier);
         if(pos == std::string::npos)
         {
             counters.push_back({ .name = std::move(name), .device_id = std::nullopt });
@@ -196,7 +196,7 @@ parse_requested_counters(const configuration& requested_config)
         }
 
         auto device = parse_device_id(
-            std::string_view{ trimmed_event }.substr(pos + device_qualifier.size()));
+            std::string_view{ trimmed_event }.substr(pos + k_device_qualifier.size()));
 
         if(name.empty() || !device.has_value())
         {
@@ -238,7 +238,7 @@ requested_counter_names(const requested_counter_vec_t& requested)
 #if ROCPROFSYS_USE_SPM && !defined(ROCPROFSYS_DISABLE_SPM_RUNTIME)
 namespace
 {
-constexpr auto invalid_context_handle = 0UL;
+constexpr auto k_invalid_context_handle = 0UL;
 static_assert(sizeof(rocprofiler_counter_config_id_t) == sizeof(spm_counter_config_id_t),
               "SPM config handle mirror diverged from rocprofiler-sdk");
 
@@ -277,16 +277,16 @@ using sample_index_map_t         = std::unordered_map<std::uint64_t, size_t>;
 using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
         ::rocprofsys::rocprofiler_sdk::wrapper>;
 
-enum class spm_status
+enum class SpmStatus
 {
-    success,
-    skipped,
-    failed,
+    Success,
+    Skipped,
+    Failed,
 };
 
 struct counter_query_result
 {
-    spm_status             status = spm_status::failed;
+    SpmStatus              status = SpmStatus::Failed;
     resolved_counter_vec_t resolved_counters;
 };
 
@@ -318,7 +318,7 @@ void
 destroy_spm_counter_config(rocprofiler_agent_id_t          agent_id,
                            rocprofiler_counter_config_id_t config_id) noexcept
 {
-    if(config_id.handle == invalid_context_handle)
+    if(config_id.handle == k_invalid_context_handle)
     {
         return;
     }
@@ -391,7 +391,7 @@ private:
 
 struct agent_config_result
 {
-    spm_status           status = spm_status::failed;
+    SpmStatus            status = SpmStatus::Failed;
     counter_config_owner config;
 };
 
@@ -477,7 +477,7 @@ spm_supported_counters_callback(rocprofiler_agent_id_t /*agent_id*/,
     }
 }
 
-spm_status
+SpmStatus
 query_sample_interval_support(rocprofiler_agent_id_t agent_id,
                               const configuration&   requested_config)
 {
@@ -489,7 +489,7 @@ query_sample_interval_support(rocprofiler_agent_id_t agent_id,
         LOG_WARNING("Failed to query SPM configurations for agent {}: {} ({})",
                     agent_id.handle, static_cast<int>(status),
                     rocprofiler_get_status_string(status));
-        return spm_status::failed;
+        return SpmStatus::Failed;
     }
 
     const auto supported =
@@ -499,7 +499,7 @@ query_sample_interval_support(rocprofiler_agent_id_t agent_id,
                    config.interval.min_interval <= requested_config.sample_interval &&
                    config.interval.max_interval >= requested_config.sample_interval;
         });
-    return supported ? spm_status::success : spm_status::skipped;
+    return supported ? SpmStatus::Success : SpmStatus::Skipped;
 }
 
 counter_config_data
@@ -564,14 +564,14 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
     {
         LOG_WARNING("SPM is not supported on the architecture of device {} (agent {})",
                     device_id, agent_id.handle);
-        return { .status = spm_status::skipped, .resolved_counters = {} };
+        return { .status = SpmStatus::Skipped, .resolved_counters = {} };
     }
 
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
         LOG_WARNING("Failed to query SPM counters for agent {}: {} ({})", agent_id.handle,
                     static_cast<int>(status), rocprofiler_get_status_string(status));
-        return { .status = spm_status::failed, .resolved_counters = {} };
+        return { .status = SpmStatus::Failed, .resolved_counters = {} };
     }
 
     auto counters = resolved_counter_vec_t{};
@@ -596,8 +596,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
 
     if(matched.size() == requested_names.size())
     {
-        return { .status            = spm_status::success,
-                 .resolved_counters = std::move(counters) };
+        return { .status = SpmStatus::Success, .resolved_counters = std::move(counters) };
     }
 
     for(const auto& name : requested_names)
@@ -610,7 +609,7 @@ query_supported_spm_counters(rocprofiler_agent_id_t                 agent_id,
         }
     }
 
-    return { .status = spm_status::skipped, .resolved_counters = {} };
+    return { .status = SpmStatus::Skipped, .resolved_counters = {} };
 }
 
 std::optional<counter_config_owner>
@@ -653,20 +652,20 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
     const auto requested_names = detail::requested_counter_names(requested);
     auto       counter_query =
         query_supported_spm_counters(agent_id, requested_names, device_id);
-    if(counter_query.status != spm_status::success)
+    if(counter_query.status != SpmStatus::Success)
     {
         return { .status = counter_query.status, .config = {} };
     }
 
     const auto interval_status =
         query_sample_interval_support(agent_id, requested_config);
-    if(interval_status == spm_status::skipped)
+    if(interval_status == SpmStatus::Skipped)
     {
         LOG_WARNING("SPM sample interval {} SCLK cycles is not supported for device {} "
                     "(agent {})",
                     requested_config.sample_interval, device_id, agent_id.handle);
     }
-    if(interval_status != spm_status::success)
+    if(interval_status != SpmStatus::Success)
     {
         return { .status = interval_status, .config = {} };
     }
@@ -678,10 +677,10 @@ create_agent_spm_config(rocprofiler_agent_id_t agent_id, std::uint64_t device_id
     {
         trace_cache::get_metadata_registry().set_spm_counter_names(
             static_cast<std::uint32_t>(device_id), std::move(config_data.name_entries));
-        return { .status = spm_status::success, .config = std::move(*config) };
+        return { .status = SpmStatus::Success, .config = std::move(*config) };
     }
 
-    return { .status = spm_status::failed, .config = {} };
+    return { .status = SpmStatus::Failed, .config = {} };
 }
 
 void
@@ -705,22 +704,22 @@ log_agent_configuration_summary(bool matched_agent, std::size_t skipped_agents,
     }
 }
 
-enum class agent_setup_status
+enum class AgentSetupStatus
 {
-    not_requested,
-    configured,
-    skipped,
-    failed,
+    NotRequested,
+    Configured,
+    Skipped,
+    Failed,
 };
 
-agent_setup_status
+AgentSetupStatus
 configure_agent_spm_config(agent_spm_counter_config_map_t& configs,
                            const tool_agent& agent, const configuration& requested_config,
                            const requested_counter_vec_t& all_requested)
 {
     if(agent.agent == nullptr)
     {
-        return agent_setup_status::not_requested;
+        return AgentSetupStatus::NotRequested;
     }
 
     const auto device_id = agent.device_id;
@@ -729,18 +728,18 @@ configure_agent_spm_config(agent_spm_counter_config_map_t& configs,
     if(requested.empty())
     {
         LOG_DEBUG("No SPM counters requested for device {}", device_id);
-        return agent_setup_status::not_requested;
+        return AgentSetupStatus::NotRequested;
     }
 
     auto config = create_agent_spm_config(rocprofiler_agent_id_t{ agent.agent->handle },
                                           device_id, requested_config, requested);
-    if(config.status == spm_status::skipped)
+    if(config.status == SpmStatus::Skipped)
     {
-        return agent_setup_status::skipped;
+        return AgentSetupStatus::Skipped;
     }
-    if(config.status == spm_status::failed)
+    if(config.status == SpmStatus::Failed)
     {
-        return agent_setup_status::failed;
+        return AgentSetupStatus::Failed;
     }
 
     const auto agent_id = rocprofiler_agent_id_t{ agent.agent->handle };
@@ -749,11 +748,11 @@ configure_agent_spm_config(agent_spm_counter_config_map_t& configs,
             .second;
     if(!inserted)
     {
-        return agent_setup_status::failed;
+        return AgentSetupStatus::Failed;
     }
 
     static_cast<void>(config.config.release());
-    return agent_setup_status::configured;
+    return AgentSetupStatus::Configured;
 }
 
 bool
@@ -768,16 +767,16 @@ populate_agent_spm_configs_unchecked(agent_spm_counter_config_map_t& configs,
     {
         const auto setup_status =
             configure_agent_spm_config(configs, agent, requested_config, all_requested);
-        if(setup_status == agent_setup_status::failed)
+        if(setup_status == AgentSetupStatus::Failed)
         {
             destroy_spm_counter_configs(configs);
             return false;
         }
-        if(setup_status == agent_setup_status::configured)
+        if(setup_status == AgentSetupStatus::Configured)
         {
             matched_agent = true;
         }
-        else if(setup_status == agent_setup_status::skipped)
+        else if(setup_status == AgentSetupStatus::Skipped)
         {
             ++skipped_agents;
         }
@@ -1085,7 +1084,7 @@ configure_requested_runtime(client_data* data, const configuration& requested_co
         return false;
     }
 
-    if(data->spm_ctx.handle == invalid_context_handle)
+    if(data->spm_ctx.handle == k_invalid_context_handle)
     {
         auto status = rocprofiler_create_context(&data->spm_ctx);
         if(status != ROCPROFILER_STATUS_SUCCESS)

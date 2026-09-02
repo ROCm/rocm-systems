@@ -220,11 +220,14 @@ inline constexpr const char* CAUSAL_FILE       = "ROCPROFSYS_CAUSAL_FILE";
 inline constexpr const char* CAUSAL_FILE_RESET = "ROCPROFSYS_CAUSAL_FILE_RESET";
 
 // --- Hardware counters ---
+// Environment-variable identifiers intentionally mirror their external names.
+// NOLINTBEGIN(readability-identifier-naming)
 inline constexpr const char* ROCM_EVENTS       = "ROCPROFSYS_ROCM_EVENTS";
 inline constexpr const char* GPU_PERF_COUNTERS = "ROCPROFSYS_GPU_PERF_COUNTERS";
 inline constexpr const char* ROCM_SPM_EVENTS   = "ROCPROFSYS_ROCM_SPM_EVENTS";
 inline constexpr const char* ROCM_SPM_SAMPLE_INTERVAL =
     "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL";
+// NOLINTEND(readability-identifier-naming)
 // Note: PAPI_MULTIPLEXING and PAPI_QUIET would collide with integer macros defined in
 // PAPI's C header (papi.h). The identifiers carry a trailing suffix to avoid
 // preprocessor substitution; the env-var strings retain the original names.

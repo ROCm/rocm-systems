@@ -91,7 +91,7 @@ constexpr auto gpu_preset_json = R"({
     }
 })";
 
-constexpr auto spm_preset_json = R"({
+constexpr auto k_spm_preset_json = R"({
     "metadata": {
         "name": "spm-trace",
         "cli_flag": "--spm-trace",
@@ -106,7 +106,7 @@ constexpr auto spm_preset_json = R"({
     }
 })";
 
-constexpr auto disabled_spm_preset_json = R"({
+constexpr auto k_disabled_spm_preset_json = R"({
     "metadata": {
         "name": "spm-disabled",
         "cli_flag": "--spm-disabled",
@@ -335,7 +335,7 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
 TEST_F(preset_registry_test, describe_reports_spm_events_when_hw_counters_enabled)
 {
     temp_dir dir;
-    dir.write_file("spm-trace.json", spm_preset_json);
+    dir.write_file("spm-trace.json", k_spm_preset_json);
 
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry registry;
@@ -351,7 +351,7 @@ TEST_F(preset_registry_test, describe_reports_spm_events_when_hw_counters_enable
 TEST_F(preset_registry_test, describe_omits_spm_events_when_hw_counters_disabled)
 {
     temp_dir dir;
-    dir.write_file("spm-disabled.json", disabled_spm_preset_json);
+    dir.write_file("spm-disabled.json", k_disabled_spm_preset_json);
 
     ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry registry;

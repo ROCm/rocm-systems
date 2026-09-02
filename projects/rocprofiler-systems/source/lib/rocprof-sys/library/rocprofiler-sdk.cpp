@@ -2874,10 +2874,10 @@ tool_fini(void* callback_data)
         }
     }
 
-    auto* _data = as_client_data(callback_data);
-    rocprofiler_sdk::spm::finalize_runtime(_data);
-    _data->client_id   = nullptr;
-    _data->client_fini = nullptr;
+    auto* data = as_client_data(callback_data);
+    rocprofiler_sdk::spm::finalize_runtime(data);
+    data->client_id   = nullptr;
+    data->client_fini = nullptr;
     delete tool_data;
     tool_data = nullptr;
 }
