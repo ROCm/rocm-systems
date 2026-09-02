@@ -590,6 +590,10 @@ class IsaProfile(ABC):
         """
         return {
             'V_ADDC_CO_U32': 'u32',
+            'V_ADD_MAX_I32': 'i32',
+            'V_ADD_MAX_U32': 'u32',
+            'V_ADD_MIN_I32': 'i32',
+            'V_ADD_MIN_U32': 'u32',
             'V_ADD_CO_CI_U32': 'u32',
             'V_ADD_CO_U32': 'u32',
             'V_ADD_I16': 'i16',
@@ -607,6 +611,8 @@ class IsaProfile(ABC):
             'V_MAD_U16': 'u16',
             'V_MAD_U32_U16': 'u32',
             'V_MAD_U32_U24': 'u32',
+            'V_MQSAD_PK_U16_U8': 'u16',
+            'V_MQSAD_U32_U8': 'u32',
             'V_MSAD_U8': 'u32',
             'V_MUL_I32_I24': 'i32',
             'V_MUL_U32_U24': 'u32',
@@ -614,6 +620,7 @@ class IsaProfile(ABC):
             'V_SAD_U8': 'u32',
             'V_SAD_U16': 'u32',
             'V_SAD_U32': 'u32',
+            'V_QSAD_PK_U16_U8': 'u16',
             'V_SUBBREV_CO_U32': 'u32',
             'V_SUBB_CO_U32': 'u32',
             'V_SUBREV_CO_CI_U32': 'u32',

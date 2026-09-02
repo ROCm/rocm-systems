@@ -496,7 +496,11 @@ def gen_vector_perm_pk16(
 
 
 def gen_vector_qsad(
-    dst: list[str], src: list[str], op: str | None, uses_vgpr_msb_indexing: bool
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    uses_vgpr_msb_indexing: bool,
+    integer_clamp: bool = False,
 ) -> str:
     """Generate QSAD/MQSAD four-window sum-of-absolute-difference ops."""
     is_packed = op in ('sad_pk_u16', 'msad_pk_u16')
@@ -553,17 +557,27 @@ def gen_vector_qsad(
         L.append('        sum += a > b ? a - b : b - a;')
     L.extend(['      }'])
     if is_packed:
+        value_expr = (
+            'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)'
+            if integer_clamp
+            else 'value & 0xffffu'
+        )
         L.extend(
             [
                 '      uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);',
-                '      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);',
+                f'      packed_result |= static_cast<uint64_t>({value_expr}) << (window * 16);',
             ]
         )
     else:
+        value_expr = (
+            'amdgpu::vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)'
+            if integer_clamp
+            else 'accum[window] + sum'
+        )
         L.extend(
             [
                 f'      dst_word.encoding_value_ = {dst[0]}.encoding_value_ + static_cast<int>(window);',
-                '      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, accum[window] + sum);',
+                f'      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, {value_expr});',
             ]
         )
     L.append('    }')

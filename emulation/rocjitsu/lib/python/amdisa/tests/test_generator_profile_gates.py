@@ -4114,6 +4114,21 @@ def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
     assert 'vop3_integer_sub<uint64_t>' in sub_u64
     assert 'inst_.clamp' in sub_u64
 
+    expected_helpers = {
+        'V_ADD_MAX_I32': 'vop3_integer_add_minmax<int32_t, true>',
+        'V_ADD_MAX_U32': 'vop3_integer_add_minmax<uint32_t, true>',
+        'V_ADD_MIN_I32': 'vop3_integer_add_minmax<int32_t, false>',
+        'V_ADD_MIN_U32': 'vop3_integer_add_minmax<uint32_t, false>',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name, 'ENC_VOP3')
+        assert helper in body
+        assert 'inst_.clamp' in body
+
+    for name in ('V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'):
+        body = generated_body(name, 'ENC_VOP3')
+        assert 'inst_.clamp' in body
+
     vop2 = generated_body('V_ADD_NC_U32', 'ENC_VOP2')
     assert 'vop3_integer_add' not in vop2
     assert 'inst_.clamp' not in vop2

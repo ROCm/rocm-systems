@@ -1705,7 +1705,7 @@ class TestDeriveVectorTernary:
         cpp = lower_sema_block(block)
         assert 'std::fma(' in cpp
 
-    def test_add_minmax_i32_u32_wraps_add_before_clamp(self):
+    def test_add_minmax_i32_u32_can_saturate_add_before_selection(self):
         cases = [
             ('V_ADD_MAX_I32', 'add_max', 'i32', 'std::max'),
             ('V_ADD_MAX_U32', 'add_max', 'u32', 'std::max'),
@@ -1720,10 +1720,17 @@ class TestDeriveVectorTernary:
             assert sem.data_type == dtype
 
             block = derive_sema_block(sem)
-            cpp = lower_sema_block(block)
-            assert clamp_fn in cpp
-            assert 'static_cast<uint32_t>' in cpp
-            assert f'{op}_{dtype}(' not in cpp
+            cpp = lower_sema_block(
+                block,
+                LoweringContext(
+                    exec_model=ExecModel.VECTOR,
+                    integer_saturation_dtype=dtype,
+                ),
+            )
+            select_max = 'true' if clamp_fn == 'std::max' else 'false'
+            assert f'vop3_integer_add_minmax<' in cpp
+            assert f', {select_max}>' in cpp
+            assert 'inst_.clamp' in cpp
 
     def test_ashr_pk_i8_u8_i32_packs_shifted_saturated_bytes(self):
         cases = [

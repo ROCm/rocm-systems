@@ -263,7 +263,15 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
       TestCase{cdna5::kVMadI32I16Vop3, static_cast<uint16_t>(INT16_MIN),
                static_cast<uint16_t>(INT16_MAX), static_cast<uint32_t>(INT32_MIN),
                static_cast<uint32_t>(INT32_MIN)},
+      TestCase{cdna5::kVAddMaxI32Vop3, static_cast<uint32_t>(INT32_MAX), 1u,
+               static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX)},
+      TestCase{cdna5::kVAddMaxU32Vop3, UINT32_MAX, 1u, 0u, UINT32_MAX},
+      TestCase{cdna5::kVAddMinI32Vop3, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(-1),
+               static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MIN)},
+      TestCase{cdna5::kVAddMinU32Vop3, UINT32_MAX, 1u, UINT32_MAX, UINT32_MAX},
       TestCase{cdna5::kVSadHiU8Vop3, UINT32_MAX, 0u, 0xfc040000u, UINT32_MAX},
+      TestCase{cdna5::kVSadU8Vop3, 0x00010203u, 0x10002030u, UINT32_MAX, UINT32_MAX},
+      TestCase{cdna5::kVSadU16Vop3, 0x00010003u, 0x10002000u, UINT32_MAX, UINT32_MAX},
       TestCase{cdna5::kVSadU32Vop3, 0u, UINT32_MAX, 1u, UINT32_MAX},
       TestCase{cdna5::kVMsadU8Vop3, 0xffffffffu, 0x01010101u, UINT32_MAX, UINT32_MAX},
   };
@@ -3066,6 +3074,39 @@ TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBy
   EXPECT_EQ(read(6), 202u);
   EXPECT_EQ(read(7), 304u);
   EXPECT_EQ(read(8), 406u);
+
+  // CLAMP saturates each packed or full-width accumulation independently.
+  write(0, 0u);
+  write(1, 0u);
+  write(2, 0xffff'ffffu);
+  write(4, 0xffff'ffffu);
+  write(5, 0xffff'ffffu);
+  const auto clamped_qsad_words = cdna5::build_vop3(
+      cdna5::kVQsadPkU16U8Vop3, {.vdst = 8, .clamp = 1, .src0 = 256, .src1 = 258, .src2 = 260});
+  cdna5::VQsadPkU16U8Vop3 clamped_qsad(clamped_qsad_words.data());
+  clamped_qsad.execute_impl(*wf);
+  EXPECT_EQ(read(8), UINT32_MAX);
+  EXPECT_EQ(read(9), UINT32_MAX);
+
+  const auto clamped_mqsad_pk_words = cdna5::build_vop3(
+      cdna5::kVMqsadPkU16U8Vop3, {.vdst = 8, .clamp = 1, .src0 = 256, .src1 = 258, .src2 = 260});
+  cdna5::VMqsadPkU16U8Vop3 clamped_mqsad_pk(clamped_mqsad_pk_words.data());
+  clamped_mqsad_pk.execute_impl(*wf);
+  EXPECT_EQ(read(8), UINT32_MAX);
+  EXPECT_EQ(read(9), UINT32_MAX);
+
+  write(4, UINT32_MAX);
+  write(5, UINT32_MAX);
+  write(6, UINT32_MAX);
+  write(7, UINT32_MAX);
+  const auto clamped_mqsad_words = cdna5::build_vop3(
+      cdna5::kVMqsadU32U8Vop3, {.vdst = 12, .clamp = 1, .src0 = 256, .src1 = 258, .src2 = 260});
+  cdna5::VMqsadU32U8Vop3 clamped_mqsad(clamped_mqsad_words.data());
+  clamped_mqsad.execute_impl(*wf);
+  EXPECT_EQ(read(12), UINT32_MAX);
+  EXPECT_EQ(read(13), UINT32_MAX);
+  EXPECT_EQ(read(14), UINT32_MAX);
+  EXPECT_EQ(read(15), UINT32_MAX);
 }
 
 TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRules) {

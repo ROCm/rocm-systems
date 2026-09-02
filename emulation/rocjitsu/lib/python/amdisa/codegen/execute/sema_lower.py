@@ -1763,6 +1763,19 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    add_minmax_calls = {
+        'add_max_i32': ('int32_t', 'true'),
+        'add_max_u32': ('uint32_t', 'true'),
+        'add_min_i32': ('int32_t', 'false'),
+        'add_min_u32': ('uint32_t', 'false'),
+    }
+    if ctx.integer_saturation_dtype is not None and callee in add_minmax_calls:
+        cpp_type, select_max = add_minmax_calls[callee]
+        return (
+            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>('
+            f'{args_str}, inst_.clamp)'
+        )
+
     saturating_calls = {
         'mul_i24': ('int32_t', 24, False),
         'mul_u24': ('uint32_t', 24, False),

@@ -119,6 +119,23 @@ inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
   }
 }
 
+/// @brief Add with optional saturation, then select the maximum or minimum operand.
+template <typename T, bool SelectMax>
+inline std::make_unsigned_t<T> vop3_integer_add_minmax(std::make_unsigned_t<T> lhs,
+                                                       std::make_unsigned_t<T> rhs,
+                                                       std::make_unsigned_t<T> bound, bool clamp) {
+  static_assert(std::is_integral_v<T> && sizeof(T) == 4);
+  using U = std::make_unsigned_t<T>;
+  const U sum_bits = vop3_integer_add<T>(lhs, rhs, clamp);
+  if constexpr (std::is_signed_v<T>) {
+    const T sum = std::bit_cast<T>(sum_bits);
+    const T typed_bound = std::bit_cast<T>(bound);
+    return static_cast<U>(SelectMax ? std::max(sum, typed_bound) : std::min(sum, typed_bound));
+  } else {
+    return SelectMax ? std::max(sum_bits, bound) : std::min(sum_bits, bound);
+  }
+}
+
 /// @brief Execute an integer multiply-add with an exact intermediate.
 template <typename T, unsigned SourceBits>
 inline std::make_unsigned_t<T> vop3_integer_mad(uint32_t lhs, uint32_t rhs,
