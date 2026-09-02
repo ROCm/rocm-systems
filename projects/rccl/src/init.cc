@@ -206,8 +206,8 @@ RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
 // the hierarchical algorithm, instead of doing them unconditionally at communicator init.
 // Motivation (ROCM-29579): the inter-node split is what exposes a workload to the tus1-p3 deep
 // collapse, and a DDP workload that only ever issues large AllReduces pays that exposure - plus
-// ~1s of init - for an algorithm it can never select.
-RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 0);
+// ~1s of init - for an algorithm it can never select. Default on; set 0 to restore eager setup.
+RCCL_PARAM(HierarchicalLazyInit, "HIERARCHICAL_LAZY_INIT", 1);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // GDRCOPY support: Off by default
@@ -2553,8 +2553,8 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
 // Create the hierarchical sub-communicators and the shared temp buffer.
 //
 // COLLECTIVE: ncclCommSplit is a collective call, so every rank of `comm` must reach this at the
-// same point. Called either from ncclCommInitRankFunc (eager, the default) or, with
-// RCCL_HIERARCHICAL_LAZY_INIT=1, from the first AllGather whose message size would select the
+// same point. Called either from ncclCommInitRankFunc (eager, if RCCL_HIERARCHICAL_LAZY_INIT=0)
+// or, by default, from the first AllGather whose message size would select the
 // hierarchical algorithm - a point where all ranks are present with identical, size-derived arguments.
 static ncclResult_t rcclCreateHierarchicalComms(struct ncclComm* comm) {
   if (comm->minLocalRanks != comm->maxLocalRanks) {
