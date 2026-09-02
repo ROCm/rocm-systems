@@ -43,6 +43,26 @@ void Logger::log(LogLevel level, const std::string& msg) const {
 }
 
 // Helper to read a sysfs file into a string
+std::string CuidUtilities::errno_string(int err) {
+  char buf[256];
+#if defined(_WIN32)
+  if (strerror_s(buf, sizeof(buf), err) != 0) {
+    return "unknown error " + std::to_string(err);
+  }
+  return std::string(buf);
+#elif defined(_GNU_SOURCE)
+  // GNU strerror_r returns a pointer that may or may not point at buf.
+  const char* msg = strerror_r(err, buf, sizeof(buf));
+  return msg ? std::string(msg) : ("unknown error " + std::to_string(err));
+#else
+  // XSI strerror_r fills buf and returns 0 on success.
+  if (strerror_r(err, buf, sizeof(buf)) != 0) {
+    return "unknown error " + std::to_string(err);
+  }
+  return std::string(buf);
+#endif
+}
+
 std::string CuidUtilities::read_sysfs_file(const std::string& path) {
   std::ifstream file(path);
   if (!file.is_open()) return "";
@@ -92,6 +112,9 @@ std::string CuidUtilities::bdf_to_device_path(const std::string& bdf,
     if (dir) {
       struct dirent* entry;
       std::string card_path;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       while ((entry = readdir(dir)) != nullptr) {
         // Prefer renderD* nodes when available
         if (strncmp(entry->d_name, "renderD", 7) == 0) {
@@ -126,6 +149,9 @@ std::string CuidUtilities::bdf_to_device_path(const std::string& bdf,
     DIR* dir = opendir(subsystem_dir.c_str());
     if (dir) {
       struct dirent* entry;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       while ((entry = readdir(dir)) != nullptr) {
         // Skip . and ..
         if (entry->d_name[0] == '.') continue;
@@ -140,6 +166,9 @@ std::string CuidUtilities::bdf_to_device_path(const std::string& bdf,
     DIR* dir = opendir(subsystem_dir.c_str());
     if (dir) {
       struct dirent* entry;
+      // this call site owns its DIR*, which is all POSIX requires; readdir_r is deprecated and
+      // must not be adopted.
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       while ((entry = readdir(dir)) != nullptr) {
         // Skip . and ..
         if (entry->d_name[0] == '.') continue;
@@ -531,7 +560,8 @@ std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t* id) {
   // Format as UUIDv8 string: 8-4-4-4-12 hex digits from id->bytes[16]
   // UUID: xxxxxxxx-xxxx-8xxx-yxxx-xxxxxxxxxxxx
   char uuid_str[37];  // 36 chars + null
-  // Format the bytes into a UUID string
+  // 32 hex digits plus 4 hyphens is exactly 36 characters plus the NUL.
+  // NOLINTNEXTLINE(cert-err33-c)
   snprintf(uuid_str, sizeof(uuid_str),
            "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", id->bytes[0],
            id->bytes[1], id->bytes[2], id->bytes[3], id->bytes[4], id->bytes[5], id->bytes[6],
