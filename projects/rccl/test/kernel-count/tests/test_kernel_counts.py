@@ -55,33 +55,33 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 # ---------------------------------------------------------------------------
 EXPECTED = {
     "OFF": {
-        "total": 6123,
+        "total": 4084,
         "per_coll": {
-            "AllGather": 48,
-            "AllGatherV": 18,
-            "AllReduce": 3840,
-            "AlltoAllPivot": 6,
-            "Broadcast": 24,
-            "Reduce": 726,
-            "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            "AllGather": 32,
+            "AllGatherV": 12,
+            "AllReduce": 2560,
+            "AlltoAllPivot": 4,
+            "Broadcast": 16,
+            "Reduce": 484,
+            "ReduceScatter": 968,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            "SendRecv": 8,
         },
     },
     "ON": {
-        "total": 6135,
+        "total": 4092,
         "per_coll": {
-            "AllGather": 48,
-            "AllGatherV": 18,
-            "AllReduce": 3840,
-            "AlltoAllGda": 6,
-            "AlltoAllPivot": 6,
-            "AlltoAllvGda": 6,
-            "Broadcast": 24,
-            "Reduce": 726,
-            "ReduceScatter": 1452,
-            # 6 legacy-LL (reg=0) + 3 LL128 (reg=1, unroll 1/2/4, gfx942/950).
-            "SendRecv": 9,
+            "AllGather": 32,
+            "AllGatherV": 12,
+            "AllReduce": 2560,
+            "AlltoAllGda": 4,
+            "AlltoAllPivot": 4,
+            "AlltoAllvGda": 4,
+            "Broadcast": 16,
+            "Reduce": 484,
+            "ReduceScatter": 968,
+            # 4 legacy-LL (reg=0) + 4 LL128 (reg=1, gfx942/950-guarded).
+            "SendRecv": 8,
         },
     },
 }
@@ -99,7 +99,8 @@ COMMON_DIMS = {
     },
     "acc": {"0", "1"},
     "pipeline": {"0", "1"},
-    "unroll": {"1", "2", "4", "8", "16", "32"},
+    # A multi-arch build skips 8/16 (gfx1250 tuning-only); --all_unrolls adds them back.
+    "unroll": {"1", "2", "4", "32"},
     "reg": {"0", "1", "2"},
 }
 DIMENSIONS = ("coll", "algo", "proto", "redop", "ty", "acc", "pipeline", "unroll", "reg")
@@ -122,11 +123,11 @@ _DEFINE_RE = re.compile(
 )
 
 
-def _run_generator(out_dir, rocshmem):
+def _run_generator(out_dir, rocshmem, all_unrolls="OFF"):
     """Run the main generator into out_dir for the given rocSHMEM setting.
 
     argv layout matches src/CMakeLists.txt:
-      gensrc, IFC, <unused>, local_gpu_only, rocshmem, ONLY_FUNCS
+      gensrc, IFC, <unused>, local_gpu_only, rocshmem, all_unrolls, ONLY_FUNCS
     local_gpu_only=OFF keeps the count deterministic and GPU-free (no rocminfo)
     and yields the full MULTI-ARCH superset of kernels (arch-guarded variants
     included); a BUILD_LOCAL_GPU_TARGET_ONLY=ON build legitimately emits fewer.
@@ -137,7 +138,7 @@ def _run_generator(out_dir, rocshmem):
         # a real breakage. (pytest.fail also survives `python -O`, unlike assert.)
         pytest.fail("generate.py not found next to source tree: %s" % GENERATE_PY)
     subprocess.run(
-        [sys.executable, str(GENERATE_PY), str(out_dir), "OFF", "OFF", "OFF", rocshmem, ""],
+        [sys.executable, str(GENERATE_PY), str(out_dir), "OFF", "OFF", "OFF", rocshmem, all_unrolls, ""],
         check=True,
         capture_output=True,
         text=True,
@@ -185,6 +186,13 @@ def _per_coll(records):
     counts = {}
     for r in records:
         counts[r["coll"]] = counts.get(r["coll"], 0) + 1
+    return counts
+
+
+def _per_unroll(records):
+    counts = {}
+    for r in records:
+        counts[r["unroll"]] = counts.get(r["unroll"], 0) + 1
     return counts
 
 
@@ -276,6 +284,36 @@ def test_parser_integrity(generated, rocshmem):
     assert data["manifest_count"] == len(data["records"]), (
         "generator contract: specialized_files.txt lists %d kernels but %d were "
         "parsed from specialized/*.cpp" % (data["manifest_count"], len(data["records"]))
+    )
+
+
+@pytest.mark.main_generator
+@pytest.mark.parametrize("rocshmem", ["OFF", "ON"])
+def test_unroll_tables_have_equal_kernel_counts(generated, rocshmem):
+    # Host ids come from the first unroll and index every other unroll's table, so the
+    # unrolls must be generated in lockstep; a func_validate exception shows up as a skew.
+    counts = _per_unroll(generated[rocshmem]["records"])
+    assert len(set(counts.values())) == 1, (
+        "unroll tables are not generated in lockstep (host ids would misindex): %s" % counts
+    )
+
+
+@pytest.mark.main_generator
+def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated):
+    # --all_unrolls must add exactly the skipped unrolls at the same per-unroll count.
+    # Asserted against the OFF baseline so no second hardcoded total is needed.
+    d = tmp_path_factory.mktemp("all_unrolls")
+    _run_generator(str(d), "OFF", all_unrolls="ON")
+    records, _, manifest_count = _parse(str(d))
+    assert manifest_count == len(records)
+
+    counts = _per_unroll(records)
+    assert set(counts) == {"1", "2", "4", "8", "16", "32"}
+    assert len(set(counts.values())) == 1, counts
+
+    baseline = _per_unroll(generated["OFF"]["records"])
+    assert set(counts.values()) == set(baseline.values()), (
+        "--all_unrolls changed the per-unroll kernel count: %s vs %s" % (counts, baseline)
     )
 
 
