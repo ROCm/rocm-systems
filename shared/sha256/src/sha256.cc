@@ -30,6 +30,8 @@ sha256::sha256(const std::string &data) {
 }
 
 void sha256::update(const uint8_t *data, size_t len) {
+  ROCP_CI_LOG_IF(INFO, m_finalized)
+      << "attempt to update sha256 after finalized";
   if (m_finalized)
     return;
   for (size_t i = 0; i < len; ++i) {
@@ -43,6 +45,8 @@ void sha256::update(const uint8_t *data, size_t len) {
 }
 
 void sha256::update(const std::string &data) {
+  ROCP_CI_LOG_IF(INFO, m_finalized)
+      << "attempt to update sha256 after finalized";
   if (m_finalized)
     return;
   update(reinterpret_cast<const uint8_t *>(data.data()), data.size());
