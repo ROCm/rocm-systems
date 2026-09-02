@@ -28,6 +28,13 @@ on:
       notify_webhook:
         type: string
         default: ''
+      madengine_nodes:
+        description: 'Number of SLURM nodes for MADEngine workloads'
+        type: string
+        default: '2'
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK:
+        required: false
 
 permissions:
   contents: read
@@ -42,7 +49,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb # 2026-08-18
     env:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
@@ -58,7 +65,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 56d538e3e6371499576bcdbe5fc5f84fddfd59d4 # 2026-08-12
+          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
 
       - name: Install python deps
         run: |
@@ -88,7 +95,7 @@ jobs:
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          echo "No patches to remove"
 
       - name: Configure Projects
         env:
@@ -106,7 +113,6 @@ jobs:
         run: cmake --build TheRock/build --target therock-artifacts
 
       - name: Report
-        #if: ${{ !cancelled() }}
         run: |
           echo "Full SDK du:"
           echo "------------"
@@ -174,6 +180,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-pytorch-distributed.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -188,6 +196,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-jax-collective.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -201,6 +211,8 @@ jobs:
     if: ${{ !cancelled() && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-rocprof.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
@@ -208,3 +220,22 @@ jobs:
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
       notify_email: ${{ inputs.notify_email }}
       notify_webhook: ${{ inputs.notify_webhook }}
+
+  therock-test-madengine:
+    name: "Test MADEngine workloads (scheduled)"
+    if: ${{ !cancelled() && inputs.amdgpu_families == 'gfx950-dcgpu' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
+    needs: [therock-build-linux]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    secrets: inherit
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: ruby-linux-slurm-scale-runner
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      workload: llama-3.1-70b-training
+      nodes: ${{ inputs.madengine_nodes || '2' }}
+      notify_email: ${{ inputs.notify_email }}
+      teams_webhook: ${{ inputs.notify_webhook }}

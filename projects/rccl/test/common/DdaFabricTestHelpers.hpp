@@ -7,10 +7,11 @@
 #pragma once
 
 #include <cstring>
+#include <limits>
 
 #include "comm.h"
-#include "dda_init_detail.h"
-#include "fabric_gpu_barrier.h"
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 
 namespace RcclUnitTesting
 {
@@ -29,7 +30,9 @@ struct DdaFabricMockComm
         comm.bootstrap          = &bootstrapPlaceholder;
         comm.nNodes             = 1;
         comm.nRanks             = 8; // any value in [2, kDdaMaxNranks]
-        comm.ddaScratchBytes    = DDA_FABRIC_BUFFER_SIZE;
+        // Capacity is not under test by default. Individual tests override this
+        // with an exact small value when exercising scratch-size rejection.
+        comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         setFabricResourcesPresent(true);
     }

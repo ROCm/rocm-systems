@@ -19,26 +19,50 @@ description: "Use when: reviewing API changes, adding/modifying amdsmi_* functio
 
 # API Cascade
 
-Changes to the public C API must propagate through all layers in order:
+## What Triggers the Cascade
+
+The full cascade applies when you **add or change a public function** (a new
+`amdsmi_*` signature, or a changed one). That is what the name-grep below can
+track across layers.
+
+Non-function public-API edits do **not** all cascade the same way:
+
+| Change | Cascade path |
+|--------|--------------|
+| New / changed `amdsmi_*` **function** | Full path below (name is grep-able in every name-bearing layer) |
+| New **enum value / struct field / macro** in `amdsmi.h` | Header + impl + regenerate wrapper; interface/CLI only if user-facing. Not name-grep-able per layer |
+| Bug fix or behavior change inside an existing function | Impl + tests; docs/changelog if user-visible. No new wrapper/CLI entry |
+| Doxygen / comment-only edit | Header (or docs) only |
+
+Changes to a **function** propagate through all layers in order:
 
 1. `include/amd_smi/amdsmi.h` — C header declaration
 2. `src/amd_smi/amd_smi.cc` — C++ implementation
-3. `tools/generator.py` — wrapper generator (parses header)
+3. `tools/generator.py` — wrapper generator (parses header; no per-function edit — verify by regenerating)
 4. `py-interface/amdsmi_wrapper.py` — **auto-generated, never edit manually**
 5. `py-interface/amdsmi_interface.py` — Python API
-6. `amdsmi_cli/amdsmi_commands.py` — CLI commands
+6. `amdsmi_cli/amdsmi_commands.py` — CLI commands (if user-facing)
 7. `docs/` — documentation
+8. `rust-interface/` and `goamdsmi_shim/` — bind `amdsmi_*` directly; update if the new function must reach Rust/Go consumers
 
 Regenerate the wrapper with `tools/update_wrapper.sh`
 
 ## Quick Check
 
+Greps only the five **name-bearing** layers. Layer 3 (`generator.py`) is a
+generic parser with no per-function entry (verify it instead by regenerating the
+wrapper), and layer 7 (`docs/`) is prose — check both separately, they are NOT
+covered by this grep.
+
 ```bash
 FUNC="amdsmi_get_gpu_new_feature"
-grep -n "$FUNC" include/amd_smi/amdsmi.h src/amd_smi/*.cc py-interface/amdsmi_wrapper.py py-interface/amdsmi_interface.py amdsmi_cli/*.py
+grep -n "$FUNC" include/amd_smi/amdsmi.h src/amd_smi/*.cc \
+  py-interface/amdsmi_wrapper.py py-interface/amdsmi_interface.py amdsmi_cli/*.py \
+  rust-interface/src/*.rs goamdsmi_shim/smiwrapper/*
 ```
 
-Missing results = cascade gap.
+Missing results in a name-bearing layer = cascade gap. A clean grep does **not**
+prove layers 3 and 7 are done.
 
 ## Per-Layer Checklist
 
@@ -51,6 +75,8 @@ Missing results = cascade gap.
 | `amdsmi_interface.py` | Python function exists, raises `AmdSmiException` on error |
 | `amdsmi_commands.py` | CLI exposes data if user-facing, JSON output includes field |
 | `docs/` | API reference updated |
+| `rust-interface/` | `pub fn amdsmi_*` binding added if the function must reach Rust consumers |
+| `goamdsmi_shim/` | `amdsmi_*` call added if the function must reach the Go shim |
 
 # Tools (`tools/`)
 

@@ -14,6 +14,8 @@
 #include <string.h>
 #include <chrono>
 #include "param.h"
+#include "param/param_tmp.h"
+#include "param/parsers.h"
 #include "compiler.h"
 #include <mutex>
 #include "os.h"
@@ -39,6 +41,73 @@ static std::chrono::steady_clock::time_point ncclEpoch;
 static bool ncclWarnSetDebugInfo = false;
 
 static thread_local int tid = -1;
+
+// clang-format off
+DEFINE_NCCL_PARAM(ncclParamDebugLevel, ncclDebugLogLevel, NCCL_DEBUG, NCCL_LOG_NONE,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  ncclParamOneOf<ncclDebugLogLevel>(makeOptions(
+                    makeOption("VERSION", NCCL_LOG_VERSION, "Prints the NCCL version info only"),
+                    makeOption("WARN", NCCL_LOG_WARN, "Prints only messages indicating a fatal error."),
+                    makeOption("INFO", NCCL_LOG_INFO, "Prints debug message"),
+                    makeOption("ABORT", NCCL_LOG_ABORT, ""),
+                    makeOption("TRACE", NCCL_LOG_TRACE, "Prints replayable trace info on all calls")
+                  )), "Set debug output level, the option is inclusive for any level that is less verbose than the set value");
+
+DEFINE_NCCL_PARAM(ncclParamDebugSubsys, uint64_t, NCCL_DEBUG_SUBSYS,
+                  NCCL_INIT | NCCL_BOOTSTRAP | NCCL_ENV,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  (ncclParamBitsetOf<ncclDebugLogSubSys, uint64_t>(makeOptions(
+                    makeOption("INIT", NCCL_INIT, "NCCL and comm initialization (included in default)"),
+                    makeOption("COLL", NCCL_COLL, "Collective operations"),
+                    makeOption("P2P", NCCL_P2P, "Peer-to-peer transport"),
+                    makeOption("SHM", NCCL_SHM, "Shared memory transport"),
+                    makeOption("NET", NCCL_NET, "Network transport"),
+                    makeOption("GRAPH", NCCL_GRAPH, "Graph search and topology"),
+                    makeOption("TUNING", NCCL_TUNING, "Algorithm tuning"),
+                    makeOption("ENV", NCCL_ENV, "Parameter settings by config file, EnvVar or EnvPlugins (included in default)"),
+                    makeOption("ALLOC", NCCL_ALLOC, "Device memory allocation"),
+                    makeOption("ALLOC_HOST", NCCL_ALLOC_HOST, "Host memory allocation"),
+                    makeOption("CALL", NCCL_CALL, "API call tracing"),
+                    makeOption("PROXY", NCCL_PROXY, "Proxy thread operations"),
+                    makeOption("NVLS", NCCL_NVLS, "NVLink SHARP operations"),
+                    makeOption("BOOTSTRAP", NCCL_BOOTSTRAP, "Bootstrap network (included in default)"),
+                    makeOption("REG", NCCL_REG, "Buffer registration"),
+                    makeOption("PROFILE", NCCL_PROFILE,   "Profiling"),
+                    makeOption("RAS", NCCL_RAS, "Reliability, availability, serviceability"),
+                    makeOption("DESTROY", NCCL_DESTROY, "Communicator destroy, abort, revoke, and plugin unload/close operations"),
+                    makeOption("ALL", NCCL_ALL, "All categories")
+                  ))), "Filter debug output by (comma-separated)");
+
+DEFINE_NCCL_PARAM(ncclParamWarnEnableDebugInfo, bool, NCCL_WARN_ENABLE_DEBUG_INFO, false,
+                  NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "If enabled, the debug level will be set to INFO after a WARN level debug message is logged.");
+// clang-format on
+
+DEFINE_NCCL_PARAM(ncclParamDebugTimestampLevel, uint32_t, NCCL_DEBUG_TIMESTAMP_LEVELS, (1u << NCCL_LOG_WARN),
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT,
+                  ncclParamBitsetOf<uint32_t>(
+                    makeOptions(makeOption("VERSION", (1u << NCCL_LOG_VERSION), "on NCCL version info message"),
+                                makeOption("WARN", (1u << NCCL_LOG_WARN), "on Explicit error message"),
+                                makeOption("INFO", (1u << NCCL_LOG_INFO), "on Debug message"),
+                                makeOption("ABORT", (1u << NCCL_LOG_ABORT), ""),
+                                makeOption("TRACE", (1u << NCCL_LOG_TRACE), "on Replayable trace message"),
+                                makeOption("ALL",
+                                           (1u << NCCL_LOG_VERSION | 1u << NCCL_LOG_WARN | 1u << NCCL_LOG_INFO |
+                                            1u << NCCL_LOG_ABORT | 1u << NCCL_LOG_TRACE),
+                                           "on All messages"))),
+                  "Set which log lines get a timestamp depending upon the level of the log");
+
+DEFINE_NCCL_PARAM(ncclParamDebugTsFormat, const char*, NCCL_DEBUG_TIMESTAMP_FORMAT, "[%F %T] ",
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "Set the format used when printing debug log messages");
+
+DEFINE_NCCL_PARAM(ncclParamDebugFile, const char*, NCCL_DEBUG_FILE, nullptr,
+                  NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT, NCCL_PARAM_DEFAULT,
+                  "Set the NCCL debug logging output to a file. The filename format can be set to "
+                  "filename.%h.%p where %h is replaced with the hostname "
+                  "and %p is replaced "
+                  "with the process PID. This does not accept the ~ character as part of the path, "
+                  "please convert to a relative or absolute path first.");
 
 typedef const char* (*ncclGetEnvFunc_t)(const char*);
 
@@ -355,7 +424,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   // WARNs come with an extra newline at the beginning.
   if (level == NCCL_LOG_WARN) {
     buffer[len++] = '\n';
-  };
+  }
 
   // Add the timestamp to the buffer if they are turned on for this level.
   if (ncclDebugTimestampLevels & (1 << level)) {
@@ -480,7 +549,7 @@ void ncclSetThreadName(std::thread& thread, const char* fmt, ...) {
   // pthread_setname_np is nonstandard GNU extension
   // needs the following feature test macro
 #ifdef _GNU_SOURCE
-  if (ncclParamSetThreadName() != 1) return;
+  if (ncclParamSetThreadName() == false) return;
   char threadName[NCCL_THREAD_NAMELEN];
   va_list vargs;
   va_start(vargs, fmt);

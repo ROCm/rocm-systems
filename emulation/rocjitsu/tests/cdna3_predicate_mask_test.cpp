@@ -4,6 +4,7 @@
 /// @file cdna3_predicate_mask_test.cpp
 /// @brief CDNA3 predicate-mask semantics from hip-fpsan algebraic kernels.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -81,7 +82,7 @@ struct Fixture {
   }
 
   void execute(const std::array<uint32_t, 2> &words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst.get(), *wf);
   }

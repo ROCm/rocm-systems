@@ -1,0 +1,98 @@
+name: ABI Compliance Report
+
+on:
+  workflow_run:
+    workflows: ["ABI Compliance Check"]
+    types:
+      - completed
+
+# Runs on the trusted base ref after the untrusted check workflow completes.
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+# Serialize label updates for a branch so overlapping runs cannot interleave
+# add/remove calls on the same PR.
+concurrency:
+  group: abi-report-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  label_pr:
+    name: Apply ABI Labels to PR
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
+
+    steps:
+      # workflow_run.pull_requests is empty for fork PRs, and artifacts from the
+      # check workflow are fork-controlled, so derive the PR from the run payload
+      # and require it to still point at the commit that was actually checked.
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          NUMBER=$(gh api "repos/$GH_REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
+            --jq '[.[] | select(.head.sha == $ENV.HEAD_SHA) | .number] | first // empty')
+          if [[ ! "$NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "No open PR at $HEAD_SHA for $HEAD_OWNER:$HEAD_BRANCH, skipping labels"
+            NUMBER=""
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Download major ABI outcome
+        if: steps.pr.outputs.number != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: major-abi-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: major-artifacts
+        continue-on-error: true
+
+      - name: Download minor ABI outcome
+        if: steps.pr.outputs.number != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: minor-abi-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: minor-artifacts
+        continue-on-error: true
+
+      - name: Apply ABI labels to PR
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          # A missing outcome means the check never reported a verdict, so an
+          # existing label must be left as-is rather than cleared.
+          apply_label() {
+            local outcome="$1" label="$2"
+            case "$outcome" in
+              failure)
+                echo "Adding $label label to PR #$PR_NUMBER"
+                gh pr edit "$PR_NUMBER" --add-label "$label"
+                ;;
+              success)
+                echo "Removing $label label from PR #$PR_NUMBER if present"
+                gh pr edit "$PR_NUMBER" --remove-label "$label" || true
+                ;;
+              *)
+                echo "No $label verdict reported, leaving labels unchanged"
+                ;;
+            esac
+          }
+
+          apply_label "$(cat major-artifacts/outcome.txt 2>/dev/null || echo unknown)" "MAJOR ABI BREAKAGE"
+          apply_label "$(cat minor-artifacts/outcome.txt 2>/dev/null || echo unknown)" "MINOR ABI BREAKAGE"

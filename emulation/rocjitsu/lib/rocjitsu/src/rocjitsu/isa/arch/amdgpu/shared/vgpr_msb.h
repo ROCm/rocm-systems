@@ -16,7 +16,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief Operand role selected by the two-bit fields in S_SET_VGPR_MSB.
+/// @brief Logical VALU operand role selected by VGPR_MSB and GPR_IDX fields.
 enum class VgprMsbRole : uint8_t {
   None,
   Src0,

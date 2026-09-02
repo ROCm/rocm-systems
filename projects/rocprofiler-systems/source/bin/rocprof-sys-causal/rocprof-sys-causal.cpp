@@ -91,8 +91,8 @@ main(int argc, char** argv)
         }
 
         forward_signals({ SIGINT, SIGTERM, SIGQUIT });
-        size_t _ncount = 0;
-        size_t _width  = std::log10(_causal_env.size()) + 1;
+        size_t       _ncount = 0;
+        const size_t _width  = std::log10(_causal_env.size()) + 1;
         for(auto& citr : _causal_env)
         {
             auto _n        = _ncount++;

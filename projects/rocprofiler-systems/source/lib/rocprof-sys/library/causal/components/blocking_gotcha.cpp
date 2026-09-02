@@ -127,7 +127,7 @@ Ret
 blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
-    std::int64_t _delay_value =
+    const std::int64_t _delay_value =
         causal::delay::get_global().load(std::memory_order_relaxed);
 
     causal::sampling::block_backtrace_samples();
@@ -164,7 +164,7 @@ blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, 
     causal_gotcha::remove_signals(&_set);
     siginfo_t _info;
 
-    std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
     auto* _data         = blocking_gotcha_t::at(16);
     auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
@@ -196,7 +196,7 @@ blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
     causal_gotcha::remove_signals(&_set);
     siginfo_t _info;
 
-    std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(&_set, &_info);
@@ -224,7 +224,7 @@ blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
     causal_gotcha::remove_signals(&_set);
     siginfo_t _info;
 
-    std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(&_set, &_info, _wait_v);

@@ -1601,6 +1601,13 @@ typedef struct hsa_amd_image_descriptor_s {
   uint32_t data[1];
 } hsa_amd_image_descriptor_t;
 
+// Value stamped into hsa_amd_image_descriptor_t::version to mark a descriptor whose data[] holds an
+// opaque surface-metadata blob (not a full SRD) that the gfx image manager must interpret to
+// reconstruct the SRD (Windows Vulkan image interop, where the AMD driver exposes no SRD-query
+// extension). Disjoint from the small SRD-format versions (1, ...) used when data[0..7] already hold
+// a full driver SRD (GL/D3D/Linux). "WMDS" in ASCII.
+#define HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA 0x574D4453u
+
 /**
  * @brief Creates an image from an opaque vendor specific image format.
  * Does not modify data at image_data.  Intended initially for

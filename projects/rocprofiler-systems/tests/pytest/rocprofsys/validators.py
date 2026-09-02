@@ -213,9 +213,14 @@ def _run_validation_script(
         if result.returncode == 0:
             message = result.stdout.strip()
         else:
+            # Both streams: the traceback goes to stderr, but the context needed
+            # to read it (paths, counts, what the script decided) is on stdout
             message = (
-                result.stderr.strip()
-                or result.stdout.strip()
+                "\n".join(
+                    stream
+                    for stream in (result.stdout.strip(), result.stderr.strip())
+                    if stream
+                )
                 or f"Exit code: {result.returncode}"
             )
 
@@ -274,7 +279,9 @@ def validate_perfetto_trace(
         counter_names: Counter names to validate (--counter-names flag)
         key_names: Debug key names to check (--key-names flag)
         key_counts: Expected counts for debug keys (--key-counts flag)
-        trace_processor_path: Path to trace_processor_shell (-t flag)
+        trace_processor_path: Path to trace_processor_shell (-t flag). When omitted,
+            validate-perfetto-proto.py falls back to $ROCPROFSYS_TRACE_PROC_SHELL, then
+            to the binary staged next to it by the build, then to a Perfetto download
         print_output: Whether to print trace data (-p flag)
         check_counter_pairing: Verify counter tracks have paired start/end entries
         timeout: Validation timeout in seconds
@@ -284,11 +291,6 @@ def validate_perfetto_trace(
     """
     if not trace_path.exists():
         return ValidationResult(False, f"Trace file not found: {trace_path}")
-
-    # Allow override of trace_processor_path to allow perfetto validation using older GLIBC versions
-    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
-    if env_path:
-        trace_processor_path = Path(env_path)
 
     args = ["-i", str(trace_path)]
 

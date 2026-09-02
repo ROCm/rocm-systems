@@ -1,23 +1,5 @@
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
 
 #
 # Minimum version of cmake required
@@ -112,7 +94,7 @@ set(PKG_VERSION_NUM_COMMIT 0)
 project(
     ${AMD_SMI_LIBS_TARGET}
     DESCRIPTION "AMD System Management libraries"
-    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
 )
 
 set(CMAKE_CXX_STANDARD 17)
@@ -132,6 +114,10 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
+
+# WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
+# ON, the WSL intercept hooks and mock backend are compiled
+option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
@@ -213,13 +199,13 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
-find_package(PkgConfig REQUIRED)
 
 # Try to use CMake config files first (bundled sysdeps provide these)
 find_package(libnl CONFIG QUIET)

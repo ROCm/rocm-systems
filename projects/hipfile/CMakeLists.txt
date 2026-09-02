@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 4)
+set(AIS_LIBRARY_MINOR 5)
 set(AIS_LIBRARY_PATCH 0)
 set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
 

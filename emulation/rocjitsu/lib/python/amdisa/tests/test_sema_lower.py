@@ -16,6 +16,9 @@ from amdisa.sema_ast import (
 )
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
+    _INLINE_TERNARY_OPS,
+    _lower_apply_clamp,
+    _lower_apply_omod,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -54,6 +57,17 @@ def test_scc_shift_add_inline_operations_do_not_read_scc(name):
 
 def test_non_scc_inline_operation_has_no_scc_effect():
     assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+def test_packed_byte_inline_operations_match_isa_special_cases():
+    lerp = _INLINE_TERNARY_OPS['lerp_u8']
+    msad = _INLINE_TERNARY_OPS['msad_u8']
+    perm = _INLINE_TERNARY_OPS['perm']
+
+    assert '(ab + bb + round_up) >> 1' in lerp
+    assert 'if (reference != 0)' in msad
+    assert '(sel - 8) * 2 + 1' in perm
+    assert 'sel >= 13' in perm
 
 
 def _src(idx: int) -> SemaNode:
@@ -146,6 +160,57 @@ class TestLowerScalarAdd:
 
 
 class TestLowerVectorAdd:
+    def test_apply_clamp_uses_architecture_mode_policy(self):
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F32),
+            ),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert 'amdgpu::clamp_floating_result(v, wf)' in result
+        assert 'std::clamp' not in result
+
+    @pytest.mark.parametrize(
+        ('result_type', 'expected_helper', 'expected_denorm_mode'),
+        [
+            (SemaType.F32, 'effective_omod', 'fp_denorm_mode_f32'),
+            (SemaType.F16, 'effective_f16_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.BF16, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.F64, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+        ],
+    )
+    def test_apply_omod_uses_result_type_mode_policy(
+        self,
+        result_type: SemaType,
+        expected_helper: str,
+        expected_denorm_mode: str,
+    ) -> None:
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_omod',
+            ty=result_type,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_omod'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=result_type),
+            ),
+        )
+
+        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert f'amdgpu::fp_mode::{expected_helper}' in result
+        assert expected_denorm_mode in result
+        assert 'const uint32_t effective_omod' in result
+        assert 'finalize_omod_' in result
+        assert 'if (inst_.omod ==' not in result
+        if result_type == SemaType.F16:
+            assert 'false, inst_.omod' in result
+
     def test_vector_add_f32(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,
@@ -222,6 +287,16 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in result
+
+        callback_ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            vcc_dst='sdst',
+            mask_result_writer='commit_result',
+        )
+        callback_result = lower_sema_block(block, callback_ctx)
+        assert 'commit_result(vcc);' in callback_result
+        assert 'write_wave_mask_scalar' not in callback_result
 
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(

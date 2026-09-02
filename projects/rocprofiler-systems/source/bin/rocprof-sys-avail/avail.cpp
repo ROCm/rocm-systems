@@ -13,14 +13,13 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include "hw_counter_query.hpp"
 
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/rocprofiler-sdk.hpp"
 #include "core/state.hpp"
 
 #include <timemory/components.hpp>
@@ -164,7 +163,7 @@ main(int argc, char** argv)
 
     std::string cols_via{};
     std::tie(fmt_opts.num_cols, cols_via) = tim::utility::console::get_columns();
-    std::string col_msg =
+    const std::string col_msg =
         ". default: " + std::to_string(fmt_opts.num_cols) + " [via " + cols_via + "]";
 
     fields[VAL]      = "VALUE_TYPE";
@@ -821,10 +820,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
-    width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool   _wusing           = width_bool{ true, _available_column };
-    std::int64_t pad               = fmt_opts.padding;
+    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool _wusing           = width_bool{ true, _available_column };
+    const std::int64_t pad       = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
@@ -879,7 +878,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
             {
                 if(!options[i]) continue;
-                bool center = (i > 0) ? false : true;
+                const bool center = (i > 0) ? false : true;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
@@ -952,7 +951,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
             if(!options[i]) continue;
-            bool center = (i > 0) ? false : true;
+            const bool center = (i > 0) ? false : true;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -1275,8 +1274,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
         for(const auto& itr : fitr.second)
         {
             if(fmt_opts.available_only && !itr.available()) continue;
-            std::stringstream ss;
-            int               _selected = 0;
+            const std::stringstream ss;
+            int                     _selected = 0;
             if(options[0])
             {
                 _selected += (is_selected(itr.symbol())) ? 1 : 0;
@@ -1450,9 +1449,9 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         if(_midx < _widths.size()) _widths.at(_midx) -= 1;
     };
 
-    std::int32_t _max_width = fmt_opts.num_cols;
-    size_t       _n         = 0;
-    size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
+    const std::int32_t _max_width = fmt_opts.num_cols;
+    size_t             _n         = 0;
+    const size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
     while(_n++ < _nmax)
     {
         if(debug_msg)
@@ -1469,7 +1468,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         _decrement_max();
     }
 
-    std::int32_t _maxw = _get_max().second;
+    const std::int32_t _maxw = _get_max().second;
     if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
 
     if(debug_msg)

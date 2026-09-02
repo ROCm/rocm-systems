@@ -47,7 +47,7 @@ private:
 
 const std::string &daemon_json() {
   static const std::string config = [] {
-    std::ifstream input(std::filesystem::path(CONFIG_DIR) / "gfx950_cdna4_kmd.json");
+    std::ifstream input(std::filesystem::path(CONFIG_DIR) / "gfx950_mi355x_kmd.json");
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
   }();
   return config;

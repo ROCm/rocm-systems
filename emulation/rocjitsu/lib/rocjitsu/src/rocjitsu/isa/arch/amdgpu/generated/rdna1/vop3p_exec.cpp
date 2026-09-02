@@ -95,34 +95,6 @@ void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_max_f16_vop3p(*this, wf);
 }
 
-void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_f32_f16_vop3p(*this, wf);
-}
-
-void VDot2I32I16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_i32_i16_vop3p(*this, wf);
-}
-
-void VDot2U32U16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_u32_u16_vop3p(*this, wf);
-}
-
-void VDot4I32I8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_i32_i8_vop3p(*this, wf);
-}
-
-void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_u32_u8_vop3p(*this, wf);
-}
-
-void VDot8I32I4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_i32_i4_vop3p(*this, wf);
-}
-
-void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_u32_u4_vop3p(*this, wf);
-}
-
 void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_fma_mix_f32_vop3p(*this, wf);
 }

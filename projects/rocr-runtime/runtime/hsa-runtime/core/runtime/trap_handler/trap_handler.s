@@ -344,9 +344,13 @@ trap_entry:
 .endif
 
 .not_host_trap:
-  // It's an s_trap; advance the PC
+  // We have an s_trap.  We should advance the PC past the trap instruction
+  // except for s_trap 2 (TRAP_ID_ABORT).
+  s_cmp_eq_u32                          ttmp2, TRAP_ID_ABORT
+  s_cbranch_scc1                        .skip_advance_pc
   s_add_u32                             ttmp0, ttmp0, 0x4
   s_addc_u32                            ttmp1, ttmp1, 0x0
+.skip_advance_pc:
 
   // If llvm.debugtrap and debugger is not attached.
   s_cmp_eq_u32                          ttmp2, TRAP_ID_DEBUGTRAP

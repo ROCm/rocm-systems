@@ -31,6 +31,7 @@ inline constexpr size_t REGISTER_SET_MAX_SGPRS =
     std::max<size_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
 inline constexpr size_t REGISTER_SET_MAX_VGPRS = MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF;
 inline constexpr size_t REGISTER_SET_MAX_ACC_VGPRS = REGISTER_SET_MAX_VGPRS;
+inline constexpr size_t REGISTER_SET_MAX_TTMPS = 16;
 
 /// @brief Normal SGPRs safe for scratch allocation across supported families.
 ///
@@ -93,6 +94,14 @@ public:
 
   /// @brief Return true if every lane covered by `ref` is present.
   [[nodiscard]] bool contains(RegisterRef ref) const;
+
+  /// @brief Return true if any lane covered by `ref` is present.
+  ///
+  /// @details The any-of counterpart to contains(). Register allocation asks
+  /// this to reject a candidate tuple: a run is usable only when none of its
+  /// lanes is in the unavailable set. Classes RegisterSet does not track answer
+  /// false, matching contains().
+  [[nodiscard]] bool intersects(RegisterRef ref) const;
 
   /// @brief Return true when no register class contains any live bits.
   [[nodiscard]] bool none() const;

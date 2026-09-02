@@ -224,14 +224,16 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 {
     auto output_dir = get_output_directory();
 
-    bool tracing_on   = true;
-    bool profiling_on = true;
+    bool tracing_on   = false;
+    bool profiling_on = false;
+    bool rocpd_on     = true;
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
         auto normalized = strip_flag_prefix(preset_mode);
-        tracing_on      = registry.is_section_enabled(normalized, "tracing", true);
-        profiling_on    = registry.is_section_enabled(normalized, "profiling", true);
+        tracing_on      = registry.is_section_enabled(normalized, "tracing");
+        profiling_on    = registry.is_section_enabled(normalized, "profiling");
+        rocpd_on        = registry.is_rocpd_output_enabled(normalized);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -274,18 +276,31 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     std::cerr << "\nResults will be available in:\n";
     if(profiling_on)
     {
-        std::cerr << "  \u2022 Text profile:  " << output_dir << "/wall_clock.txt\n"
+        std::cerr << "  \u2022 Text profile:   " << output_dir << "/wall_clock.txt\n"
                   << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n";
     }
-    if(tracing_on)
+    if(rocpd_on)
     {
-        std::cerr << "  \u2022 Trace (visual): " << output_dir
-                  << "/perfetto-trace.proto\n";
+        std::cerr << "  \u2022 rocpd output:   " << output_dir << "/rocpd.db\n";
     }
     if(tracing_on)
     {
-        std::cerr << "\nTo visualize trace:\n"
-                  << "  Open " << output_dir
+        std::cerr << "  \u2022 Perfetto trace: " << output_dir
+                  << "/perfetto-trace.proto\n";
+    }
+
+    if(rocpd_on || tracing_on)
+    {
+        std::cerr << "\nTo visualize results:\n";
+    }
+    if(rocpd_on)
+    {
+        std::cerr << "  \u2022 rocpd:    Open " << output_dir
+                  << "/rocpd.db in ROCm Optiq.\n";
+    }
+    if(tracing_on)
+    {
+        std::cerr << "  \u2022 Perfetto: Open " << output_dir
                   << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
     }
     std::cerr << "\n";
@@ -365,8 +380,8 @@ validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
                      "Consider adding --rocm for GPU collective tracing.\n";
     }
 
-    int domain_count = (gpu_enabled ? 1 : 0) + (rocm_enabled ? 1 : 0) +
-                       (cpu_enabled ? 1 : 0) + (parallel_enabled ? 1 : 0);
+    const int domain_count = (gpu_enabled ? 1 : 0) + (rocm_enabled ? 1 : 0) +
+                             (cpu_enabled ? 1 : 0) + (parallel_enabled ? 1 : 0);
     if(domain_count >= 3 && preset_name.empty())
     {
         std::cerr << "[rocprof-sys][note] Multiple domain flags specified. Consider "
@@ -394,12 +409,12 @@ collect_resolved_settings(const std::vector<std::string>&        current_env,
 
     for(const auto& env_entry : current_env)
     {
-        std::string_view entry{ env_entry };
-        auto             eq_pos = entry.find('=');
+        const std::string_view entry{ env_entry };
+        auto                   eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos) continue;
 
-        std::string key(entry.substr(0, eq_pos));
-        std::string val(entry.substr(eq_pos + 1));
+        const std::string key(entry.substr(0, eq_pos));
+        const std::string val(entry.substr(eq_pos + 1));
 
         if(key.find("ROCPROFSYS_") != 0) continue;
 
@@ -471,7 +486,7 @@ strip_ansi(const std::string& text)
     std::string result;
     result.reserve(text.size());
     bool in_escape = false;
-    for(char ch : text)
+    for(const char ch : text)
     {
         if(in_escape)
         {
@@ -514,7 +529,7 @@ line_contains_flag(const std::string& line, const std::string& flag)
     auto end = pos + flag.size();
     if(end < stripped.size())
     {
-        char next = stripped[end];
+        const char next = stripped[end];
         if(next != ' ' && next != ',' && next != '=' && next != '\t' && next != '[')
             return false;
     }
@@ -772,7 +787,8 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
     if(match == topic_map.end()) return false;
 
     // Build set of target header strings
-    std::set<std::string> target_headers(match->second.begin(), match->second.end());
+    const std::set<std::string> target_headers(match->second.begin(),
+                                               match->second.end());
 
     // Split captured text into lines
     std::istringstream       iss(captured);
@@ -885,7 +901,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
         }
 
         // Check if this line starts a new argument (has - prefix after indent)
-        bool is_arg_line = (stripped[first] == '-');
+        const bool is_arg_line = (stripped[first] == '-');
 
         if(is_arg_line)
         {

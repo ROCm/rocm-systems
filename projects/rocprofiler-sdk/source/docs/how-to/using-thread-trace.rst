@@ -6,7 +6,9 @@
 
 ====================
 Using thread trace
-====================
+********************************
+Using thread trace
+********************************
 
 Thread trace is a shader execution tracing technique capable of profiling wavefronts at the instruction timing level.
 This is a low-level tracing and profiling feature that targets a single or a few kernel executions.
@@ -17,12 +19,56 @@ Thread trace features include:
 * Exact thread or wave execution path
 * Wave scheduling and stall timing analysis
 * Instruction and source level hotspots
-* Extremely fast and granular counter collection (AMD Instinct)
+* Extremely fast and granular counter collection (AMD Instinct™)
 
-Supported devices:
+For a comparison of ATT against dispatch PMC and PC sampling — granularity, output size, and when to use each — see :ref:`How ATT differs from counter-based services <glance-att-comparison>` in the SDK overview.
 
-* AMD Instinct: MI200 and MI300 series
-* AMD Radeon: gfx10, gfx11 and gfx12
+.. _thread-trace-supported-devices:
+
+Supported devices
+===================
+
+ATT support varies by GPU architecture. Full support includes both instruction trace and perfmon streaming; trace-only architectures don't support ``--att-perfcounters``.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Architecture
+     - GPU family
+     - Support
+     - Notes
+   * - CDNA4
+     - AMD Instinct MI350 series
+     - Full
+     - gfx950
+   * - CDNA3
+     - AMD Instinct MI300 series
+     - Full
+     - gfx942
+   * - CDNA2
+     - AMD Instinct MI200 series
+     - Full
+     - gfx90a
+   * - RDNA2
+     - AMD Radeon™
+     - Trace-only
+     - gfx1030
+   * - RDNA3
+     - AMD Radeon (discrete)
+     - Trace-only
+     - gfx1100, gfx1101, gfx1102
+   * - RDNA3.5
+     - AMD Ryzen™ AI (APU)
+     - Trace-only
+     - gfx1150, gfx1151, gfx1152, gfx1153; strongest validation on gfx1151 and gfx1153
+   * - RDNA4
+     - AMD Radeon
+     - Trace-only
+     - gfx1200, gfx1201
+
+.. note::
+
+   MI100 (gfx908) is expected to work but hasn't been formally validated for ATT, so it isn't listed above.
 
 Thread trace profiling is performed in the following steps:
 
@@ -65,6 +111,8 @@ The following table lists the parameters relevant to thread tracing:
 |                             |         |         |           | Increase this value if the buffer tends to get full.         |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-no-detail               | Bool    |         | False     | Collects occupancy data without instruction-level detail.    |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-perfcounter-ctrl        | Integer | 1 - 32  | 2~8       | Available only in gfx9. Streams SQ performance counters to   |
 |                             |         |         |           | the thread trace buffer in the given relative period. As     |

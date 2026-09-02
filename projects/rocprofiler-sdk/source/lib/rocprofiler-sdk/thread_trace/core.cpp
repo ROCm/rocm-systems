@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -411,6 +412,18 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
+    enabled.store(false, std::memory_order_release);
+
+    if(auto* controller = hsa::get_queue_controller())
+    {
+        client.wlock([&](auto& client_id) {
+            if(!client_id) return;
+            controller->remove_callback(*client_id);
+            client_id = std::nullopt;
+        });
+        controller->disable_serialization();
+    }
+
     ROCP_TRACE << "Clearing agents";
     auto lk = std::unique_lock{agents_map_mut};
     agents.clear();
@@ -436,6 +449,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     }
     // TODO: Get external
 
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
+
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
     auto it = agents.find(queue.get_agent().get_hsa_agent());
@@ -444,6 +459,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 
     auto&       agent      = *CHECK_NOTNULL(it->second);
     const auto& parameters = agent.params;
+
+    // Kernel-replay localized context control: a replay pass may disable this ATT context for the
+    // pass -- skip the trace (but keep serialization) when it's forced off. No-op outside a replay
+    // loop. See kernel_replay/local_context.hpp.
+    if(auto ov = kernel_replay::local_context_override(parameters.context_id); ov && !*ov)
+        return {nullptr, parameters.bSerialize};
 
     auto control_flags = parameters.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
                                                    queue.get_id(),
@@ -494,6 +515,7 @@ DispatchThreadTracer::start_context()
     // Only installs queue-controller callbacks (cached and applied to queues as
     // they are created), so this is safe to call before hsa_init.
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    enabled.store(true, std::memory_order_release);
 
     // Only one thread should be attempting to enable/disable this context
     client.wlock([&](auto& client_id) {
@@ -529,18 +551,11 @@ DispatchThreadTracer::start_context()
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    auto* controller = hsa::get_queue_controller();
-    if(!controller) return;
+    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
+    // registered so packets already in the queues can drain through the serializer transition.
+    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
-    client.wlock([&](auto& client_id) {
-        if(!client_id) return;
-
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(*client_id);
-        client_id = std::nullopt;
-    });
-
-    controller->disable_serialization();
+    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
 }
 
 DeviceThreadTracer::DeviceThreadTracer()

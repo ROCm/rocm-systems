@@ -238,8 +238,6 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
-           core/runtime/hotswap.cpp
-           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp
@@ -301,9 +299,8 @@ if (${PC_SAMPLING_SUPPORT})
 endif()
 
 if (${AMDCUID_FOUND})
-  find_package(OpenSSL REQUIRED) # Required by CUID library
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
-  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB})
   set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
               BUILD_RPATH "${AMDCUID_ROOT}/lib"
               INSTALL_RPATH "${AMDCUID_ROOT}/lib")

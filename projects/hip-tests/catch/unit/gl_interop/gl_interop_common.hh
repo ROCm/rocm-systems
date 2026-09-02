@@ -73,30 +73,63 @@ public:
   virtual ~IContextScopeGuard() = default;
 };
 
-static std::once_flag glut_init_flag;
-static bool glut_init_failed = false;
-static void GlutError(const char *fmt, va_list ap)
+// inline (one instance across all translation units that include this header) so GLUT is
+// initialized exactly once per process. A per-TU flag caused glutInit() to run once per TU, which
+// on Windows raises "illegal glutInit() reinitialization attempt" and can hang the test.
+inline std::once_flag glut_init_flag;
+inline bool glut_init_failed = false;
+// Single window/context shared by every test. 0 means "not created". Created once in init() and
+// kept alive for the whole process: freeglut accumulates native window handles across repeated
+// create/destroy, so opening/closing one window per test hangs the window manager (Windows+Linux).
+inline int glut_shared_window = 0;
+inline void GlutError(const char *fmt, va_list ap)
 {
     // Print what error occurred
     fprintf(stderr, "GlutError:");
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
-    
+
     glut_init_failed = true;
 }
+
+// Initialize freeglut exactly once per process. glutInit() must be called only once; calling it
+// again raises "illegal glutInit() reinitialization attempt" and can hang the test. ALL GL interop
+// test files must go through EnsureGlutInitialized() (including the context-switch tests in
+// hipGLContextSwitch.cc) so there is a single glutInit() for the whole process.
+inline void GlutInitOnce() {
+  static char proc_name[] = "";
+  static std::array<char*, 2> glut_argv = {proc_name, nullptr};
+  static int glut_argc = 1;
+  glutInitErrorFunc(&GlutError);
+  glutInit(&glut_argc, glut_argv.data());
+  if (glut_init_failed) return;
+  glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
+}
+
+inline void EnsureGlutInitialized() { std::call_once(glut_init_flag, GlutInitOnce); }
 
 class GLUTContextScopeGuard : public IContextScopeGuard {
  public:
   GLUTContextScopeGuard() {
-    std::call_once(glut_init_flag, &GLUTContextScopeGuard::init);
+    EnsureGlutInitialized();
     if (glut_init_failed) {
       HIP_SKIP_TEST("GLUT Init Failed");
     }
-    glut_window_ = glutCreateWindow("");
+    // Reuse one persistent window/context for every test that uses this guard instead of creating
+    // and destroying a window per test. freeglut accumulates native window handles across repeated
+    // create/destroy, and opening hundreds of windows over a full run hangs the window manager
+    // (observed on Windows and Linux). Tests run serially (Catch2 single-threaded), so this lazy
+    // create needs no synchronization.
+    if (glut_shared_window == 0) {
+      glutInitWindowSize(512, 512);
+      glut_shared_window = glutCreateWindow("");
+    }
+    glutSetWindow(glut_shared_window);
   }
 
   ~GLUTContextScopeGuard() override {
-    glutDestroyWindow(glut_window_);
+    // Intentionally do NOT destroy the shared window; it is reused by subsequent tests and torn
+    // down when the process exits. Per-test destroy/recreate is what caused the window-count hang.
   }
 
   GLUTContextScopeGuard(const GLUTContextScopeGuard&) = delete;
@@ -104,20 +137,6 @@ class GLUTContextScopeGuard : public IContextScopeGuard {
 
   GLUTContextScopeGuard(GLUTContextScopeGuard&&) = delete;
   GLUTContextScopeGuard& operator=(GLUTContextScopeGuard&&) = delete;
-
- private:
-  int glut_window_;
-
-  static void init() {
-    static char proc_name[] = "";
-    static std::array<char*, 2> glut_argv = {proc_name, nullptr};
-    static int glut_argc = 1;
-    glutInitErrorFunc(&GlutError);
-    glutInit(&glut_argc, glut_argv.data());
-    if (glut_init_failed) return;
-    glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
-    glutInitWindowSize(512, 512);
-  }
 };
 
 #ifdef USE_EGL

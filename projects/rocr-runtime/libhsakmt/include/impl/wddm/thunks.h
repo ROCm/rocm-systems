@@ -241,7 +241,22 @@ inline ErrorCode QueryResourceInfo(D3DKMT_QUERYRESOURCEINFO *args) {
 inline ErrorCode OpenResource(D3DKMT_OPENRESOURCE *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTOpenResource(args)));
 }
+
+inline bool QueryVideoMemoryInfoAvailable() {
+  return DXCORE_CALL(D3DKMTQueryVideoMemoryInfo) != nullptr;
+}
+
+inline ErrorCode QueryVideoMemoryInfo(void *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryVideoMemoryInfo(args)));
+}
+
+inline bool EnumProcessesAvailable() {
+  return DXCORE_CALL(D3DKMTEnumProcesses) != nullptr;
+}
+
+inline ErrorCode EnumProcesses(void *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEnumProcesses(args)));
+}
 } // namespace d3dthunk
 } // namespace thunk
 } // namespace wsl
-

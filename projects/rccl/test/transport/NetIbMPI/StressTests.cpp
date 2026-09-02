@@ -13,6 +13,8 @@
 
 #include "NetIbMPITestBase.hpp"
 
+#include <sched.h>
+
 #ifdef MPI_TESTS_ENABLED
 
 // =====================================================================
@@ -1586,5 +1588,222 @@ TEST_F(NetIbMPITest, SetNetAttrNoOp) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: ThreadedProgressDoesNotSerialize
+//
+// Multithread-only gate on the data path itself: independent workers must make
+// progress at the same time, not one after another. It exists because a single
+// process-global lock anywhere under isend/irecv/test is enough to turn every
+// concurrent communicator into a queue while every functional test still passes.
+// The known instance is the libibverbs ops shims, whose poll_cq takes one
+// process-global mutex per call, but nothing about this test is specific to
+// them: any future global lock on the progress path shows up here.
+//
+// Method. The same body runs in one process, on the same devices: once with a
+// single worker, then with all of them, and each worker times only its own loop,
+// so connection setup is outside the measurement. Every worker does the same
+// fixed number of transfers, so the parallel phase moves N times the data.
+// Perfect overlap therefore lands near the single-worker time, and full
+// serialization near N times it. Calibration runs before and after the parallel
+// phase and is averaged, so a machine that drifts mid-test is visible rather
+// than silently shifting the verdict. A fourth phase holds a mutex across every
+// transfer, and the same measurement has to notice it -- otherwise the verdict
+// on the plugin means nothing.
+//
+// Both waits poll without sleeping, deliberately: the completion wait, and the
+// isend retry that waits for the receiver's FIFO slot. The harness backs off
+// 10 ms in either place, which is longer than everything being measured -- with
+// the backoff a transfer here costs 10 ms and the phase reports the poll interval
+// rather than the plugin, and nothing shorter than the interval can be seen at
+// all. Without it a transfer costs about 7 us, so contention has somewhere to
+// show up. The price is a core per waiting worker for the couple of seconds this
+// test runs, which is why the functional tests keep the sleeping waits -- and why
+// this one skips rather than measures when the allocation has fewer cores than
+// workers, since below that line the parallel phase reports the machine.
+//
+// The self-check's own margin, since a gate that fails on a fast NIC is worse
+// than no gate. Locking the sending rank alone serializes the whole exchange --
+// the receiver can only complete what the sender was allowed to post -- so the
+// serialized factor comes out near N rather than at some fraction of it: 3.57 to
+// 4.17 at four workers against a budget of 2.40, and 15.18 to 17.79 at sixteen
+// against 9.60, over the mia1 runs recorded for this branch. The narrowest margin
+// is 1.49x, and it does not shrink with N, which is the property that matters
+// since the budget scales with N as well. Four and sixteen are the only counts
+// this runs at -- the threaded suites set 2, 4 and 16, and 2 skips above -- so
+// those are the counts the margin is claimed for.
+//
+// What it sees, measured on mia1 at two ranks: a healthy build reports 1.02 to
+// 1.16 at four workers and 1.65 to 2.11 at sixteen, the growth being the NIC and
+// the cores rather than a lock. With RCCL_IB_FAULT_INJECTION set, whose ops shims
+// take one process-global mutex per poll_cq, the same measurement reports 1.74 to
+// 1.94 and 5.39 to 6.20: separated from the healthy range with no overlap. The
+// budget stays at 0.6 x N so a loaded node cannot fail the suite, which means the
+// shims pass it -- they are gated deterministically by
+// FaultInjectionShimsAbsentUnlessRequested instead, and this test's own numbers
+// are the evidence it would see a lock that mattered.
+// =============================================================================
+TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const int rank     = MPIEnvironment::world_rank;
+    const int nThreads = MPIEnvironment::nThreads;
+    // Below four workers the ratio is too close to one to separate contention
+    // from ordinary noise.
+    if (nThreads < 4) {
+        GTEST_SKIP() << "requires --net_ib_nthreads of at least 4 to separate contention "
+                        "from noise";
+    }
+
+    // Both waits busy-poll, so a waiting worker holds a core for the whole phase.
+    // Given fewer cores than workers the parallel phase inflates toward the
+    // serialized one no matter what the plugin does, and the run reports a lock
+    // that is really the allocation. Nothing in the suite config reserves cores,
+    // so the test asks instead, and says so rather than measuring.
+    //
+    // The affinity mask, not hardware_concurrency(): the latter reports the
+    // machine, while the mask is what a batch system narrows. Reduced across
+    // ranks because the two run on different nodes and both must reach the same
+    // verdict -- a one-sided skip would leave the peer in the barrier below.
+    cpu_set_t cpuMask;
+    CPU_ZERO(&cpuMask);
+    const int localCpus =
+        (sched_getaffinity(0, sizeof(cpuMask), &cpuMask) == 0) ? CPU_COUNT(&cpuMask) : -1;
+    int fewestCpus = -1;
+    if (MPI_Allreduce(&localCpus, &fewestCpus, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD)
+        != MPI_SUCCESS)
+        fewestCpus = -1;
+    // A negative value means some rank could not read its mask; that is not a
+    // reason to skip, only a reason not to claim the check was made.
+    if (fewestCpus >= 0 && fewestCpus < nThreads) {
+        GTEST_SKIP() << "needs a core per worker and the narrowest rank has " << fewestCpus
+                     << " for " << nThreads
+                     << " workers: both waits busy-poll, so on fewer cores the parallel phase "
+                        "measures the allocation rather than the progress path";
+    }
+
+    AssertInitAndGetDevices(nullptr);
+
+    // Small messages: the point is how many transfers overlap, not bandwidth.
+    // The loop polls for completion without sleeping, so a transfer costs what it
+    // costs -- tens of microseconds -- and enough of them are needed for a phase
+    // to be measurable against scheduling noise.
+    static constexpr size_t kMsgSize = 256;
+    static constexpr int    kIters   = 5000;
+    static constexpr int    kTimeoutMs = 60000;
+    // Full serialization costs N times the single-worker time. Passing means
+    // staying below 60% of that, which on healthy hardware measures near 1.
+    static constexpr double kSerializedFraction = 0.6;
+
+    std::vector<double> workerMs(nThreads, 0.0);
+    // Phase 3 holds this across each transfer to imitate a global lock on the
+    // progress path, which is how the measurement proves it can still see one.
+    std::mutex serializeAll;
+    bool serialize = false;
+
+    auto body = [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        ThreadResult result;
+        void* buffer = malloc(kMsgSize);
+        if (!buffer) {
+            result.ok = false;
+            result.msg = "malloc failed";
+            return result;
+        }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+        memset(buffer, 0x5A, kMsgSize);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        result = WorkerRegister(comm, buffer, kMsgSize, NCCL_PTR_HOST, &mhandle);
+        if (!result.ok) return result;
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < kIters; i++) {
+            // Only the sending rank serializes. Locking both would let the two
+            // ranks admit different workers at the same time, and each would then
+            // wait for a peer that its own lock is keeping out -- a deadlock,
+            // which is its own argument against a global lock on this path.
+            std::unique_lock<std::mutex> lock(serializeAll, std::defer_lock);
+            if (serialize && rank == 1) lock.lock();
+            result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
+                                       kTimeoutMs, nullptr, /*busyPoll=*/true);
+            if (!result.ok) return result;
+        }
+        const auto end = std::chrono::steady_clock::now();
+        workerMs[threadIdx] =
+            std::chrono::duration<double, std::milli>(end - start).count();
+        return result;
+    };
+
+    // The slowest worker bounds the phase: the others waited for it.
+    auto measure = [&](int workers) -> double {
+        std::fill(workerMs.begin(), workerMs.end(), 0.0);
+        // Pinned to one device deliberately: the measurement is about workers
+        // contending for the same device's progress path, and spreading them over
+        // four NICs would hide exactly the serialization this gate exists to catch.
+        RunMultiThreadedIndependent(ThreadDevPolicy::Fixed(0), workers, body);
+        double worst = 0.0;
+        for (int t = 0; t < workers; t++) worst = std::max(worst, workerMs[t]);
+        return worst;
+    };
+
+    const double singleBefore = measure(1);
+    const double parallel     = measure(nThreads);
+    const double singleAfter  = measure(1);
+    serialize = true;
+    const double serialized = measure(nThreads);
+    serialize = false;
+
+    // A worker can fail on one rank only, and the harness reports that on both
+    // ranks already. What must not happen here is a fatal assertion: this rank
+    // would leave the test while the peer, whose own timings are fine, waits in
+    // the barrier below forever. So a missing measurement is reported and the
+    // verdict skipped, and both ranks reach the barrier either way.
+    const bool measured = singleBefore > 0.0 && singleAfter > 0.0 && parallel > 0.0
+                          && serialized > 0.0;
+    EXPECT_TRUE(measured)
+        << "a phase produced no timing on this rank (single " << singleBefore << "/"
+        << singleAfter << " ms, parallel " << parallel << " ms, serialized " << serialized
+        << " ms), so the scaling verdict is skipped";
+
+    if (measured) {
+        const double single = (singleBefore + singleAfter) / 2.0;
+        const double factor = parallel / single;
+        const double budget = kSerializedFraction * nThreads;
+        const double serializedFactor = serialized / single;
+
+        TEST_INFO("progress scaling: %d workers, single %.1f/%.1f ms, parallel %.1f ms, "
+                  "factor %.2f; deliberately serialized %.1f ms, factor %.2f; budget %.2f",
+                  nThreads, singleBefore, singleAfter, parallel, factor, serialized,
+                  serializedFactor, budget);
+
+        // Without this the gate could pass by being blind: a wait that sleeps, or a
+        // workload that spends its time off the progress path, would report a flat
+        // factor no matter what. The same measurement has to flag a lock it knows is
+        // there before its verdict on the plugin means anything.
+        EXPECT_GT(serializedFactor, budget)
+            << "the measurement did not notice a mutex held across every transfer (factor "
+            << serializedFactor << ", budget " << budget
+            << "), so it cannot be trusted to notice one inside the plugin either";
+
+        EXPECT_LT(factor, budget)
+            << nThreads << " workers each moved " << kIters << " messages in " << parallel
+            << " ms while one worker needed " << single << " ms, a factor of " << factor
+            << " where full serialization is " << nThreads << ". Concurrent progress is being "
+            << "serialized somewhere under isend/irecv/test: a lock held across a progress "
+            << "call would do exactly this.";
+
+        // A machine that changed speed under us would invalidate the ratio above.
+        const double drift =
+            std::max(singleBefore, singleAfter) / std::min(singleBefore, singleAfter);
+        EXPECT_LT(drift, 1.5) << "single-worker calibration drifted between " << singleBefore
+                              << " ms and " << singleAfter
+                              << " ms, so the scaling factor cannot be trusted";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
 
 #endif /* MPI_TESTS_ENABLED */

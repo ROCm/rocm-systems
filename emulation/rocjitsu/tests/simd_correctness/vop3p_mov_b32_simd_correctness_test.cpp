@@ -12,6 +12,7 @@
 /// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -213,7 +214,7 @@ void check(uint64_t exec) {
     uint32_t words[2] = {0u, 0u};
     // src0 = VGPR 256 (pair v0:v1), src1 = VGPR 258 (pair v2:v3).
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, op_sel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_pk_mov_b32_vop3p decode failed";
     auto out =
         force_scalar ? fx.run(inst, rot, exec) : fx.run_simd_probe(inst, arch, rot, exec, op_sel);
@@ -287,7 +288,7 @@ TEST(Vop3pMovB32SimdCorrectness, ProductionSimdDispatchGolden) {
     ASSERT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3p_encode(/*op=*/51, kDstVgpr, /*src0=*/256, /*src1=*/258, kOpSel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr) << arch.name << " v_pk_mov_b32_vop3p decode failed";
     const auto out = fx.run(inst, kRot, kExec);
     delete inst;
@@ -324,7 +325,7 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3p_encode(/*op=*/51, kDstVgpr, test_case.src0, test_case.src1, test_case.op_sel, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << arch.name << " " << test_case.name
                              << " v_pk_mov_b32_vop3p decode failed";
     auto out = force_scalar

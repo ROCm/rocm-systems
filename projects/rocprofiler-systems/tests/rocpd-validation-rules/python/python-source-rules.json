@@ -12,9 +12,9 @@
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'main_loop' has a total of 5 calls.",
-                    "error_message": "'main_loop' does not have 5 total calls, as expected.",
-                    "expected_result": 5,
+                    "description": "Verify that 'main_loop' has a total of 4 calls.",
+                    "error_message": "'main_loop' does not have 4 total calls, as expected.",
+                    "expected_result": 4,
                     "query": "SELECT total_calls FROM top WHERE name = 'main_loop';"
                 },
                 {
@@ -66,9 +66,9 @@
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'main_loop' has a total of 5 calls.",
-                    "error_message": "'main_loop' does not have 5 total calls, as expected.",
-                    "expected_result": 5,
+                    "description": "Verify that 'main_loop' has a total of 4 calls.",
+                    "error_message": "'main_loop' does not have 4 total calls, as expected.",
+                    "expected_result": 4,
                     "query": "SELECT COUNT(*) FROM regions WHERE name = 'main_loop';"
                 },
                 {

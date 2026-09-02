@@ -21,8 +21,11 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.mi_gpu_spec import MIGPUSpecs
 from utils.native_tool_finder import NativeToolFinder
+from utils.specs import MachineSpecs
 from utils.utils_common import (
+    PROFILE_OUTPUT_FORMAT,
     format_time,
     get_job_rank_and_size,
     is_only_pc_sampling,
@@ -42,6 +45,28 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "triton_trace": ("triton",),
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
+
+
+def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
+    """Return notices on how active partition modes shape analysis metrics."""
+    if not MIGPUSpecs.is_partition_supported(
+        getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
+    ):
+        return []
+
+    messages = []
+    for label, attribute, derived in (
+        ("Compute", "compute_partition", "logical XCDs and L2 channels"),
+        ("Memory", "memory_partition", "HBM channels"),
+    ):
+        partition = getattr(mspec, attribute, None)
+        if not partition or partition.strip().lower() == "n/a":
+            continue
+        messages.append(
+            f"{label} partition: {partition}. Analysis mode will calculate metrics "
+            f"based on the number of {derived} derived for this partition mode."
+        )
+    return messages
 
 
 def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
@@ -165,6 +190,12 @@ class RocProfCompute_Base:
         """Perform sanitization of inputs"""
         args = self.get_args()
         selected_frameworks = _compute_selected_frameworks(args)
+        if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
+            console_error(
+                "ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) "
+                "cannot be used with PC-sampling-only profiling, which does not "
+                "collect counters. Remove the tracing option(s) or add a counter block."
+            )
         self._selected_frameworks: set[str] = selected_frameworks
 
         if (
@@ -291,10 +322,11 @@ class RocProfCompute_Base:
             "w",
             encoding="utf-8",
         ) as f:
-            args_dict = vars(self.__args)
+            args_dict = dict(vars(self.__args))
             # Override filter_blocks when writing profiling config yaml
             args_dict["filter_blocks"] = self._filter_blocks
             args_dict["config_dir"] = str(args_dict["config_dir"])
+            args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             yaml.dump(args_dict, f)
 
         # verify soc compatibility
@@ -311,6 +343,9 @@ class RocProfCompute_Base:
             mspec=self._soc._mspec,
             soc=self._soc,
         )
+
+        for message in _partition_warning_messages(self._soc._mspec):
+            console_warning(message)
 
     def profile(
         self,
@@ -352,8 +387,6 @@ class RocProfCompute_Base:
                 fnames=str_fnames,
                 profiler_options=options,
                 workload_dir=args.output_directory,
-                loglevel=args.loglevel,
-                format_rocprof_output=args.format_rocprof_output,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
@@ -409,6 +442,14 @@ class RocProfCompute_Base:
         msg = "Collecting Performance Counters"
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
+
+        if total_runs:
+            # Warn once per profile run, not once per counter collection pass.
+            console_warning(
+                "Intermediate results_*.csv generation from rocpd databases is "
+                "deprecated and will be replaced with automatic .db file "
+                "retention in a future release."
+            )
 
         native_tool_path = self.__get_native_tool_path(args)
         pc_sampling = PCSamplingProfile(

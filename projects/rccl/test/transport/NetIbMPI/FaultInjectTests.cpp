@@ -3224,4 +3224,86 @@ TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// =============================================================================
+// Test: FaultInjectionShimsAbsentUnlessRequested
+//
+// With RCCL_IB_FAULT_INJECTION off, the libibverbs ops shims must not be
+// installed. They are not a passive instrument: shimPollCq takes one
+// process-global mutex on every call, so a context that carries them serializes
+// completion polling across every thread in the process, including production
+// proxy threads that never asked for fault injection. This is the deterministic
+// half of that guard -- ThreadedProgressDoesNotSerialize measures the effect,
+// this one catches the cause before it can reach a normal run.
+//
+// The probe: arming an ops-level fault looks up the device context in the
+// registry that install() fills in, so it returns ncclInvalidArgument while the
+// shims are absent and ncclSuccess once they are in place.
+//
+// That code is the only thing a registry miss can return -- ncclIbOpsFaultArm*
+// (net_ib_ops_fault.cc) has exactly two exits, ncclInvalidArgument on a null
+// context or an absent entry, and ncclSuccess otherwise -- so the expectation
+// cannot go stale into a false FAIL. The risk runs the other way: the same code
+// also comes back from a null comm, a qpIdx outside nqps, and a QP torn down by
+// recovery (p2p.cc), any of which would let this pass without having probed
+// anything. The transfer above rules all three out before the probe: it needs QP
+// 0 up on a live comm, and it asserts that it moved.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjectionShimsAbsentUnlessRequested) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const char* injection = getenv("RCCL_IB_FAULT_INJECTION");
+    if (injection && injection[0] && strcmp(injection, "0") != 0) {
+        GTEST_SKIP() << "RCCL_IB_FAULT_INJECTION=" << injection
+                     << ": this configuration installs the shims on purpose";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> buf(kMsgSize, 0);
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.data(), kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // One transfer first: the QPs a probe reaches through must be up.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf.data(), kMsgSize,
+                                         /*tag=*/900, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    const char* kLeak = "the libibverbs ops shims are installed without "
+                        "RCCL_IB_FAULT_INJECTION: every poll_cq on this device now takes a "
+                        "process-global mutex, which serializes completion polling for the "
+                        "whole process";
+    if (rank == 1) {
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostSendError(sendComm, 0, EAGAIN), ncclInvalidArgument)
+            << kLeak;
+        EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(sendComm, 0, kWcRetryExcErr, 1,
+                                                   /*injectWhenIdle=*/false),
+                  ncclInvalidArgument)
+            << kLeak;
+    } else {
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostRecvError(recvComm, 0, EAGAIN), ncclInvalidArgument)
+            << kLeak;
+        EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(recvComm, 0, kWcRetryExcErr, 1,
+                                                   /*injectWhenIdle=*/false),
+                  ncclInvalidArgument)
+            << kLeak;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */

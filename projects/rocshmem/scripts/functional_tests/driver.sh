@@ -168,7 +168,10 @@ declare -A TEST_NUMBERS=(
   ["alltoall_wave"]="151"
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
-  ["teamreducescatterwave"]="154"
+  ["reducescatter_wave"]="154"
+  ["tile_reduce"]="155"
+  ["tile_reduce_wave"]="156"
+  ["tile_reduce_wg"]="157"
 )
 
 # Detect which runtime to use
@@ -263,7 +266,8 @@ ExecTest_SLR() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+  NUM_WF=${6:-0}    # Optional 6th parameter: number of wavefronts (0 = use NUM_THREADS directly)
+  IS_RETRY=${7:-0}  # Optional 7th parameter to indicate if this is a retry
 
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
@@ -318,7 +322,11 @@ ExecTest_SLR() {
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
   # Construct Test Command
-  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+  if (( NUM_WF > 0 )); then
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_wf"$NUM_WF"
+  else
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+  fi
 
   # Build the command with timeout if specified
   if [[ -n "$TIMEOUT" ]]; then
@@ -328,7 +336,11 @@ ExecTest_SLR() {
   fi
 
   # Add environment variables and application
-  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  if (( NUM_WF > 0 )); then
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  else
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+  fi
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
@@ -373,7 +385,7 @@ ExecTest_SLR() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -396,7 +408,8 @@ ExecTest_MPI() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+  NUM_WF=${6:-0}    # Optional 6th parameter: number of wavefronts (0 = use NUM_THREADS directly)
+  IS_RETRY=${7:-0}  # Optional 7th parameter to indicate if this is a retry
 
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
@@ -459,8 +472,13 @@ ExecTest_MPI() {
         --map-by numa
       )
   # Construct Test Command
-  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  if (( NUM_WF > 0 )); then
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_wf"$NUM_WF"
+    cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  else
+    TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+    cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
+  fi
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -501,7 +519,7 @@ ExecTest_MPI() {
       # Track failed tests with their parameters for potential retry
       # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}|$NUM_WF")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -585,9 +603,13 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           128       512
   unset LOCALBUFTYPE
 
-  export LOCALBUFTYPE=managed
-  ExecTest  "putnbi"           2       32           128       512
-  unset LOCALBUFTYPE
+  if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  else
+    echo "Skip:   putnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+  fi
 }
 
 TestRMAGet() {
@@ -663,9 +685,13 @@ TestRMAGet() {
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "getnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+    if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+      export LOCALBUFTYPE=managed
+      ExecTest  "getnbi"           2       32           128       512
+      unset LOCALBUFTYPE
+    else
+      echo "Skip:   getnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+    fi
   fi
 }
 
@@ -808,23 +834,26 @@ TestColl() {
   ExecTest  "fcollect"         3       1            64        32768
   ExecTest  "fcollect"         5       1            64        32768
 
-  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
-  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
-  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+  ExecTest  "teamreduction"    3       1            64        32768
+  ExecTest  "teamreduction"    4       1            64        32768
+  ExecTest  "teamreduction"    8       1            64        32768
 
   ExecTest  "teamreducescatter" 2      1            64        32768
   ExecTest  "teamreducescatter" 4      1            64        32768
   ExecTest  "teamreducescatter" 8      1            64        32768
 
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-409: wave tests not supported on RO
-    ExecTest  "broadcast_wave"   2       1            $WAVE_SIZE        32768
-    ExecTest  "alltoall_wave"    2       1            $WAVE_SIZE        512
-    ExecTest  "fcollect_wave"    2       1            $WAVE_SIZE        32768
-    ExecTest  "reduce_wave"      2       1            $WAVE_SIZE        32768
-    ExecTest  "teamreducescatterwave" 2      1            $WAVE_SIZE   32768
-    ExecTest  "teamreducescatterwave" 4      1            $WAVE_SIZE   32768
-    ExecTest  "teamreducescatterwave" 8      1            $WAVE_SIZE   32768
+    #       | Name                | Ranks | Workgroups | Threads    | Max Message Size #
+    ExecTest  "broadcast_wave"      2       1            $WAVE_SIZE   32768
+    ExecTest  "alltoall_wave"       2       1            $WAVE_SIZE   512
+    ExecTest  "fcollect_wave"       2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         2       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         4       1            $WAVE_SIZE   32768
+    ExecTest  "reduce_wave"         8       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  2       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  4       1            $WAVE_SIZE   32768
+    ExecTest  "reducescatter_wave"  8       1            $WAVE_SIZE   32768
   else echo "Skip:   *_wave (AIROCSHMEM-409: wave tests not supported on RO)"; fi
 }
 
@@ -1016,6 +1045,12 @@ TestTiles() {
   ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_reduce"               2       1            1
+  ExecTest  "tile_reduce"               4       1            1
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {
@@ -1110,7 +1145,7 @@ RerunFailedTests() {
 
   # Rerun each failed test with the same environment/config state
   for test_params in "${FAILED_TESTS[@]}"; do
-    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif <<< "$test_params"
+    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif num_wf <<< "$test_params"
 
     # Restore environment state from original test run
     if [[ -n "$use_default_stream" ]]; then
@@ -1126,7 +1161,7 @@ RerunFailedTests() {
       NOVERIF="$noverif"
     fi
 
-    ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" 1
+    ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" "${num_wf:-0}" 1
 
     # Clean up environment state after retry
     unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
@@ -1217,8 +1252,8 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
-    # Tile tests are only supported on IPC backend
-    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+    # Tile tests are only supported on IPC and GDA backend
+    if [[ ! "$TEST" =~ ^(ro) ]]; then
       TestTiles
     fi
     # Host non-MPI IPC tests are only supported on IPC backend
