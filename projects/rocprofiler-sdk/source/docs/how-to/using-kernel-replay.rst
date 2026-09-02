@@ -131,13 +131,36 @@ during ``CONFIG PHASE_ENTER`` to carry state through the complete replay sequenc
 * Use ``user_data->ptr`` for a state object that remains alive through ``CONFIG PHASE_EXIT``.
 
 The SDK copies the union value after ``CONFIG PHASE_ENTER`` and supplies it to
-``replay_pass_count``, ``replay_continue``, and every ``PASS`` callback. Replacing the union value
-during a ``PASS`` callback is not retained. When using ``ptr``, however, callbacks can mutate the
-pointed-to state and later callbacks can observe those changes.
+``replay_pass_count``, ``replay_continue``, and every ``PASS`` callback.
+
+Each pass gets its own copy, so replacing the union value during ``PASS PHASE_ENTER`` is scoped to
+that one pass:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Observed from
+     - Value delivered
+   * - ``replay_pass_count``
+     - the ``CONFIG PHASE_ENTER`` value
+   * - ``PASS PHASE_ENTER``
+     - the ``CONFIG PHASE_ENTER`` value, on every pass
+   * - ``PASS PHASE_EXIT``
+     - the write made during ``PASS PHASE_ENTER`` of the same pass
+   * - ``replay_continue``
+     - the ``CONFIG PHASE_ENTER`` value
+   * - ``CONFIG PHASE_EXIT``
+     - the ``CONFIG PHASE_ENTER`` value
+
+``replay_continue`` runs after ``PASS PHASE_EXIT`` but still receives the ``CONFIG`` value, so a
+tool cannot signal an early exit by overwriting ``user_data->value`` during a pass. Put anything
+that has to influence the continue decision behind ``user_data->ptr`` instead: mutations to the
+pointed-to object are visible from every callback, because the pointer itself never changes.
 
 ``samples/kernel_replay/basic_client_with_user_data.cpp`` demonstrates the pointer form. It stores
-tool state in ``user_data.ptr``, reads the requested maximum from ``replay_pass_count``, and lets a
-``PASS PHASE_EXIT`` update stop the loop through ``replay_continue``.
+tool state in ``user_data.ptr``, reads the requested maximum from ``replay_pass_count``, lets a
+``PASS PHASE_EXIT`` update stop the loop through ``replay_continue``, and asserts each row of the
+table above.
 
 Localized context control
 =========================

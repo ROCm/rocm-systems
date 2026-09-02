@@ -69,8 +69,10 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  *   The tool sets @c replay_pass_count and optionally @c replay_continue during
  *   @ref ROCPROFILER_CALLBACK_PHASE_ENTER. Pass-info fields are zero.
  * - @ref ROCPROFILER_KERNEL_REPLAY_PASS: @c dispatch_info, @c current_pass, and
- *   @c total_passes are populated by the SDK. Config fields are zero/null and must not be
- *   modified.
+ *   @c total_passes are populated by the SDK. @c replay_pass_count and @c replay_continue read
+ *   as NULL and must not be modified: the callbacks installed during CONFIG PHASE_ENTER govern
+ *   the whole sequence and cannot be swapped mid-replay (such a write is discarded today, but
+ *   tools must not depend on that).
  *
  * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
  * (CONFIG + all PASS operations). A tool can write per-dispatch state into
@@ -78,11 +80,18 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * subsequent PASS callback and to @c replay_pass_count and @c replay_continue for the
  * same dispatch.
  *
+ * Each PASS receives its own copy of that value, so a write during PASS PHASE_ENTER is scoped
+ * to the pass that performed it: PASS PHASE_EXIT for that same pass observes the write, while
+ * the next PASS, @c replay_continue, and CONFIG PHASE_EXIT all still observe the value set
+ * during CONFIG PHASE_ENTER. @c replay_continue in particular runs after PASS PHASE_EXIT yet
+ * still receives the CONFIG value, so state that must influence the continue decision belongs
+ * behind @c user_data.ptr: mutating the pointed-to object is visible from every callback,
+ * whereas overwriting the union itself is not. See
+ * `samples/kernel_replay/basic_client_with_user_data.cpp` for a worked example.
+ *
  * Exactly one context may configure a KERNEL_REPLAY service; a second
  * @ref rocprofiler_configure_callback_tracing_service for this domain returns
- * @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED. @c user_data written during a PASS
- * callback is not retained -- only the value set during CONFIG @ref
- * ROCPROFILER_CALLBACK_PHASE_ENTER is threaded through the sequence.
+ * @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED.
  *
  * @warning Beta. A dispatch is replayed only when its submission is a single packet containing a
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
@@ -104,7 +113,7 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  */
 typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 {
-    uint64_t                                  size;  ///< Size of this struct
+    uint64_t                                  size;           ///< Size of this struct
     rocprofiler_kernel_dispatch_info_t        dispatch_info;  ///< Kernel dispatch info (always set)
     uint64_t                                  current_pass;
     uint64_t                                  total_passes;
