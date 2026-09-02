@@ -4155,6 +4155,12 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
       continue;
     }
     // if val is PPT, then sensor_type is PPT0. If val is PPT1 then sensor_type is PPT1
+    // Callers size their arrays to AMDSMI_MAX_POWER_CAP_SENSORS, which the
+    // public header documents and which must stay equal to the bound below.
+    // Never write past it, however many labels this device exposes.
+    if (sensor_count_local >= RSMI_MAX_POWER_CAP_SENSORS) {
+      break;
+    }
     if (val == "PPT") {
       sensor_types[sensor_count_local] = RSMI_POWER_CAP_TYPE_PPT0;
     } else if (val == "PPT1") {

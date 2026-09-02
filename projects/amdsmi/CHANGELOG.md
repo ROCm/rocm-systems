@@ -66,6 +66,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `vram_bit_width` never being reported as `N/A`**.  
   - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
+
+- **Fixed a stack buffer overflow in `amdsmi_get_cpu_socket_current_active_freq_limit()` callers**.  
+  - `amdsmi_hsmp_freqlimit_src_names` listed only 8 of the 11 frequency-limit sources ESMI reports, and the API writes one entry per active source. Any caller sizing its `src_type` array from the published table, including the Python binding, overflowed once a socket had more than 8 limits active. The table now carries all 11 names and `src_type` documents the required capacity.
+
+- **Fixed `amdsmi_get_gpu_bad_page_info()` writing past a caller's buffer**.  
+  - The count out-parameter was overwritten with the number of retired pages before the caller's capacity was read, so the fill loop ran past a fixed-size array on any GPU reporting more pages than the caller allocated. The write is now clamped to the capacity supplied.
+
 - **Fixed an out-of-bounds read in the DRM example's RAS block listing**.  
   - `amd_smi_drm_example.cc` iterated every `amdsmi_gpu_block_t` value but indexed a 14-entry name array, so every block from `AMDSMI_GPU_BLOCK_MCA` onward read past the end of the array and printed a garbage label. The list now covers all 39 blocks and the lookup is bounds-checked.
 

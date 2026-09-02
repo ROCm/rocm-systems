@@ -2953,9 +2953,17 @@ typedef struct __attribute__((__packed__)) {
  *
  * @cond @tag{cpu_bm} @endcond
  */
-static char* const amdsmi_hsmp_freqlimit_src_names[] = {
-    "cHTC-Active", "PROCHOT",           "TDC limit",  "PPT Limit",
-    "OPN Max",     "Reliability Limit", "APML Agent", "HSMP Agent"};
+static char* const amdsmi_hsmp_freqlimit_src_names[] = {"cHTC-Active",
+                                                        "PROCHOT",
+                                                        "TDC Limit (CPU rail)",
+                                                        "PPT Limit",
+                                                        "OPN Max",
+                                                        "Reliability Limit",
+                                                        "APML Agent",
+                                                        "HSMP Agent",
+                                                        "VRHOT(Voltage Regulator Hot)",
+                                                        "TDC Limit (VDD_MEM_S3 rail)",
+                                                        "SOC and DIMM Power Limit"};
 
 /**
  * @brief cpu info data
@@ -4180,13 +4188,17 @@ amdsmi_status_t amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_h
  *  @param[in]  processor_handle A processor handle.
  *  @param[out] sensor_count Pointer to a uint32_t that will be set to the number of supported
  * sensors.
- *  @param[out] sensor_inds  Pointer to an array of uint32_t to be filled with sensor indices.
- *                           The array must be allocated by the caller with enough space.
- *  @param[out] sensor_types Pointer to an array of amdsmi_power_cap_type_t to be filled with sensor
- * types. The array must be allocated by the caller with enough space.
+ *  @param[out] sensor_inds  Pointer to a caller-allocated array of uint32_t holding at least
+ *                           ::AMDSMI_MAX_POWER_CAP_SENSORS elements.
+ *  @param[out] sensor_types Pointer to a caller-allocated array of amdsmi_power_cap_type_t holding
+ *                           at least ::AMDSMI_MAX_POWER_CAP_SENSORS elements.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
+//! Elements a caller must allocate in the sensor_inds / sensor_types arrays
+//! passed to ::amdsmi_get_supported_power_cap.
+#define AMDSMI_MAX_POWER_CAP_SENSORS 2
+
 amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle,
                                                uint32_t* sensor_count, uint32_t* sensor_inds,
                                                amdsmi_power_cap_type_t* sensor_types);
@@ -8661,7 +8673,9 @@ amdsmi_status_t amdsmi_get_cpu_cclk_limit(amdsmi_processor_handle processor_hand
  *
  *  @param[in,out]    freq - Input buffer to return frequency value in MHz
  *
- *  @param[in,out]    src_type - Input buffer to return frequency source name
+ *  @param[in,out]    src_type - Caller-allocated array of at least
+ *  ARRAY_SIZE(::amdsmi_hsmp_freqlimit_src_names) char pointers. One entry is written per
+ *  active limit source, so a smaller array overflows when several are active at once.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
