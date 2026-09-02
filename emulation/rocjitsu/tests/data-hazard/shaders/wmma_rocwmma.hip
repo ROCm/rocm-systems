@@ -29,6 +29,12 @@
 //   - WMMA writes accumulator VGPRs (mma_sync)
 //   - v_exp_f32 reads accumulator VGPRs immediately (WMMA→trans hazard)
 //   - global_store reads result VGPRs (trans→store hazard)
+//
+// The launch below is one 32-thread block, which is a whole wave only where
+// waves are 32 lanes wide. On a wave64 target those threads are half a wave
+// and the rocWMMA fragments never cover the tile, so the harness is told to
+// skip this kernel everywhere else:
+// requires: gfx1250
 
 constexpr int WMMA_M = 16;
 constexpr int WMMA_N = 16;

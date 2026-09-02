@@ -34,7 +34,7 @@ tdm::TensorDmaDescriptor make_tile(std::vector<uint32_t> tile_dims, uint32_t lds
 
 std::vector<std::pair<uint64_t, uint32_t>> ranges_of(const tdm::TensorDmaDescriptor &desc) {
   std::vector<std::pair<uint64_t, uint32_t>> flattened;
-  for (const dh::LocalMemoryRange &range : dh::tensor_lds_write_ranges(desc))
+  for (const dh::LocalMemoryRange &range : dh::tensor_lds_ranges(desc))
     flattened.emplace_back(range.address, range.size);
   return flattened;
 }

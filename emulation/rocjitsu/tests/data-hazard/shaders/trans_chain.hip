@@ -68,7 +68,9 @@ int main() {
     for (unsigned int i = 0; i < arraySize; ++i) {
         float expected = input[i];
         float diff     = std::fabs(output[i] - expected);
-        if (diff > 0.05f && diff > 0.01f * std::fabs(expected)) {
+        // A non-finite result fails every tolerance comparison, so it is
+        // rejected outright rather than passing by default.
+        if (!std::isfinite(output[i]) || (diff > 0.05f && diff > 0.01f * std::fabs(expected))) {
             std::cerr << "Mismatch at " << i << ": expected " << expected << " got " << output[i] << " (diff " << diff
                       << ")" << std::endl;
             pass = false;

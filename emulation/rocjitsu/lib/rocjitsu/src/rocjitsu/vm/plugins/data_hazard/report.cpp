@@ -265,6 +265,10 @@ std::string WarningCollector::to_json() const {
     out += ": {\n";
     append_uint_field(out, 3, "instruction_id", w.source_instruction_id, true);
     append_uint_field(out, 3, "pc", w.source_pc, true);
+    append_uint_field(out, 3, "dispatch_id", w.source_dispatch_id, true);
+    append_uint_field(out, 3, "cluster_id", w.source_cluster_id, true);
+    append_uint_field(out, 3, "workgroup_id", w.source_workgroup_id, true);
+    append_uint_field(out, 3, "wave_id", w.source_wave_id, true);
     append_bool_field(out, 3, "has_descriptor", w.has_source_instruction, true);
     append_string_field(out, 3, "instruction_text", w.source_instruction_text, true);
     append_string_field(out, 3, "raw_isa", source_raw_isa, false);
@@ -350,6 +354,10 @@ void CollectingWarningSink::emit_warning(const hazard_core::EngineWarning &warni
       out.source_instruction_id = finding.source_instruction.instruction_id;
       out.source_pc = finding.source_instruction.pc;
       out.source_raw_isa = finding.source_instruction.raw_isa;
+      out.source_dispatch_id = finding.source_instruction.execution.dispatch_id;
+      out.source_cluster_id = finding.source_instruction.execution.cluster_id;
+      out.source_workgroup_id = finding.source_instruction.execution.workgroup_id;
+      out.source_wave_id = finding.source_instruction.execution.wave_id;
     }
     if (formatter_ != nullptr) {
       out.source_instruction_text = formatter_->format_instruction(

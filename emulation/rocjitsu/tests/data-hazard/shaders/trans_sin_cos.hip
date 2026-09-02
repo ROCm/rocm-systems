@@ -69,8 +69,10 @@ int main() {
         float x        = input[i];
         float expected = 0.5f * std::sin(2.0f * x);
         float diff     = std::fabs(output[i] - expected);
-        // __sinf / __cosf are lower-precision intrinsics; allow some ULP error
-        if (diff > 0.01f && diff > 0.001f * std::fabs(expected)) {
+        // __sinf / __cosf are lower-precision intrinsics; allow some ULP error.
+        // A non-finite result fails every tolerance comparison, so it is
+        // rejected outright rather than passing by default.
+        if (!std::isfinite(output[i]) || (diff > 0.01f && diff > 0.001f * std::fabs(expected))) {
             std::cerr << "Mismatch at " << i << ": expected " << expected << " got " << output[i] << " (diff " << diff
                       << ")" << std::endl;
             pass = false;

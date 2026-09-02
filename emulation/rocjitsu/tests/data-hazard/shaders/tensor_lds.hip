@@ -17,8 +17,10 @@
 // read via the __builtin_amdgcn_tensor_load_to_lds compiler builtin.
 // The Tensor DMA unit (TDM) copies a tile from a global-memory tensor
 // directly into LDS — no VGPRs are involved and the EXEC mask is ignored.
-// The compiler automatically inserts s_wait_tensorcnt to synchronise the
-// DMA transfer before any subsequent LDS read.
+// The DMA has to be synchronised with s_wait_tensorcnt before any subsequent
+// LDS read. The compiler does not emit that wait for this builtin yet, so the
+// kernel below writes it inline; it is the wait the harness mutates away, not
+// a compiler-generated one.
 //
 // Hazard surface:
 //   - tensor_load_to_lds writes to LDS (async, tracked by TENSORcnt)

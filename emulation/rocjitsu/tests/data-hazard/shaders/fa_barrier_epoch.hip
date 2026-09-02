@@ -44,6 +44,11 @@
 //     ds_load_u16 may see stale data
 //   - Remove __syncthreads (barrier): true cross-wave race — other waves
 //     read LDS before the writer has finished
+//
+// The inline asm below is written in the gfx12 spellings — ds_store_b16,
+// ds_load_u16 and s_wait_dscnt — which earlier targets do not assemble, so the
+// harness is told to skip this kernel everywhere else:
+// requires: gfx1250
 
 static constexpr int WAVE_SIZE    = 32;
 static constexpr int WAVES_PER_WG = 4;

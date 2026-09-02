@@ -2178,6 +2178,52 @@ TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNo
   EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
 }
 
+// A workgroup that wrote part of what it later reads is ordered against itself
+// over those bytes only. The rest of the read is still exposed, and dropping it
+// leaves a write from another workgroup with nothing to conflict with.
+TEST(GenericDataHazardEngineTest, ReadRetainsTheBytesItsOwnWorkgroupDidNotWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  auto access = [&](EntityId instruction_id, const ExecutionKey &wave, const SubDwordAccess &spec) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(instruction_id, 0x100 * instruction_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = spec.address;
+    event.size_bytes = spec.size_bytes;
+    event.is_write = spec.is_write;
+    event.is_read = !spec.is_write;
+    engine.on_resource_access(event);
+  };
+
+  access(1, first_wave, {0x3000, 1, true});
+  access(2, first_wave, {0x3000, 2, false});
+  ASSERT_TRUE(engine.warning_snapshot().empty()) << "a workgroup does not race with itself";
+
+  access(3, second_wave, {0x3001, 1, true});
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "workgroup 0 read byte 0x3001 but never wrote it";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x3000"),
+            std::string::npos);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 2u)
+      << "the read is what the write races with";
+}
+
 namespace {
 
 /// What one global access does to the location. An atomic reads and writes it
@@ -2561,6 +2607,227 @@ TEST(GenericDataHazardEngineTest, TracksTensorLocalWriteWithTensorWait) {
 
   warnings = engine.warning_snapshot();
   ASSERT_EQ(warnings.size(), 1u);
+}
+
+// DScnt counts one slot per DS instruction wherever that instruction left its
+// state, so s_wait_dscnt 1 retires the older of an LDS write and a DS load
+// rather than keeping one of each.
+TEST(GenericDataHazardEngineTest, DsWaitRetiresTheOldestOperationAcrossItsQueues) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent lds_write_inst;
+  lds_write_inst.instruction = make_instruction(1, 0x100);
+  lds_write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(lds_write_inst);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = lds_write_inst.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x180;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent ds_load_inst;
+  ds_load_inst.instruction = make_instruction(2, 0x104);
+  ds_load_inst.hazards.vector_write_wait = WaitCntType::LDS;
+  engine.on_instruction(ds_load_inst);
+
+  ResourceAccessEvent ds_load;
+  ds_load.instruction = ds_load_inst.instruction;
+  ds_load.resource_kind = ResourceKind::VectorRegister;
+  ds_load.register_kind = RegisterKind::Vector;
+  ds_load.resource_index = 4;
+  ds_load.size_bytes = 4;
+  ds_load.is_write = true;
+  engine.on_resource_access(ds_load);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LDS, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent lds_read_inst;
+  lds_read_inst.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(lds_read_inst);
+
+  ResourceAccessEvent lds_read;
+  lds_read.instruction = lds_read_inst.instruction;
+  lds_read.resource_kind = ResourceKind::LocalMemory;
+  lds_read.address = 0x180;
+  lds_read.size_bytes = 4;
+  lds_read.is_read = true;
+  engine.on_resource_access(lds_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+
+  // The load the wait kept is still in flight, and reading its destination is
+  // still a hazard.
+  InstructionEvent reg_read_inst;
+  reg_read_inst.instruction = make_instruction(5, 0x110);
+  engine.on_instruction(reg_read_inst);
+
+  ResourceAccessEvent reg_read;
+  reg_read.instruction = reg_read_inst.instruction;
+  reg_read.resource_kind = ResourceKind::VectorRegister;
+  reg_read.register_kind = RegisterKind::Vector;
+  reg_read.resource_index = 4;
+  reg_read.size_bytes = 4;
+  reg_read.is_read = true;
+  engine.on_resource_access(reg_read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
+}
+
+// lgkmcnt is one counter over scalar memory and LDS, so lgkmcnt(1) after a
+// scalar load and a later LDS write retires the load and keeps the write.
+TEST(GenericDataHazardEngineTest, LegacyLgkmWaitRetiresScalarAndLdsAsOneSequence) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent scalar_load_inst;
+  scalar_load_inst.instruction = make_instruction(1, 0x100);
+  scalar_load_inst.hazards.scalar_write_wait = WaitCntType::SMEM;
+  engine.on_instruction(scalar_load_inst);
+
+  ResourceAccessEvent scalar_write;
+  scalar_write.instruction = scalar_load_inst.instruction;
+  scalar_write.resource_kind = ResourceKind::ScalarRegister;
+  scalar_write.register_kind = RegisterKind::Scalar;
+  scalar_write.resource_index = 8;
+  scalar_write.size_bytes = 4;
+  scalar_write.is_write = true;
+  engine.on_resource_access(scalar_write);
+
+  InstructionEvent lds_write_inst;
+  lds_write_inst.instruction = make_instruction(2, 0x104);
+  lds_write_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(lds_write_inst);
+
+  ResourceAccessEvent lds_write;
+  lds_write.instruction = lds_write_inst.instruction;
+  lds_write.resource_kind = ResourceKind::LocalMemory;
+  lds_write.address = 0x180;
+  lds_write.size_bytes = 4;
+  lds_write.is_write = true;
+  engine.on_resource_access(lds_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::LGKM, 1});
+  engine.on_instruction(wait);
+
+  InstructionEvent scalar_read_inst;
+  scalar_read_inst.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(scalar_read_inst);
+
+  ResourceAccessEvent scalar_read;
+  scalar_read.instruction = scalar_read_inst.instruction;
+  scalar_read.resource_kind = ResourceKind::ScalarRegister;
+  scalar_read.register_kind = RegisterKind::Scalar;
+  scalar_read.resource_index = 8;
+  scalar_read.size_bytes = 4;
+  scalar_read.is_read = true;
+  engine.on_resource_access(scalar_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+
+  InstructionEvent lds_read_inst;
+  lds_read_inst.instruction = make_instruction(5, 0x110);
+  engine.on_instruction(lds_read_inst);
+
+  ResourceAccessEvent lds_read;
+  lds_read.instruction = lds_read_inst.instruction;
+  lds_read.resource_kind = ResourceKind::LocalMemory;
+  lds_read.address = 0x180;
+  lds_read.size_bytes = 4;
+  lds_read.is_read = true;
+  engine.on_resource_access(lds_read);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::LDS);
+}
+
+// A tensor store reads its LDS source until TENSORcnt drains, so overwriting
+// that LDS before the wait is a WAR hazard on data still in flight.
+TEST(GenericDataHazardEngineTest, TensorGuardedLocalReadHoldsOffALaterWrite) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent tensor_store_inst;
+  tensor_store_inst.instruction = make_instruction(1, 0x100);
+  engine.on_instruction(tensor_store_inst);
+
+  ResourceAccessEvent tensor_read;
+  tensor_read.instruction = tensor_store_inst.instruction;
+  tensor_read.resource_kind = ResourceKind::LocalMemory;
+  tensor_read.address = 0x180;
+  tensor_read.size_bytes = 4;
+  tensor_read.is_read = true;
+  tensor_read.hazards.read_wait = WaitCntType::TENSOR;
+  engine.on_resource_access(tensor_read);
+
+  // DScnt is not the counter this read is outstanding on, and draining it
+  // leaves the transfer in flight.
+  InstructionEvent ds_wait;
+  ds_wait.instruction = make_instruction(2, 0x104);
+  ds_wait.wait_action.is_wait_instruction = true;
+  ds_wait.wait_action.counters.push_back({WaitCntType::LDS, 0});
+  engine.on_instruction(ds_wait);
+
+  InstructionEvent overwrite_inst;
+  overwrite_inst.instruction = make_instruction(3, 0x108);
+  overwrite_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(overwrite_inst);
+
+  ResourceAccessEvent overwrite;
+  overwrite.instruction = overwrite_inst.instruction;
+  overwrite.resource_kind = ResourceKind::LocalMemory;
+  overwrite.address = 0x180;
+  overwrite.size_bytes = 4;
+  overwrite.is_write = true;
+  engine.on_resource_access(overwrite);
+
+  auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::WAR);
+  EXPECT_EQ(warnings[0].finding.required_wait, WaitCntType::TENSOR);
+  EXPECT_EQ(warnings[0].suggestion, "Add s_wait_tensorcnt 0 before writing this LDS address");
+
+  InstructionEvent tensor_wait;
+  tensor_wait.instruction = make_instruction(4, 0x10c);
+  tensor_wait.wait_action.is_wait_instruction = true;
+  tensor_wait.wait_action.counters.push_back({WaitCntType::TENSOR, 0});
+  engine.on_instruction(tensor_wait);
+
+  InstructionEvent second_overwrite_inst;
+  second_overwrite_inst.instruction = make_instruction(5, 0x110);
+  second_overwrite_inst.hazards.local_write_wait = WaitCntType::LDS;
+  engine.on_instruction(second_overwrite_inst);
+
+  overwrite.instruction = second_overwrite_inst.instruction;
+  engine.on_resource_access(overwrite);
+
+  warnings = engine.warning_snapshot();
+  EXPECT_EQ(warnings.size(), 1u);
 }
 
 TEST(GenericDataHazardEngineTest, DoesNotMixLdsRaceEpochsAcrossDispatches) {

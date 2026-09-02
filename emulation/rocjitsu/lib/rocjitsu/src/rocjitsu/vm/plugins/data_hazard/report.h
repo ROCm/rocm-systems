@@ -42,6 +42,14 @@ struct HazardWarning {
   std::array<uint32_t, 4> source_raw_isa{};
   uint64_t source_pc = 0;
   hazard_core::EntityId source_instruction_id = 0;
+  /// Where the producing instruction ran. A cross-wave or cross-workgroup race
+  /// is only actionable once the other side of it is identified, so these are
+  /// carried in their own right rather than left in the message text. They stay
+  /// zero when the producer is known by raw words alone.
+  hazard_core::EntityId source_dispatch_id = 0;
+  hazard_core::EntityId source_cluster_id = 0;
+  hazard_core::EntityId source_workgroup_id = 0;
+  hazard_core::EntityId source_wave_id = 0;
   bool has_source_instruction = false;
 };
 
