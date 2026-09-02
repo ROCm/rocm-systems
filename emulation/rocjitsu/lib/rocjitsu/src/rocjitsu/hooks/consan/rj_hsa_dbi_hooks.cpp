@@ -15,6 +15,7 @@
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/checked_byte_budget.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
@@ -3797,6 +3798,23 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   if (reader_bytes) {
     const uint8_t *bytes = reader_bytes.bytes;
     const size_t size = reader_bytes.size;
+    if (!config->kernel_name_allowlist.empty()) {
+      const rocjitsu::KernelNameIndexMatch match = rocjitsu::match_kernel_name_index(
+          std::span<const uint8_t>(bytes, size), config->kernel_name_allowlist);
+      if (match == rocjitsu::KernelNameIndexMatch::NoMatch) {
+        log_message(kLogInfo,
+                    "ConSan kernel allowlist prefilter reader=%llu bytes=%zu outcome=skipped "
+                    "reason=no-matching-entry",
+                    static_cast<unsigned long long>(code_object_reader.handle), size);
+        return original_load(executable, agent, code_object_reader, options, loaded_code_object);
+      }
+      if (match == rocjitsu::KernelNameIndexMatch::Indeterminate) {
+        log_message(kLogVerbose,
+                    "ConSan kernel allowlist prefilter reader=%llu bytes=%zu outcome=deferred "
+                    "reason=indeterminate-kernel-index",
+                    static_cast<unsigned long long>(code_object_reader.handle), size);
+      }
+    }
     // Reader handles may be destroyed and reused by the HSA runtime. Keep a
     // process-local identity for this particular load so retained coverage can
     // be joined to the correspondingly numbered captured object without

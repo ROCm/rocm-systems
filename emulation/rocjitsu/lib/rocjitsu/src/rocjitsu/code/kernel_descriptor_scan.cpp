@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/isa_traits.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -77,6 +78,78 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size, const Elf64_Ehd
 }
 
 } // namespace
+
+KernelNameIndexMatch match_kernel_name_index(std::span<const uint8_t> image,
+                                             std::span<const std::string> exact_kernel_names) {
+  if (exact_kernel_names.empty())
+    return KernelNameIndexMatch::Matched;
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return KernelNameIndexMatch::Indeterminate;
+
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  if (std::memcmp(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE) != 0 ||
+      header.e_ident[EI_CLASS] != ELFCLASS64 || header.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA ||
+      header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shnum == 0 ||
+      !range_in_bounds(header.e_shoff, static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr),
+                       image.size())) {
+    return KernelNameIndexMatch::Indeterminate;
+  }
+
+  const auto section = [&](size_t index) -> std::optional<Elf64_Shdr> {
+    if (index >= header.e_shnum)
+      return std::nullopt;
+    Elf64_Shdr value{};
+    std::memcpy(&value, image.data() + header.e_shoff + index * sizeof(value), sizeof(value));
+    return value;
+  };
+
+  bool indeterminate = false;
+  for (size_t section_index = 0; section_index < header.e_shnum; ++section_index) {
+    const Elf64_Shdr symbols = *section(section_index);
+    if (symbols.sh_type != SHT_SYMTAB && symbols.sh_type != SHT_DYNSYM)
+      continue;
+    if (symbols.sh_entsize != sizeof(Elf64_Sym) || symbols.sh_size % sizeof(Elf64_Sym) != 0 ||
+        !range_in_bounds(symbols.sh_offset, symbols.sh_size, image.size()) ||
+        symbols.sh_link >= header.e_shnum) {
+      indeterminate = true;
+      continue;
+    }
+    const Elf64_Shdr strings = *section(symbols.sh_link);
+    if (strings.sh_type != SHT_STRTAB ||
+        !range_in_bounds(strings.sh_offset, strings.sh_size, image.size())) {
+      indeterminate = true;
+      continue;
+    }
+
+    for (uint64_t symbol_offset = 0; symbol_offset < symbols.sh_size;
+         symbol_offset += sizeof(Elf64_Sym)) {
+      Elf64_Sym symbol{};
+      std::memcpy(&symbol, image.data() + symbols.sh_offset + symbol_offset, sizeof(symbol));
+      if (symbol.st_name >= strings.sh_size) {
+        indeterminate = true;
+        continue;
+      }
+      const char *name_begin =
+          reinterpret_cast<const char *>(image.data() + strings.sh_offset + symbol.st_name);
+      const size_t maximum_name_size = static_cast<size_t>(strings.sh_size - symbol.st_name);
+      const size_t name_size = strnlen(name_begin, maximum_name_size);
+      if (name_size == maximum_name_size) {
+        indeterminate = true;
+        continue;
+      }
+      std::string_view name(name_begin, name_size);
+      if (!name.ends_with(".kd"))
+        continue;
+      name.remove_suffix(3);
+      if (std::ranges::any_of(exact_kernel_names,
+                              [&](const std::string &expected) { return name == expected; })) {
+        return KernelNameIndexMatch::Matched;
+      }
+    }
+  }
+  return indeterminate ? KernelNameIndexMatch::Indeterminate : KernelNameIndexMatch::NoMatch;
+}
 
 std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,

@@ -30,6 +30,25 @@ struct KernelDescriptorInfo {
   rocr::llvm::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
 };
 
+/// Result of matching exact kernel names against an AMDHSA ELF symbol index.
+enum class KernelNameIndexMatch {
+  Matched,
+  NoMatch,
+  Indeterminate,
+};
+
+/// @brief Match any exact kernel name without decoding executable contents.
+///
+/// @details Walks only the ELF section headers, symbol tables, and linked
+/// string tables. `NoMatch` is returned only after every advertised symbol
+/// table was read safely; malformed or unsupported indexing returns
+/// `Indeterminate` so a caller cannot mistake parser uncertainty for proof
+/// that a requested kernel is absent. Names omit the AMDHSA `.kd` suffix.
+/// Work and retained memory are independent of executable instruction count.
+[[nodiscard]] KernelNameIndexMatch
+match_kernel_name_index(std::span<const uint8_t> image,
+                        std::span<const std::string> exact_kernel_names);
+
 /// @brief Locate every ".kd" descriptor whose entry lands in .text.
 ///
 /// @details Walks .symtab/.dynsym, decodes each descriptor's file offset and

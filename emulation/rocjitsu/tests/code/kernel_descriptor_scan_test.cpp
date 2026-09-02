@@ -16,8 +16,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -72,6 +74,27 @@ TEST(KernelDescriptorScan, EntryOutsideTextIsDropped) {
 TEST(KernelDescriptorScan, TooSmallImageReturnsEmpty) {
   std::vector<uint8_t> tiny(8, 0);
   EXPECT_TRUE(scan_kernel_descriptors({tiny.data(), tiny.size()}, 0x100, 0x8).empty());
+}
+
+TEST(KernelDescriptorScan, ExactKernelNameIndexMatchDoesNotDecodeText) {
+  const auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  const std::array<std::string, 1> exact{"test_kernel"};
+  const std::array<std::string, 1> substring{"test"};
+  const std::array<std::string, 1> unrelated{"other_kernel"};
+
+  EXPECT_EQ(match_kernel_name_index(image, exact), KernelNameIndexMatch::Matched);
+  EXPECT_EQ(match_kernel_name_index(image, substring), KernelNameIndexMatch::NoMatch);
+  EXPECT_EQ(match_kernel_name_index(image, unrelated), KernelNameIndexMatch::NoMatch);
+}
+
+TEST(KernelDescriptorScan, MalformedKernelNameIndexIsIndeterminate) {
+  const std::array<std::string, 1> requested{"test_kernel"};
+  const std::vector<uint8_t> tiny(8, 0);
+  EXPECT_EQ(match_kernel_name_index(tiny, requested), KernelNameIndexMatch::Indeterminate);
+
+  const auto unterminated =
+      make_gfx950_unterminated_kd_name_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  EXPECT_EQ(match_kernel_name_index(unterminated, requested), KernelNameIndexMatch::Indeterminate);
 }
 
 // A descriptor symbol whose name runs to the end of its string table with no
