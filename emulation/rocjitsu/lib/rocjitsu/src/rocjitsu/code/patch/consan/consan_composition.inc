@@ -583,11 +583,13 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                                             fault_planning_input(result),
                                                             require_applicable_fault_plan),
                                   result);
-    build_perturbation_plan(options, perturbation, result, carried_plans);
+    build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
+                            carried_plans);
     return result;
   }
   if (has_perturbation) {
-    build_perturbation_plan(options, perturbation, result, carried_plans);
+    build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
+                            carried_plans);
     if (!result.errors.empty())
       return result;
   }

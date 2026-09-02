@@ -161,6 +161,16 @@ foreach(_source IN ITEMS consan_fault_selection.cpp consan_program_analysis.cpp 
     )
 endforeach()
 
+file(READ "${_consan_dir}/consan_perturbation.h" _perturbation_contract)
+if(NOT _perturbation_contract MATCHES
+       "build_perturbation_plan[^;]*ConSanMutationTally[^;]*vector<std::string>" OR
+   _perturbation_contract MATCHES
+       "build_perturbation_plan[^;]*ConSanTransformArtifacts")
+    message(FATAL_ERROR
+        "perturbation planning must publish its tally and diagnostics without the mutation bus"
+    )
+endif()
+
 foreach(_source IN ITEMS
     consan_program_analysis.h
     consan_program_analysis.cpp

@@ -71,32 +71,32 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
 
 void build_perturbation_plan(const ConSanOptions &options,
                              ConSanPerturbationPlanningState &planning,
-                             ConSanTransformArtifacts &result,
+                             ConSanMutationTally &tally, std::vector<std::string> &errors,
                              std::span<const CarriedPerturbationPlan> carried_plans) {
-  result.mutation.perturbation.requested =
+  tally.requested =
       options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
   if (options.sc_perturb_kind == ConSanPerturbationKind::None)
     return;
   if (options.flavor != ConSanFlavor::SuperCollider) {
-    result.errors.emplace_back("ConSan SC perturbation requires the SuperCollider flavor");
+    errors.emplace_back("ConSan SC perturbation requires the SuperCollider flavor");
     return;
   }
   if (options.sc_perturb_max == 0u || options.sc_perturb_max > 2u) {
-    result.errors.emplace_back("ConSan SC perturb maximum must be from 1 through 2");
+    errors.emplace_back("ConSan SC perturb maximum must be from 1 through 2");
     return;
   }
   if (options.sc_perturb_sleep == 0u || options.sc_perturb_sleep > 15u) {
-    result.errors.emplace_back("ConSan SC perturb sleep immediate must be from 1 through 15");
+    errors.emplace_back("ConSan SC perturb sleep immediate must be from 1 through 15");
     return;
   }
   if (options.sc_perturb_required_count > options.sc_perturb_max) {
-    result.errors.emplace_back("ConSan SC perturb required count exceeds the selected maximum");
+    errors.emplace_back("ConSan SC perturb required count exceeds the selected maximum");
     return;
   }
 
   if (!carried_plans.empty()) {
     if (carried_plans.size() > options.sc_perturb_max) {
-      result.errors.emplace_back(
+      errors.emplace_back(
           "ConSan carried SC perturbation plans exceed the selected maximum");
       return;
     }
@@ -108,7 +108,7 @@ void build_perturbation_plan(const ConSanOptions &options,
               std::numeric_limits<uint64_t>::max() - carried.anchor_size ||
           carried.anchor_size == 0u ||
           (carried.removed_cache_boundary && !carried.overlaps_atomic_mutation)) {
-        result.errors.emplace_back("ConSan carried perturbation identity is incomplete");
+        errors.emplace_back("ConSan carried perturbation identity is incomplete");
         continue;
       }
       const auto matches_carried = [&](const ConSanPerturbationCandidate &candidate) {
@@ -140,7 +140,7 @@ void build_perturbation_plan(const ConSanOptions &options,
              .rejection_reason = {}});
         candidate = std::prev(planning.candidates.end());
       } else if (match_count != 1u || candidate == planning.candidates.end()) {
-        result.errors.emplace_back(
+        errors.emplace_back(
             "ConSan could not recover exactly one carried perturbation edge with its owner");
         continue;
       }
@@ -164,12 +164,12 @@ void build_perturbation_plan(const ConSanOptions &options,
            .overlaps_atomic_mutation = carried.overlaps_atomic_mutation,
            .removed_cache_boundary = carried.removed_cache_boundary});
     }
-    result.mutation.perturbation.planned = planning.plans.size();
+    tally.planned = planning.plans.size();
     if (options.sc_perturb_required_count != 0u &&
-        result.mutation.perturbation.planned != options.sc_perturb_required_count) {
-      result.errors.emplace_back(
+        tally.planned != options.sc_perturb_required_count) {
+      errors.emplace_back(
           "ConSan SC perturb required " + std::to_string(options.sc_perturb_required_count) +
-          " plans, got " + std::to_string(result.mutation.perturbation.planned));
+          " plans, got " + std::to_string(tally.planned));
     }
     return;
   }
@@ -209,12 +209,12 @@ void build_perturbation_plan(const ConSanOptions &options,
                               .overlaps_atomic_mutation = false,
                               .removed_cache_boundary = false});
   }
-  result.mutation.perturbation.planned = planning.plans.size();
+  tally.planned = planning.plans.size();
   if (options.sc_perturb_required_count != 0u &&
-      result.mutation.perturbation.planned != options.sc_perturb_required_count) {
-    result.errors.emplace_back("ConSan SC perturb required " +
-                               std::to_string(options.sc_perturb_required_count) + " plans, got " +
-                               std::to_string(result.mutation.perturbation.planned));
+      tally.planned != options.sc_perturb_required_count) {
+    errors.emplace_back("ConSan SC perturb required " +
+                        std::to_string(options.sc_perturb_required_count) + " plans, got " +
+                        std::to_string(tally.planned));
   }
 }
 

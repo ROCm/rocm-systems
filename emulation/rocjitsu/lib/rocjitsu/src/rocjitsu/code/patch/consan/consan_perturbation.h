@@ -43,7 +43,7 @@ void build_perturbation_candidate_inventory(const ProgramInventory &program_inve
 
 void build_perturbation_plan(const ConSanOptions &options,
                              ConSanPerturbationPlanningState &planning,
-                             ConSanTransformArtifacts &result,
+                             ConSanMutationTally &tally, std::vector<std::string> &errors,
                              std::span<const CarriedPerturbationPlan> carried_plans = {});
 
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
