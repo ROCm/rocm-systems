@@ -30,6 +30,12 @@ inline __device__ int loadInt(int* ptr) {
   return v;
 }
 
+inline __device__ ssize_t loadSsize(ssize_t* ptr) {
+  ssize_t v;
+  v = __atomic_load_n(ptr, __ATOMIC_RELAXED);
+  return v;
+}
+
 template <typename RedFn, typename T, int Unroll, int BytePerPack, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>

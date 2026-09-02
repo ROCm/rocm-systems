@@ -38,7 +38,10 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
+  if (out) *out = nullptr;
+  return ncclSuccess;
+}
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
@@ -49,6 +52,7 @@ ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, stru
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t) { return ncclSuccess; }
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
 // Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
 // so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
@@ -97,11 +101,19 @@ ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, cha
 }
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSuccess; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnosticsActive(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
+ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRmaCeInit(struct ncclComm* comm) { return ncclSuccess; }
+bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
+ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
@@ -120,6 +132,14 @@ bool rcclUseAinic() { ::abort(); }
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                 struct ncclComm*) {
+  return ncclSuccess;
+}
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
+  if (gpuCftSupport) *gpuCftSupport = 0;
+  return ncclSuccess;
+}
 int64_t ncclParamGraphStreamOrdering() { return 0; }
 int64_t rcclParamHierarchicalAllGather() { ::abort(); }
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }

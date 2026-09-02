@@ -89,6 +89,17 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+static ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    struct ncclMemUntrackInfo info = {};
+    ncclResult_t r = ncclMemUntrackDynamic(manager, ptr, &info);
+    if(r != ncclSuccess)
+        return r;
+    if(info.memType == ncclMemPersist)
+        return ncclMemUntrackPersist(manager, ptr, size);
+    return ncclSuccess;
+}
+
 // ---------------------------------------------------------------------------
 // VMM helpers
 //

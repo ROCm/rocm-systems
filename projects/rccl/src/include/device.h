@@ -156,6 +156,7 @@ union ncclLLFifoLine {
 // global channelId for bit `x` in word `i` is `i*CHANNELS_PER_MASK_WORD + x`.
 #define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
+#define NCCL_MAX_CGA_CLUSTER_SIZE 8
 #define NCCL_MAX_LOCAL_RANKS 72
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
@@ -605,6 +606,25 @@ struct ncclDevProfiler {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
+// Phase boundary indices into ncclDevProfilerPhases::timestamps[]. Adjacent boundaries
+// form three sub-events: BEGIN->AFTER_OPEN (initial_sync), AFTER_OPEN->BEFORE_CLOSE
+// (compute), BEFORE_CLOSE->END (final_sync). BEGIN/END always bracket the true kernel
+// span. LL kernels fuse the peer sync into the first data exchange, so AFTER_OPEN lands
+// at the end of the first epoch (initial_sync absorbs it -- for a single-iteration
+// message it covers most of the kernel) and BEFORE_CLOSE ~= END (LL has no closing
+// barrier). That is expected for LL, not a measurement bug.
+#define NCCL_KERNEL_PHASE_BEGIN 0
+#define NCCL_KERNEL_PHASE_AFTER_OPEN 1
+#define NCCL_KERNEL_PHASE_BEFORE_CLOSE 2
+#define NCCL_KERNEL_PHASE_END 3
+#define MAX_PROFILER_PHASES 4
+struct ncclDevProfilerPhases {
+  struct {
+    uint64_t counter;
+    uint64_t timestamps[MAX_PROFILER_PHASES];
+  } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
+};
+
 struct ncclKernelComm {
   int rank;
   int nRanks;
@@ -620,6 +640,8 @@ struct ncclKernelComm {
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
+  int* denseToUserRank;
+
   // Flag to ask NCCL kernels to abort
   volatile uint32_t* abortFlag;
 
@@ -631,6 +653,7 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
+  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
@@ -656,6 +679,14 @@ struct channelMasks {
   uint64_t masks[MAXCHANNELS / CHANNELS_PER_MASK_WORD];
 };
 static_assert(MAXCHANNELS % CHANNELS_PER_MASK_WORD == 0, "MAXCHANNELS must be a multiple of CHANNELS_PER_MASK_WORD");
+
+// Overload of the bitops countOneBits() so code synced from upstream NCCL, which assumes a plain
+// uint64_t channel mask, keeps working with RCCL's wide multi-word mask.
+inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
+  int n = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) n += countOneBits(x.masks[i]);
+  return n;
+}
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;

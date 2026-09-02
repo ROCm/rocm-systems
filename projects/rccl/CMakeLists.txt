@@ -675,6 +675,9 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
+# ENABLE_MPI_TESTS is consumed here as well as under test/: MPI tests poke
+# librccl internals, so Release builds must export those symbols.
+option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via

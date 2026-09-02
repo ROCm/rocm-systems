@@ -2,6 +2,30 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## RCCL 2.31.2 for ROCm 10.0.0 (Unreleased)
+
+### Added
+* Compatibility with NCCL 2.31.2.
+* Per-collective configuration APIs (`ncclCollConfig_t` / `nccl*Config()` entry points) and the `ncclConfigExt_t` vendor extension list. Initialize configs with `NCCL_COLLCONFIG_INITIALIZER`.
+* Communicator config (`ncclConfig_v23100`) fields for implicit launch ordering (`launchOrderImplicit`), RMA signal count (`numRmaSig`), eager RMA init (`rmaEagerInit`), and host collective fault tolerance (`hostCftMode`).
+* NCCL profiler plugin API v7, with per-call user profiler tags and symmetric-kernel phase events.
+* RAS diagnostics (`NCCL_RUN_RAS_DIAGNOSTICS`) covering GPU inventory, ROCm runtime versions, ECC counters, XGMI link state, and `NCCL_*` environment consistency (AMDSMI in place of NVML).
+* Communicator init diagnostics (`NCCL_RUN_DIAGNOSTICS`) with an active P2P connectivity check.
+* Multiple GIN proxy progress threads via `NCCL_GIN_PROXY_NTHREADS`.
+
+### Changed
+* **Breaking: `NCCL_GIN_TYPE` values for AMD backends are not compatible with 2.30.7.** NCCL 2.31 inserted EFA GDA at value 5, so rocSHMEM GDA moved 5→6 and Anvil SDMA moved 6→7. The IB proxy remains `2`. Jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not Anvil SDMA. See `src/gin/README.md`.
+* One-sided RMA supports multiple contexts and signals; the previous restriction to context 0 and signal index 0 has been lifted (`numRmaCtx` / `numRmaSig`).
+* Updated the RMA plugin interface to v15.
+* Reduced communicator host memory by allocating topology path link arrays to their actual length.
+
+### Resolved issues
+* Restored topo tuning-model init (`ncclTopoTuneModel`) after the 2.31 `ncclTuningInit` switch so multi-node kernels do not launch with `blockDim.x=0`.
+* Grouped multi-rank finalize to match the v2.31 teardown barrier.
+
+### Known issues
+* The following NCCL 2.31 features are NVIDIA-specific and are not available in RCCL: Compute Fabric Transport, the GDAKI and EFA GDA GIN backends, PAT combined with NVLS, NVLink-multicast AllGather, TMA-based symmetric kernels, and the CuTeDSL and `nccl4rust` bindings.
+
 ## RCCL 2.30.7 for ROCm 10.0.0 (Unreleased)
 
 ### Added

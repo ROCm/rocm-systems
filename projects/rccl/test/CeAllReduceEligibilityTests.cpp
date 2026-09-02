@@ -57,12 +57,12 @@ TEST_F(CeAllReduceEligibilityTest, CeAvailable_EligibleWithSymmetricSingleNode)
                                 ncclFuncAllReduce,
                                 ncclDevSum,
                                 ncclFloat32,
-                                ncclSymSendRegRecvReg));
+                                ncclSymSendRegRecvReg, nullptr, nullptr));
     EXPECT_TRUE(ncclCeAvailable(mockComm_.get(),
                                 ncclFuncAllReduce,
                                 ncclDevSum,
                                 ncclFloat32,
-                                ncclSymSendNonregRecvReg));
+                                ncclSymSendNonregRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAllReduceEligibilityTest, CeAvailable_MultiNodeRejected)
@@ -75,7 +75,7 @@ TEST_F(CeAllReduceEligibilityTest, CeAvailable_MultiNodeRejected)
                                  ncclFuncAllReduce,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAllReduceEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
@@ -88,7 +88,7 @@ TEST_F(CeAllReduceEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
                                  ncclFuncAllReduce,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeAllReduceEligibilityTest, CeAvailable_UnsupportedWindowRegistrationRejected)
@@ -100,12 +100,12 @@ TEST_F(CeAllReduceEligibilityTest, CeAvailable_UnsupportedWindowRegistrationReje
                                  ncclFuncAllReduce,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendNonregRecvNonreg));
+                                 ncclSymSendNonregRecvNonreg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAllReduce,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvNonreg));
+                                 ncclSymSendRegRecvNonreg, nullptr, nullptr));
 }
 
 TEST_F(CeAllReduceEligibilityTest, ChunkLayout_SmallMessageSingleChunk)

@@ -18,9 +18,8 @@
 // Verifies: initTokens.totTokens=100, per-QP tokens equal, sum invariant.
 // =============================================================================
 TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -79,9 +78,8 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
 // SetTokens resets both init and active tokens, so no reconnect needed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -190,9 +188,8 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
 // sum(activeQpTokens)==activeTotTokens.
 // =============================================================================
 TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -244,9 +241,8 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
 // White-box: nqps=1. WRR must be bypassed (schedInit stays false).
 // =============================================================================
 TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -294,9 +290,8 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
 // enable=true, doWrr=true, splitData=false, splitDataMin from env.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -345,9 +340,8 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
 // After selection cursor advances to 0.
 // =============================================================================
 TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -405,9 +399,8 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
 // activeTotTokens==0, and qpIndex==0 (cursor wrapped back to start).
 // =============================================================================
 TEST_F(NetIbMPITest, CastMaxQPCount128) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -480,9 +473,8 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
 //   - activeQpTokens[i] == 0 for all i
 // =============================================================================
 TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -575,9 +567,8 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
 // Actual nqps determines threshold dynamically.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -675,9 +666,8 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
 // Phase 3 (doWrr=true):  10 sends → 10 WRR tokens consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -806,9 +796,8 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
 // Phase 3 (splitData=false): oneQp WRR → 1 token consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -915,9 +904,8 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
 //   enable=true  → WRR resumes → 1 token consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastEnableDisableSched) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1014,9 +1002,8 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
 // Data integrity verified for all sizes.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1125,9 +1112,8 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
 // Verify: data integrity + 0 WRR tokens consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastLargeTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1196,9 +1182,8 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
 // Verify: send/recv complete with ncclSuccess, received size=0, 1 WRR token consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1270,9 +1255,8 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
 //   - If nqps > 1: initQpTokens changed from asymmetric initial values (timer fired).
 // =============================================================================
 TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 

@@ -27,6 +27,17 @@
 namespace RcclUnitTesting
 {
 
+// NCCL 2.31 split ncclMemUntrack into dynamic vs persist. Tests still exercise
+// both through this local wrapper (same pattern as SuspendResumeMPITests.cpp).
+static ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    struct ncclMemUntrackInfo info = {};
+    ncclResult_t r = ncclMemUntrackDynamic(manager, ptr, &info);
+    if (r != ncclSuccess) return r;
+    if (info.memType == ncclMemPersist) return ncclMemUntrackPersist(manager, ptr, size);
+    return ncclSuccess;
+}
+
 // Synthetic constants used by pure-state tests. The manager only stores and
 // compares ptr / handle, so any sufficiently distinct value works.
 namespace

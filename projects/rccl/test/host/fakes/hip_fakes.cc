@@ -246,8 +246,10 @@ hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
 
 hipError_t hipDeviceGet(hipDevice_t* device, int)
 {
+    // fillInfo() now CUCHECKs cuDeviceGet (hipDeviceGet) on every rank, so this
+    // must succeed on the default TransportsRankComm path.
     if (device) *device = 0;
-    return hipErrorInvalidValue;
+    return hipSuccess;
 }
 
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
@@ -306,7 +308,7 @@ hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
-hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
+hipError_t hipGetLastError(void) { return hipSuccess; }
 
 hipError_t hipHostFree(void* ptr)
 {

@@ -460,9 +460,11 @@ NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
 #endif
 
 #if NCCL_DEVICE_COMPILE
+#define NCCL_DEVICE_LOADCONST_USE_LDG 0
+
 // Load anything, but cache like its constant memory.
 template <typename T>
-NCCL_DEVICE_INLINE T loadConst(T const* p) {
+NCCL_DEVICE_INLINE T loadConstLdg(T const* p) {
   if (alignof(T) == 1) {
     union {
       uint8_t part[sizeof(T)];
@@ -499,6 +501,18 @@ NCCL_DEVICE_INLINE T loadConst(T const* p) {
     for (int i = 0; i < (int)sizeof(T) / 16; i++) part[i] = nccl_ldg((ulonglong2 const*)p + i);
     return ret;
   }
+}
+
+// loadConst defaults to ordinary dereference loads to avoid the __ldg/acquire-fence regression.
+// The loadConst selection macro is intentionally 0 for now; future CUDA-version gating belongs at
+// the define site above.
+template <typename T>
+NCCL_DEVICE_INLINE T loadConst(T const* p) {
+#if NCCL_DEVICE_LOADCONST_USE_LDG
+  return loadConstLdg(p);
+#else
+  return *p;
+#endif
 }
 #endif
 

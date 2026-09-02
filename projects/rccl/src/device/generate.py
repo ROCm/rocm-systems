@@ -98,6 +98,20 @@ else:
 # make ONLY_FUNCS="AllReduce RING SIMPLE|ReduceScatter RING LL * f32"
 # make ONLY_FUNCS="AllReduce RING/TREE LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|AllGather RING LL/SIMPLE Sum i8|AlltoAllPivot RING SIMPLE Sum i8|Broadcast RING LL/SIMPLE Sum i8|Reduce RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|ReduceScatter RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|SendRecv RING SIMPLE Sum i8"
 
+################################################################################
+# NCCL_EXACT_KERNEL_NAMES selects upstream's exact kernel naming, which only
+# applies to the representative-ncclDevKernel mapping. RCCL emits one
+# ncclDevFunc_* per primary variant plus a per-function specialized kernel, so
+# every variant already has a distinct name and the option has no effect here.
+def str_to_bool(s):
+  s = s.lower()
+  if s in ("1", "true", "on", "yes"):
+    return True
+  if s in ("", "0", "false", "off", "no"):
+    return False
+  raise ValueError("Invalid boolean value: " + s)
+exact_kernel_names = str_to_bool(os.environ.get("NCCL_EXACT_KERNEL_NAMES", "0"))
+
 # Paste all non-None arguments together with `sep`.
 def paste(sep, *args):
   return sep.join(x for x in args if x is not None)
@@ -670,7 +684,7 @@ for name in name_to_funcs.keys():
 
     out = f.write
     out(
-      '#include "common.h"\n'
+      '#include "device/common.h"\n'
       '#include "{lower_coll}.h"\n'
       .format(lower_coll=coll_camel_to_lower[coll])
     )
@@ -716,7 +730,7 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
-    out('#include "common.h"\n')
+    out('#include "device/common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:
       out("#if %s\n" % guard)

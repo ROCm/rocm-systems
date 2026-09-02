@@ -52,7 +52,7 @@ ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 ncclResult_t ncclTopoGetNetDev(struct ncclComm* comm, int rank, struct ncclTopoGraph* graph, int channelId,
                                int peerRank, int64_t* id, int* dev, int* proxyRank);
 ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* system, int rank1, int rank2, int* p2p,
-                              int* read, int* intermediateRank, int* cudaP2p);
+                              int* read, int* intermediateRank, int* cudaP2p, int* isCrossClique = nullptr);
 ncclResult_t ncclTopoCheckMNNVL(struct ncclComm* comm, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2,
                                 int* ret);
 enum ncclTopoGdrMode {
@@ -104,6 +104,10 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 #define NCCL_TOPO_CPU_MODEL_INTEL_SKL 2
 #define NCCL_TOPO_CPU_MODEL_INTEL_SRP 3
 #define NCCL_TOPO_CPU_MODEL_INTEL_ERP 4
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN12 1
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN34 2
+#define NCCL_TOPO_CPU_MODEL_AMD_ZEN5 3
+// RCCL-specific AMD CPU models (values chosen to not collide with the upstream ZEN* ids above)
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
 #define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1

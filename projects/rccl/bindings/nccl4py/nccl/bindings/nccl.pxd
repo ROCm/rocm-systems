@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This code was automatically generated with version 2.30.4. Do not modify it directly.
+# This code was automatically generated with version 2.30.7. Do not modify it directly.
 
 from libc.stdint cimport intptr_t
 
@@ -97,3 +97,19 @@ cpdef dev_comm_destroy(intptr_t comm, intptr_t dev_comm)
 cpdef intptr_t get_lsa_multimem_device_pointer(intptr_t window, size_t offset) except? 0
 cpdef intptr_t get_lsa_device_pointer(intptr_t window, size_t offset, int lsa_rank) except? 0
 cpdef intptr_t get_peer_device_pointer(intptr_t window, size_t offset, int peer) except? 0
+cpdef ll_a2a_create_requirement(int n_blocks, int n_slots, intptr_t out_handle, intptr_t out_req)
+
+# Hand-written: cybind cannot emit by-value struct returns.
+cpdef object team_world(intptr_t comm)
+cpdef object team_lsa(intptr_t comm)
+cpdef object team_rail(intptr_t comm)
+cpdef int team_rank_to_world(intptr_t comm, intptr_t team, int rank)
+cpdef int team_rank_to_lsa(intptr_t comm, intptr_t team, int rank)
+cpdef lsa_barrier_create_requirement(intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req)
+cpdef gin_barrier_create_requirement(intptr_t comm, intptr_t team, int n_barriers, intptr_t out_handle, intptr_t out_req)
+cpdef object get_library_path()
+
+# Hand-written: Param API (SKIP_LOWPP in nccl.cybind.yaml).
+cpdef str param_get_parameter(str key)
+cpdef list param_get_all_keys()
+cpdef param_dump_all()

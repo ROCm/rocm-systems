@@ -145,8 +145,8 @@ protected:
 // dma-buf (cuMem/UBR) scratchpad: the exact path that used to fault. The
 // read-only flush must complete cleanly with correct data.
 TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
     AssertInitAndGetDevices(nullptr);
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
@@ -161,8 +161,8 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
 // Legacy peermem (ibv_reg_mr) scratchpad. Confirms Option 2a keeps the peermem
 // RO=0 read path working (never regressed).
 TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
     AssertInitAndGetDevices(nullptr);
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
@@ -177,8 +177,8 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
 // Feature disabled: ncclIbIflush falls back to reading the received buffer
 // directly (upstream-NCCL behaviour). Exercises the else branch.
 TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (scratchpadFlushEnabled())
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
     AssertInitAndGetDevices(nullptr);
@@ -194,8 +194,8 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
 // Repeated-flush burst. An intermittent async-fatal would surface as a
 // non-success flush on some iteration; the whole burst must stay clean.
 TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
     if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
@@ -211,8 +211,8 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
 // scratchpad this must reproduce the fault (flush no longer succeeds), proving
 // the WRITE is the culprit and that removing it is the fix.
 TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad target)";
     if (!scratchpadFlushEnabled())
         GTEST_SKIP() << "Requires the scratchpad flush enabled (RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1)";

@@ -2042,6 +2042,20 @@ TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// HIP fillInfo stamps mloPart=0 on every physical function-0 GPU as a topo overlay
+// hint (not a real MLO partition). busId defaults to 0 in the scripted AllGather,
+// so fn==0. That combination must not set hasMloPart or multi-node GIN/CE dies.
+TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartUnset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].mloPart = 0;
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->hasMloPart);
+}
+#endif
+
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
 // as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.
@@ -2105,20 +2119,18 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Co
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
-// --- hasMultiRankNvml (init.cc:1482) ---
-// PINS CURRENT BEHAVIOUR, WHICH LOOKS ODD: the assignment is `=`, not `|=`, inside the (i,j) double
-// loop, so only the FINAL pair survives and an earlier collision is erased. On AMD this is write-only
-// dead state, not a live wrong answer: the sole reader (src/transport/nvls.cc:252) sits inside
-// `#if CUDART_VERSION >= 12010`, and CUDART_VERSION is not defined under hipcc. These two tests
-// document what ships today so a `|=` change has to update a test rather than pass silently.
+// --- hasMultiRankNvml (init.cc) ---
+// NCCL 2.31 switched the (i,j) update from `=` to `|=`, so an early collision is
+// sticky. The last-pair test still covers the final (3,2) write.
+
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_EarlyCollisionOverwrittenByLastPair) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   std::vector<PeerSpec> specs(4);
-  specs[1].nvmlDev = 7;  // ranks 1 and 2 really do share a device on the same host...
+  specs[1].nvmlDev = 7;  // ranks 1 and 2 share a device on the same host
   specs[2].nvmlDev = 7;
   InstallPeerInfoAllGather(c, specs);
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
-  EXPECT_FALSE(c.get()->hasMultiRankNvml);  // ...but the last pair (3,2) does not, and it wins
+  EXPECT_TRUE(c.get()->hasMultiRankNvml);  // |= keeps the early collision
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MultiRankNvml_LastPairCollision_IsTheOnlyOneObserved) {

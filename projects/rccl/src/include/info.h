@@ -44,6 +44,9 @@ struct ncclInfo {
   unsigned int flags;
   int nDesc;
   ncclWaitSignalDesc_t* signalDescs;
+  // A config copied from config passed by user so older user config can be safely accessed
+  // during synchronous host scheduling (never at launch/replay).
+  ncclCollConfig_t collConfig;
   // Implementation decision precomputed by ncclAllReduce_impl() via
   // rcclSelectAllReduce() and consumed by taskAppend() to avoid recomputing the
   // CE-vs-kernel choice and graph-capture state. Valid only when decisionValid

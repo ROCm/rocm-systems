@@ -46,6 +46,8 @@ int ncclPxnDisable(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int, const int*) { return ncclSuccess; }
+ncclResult_t ncclTuningInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclTreeBasePostset(struct ncclComm* comm, struct ncclTopoGraph* treeGraph) { ::abort(); }
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm*, bool*, bool*, bool*) { ::abort(); }
 ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*, int) { ::abort(); }
