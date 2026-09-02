@@ -9264,3 +9264,71 @@ implementation lines. It strengthens Sections 14.1, 14.5, 14.6, 14.7, 14.8,
 and 14.9. Full target and mode locality, remaining broad transaction and
 operating-point surfaces, final extension-proof revalidation, and the
 independent Section 14 audit remain open, so the goal remains active.
+
+### 16.133 Convergence checkpoint 132: one typed MOI VGPR-state effect
+
+The next patch-ABI trace followed vector owner/epoch state from operating-point
+assignment through entry-prologue and Inline Shadow atomic planning, native
+emission, patch publication, release-transaction proof, descriptor accounting,
+tests, and final validation. The committed patch record split that state into
+three optional registers, one Record/Replay workgroup tuple, and two booleans.
+Those booleans independently claimed whether the pair was owner-local and
+whether it was a persistent ABI, admitting contradictory combinations. The
+`persistent_*` names also described scalar-persistent entry prologues whose
+owner/epoch VGPRs were only per-kernel initialization scratch.
+
+The converged path retains one `ConSanMoiVgprStateEffect`: an indivisible
+owner/epoch pair, optional compact-workgroup key, exact Record/Replay workgroup
+tuple, and an explicit three-state owner/epoch lifetime. Entry-local,
+code-object-persistent, and owner-local-persistent are now the only
+representable lifetime states. The contract proves that every destination is
+in range and distinct and computes the combined descriptor high-water mark.
+Prologue planning carries the value unchanged through emission and publication;
+Inline Shadow atomic planning publishes the same patch contract; and final
+validation reuses its structural invariant before independently proving the
+emitted transaction and descriptor growth.
+
+The value lives in the narrow `consan_moi_vgpr_state_effect.h.inc` contract.
+Structural checks require the typed patch and prologue fields, reject all six
+old flattened spellings throughout production, and keep the effect independent
+of architecture, engine, and report policy. A direct contract test covers all
+three lifetime states, range accounting, overlap rejection, and invalid enum
+values. A corruption test proves that final validation independently rejects
+an overlapping owner/epoch pair. Existing Record/Replay and Sampled tests now
+inspect the complete durable value rather than individual patch fields.
+
+| Signal | Checkpoint 132 | Cumulative change | Slice change from checkpoint 131 |
+| --- | ---: | ---: | ---: |
+| Production files | 300 | +71 | +1 narrow contract |
+| Physical production lines | 102,662 | **-2,314** | +49 |
+| Nonblank production lines | 96,281 | **-2,803** | +44 |
+| Production implementation lines | 88,518 | **-2,932** | +43 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **263 / 51** | **-27 / 0** | 0 / 0 |
+| Flattened MOI VGPR-state patch fields | **0** | n/a | **-6** |
+| Test inventory | **5,416** | **+71** | **+1** |
+
+The operating-point figure corrects a ten-reference transcription error in the
+preceding ledger rows: an exact lexical recount of both checkpoint 131 and this
+checkpoint gives 263 references in 51 files, so this slice changes neither
+value.
+
+The implementation is committed as `8b3705807b2`. Validation includes a
+successful compiler-clean `-j16` rebuild, the architecture-boundary and typed-
+effect tests, all **1,299/1,299** nonphysical `ConSan.*` and `ConSanMoi.*`
+host/component tests, and all **1,706/1,706** Record/Replay, Sampled, and
+InlineShadow simulator-device tests across gfx942, gfx950, gfx1100, gfx1201,
+and gfx1250. The final direct-test edit only added assertions for the third
+lifetime state and passed its focused rerun. No test was removed, renamed,
+disabled, or replaced, and no physical test was run.
+
+This slice deletes a contradictory patch schema and downstream range-accounting
+replicas, but the explicit invariant and direct regression coverage cost 43 net
+production implementation lines. Under Section 13's anti-circling rule this is
+temporary structural growth, not a completed deletion payoff: checkpoint 133
+must be deletion-bearing and should exploit the newly retained effect or an
+adjacent broad patch/operating-point boundary. Full target and mode locality,
+remaining broad transaction surfaces, final extension-proof revalidation, and
+the independent Section 14 audit remain open, so the goal remains active.

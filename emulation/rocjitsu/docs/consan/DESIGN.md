@@ -764,6 +764,20 @@ needed by their native instruction builders. Evidence indices,
 workgroup-shadow layout, borrowed-entry state, and relocated guest position
 remain with the relevant engine.
 
+Entry-prologue vector state has the same retained-value discipline.
+`ConSanMoiVgprStateEffect` carries one indivisible owner/epoch pair, the
+optional compact-workgroup key, and the exact Record/Replay workgroup tuple.
+Its three-state lifetime says whether the owner/epoch pair is entry-only
+scratch, the code-object-wide persistent ABI, or an owner-local persistent
+ABI; two independently mutable booleans cannot describe contradictory states.
+The value proves that all published destinations are distinct and computes
+their descriptor high-water mark. Prologue planning retains it through
+emission and patch publication, Inline Shadow atomic planning publishes the
+same contract for its consumer, and final validation reuses its structural
+invariant before independently checking emitted instructions and descriptor
+growth. Workgroup destinations remain persistent state even when scalar
+owner/epoch selection makes only the pair entry-local.
+
 Probe preservation now has a cross-engine resource boundary.
 `MoiPlannedProbeResources` is the placement-to-emission state shared by
 Record/Replay atomic, barrier, and fence records, Sampled atomic and barrier

@@ -5790,16 +5790,19 @@ analysis completed.
 
 ### Slice 5CM: make vector-persistent state patch-local
 
-- **Initializers and consumers name the same ABI:** A shared metadata helper
-  records owner, epoch, compact workgroup key, and exact workgroup-coordinate
-  VGPRs on every relevant entry prologue and Inline atomic consumer. Release-
-  transaction validation now reads the exact atomic patch instead of a
+- **Initializers and consumers name the same ABI:** Every relevant entry
+  prologue and Inline atomic consumer publishes one
+  `ConSanMoiVgprStateEffect`: the indivisible owner/epoch pair, optional compact
+  workgroup key, exact workgroup-coordinate tuple, and owner/epoch lifetime.
+  Release-transaction validation reads the exact atomic patch instead of a
   code-object-wide result mirror.
-- **Persistent state is distinguished from entry scratch:** Patch metadata
-  says whether its VGPR tuple is the lasting mechanism ABI and whether that ABI
-  is owner-local. This prevents a scalar-persistent prologue's temporary entry
-  VGPR carrier from masquerading as vector persistence, while retaining hybrid
-  vector-owner/scalar-workgroup configurations.
+- **Persistent state is distinguished from entry scratch:** The lifetime is a
+  three-state value: entry-local scratch, code-object-wide persistent ABI, or
+  owner-local persistent ABI. This replaces two booleans that could describe
+  contradictory states and prevents a scalar-persistent prologue's temporary
+  vector carrier from masquerading as vector persistence, while retaining
+  hybrid vector-owner/scalar-workgroup configurations. The contract also owns
+  destination distinctness and the descriptor high-water calculation.
 - **Tests consume durable contracts:** Global and per-owner test reporting
   helpers derive their views only from emitted patches. Existing placement and
   instruction tests continue to cover explicit and automatic registers,
