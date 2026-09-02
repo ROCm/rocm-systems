@@ -11573,3 +11573,47 @@ deleted sixteen: the small net pair is the shared public-to-registry bridge.
 It removes the common mode decision and makes report-capacity selection an
 explicit part of adding a mode, while retaining one shared constant for the
 two modes whose policy is genuinely identical.
+
+### 16.173 Convergence checkpoint 172: mode-owned entry capture
+
+The workgroup-identity trace found another RR/Sampled matrix outside the mode
+registry.  A common engine-contract helper named
+`record_replay_requires_entry_workgroup_capture` returned true for both
+Record/Replay and Sampled, despite its name, and common placement and record
+planning consulted it before accepting or allocating an entry-stable
+workgroup tuple.  InlineShadow instead derives its workgroup-local identity at
+the probe and does not require that entry capture.
+
+This fact is prologue policy, so `MoiPrologueModePolicy` now carries
+`requires_entry_workgroup_capture`.  Record/Replay and Sampled declare it in
+their mode registrations; InlineShadow retains the false default.  Common
+placement and record planning consume that registered policy directly.  The
+misnamed predicate, its declaration and implementation, and three namespace
+imports are deleted.  The existing per-mode prologue test now proves the
+three-way value, and the structural gate requires the two positive mode-owned
+declarations while rejecting resurrection of the parallel predicate.
+
+| Signal | Checkpoint 172 | Cumulative change | Slice change from checkpoint 171 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,576 | **-2,400** | **-6** |
+| Nonblank production lines | 96,157 | **-2,927** | **-6** |
+| Production implementation lines | 88,364 | **-3,086** | **-6** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Parallel common RR/Sampled entry-capture predicates | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,427** | **+82** | 0 |
+
+The implementation is committed as `8fffae1c1a1`.  Validation includes a
+successful full `-j16` build and **160/160** nonphysical mode-planning,
+entry-prologue, persistent-state, workgroup-identity, and
+architecture-boundary tests.  All invocations used `-LE physical`; no test was
+removed, renamed, disabled, or replaced, and no physical GPU test was run.
+
+This slice turns a falsely Record/Replay-named shared predicate into an
+explicit mode extension obligation and deletes six implementation lines.  It
+also leaves the hook's independently reconstructed RR/Sampled default matrix
+more conspicuous; that runtime-default path should be traced as its own
+configuration product rather than conflated with this lowering requirement.
