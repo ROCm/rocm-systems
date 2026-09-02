@@ -10263,3 +10263,62 @@ or a higher-leverage broad surface; another growth-only checkpoint is not
 admissible.  Full target/mode locality, broad transaction and operating-point
 reduction, extension-proof revalidation, and the independent Section 14 audit
 remain open.
+
+### 16.148 Convergence checkpoint 147: one authority for planned barrier facts
+
+The follow-through trace of the shared barrier transaction found three cached
+facts parallel to products already retained by every planned barrier.  The
+planned candidate copied dispatch ownership out of its `patch_abi`; wrapped an
+`indirect_jump` already present in every alternative of its exclusive body
+plan in a second route product; and cached `uses_scalar_epoch` beside the exact
+InlineShadow body alternative and its optional `persistent_epoch_sgpr`.  The
+copies made it possible for placement, emitted patch metadata, and the
+mode-owned body to disagree even though they described one candidate.
+
+`PlannedInlineEpochBarrier` now retains only the authoritative products.
+Placement projects the indirect route from the discriminated body, dispatch
+ownership comes from `patch_abi`, and scalar-epoch placement is derived from
+the exact InlineShadow alternative.  The obsolete
+`MoiInlineBarrierCandidateRoutePlan` type and its planner are deleted.  Its
+branch-only diagnostic bit remains as a single independent fact because that
+allocation provenance is not represented by any body alternative; preserving
+it keeps the existing route-specific warning and regression intact rather
+than pretending that all former route state was redundant.
+
+The architecture-boundary gate requires all three facts to remain derived
+from retained products and rejects restoration of the route wrapper, cached
+scalar-epoch Boolean, or duplicate owner vector.  This is a representation
+convergence slice rather than a behavior expansion, so the structural guard
+is the new regression and the test inventory is unchanged.
+
+| Signal | Checkpoint 147 | Cumulative change | Slice change from checkpoint 146 |
+| --- | ---: | ---: | ---: |
+| Production files | 307 | +78 | 0 |
+| Physical production lines | 102,723 | **-2,253** | **-12** |
+| Nonblank production lines | 96,300 | **-2,784** | **-12** |
+| Production implementation lines | 88,506 | **-2,944** | **-12** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 31 | +11 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **249 / 50** | **-41 / -1** | **-1 / 0** |
+| Parallel planned-barrier fact caches | **0** | n/a | **-3** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `bb299c492b6`.  Validation includes a
+current successful full `-j16` build; the architecture-boundary gate and all
+**109/109** barrier-named host tests spanning InlineShadow, Record/Replay, and
+Sampled planning and routing; and all **20/20** correct/incorrect Record/Replay
+and InlineShadow fence/barrier-publication simulator-device cases across
+gfx942, gfx950, gfx1100, gfx1201, and gfx1250.  Checkpoint 141 remains the
+immediately preceding complete all-mode **4,789/4,789** nonphysical gate.  No
+test was removed, renamed, disabled, or replaced, and no physical GPU test was
+run.
+
+This slice exactly pays back the twelve implementation lines invested by the
+two preceding physical-locality checkpoints while retaining their mode-owner,
+shared-publication, and target-profile gains.  It also removes one broad
+operating-point type dependency with the obsolete route planner.  The three-
+checkpoint series is therefore representation- and size-converged rather than
+merely source-moved.  Full target/mode locality, further broad transaction and
+operating-point reduction, extension-proof revalidation, and the independent
+Section 14 audit remain open.
