@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cuda.h>
 #include <cstdint>
 #include <memory>
@@ -99,7 +100,11 @@ private:
   FlagType** peerFlags_{nullptr};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {}
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags) {
+    assert(selfRank >= 0 && selfRank < nRanks && "selfRank out of bounds");
+    assert(nRanks > 0 && nRanks <= kDdaMaxNranks && "nRanks out of valid range");
+    assert(nBlocks > 0 && "nBlocks must be positive");
+  }
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;
