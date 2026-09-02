@@ -84,12 +84,13 @@ Ensure ROCm is installed and follow the steps:
 
 .. _install-pytorch-with-rocm:
 
-3. To profile PyTorch or Triton from pip, install ROCm Compute Profiler
+3. To profile PyTorch from pip, install ROCm Compute Profiler
    (``rocm[profiler]``) and torch from the same index in one command.
-   TheRock torch packages depend on ``rocm[libraries]`` and pull matching
-   ROCm automatically. Do not install ROCm and then torch; that can
-   downgrade ROCm. Using ``/opt/rocm`` for this tool and pip for torch
-   loads two ROCm stacks. Replace ``device-gfx950`` with your GPU target:
+   TheRock torch packages depend on ``rocm[libraries]`` and install the
+   matching ROCm. Do not install ROCm and then torch; that can downgrade
+   ROCm. Installing this tool from ``/opt/rocm`` and torch from pip places
+   two ROCm installations in one process. Replace ``device-gfx950`` with
+   your GPU target:
 
    .. code-block:: shell-session
 

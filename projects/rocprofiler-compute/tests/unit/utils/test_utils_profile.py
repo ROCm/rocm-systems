@@ -323,12 +323,12 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
         utils_profile.run_prof(str(fname), ["--arg"], workload_dir)
 
     assert (
-        utils_profile._CONFLICTING_ROCM_INSTALLATIONS_MESSAGE,
+        utils_profile._DUPLICATE_ROCM_INSTALL_MESSAGE,
         False,
     ) not in errors
 
 
-def test_run_prof_failure_prints_conflicting_rocm_message(tmp_path, monkeypatch):
+def test_run_prof_failure_prints_duplicate_rocm_install_message(tmp_path, monkeypatch):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
@@ -362,7 +362,7 @@ def test_run_prof_failure_prints_conflicting_rocm_message(tmp_path, monkeypatch)
 
     assert (abort_line, False) in errors
     assert (
-        utils_profile._CONFLICTING_ROCM_INSTALLATIONS_MESSAGE,
+        utils_profile._DUPLICATE_ROCM_INSTALL_MESSAGE,
         False,
     ) in errors
     assert ("Profiling execution failed.", True) in errors
