@@ -17,16 +17,9 @@ Usage (source):
     tests/python/run_tests.py                        # every tier
     tests/python/run_tests.py --unit                 # one tier
     tests/python/run_tests.py --unit --integration   # several
-
-Options:
-    -v / --verbose    Verbose output (show per-test names)
-    -q / --quiet      Quiet output
-    -b / --buffer     Buffer stdout/stderr during tests
-    -k "pattern"      Only run tests matching the substring
-    -x "pattern"      Skip tests matching the substring
-    --list / -l       List all available tests without running them
 """
 
+import argparse
 import os
 import sys
 
@@ -38,40 +31,34 @@ sys.path.insert(0, _here)
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
 TIERS = ("unit", "integration", "functional", "cli")
-_LONG_OPTIONS = frozenset(
-    {"--verbose", "--quiet", "--buffer", "--keyword", "--exclude", "--list", "--help"}
-)
 
 
-def _unknown_options(argv):
-    """Long options this runner does not define.
+def _build_parser():
+    parser = argparse.ArgumentParser(
+        prog="run_tests.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    for tier in TIERS:
+        parser.add_argument(f"--{tier}", action="store_true", help=f"run the {tier} tier")
 
-    Naming no tier runs every tier, so a mistyped tier would silently widen the
-    run to the device-driven suites instead of narrowing it.
-    """
-    known = _LONG_OPTIONS | {f"--{tier}" for tier in TIERS}
-    unknown = []
-    skip = False
-    for arg in argv[1:]:
-        if skip:
-            skip = False
-        elif arg in ("-k", "--keyword", "-x", "--exclude"):
-            skip = True
-        elif arg.startswith("--") and arg not in known:
-            unknown.append(arg)
-    return unknown
+    # run_test_dir() re-reads these from sys.argv; they are declared here so a
+    # mistyped option is refused rather than widening the run to every tier.
+    passthrough = parser.add_argument_group("passed through to the runner")
+    passthrough.add_argument("-v", "--verbose", action="count", default=0)
+    passthrough.add_argument("-q", "--quiet", action="store_true")
+    passthrough.add_argument("-b", "--buffer", action="store_true")
+    passthrough.add_argument("-k", "--keyword", metavar="PATTERN")
+    passthrough.add_argument("-x", "--exclude", metavar="PATTERN")
+    passthrough.add_argument("-l", "--list", action="store_true")
+    return parser
 
 
-if "-h" in sys.argv or "--help" in sys.argv:
-    print(__doc__)
-    sys.exit(0)
+def main():
+    args = _build_parser().parse_args()
+    selected = [tier for tier in TIERS if getattr(args, tier)] or list(TIERS)
+    common.run_test_dir(selected, f"AMD SMI Tests ({', '.join(selected)})", _here)
 
-_bad = _unknown_options(sys.argv)
-if _bad:
-    print(f"error: unknown option(s): {', '.join(_bad)}", file=sys.stderr)
-    print(f"tiers: {', '.join('--' + tier for tier in TIERS)}", file=sys.stderr)
-    sys.exit(2)
 
-selected = [tier for tier in TIERS if f"--{tier}" in sys.argv] or list(TIERS)
-
-common.run_test_dir(selected, f"AMD SMI Tests ({', '.join(selected)})", _here)
+if __name__ == "__main__":
+    main()
