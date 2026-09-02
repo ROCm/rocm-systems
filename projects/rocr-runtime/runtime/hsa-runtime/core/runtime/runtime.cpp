@@ -3133,7 +3133,9 @@ hsa_status_t Runtime::LoadHotswapTool() {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),

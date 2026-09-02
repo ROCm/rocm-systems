@@ -26,7 +26,7 @@
 #ifndef LIBHSAKMT_H_INCLUDED
 #define LIBHSAKMT_H_INCLUDED
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "hsakmt/hsakmt.h"
 #include "kfdcontext.h"
 #include "hsakmt/hsakmtctx.h"
