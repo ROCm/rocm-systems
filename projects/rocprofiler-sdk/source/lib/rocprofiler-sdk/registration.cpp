@@ -1590,16 +1590,23 @@ rocprofiler_set_api_table(const char* name,
                 [](const rocprofiler::context::context* ctx) {
                     return ctx->device_thread_trace != nullptr;
                 });
+            auto registered_contexts = rocprofiler::context::get_registered_contexts();
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] non-inline contexts found: {}. The presence of "
-                "any of these contexts will prevent inline intercept (for the time being).",
+                "[queue-interposition] {} registered contexts, {} of them non-inline. The presence "
+                "of any non-inline context will prevent inline intercept (for the time being).",
+                registered_contexts.size(),
                 non_queue_interposition_contexts.size());
 
             // if non_queue_interposition_contexts is empty, default to inline intercept.
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // With no registered context there is nothing to intercept for. Installing the inline
+            // path starts the completion monitor and its record emitter, and the SDK creates no
+            // internal threads when no tool is active. This overrides the environment variable.
+            if(registered_contexts.empty()) enable_queue_interposition = false;
 
             if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
                !rocprofiler::hsa::enable_queue_intercept())
