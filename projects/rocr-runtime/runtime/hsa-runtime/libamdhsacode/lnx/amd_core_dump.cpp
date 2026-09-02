@@ -992,7 +992,7 @@ hsa_status_t write_to_pipe_handler(const std::string& pattern,
       // Write core dump data to pipe
       status = write_core_dump_to_fd(pipefd[1], segments, -1, show_progress);
       close(pipefd[1]);
-  
+
       sigaction(SIGPIPE, &old_sigpipe, nullptr);
     }
 
