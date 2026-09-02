@@ -205,7 +205,6 @@ struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   MoiBarrierBodyPlan body;
-  bool branch_only_spill = false;
   std::optional<VgprSpillSequence> spill;
   std::optional<SgprSpillSequence> scalar_spill;
   ConSanPatchAbiEffects patch_abi;
@@ -557,7 +556,6 @@ void try_apply_shared_barrier_patch(
         .candidate = candidate,
         .derived_owner = std::nullopt,
         .body = std::move(*body),
-        .branch_only_spill = candidate_point.moi_branch_only_spill.has_value(),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
         .patch_abi = std::move(patch_abi),
@@ -704,11 +702,12 @@ void try_apply_shared_barrier_patch(
     if (cave_text_offset >= return_text_offset &&
         !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) && !indirect_jump) {
       result.warnings.emplace_back(
-          planned.branch_only_spill
-              ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
-                    candidate.container_name
-              : "ConSan MOI inline-shadow barrier has no encodable far return in " +
-                    candidate.container_name);
+          std::string(moi_transient_sgpr_assignment_is_branch_only(
+                          result.moi_operating_point,
+                          planned.patch_abi.owner_descriptor_file_offsets)
+                          ? "ConSan MOI branch-only scalar-spill barrier"
+                          : "ConSan MOI inline-shadow barrier") +
+          " has no encodable far return in " + candidate.container_name);
       continue;
     }
     std::optional<std::vector<uint32_t>> cave_words =

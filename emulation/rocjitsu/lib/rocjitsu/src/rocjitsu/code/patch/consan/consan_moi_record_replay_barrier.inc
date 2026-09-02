@@ -700,7 +700,6 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
       .candidate = candidate,
       .derived_owner = derived_owner,
       .body = *record_emission,
-      .branch_only_spill = point.moi_branch_only_spill.has_value(),
       .spill = std::move(spill),
       .scalar_spill = std::move(scalar_spill),
       .patch_abi = std::move(patch_abi),

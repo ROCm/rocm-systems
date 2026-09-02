@@ -223,7 +223,6 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
               .epoch_offset = private_state_layout.epoch_offset,
               .indirect_jump = scalar_abi.indirect_jump,
           },
-      .branch_only_spill = point.moi_branch_only_spill.has_value(),
       .spill = std::move(spill),
       .scalar_spill = std::nullopt,
       .patch_abi = std::move(patch_abi),

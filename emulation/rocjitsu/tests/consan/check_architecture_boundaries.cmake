@@ -976,6 +976,11 @@ if(_moi_barrier_planning MATCHES
         "barrier persistent-VGPR requirements must be derived from emitted owner scope"
     )
 endif()
+if(_moi_barrier_planning MATCHES "branch_only_spill")
+    message(FATAL_ERROR
+        "shared barrier plans must not retain operating-point state solely for diagnostics"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
