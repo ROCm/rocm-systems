@@ -106,4 +106,12 @@ private:
   }
 };
 
+// Publish a stream-ordered scratch copy once per rank before a multi-block
+// collective consumes peer scratch. A separate one-block launch avoids paying
+// the release/acquire barrier in every collective block.
+template <int = 0>
+__global__ void fabricGpuBarrierPublish(FabricGpuBarrier barrier) {
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+}
+
 } // namespace dda::common
