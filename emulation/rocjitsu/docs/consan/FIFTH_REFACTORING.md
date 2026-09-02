@@ -8844,3 +8844,56 @@ strengthens Sections 14.1, 14.3, 14.4, 14.6, 14.7, and 14.8. Full architecture
 locality, remaining broad coordinator and patch-state paths, material
 additional whole-refactoring shrinkage, and the independent Section 14 audit
 remain open, so the goal remains active.
+
+### 16.126 Convergence checkpoint 125: vocabulary-owned independent fence composition
+
+The engine-vocabulary trace continued through every consumer of the `fence`
+operation and found two remaining common replicas. Atomic/fence policy still
+recognized Record/Replay explicitly when deciding whether an ordinary-memory
+communication delegated its after evidence to a qualified fence, when joining
+the atomic and fence decisions, and when repairing a corrupt inventory with a
+direct atomic fallback. Access-body placement separately counted literal
+`FenceRecord` intents when reserving relay islands for the downstream
+synchronization pass. Report planning, evidence classification, resource-plan
+construction, and pipeline orchestration already consumed the canonical
+engine row.
+
+Policy now asks only whether the selected engine vocabulary publishes an
+independent fence operation. It publishes that operation for a qualified fence
+and uses the same row's atomic operation for the fail-closed direct fallback.
+Placement reserves islands for the row's fence operation when one exists.
+The common paths no longer name Record/Replay or `FenceRecord`; a future mode
+that composes an independent fence operation no longer requires either common
+owner to be edited. The architecture boundary gate rejects restoration of the
+literal Record/Replay fence intent in both files. The existing exhaustive
+atomic/fence policy test remains an independent behavioral oracle for all three
+operational engines and their distinct ordinary-fence contracts.
+
+| Signal | Checkpoint 125 | Cumulative change | Slice change from checkpoint 124 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,809 | **-2,167** | +2 |
+| Nonblank production lines | 96,440 | **-2,644** | +2 |
+| Production implementation lines | 88,684 | **-2,766** | +1 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **273 / 51** | **-17 / 0** | 0 / 0 |
+| Common literal independent-fence intent consumers | **0** | n/a | **-2** |
+| Test inventory | **5,413** | **+68** | 0 |
+
+The implementation is committed as `486a00e3801`. Validation includes a
+successful compiler-clean `-j16` rebuild (with only the pre-existing CMake
+CMP0174 development warnings), all atomic/fence policy and architecture-
+boundary tests **21/21**, and all **1,296/1,296** nonphysical `ConSan.*` and
+`ConSanMoi.*` host/component tests. No test was removed, renamed, disabled, or
+replaced, and no physical test was run.
+
+This is a one-line interface cost with an immediate authority harvest: four
+Record/Replay or `FenceRecord` decisions disappear from common policy and
+placement, while the vocabulary's already-existing operation becomes the
+single input to every common fence consumer. It strengthens Sections 14.1,
+14.3, 14.4, 14.6, and 14.7 without introducing a compatibility path. Full
+architecture locality, remaining broad coordinator and patch-state paths,
+material additional whole-refactoring shrinkage, and the independent Section
+14 audit remain open, so the goal remains active.
