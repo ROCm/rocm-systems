@@ -25,6 +25,10 @@ BAD_SEQUENCE = 0
 BAD_BYTES = 0
 OUT_OF_RANGE = 0xFFFFFFFF
 
+# Declared on a bad value to pin the status it must produce. Matching is exact,
+# unlike check_ret(), which treats NOT_SUPPORTED as acceptable for any call.
+INVAL = "AMDSMI_STATUS_INVAL"
+
 # ctypes refuses an argument it cannot marshal, so the C entry point is never
 # reached; that is still a rejection.
 _BINDING_REJECTIONS = (ctypes.ArgumentError, TypeError, ValueError, OverflowError)
@@ -44,17 +48,28 @@ _UNEXPECTED_SUCCESS = (
 )
 
 
+def _with_expected_status(entry):
+    """Normalize a bad value to ``(label, value, expected)``.
+
+    ``expected`` of None only requires the call to fail; a status name, or a
+    list of them, requires it to fail that way.
+    """
+    label, value, *rest = entry
+    return (label, value, rest[0] if rest else None)
+
+
 class Param:
     """One API argument, described as ``(label, value)`` pairs.
 
-    bad:      the invalid values ``reject()`` drives this argument with
+    bad:      the invalid values ``reject()`` drives this argument with, each
+              ``(label, value)`` or ``(label, value, expected_status)``
     sweep:    values replayed while a *different* argument is invalid
     accepted: the values ``expect()`` drives this argument with
     """
 
     def __init__(self, name, valid, bad, sweep=(), accepted=()):
         self.name = name
-        self.bad = list(bad)
+        self.bad = [_with_expected_status(entry) for entry in bad]
         self.sweep = list(sweep) or [valid]
         self.accepted = list(accepted) or [valid]
 
@@ -102,13 +117,17 @@ def enum(name, type_list):
     ``reject()`` replays every member, including the ones the table marks as
     rejected: the deliberately invalid argument is refused first, so no member
     reaches the device. ``expect()`` uses only the accepted members.
+
+    A value outside the enum is a bad argument, not a missing feature, so it is
+    pinned to INVAL; NOT_SUPPORTED here would mean the API mistook one for the
+    other.
     """
     members = [(member, value) for member, value, _ in type_list]
     accepted = [(member, value) for member, value, cond in type_list if cond == PASS]
     return Param(
         name,
         (accepted or members)[0],
-        [("bad-type", BAD_ENUM)],
+        [("bad-type", BAD_ENUM, INVAL)],
         sweep=members,
         accepted=accepted or members,
     )
@@ -255,7 +274,7 @@ class ApiTest:
         func = self._resolve(func_name)
         unrejectable = _unrejectable_positions(func_name)
         names = [param.name for param in params]
-        accepted = []
+        problems = []
         for idx, param in enumerate(params):
             if idx in unrejectable:
                 raise AssertionError(
@@ -263,15 +282,16 @@ class ApiTest:
                     " to True, so driving it here would reach the device instead of"
                     " being refused. Cover this argument in the functional tier."
                 )
-            for bad in param.bad:
-                for slots in _arg_sets(params, idx, bad):
+            for bad_label, bad_value, expected in param.bad:
+                for slots in _arg_sets(params, idx, (bad_label, bad_value)):
                     label = _call_label(func_name, names, slots)
-                    if self._call_bad(func, label, slots):
-                        accepted.append(label.strip())
+                    problem = self._call_bad(func, label, slots, expected)
+                    if problem:
+                        problems.append(f"{label.strip()}\n    {problem}")
         self.common.print("")
-        if accepted:
+        if problems:
             raise AssertionError(
-                f"{func_name} accepted invalid arguments:\n  " + "\n  ".join(accepted)
+                f"{func_name} did not reject as required:\n  " + "\n  ".join(problems)
             )
 
     def expect(
@@ -350,24 +370,41 @@ class ApiTest:
             raise unittest.SkipTest(message)
         return last
 
-    def _call_bad(self, func, label, slots):
-        """Return True when the API wrongly accepted the invalid argument."""
+    def _call_bad(self, func, label, slots, expected=None):
+        """Return why the call fell short of the required rejection, else None."""
         args = [value for _, value in slots]
         try:
             data = func(*args)
         except amdsmi.AmdSmiLibraryException as e:
-            return self.common.check_ret(label, e, self.common.ANY_FAIL)
+            return self._judge_status(label, e, expected)
         except amdsmi.AmdSmiException as e:
-            return self.common.check_ret(label, e, self.common.FAIL)
+            return self._judge_status(label, e, expected or self.common.FAIL)
         except _BINDING_REJECTIONS as e:
+            # ctypes refused the value, so the C entry point was never reached.
             self.common.print(
                 f"{label}\n\tTEST SUCCESS, AMDSMI API rejected the argument"
                 f" ({type(e).__name__}), AMDSMI_STATUS_INVAL"
             )
-            return False
+            return None
         self.common.print(label, _printable(data))
         self.common.print(_UNEXPECTED_SUCCESS)
-        return True
+        return "accepted the argument"
+
+    def _judge_status(self, label, exc, expected):
+        """Judge one rejection against the status the caller pinned, if any."""
+        if expected is None:
+            self.common.check_ret(label, exc, self.common.ANY_FAIL)
+            return None
+        wanted = [expected] if isinstance(expected, str) else list(expected)
+        code, name = self.common.get_error_code(exc)
+        if name in wanted:
+            self.common.print(f"{label}\n\tTEST SUCCESS, AMDSMI API Returned {code:>2s}, {name}")
+            return None
+        self.common.print(
+            f"{label}\n\tTEST FAILURE, AMDSMI API Returned {code:>2s}, {name}\n"
+            f"\t              AMDSMI API Expected {', '.join(wanted)}"
+        )
+        return f"returned {name}, expected {' or '.join(wanted)}"
 
 
 def _nic_handles():
@@ -467,7 +504,7 @@ class ApiTestCase(unittest.TestCase):
     def reject_only(self, func_name, *params):
         """For an API that changes state: only the rejection path is safe here."""
         for param in params:
-            if any(value is OUT_OF_RANGE for _, value in param.bad):
+            if any(value is OUT_OF_RANGE for _, value, _ in param.bad):
                 raise AssertionError(
                     f"{func_name}({param.name}): an out-of-range value is type-correct, so"
                     " it reaches the device. A state-changing API must be driven only with"
