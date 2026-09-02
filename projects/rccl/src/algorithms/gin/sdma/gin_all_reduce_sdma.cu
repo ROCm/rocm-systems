@@ -36,7 +36,6 @@ RCCL_PARAM(GinAllReduceForceEnable, "GIN_ALLREDUCE_FORCE_ENABLE", 0);
 // kernels top out at DDA_IPC_MAXBLOCKS (24), so this range is worth sweeping. OVERLAP=1 selects the
 // pipelined kernel that pushes reduced columns to peers instead of the non-overlapped one.
 NCCL_PARAM(GinAllReduceLsaTwoShotCtas, "GIN_ALLREDUCE_LSA_TWOSHOT_CTAS", 0);
-NCCL_PARAM(GinAllReduceLsaTwoShotOverlap, "GIN_ALLREDUCE_LSA_TWOSHOT_OVERLAP", 0);
 
 namespace {
 
