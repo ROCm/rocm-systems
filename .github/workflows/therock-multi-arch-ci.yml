@@ -92,7 +92,11 @@ concurrency:
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' }}
+  cancel-in-progress: >-
+    ${{
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'ci:multi-arch'
+    }}
 
 jobs:
   ci-gate:
@@ -258,7 +262,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -267,15 +271,21 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
-        if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python build_tools/github_actions/workflow_summary.py \
+          python3 build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
 
       - name: Report skipped workflow
-        if: ${{ needs.ci-gate.outputs.enabled != 'true' }}
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
         run: |
           echo "TheRock Multi-Arch CI is skipped by default for pull requests."
           echo "Add the ci:multi-arch label to enable it."
+
+      - name: Report gate failure
+        if: ${{ needs.ci-gate.result != 'success' }}
+        run: |
+          echo "TheRock Multi-Arch CI gate did not complete successfully."
+          exit 1
