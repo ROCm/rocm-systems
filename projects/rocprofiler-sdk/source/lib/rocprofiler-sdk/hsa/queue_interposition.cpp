@@ -2090,11 +2090,6 @@ interposition_fini()
     // child's interception inert.
     if(internal_threading::fork_stale()) return;
 
-    // The monitor is stopped earlier, in queue_controller_fini before queue_fini, so
-    // its straggler sweep releases pooled signals while the pool is still alive. Drain
-    // once more here to flush any completions observed since.
-    interposition_sync();
-
     // clean up signal pool
     signal_pool_fini();
 
