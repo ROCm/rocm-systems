@@ -10,16 +10,10 @@
 
 namespace rocjitsu::consan_validation_target_detail {
 
-bool validate_gfx11_dependency(ConSanDependencyKind kind, const Instruction &instruction) {
+bool validate_gfx11_dependency(ConSanDependencyKind, const Instruction &instruction) {
   const Operand *operand =
       instruction.num_src_operands() == 1 ? instruction.src_operand(0) : nullptr;
-  if (!operand)
-    return false;
-  if (kind == ConSanDependencyKind::ScalarLoadCompletion)
-    return instruction.mnemonic() == "s_waitcnt" && operand->encoding_value() == 0xfc07;
-  if (kind == ConSanDependencyKind::ValuCarryToValu)
-    return false;
-  return instruction.mnemonic() == "s_delay_alu" && operand->encoding_value() == 9;
+  return instruction.mnemonic() == "s_delay_alu" && operand && operand->encoding_value() == 9;
 }
 
 } // namespace rocjitsu::consan_validation_target_detail

@@ -66,11 +66,7 @@ bool validate_gfx12_dependency(ConSanDependencyKind kind, const Instruction &ins
               : std::nullopt;
   if (kind == ConSanDependencyKind::SaluToSalu)
     return instruction.mnemonic() == "s_delay_alu" && immediate == 9u;
-  if (kind == ConSanDependencyKind::ValuToSalu)
-    return instruction.mnemonic() == "s_wait_alu" && immediate == 0xf19fu;
-  if (kind == ConSanDependencyKind::ValuCarryToValu)
-    return instruction.mnemonic() == "s_wait_alu" && immediate == 0xff9du;
-  return false;
+  return instruction.mnemonic() == "s_wait_alu" && immediate == 0xf19fu;
 }
 
 ConSanEncodedMutationValidation validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind,

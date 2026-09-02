@@ -18,16 +18,10 @@ namespace rocjitsu::consan_validation_target_detail {
 
 namespace kd = rocr::llvm::amdhsa;
 
-bool validate_gfx9_cdna_dependency(ConSanDependencyKind kind, const Instruction &instruction) {
+bool validate_gfx9_cdna_dependency(ConSanDependencyKind, const Instruction &instruction) {
   const Operand *operand =
       instruction.num_src_operands() == 1 ? instruction.src_operand(0) : nullptr;
-  if (!operand)
-    return false;
-  if (kind == ConSanDependencyKind::ScalarLoadCompletion)
-    return instruction.mnemonic() == "s_waitcnt" && operand->encoding_value() == 0xc07f;
-  if (kind == ConSanDependencyKind::ValuCarryToValu)
-    return false;
-  return instruction.mnemonic() == "s_nop" && operand->encoding_value() == 0;
+  return instruction.mnemonic() == "s_nop" && operand && operand->encoding_value() == 0;
 }
 
 ConSanDescriptorResourceDeltaValidation

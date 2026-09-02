@@ -35,8 +35,6 @@ enum class ConSanEncodedMutationKind : uint8_t {
 enum class ConSanDependencyKind : uint8_t {
   SaluToSalu,
   ValuToSalu,
-  ValuCarryToValu,
-  ScalarLoadCompletion,
 };
 
 /// Target-neutral inputs needed to prove and normalize descriptor resource
@@ -70,10 +68,5 @@ validate_consan_descriptor_resource_delta(rj_code_arch_t arch,
 
 [[nodiscard]] bool validate_consan_dependency(rj_code_arch_t arch, ConSanDependencyKind kind,
                                               const Instruction &instruction);
-
-/// Whether this target spells the requested dependency as a standalone
-/// instruction. A false result is meaningful only for dependencies whose ISA
-/// form can be implicit, currently the VALU carry chain on pre-gfx12 targets.
-[[nodiscard]] bool consan_dependency_is_explicit(rj_code_arch_t arch, ConSanDependencyKind kind);
 
 } // namespace rocjitsu

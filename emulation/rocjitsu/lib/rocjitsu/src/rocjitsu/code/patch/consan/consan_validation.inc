@@ -307,22 +307,6 @@ decode_validation_instruction(ValidationText text, Decoder &decoder, uint64_t of
   return operand && operand->to_register_ref() == RegisterRef{cls, index, width};
 }
 
-[[nodiscard]] bool operand_is_scc(const Operand *operand) {
-  if (!operand)
-    return false;
-  const std::optional<RegisterRef> reg = operand->to_register_ref();
-  return (reg && reg->cls == RegClass::SCC && reg->index == 0u) || operand->name() == "src_scc" ||
-         operand->name() == "SRC_SCC" || operand->name() == "scc";
-}
-
-[[nodiscard]] bool operand_is_vcc(const Operand *operand) {
-  if (!operand)
-    return false;
-  const std::optional<RegisterRef> reg = operand->to_register_ref();
-  return (reg && reg->cls == RegClass::VCC && reg->index == 0u) || operand->name() == "vcc" ||
-         operand->name() == "vcc_lo" || operand->name() == "VCC_LO";
-}
-
 [[nodiscard]] bool operand_is_constant(const Operand *operand, uint64_t value) {
   return operand && operand->const_value() == value;
 }
@@ -406,217 +390,6 @@ validate_scalar_lane_transfers(const FinalValidationEnvironment &environment, ui
     cursor = decoded->next_offset;
   }
   return false;
-}
-
-template <typename Predicate>
-[[nodiscard]] size_t count_instruction_destinations(const Instruction &instruction,
-                                                    Predicate predicate) {
-  size_t count = 0;
-  for (int index = 0; index < instruction.num_dst_operands(); ++index)
-    count += predicate(instruction.dst_operand(index));
-  return count;
-}
-
-[[nodiscard]] bool is_scalar_move(const Instruction &instruction, uint16_t destination,
-                                  uint16_t source) {
-  return instruction.mnemonic() == "s_mov_b32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::SGPR, destination) &&
-         operand_is_register(instruction.src_operand(0), RegClass::SGPR, source);
-}
-
-[[nodiscard]] bool is_vector_move_from_scalar(const Instruction &instruction, uint16_t destination,
-                                              uint16_t source) {
-  return instruction.mnemonic() == "v_mov_b32_e32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::VGPR, destination) &&
-         operand_is_register(instruction.src_operand(0), RegClass::SGPR, source);
-}
-
-[[nodiscard]] bool is_scalar_dispatch_increment(const Instruction &instruction,
-                                                uint16_t destination, bool carry_in) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  const bool right_opcode = carry_in ? mnemonic == "s_addc_u32" || mnemonic == "s_add_co_ci_u32"
-                                     : mnemonic == "s_add_u32" || mnemonic == "s_add_co_u32";
-  const uint64_t addend = carry_in ? 0u : 1u;
-  return right_opcode && instruction.num_dst_operands() == 2 &&
-         instruction.num_src_operands() == (carry_in ? 3 : 2) &&
-         count_instruction_destinations(instruction,
-                                        [&](const Operand *operand) {
-                                          return operand_is_register(operand, RegClass::SGPR,
-                                                                     destination);
-                                        }) == 1u &&
-         count_instruction_destinations(instruction,
-                                        [&](const Operand *operand) {
-                                          return operand_is_scc(operand);
-                                        }) == 1u &&
-         count_instruction_sources(instruction,
-                                   [&](const Operand *operand) {
-                                     return operand_is_register(operand, RegClass::SGPR,
-                                                                destination);
-                                   }) == 1u &&
-         count_instruction_sources(
-             instruction,
-             [&](const Operand *operand) { return operand_is_constant(operand, addend); }) == 1u &&
-         (!carry_in || count_instruction_sources(instruction, [&](const Operand *operand) {
-                         return operand_is_scc(operand);
-                       }) == 1u);
-}
-
-[[nodiscard]] bool is_vector_dispatch_increment(const Instruction &instruction,
-                                                uint16_t destination, bool carry_in) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  const bool right_opcode = carry_in ? mnemonic == "v_addc_co_u32_e32" ||
-                                           mnemonic == "v_add_co_ci_u32_e32" ||
-                                           mnemonic == "v_add_co_ci_u32"
-                                     : mnemonic == "v_add_co_u32_e32" || mnemonic == "v_add_co_u32";
-  const uint64_t addend = carry_in ? 0u : 1u;
-  return right_opcode && instruction.num_dst_operands() == 2 &&
-         instruction.num_src_operands() == (carry_in ? 3 : 2) &&
-         count_instruction_destinations(instruction,
-                                        [&](const Operand *operand) {
-                                          return operand_is_register(operand, RegClass::VGPR,
-                                                                     destination);
-                                        }) == 1u &&
-         count_instruction_destinations(instruction,
-                                        [&](const Operand *operand) {
-                                          return operand_is_vcc(operand);
-                                        }) == 1u &&
-         count_instruction_sources(instruction,
-                                   [&](const Operand *operand) {
-                                     return operand_is_register(operand, RegClass::VGPR,
-                                                                destination);
-                                   }) == 1u &&
-         count_instruction_sources(
-             instruction,
-             [&](const Operand *operand) { return operand_is_constant(operand, addend); }) == 1u &&
-         (!carry_in || count_instruction_sources(instruction, [&](const Operand *operand) {
-                         return operand_is_vcc(operand);
-                       }) == 1u);
-}
-
-[[nodiscard]] bool is_scalar_kernarg_reload(const Instruction &instruction, uint16_t destination,
-                                            uint16_t base, uint32_t byte_offset) {
-  return instruction.mnemonic() == "s_load_dword" && instruction.size() == 8 &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 3 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::SGPR, destination) &&
-         operand_is_register(instruction.src_operand(0), RegClass::SGPR, base, 2u) &&
-         operand_is_constant(instruction.src_operand(1), byte_offset);
-}
-
-/// Decode-forward cursor used only for direct, named semantic checks below.
-/// It provides bounded instruction traversal but deliberately owns no pattern
-/// vocabulary or matching policy.
-class DecodedValidationCursor {
-public:
-  DecodedValidationCursor(const FinalValidationEnvironment &environment, uint64_t begin,
-                          uint64_t end)
-      : environment_(environment), cursor_(begin), end_(end) {}
-
-  [[nodiscard]] std::unique_ptr<Instruction> take() {
-    auto decoded = decode_validation_instruction(environment_.replacement_text,
-                                                 *environment_.decoder, cursor_, end_);
-    if (!decoded)
-      return {};
-    cursor_ = decoded->next_offset;
-    return std::move(decoded->instruction);
-  }
-
-  [[nodiscard]] uint64_t offset() const { return cursor_; }
-
-private:
-  const FinalValidationEnvironment &environment_;
-  uint64_t cursor_;
-  uint64_t end_;
-};
-
-[[nodiscard]] bool take_dependency(DecodedValidationCursor &cursor,
-                                   const FinalValidationEnvironment &environment,
-                                   ConSanDependencyKind kind) {
-  std::unique_ptr<Instruction> instruction = cursor.take();
-  return instruction && validate_consan_dependency(environment.arch(), kind, *instruction);
-}
-
-[[nodiscard]] std::optional<uint64_t>
-validate_dispatch_repair_at(const FinalValidationEnvironment &environment, uint64_t offset,
-                            uint64_t end, const ConSanMoiDispatchIdPrologueEffect &dispatch,
-                            uint32_t restore_count, uint32_t system_restore_count) {
-  DecodedValidationCursor cursor(environment, offset, end);
-  const ConSanMoiDispatchIdPreloadPlan &preload = dispatch.preload;
-  if (const std::optional<uint16_t> capture = dispatch.capture.sgpr()) {
-    std::unique_ptr<Instruction> low_move = cursor.take();
-    if (!low_move || !is_scalar_move(*low_move, *capture, preload.dispatch_id_sgpr) ||
-        !take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu))
-      return std::nullopt;
-    std::unique_ptr<Instruction> high_move = cursor.take();
-    if (!high_move ||
-        !is_scalar_move(*high_move, static_cast<uint16_t>(*capture + 1u),
-                        static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u)) ||
-        !take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu))
-      return std::nullopt;
-    std::unique_ptr<Instruction> low_increment = cursor.take();
-    if (!low_increment || !is_scalar_dispatch_increment(*low_increment, *capture, false) ||
-        !take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu))
-      return std::nullopt;
-    std::unique_ptr<Instruction> high_increment = cursor.take();
-    if (!high_increment ||
-        !is_scalar_dispatch_increment(*high_increment, static_cast<uint16_t>(*capture + 1u), true) ||
-        !take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu))
-      return std::nullopt;
-  } else if (const std::optional<uint16_t> capture = dispatch.capture.vgpr()) {
-    std::unique_ptr<Instruction> low_move = cursor.take();
-    std::unique_ptr<Instruction> high_move = cursor.take();
-    std::unique_ptr<Instruction> low_increment = cursor.take();
-    if (!low_move || !is_vector_move_from_scalar(*low_move, *capture, preload.dispatch_id_sgpr) ||
-        !high_move ||
-        !is_vector_move_from_scalar(*high_move, static_cast<uint16_t>(*capture + 1u),
-                                    static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u)) ||
-        !low_increment || !is_vector_dispatch_increment(*low_increment, *capture, false))
-      return std::nullopt;
-    if (consan_dependency_is_explicit(environment.arch(), ConSanDependencyKind::ValuCarryToValu) &&
-        !take_dependency(cursor, environment, ConSanDependencyKind::ValuCarryToValu))
-      return std::nullopt;
-    std::unique_ptr<Instruction> high_increment = cursor.take();
-    if (!high_increment ||
-        !is_vector_dispatch_increment(*high_increment, static_cast<uint16_t>(*capture + 1u), true))
-      return std::nullopt;
-  } else {
-    return std::nullopt;
-  }
-
-  const auto take_restore = [&](uint16_t destination, uint16_t source) {
-    std::unique_ptr<Instruction> move = cursor.take();
-    return move && is_scalar_move(*move, destination, source) &&
-           take_dependency(cursor, environment, ConSanDependencyKind::SaluToSalu);
-  };
-  for (uint32_t index = 0; index < restore_count; ++index) {
-    const uint16_t destination = static_cast<uint16_t>(preload.dispatch_id_sgpr + index);
-    if (!take_restore(destination, static_cast<uint16_t>(destination + 2u)))
-      return std::nullopt;
-  }
-  for (uint32_t index = 0; index < system_restore_count; ++index) {
-    const uint16_t destination = static_cast<uint16_t>(preload.original_user_sgpr_count + index);
-    if (!take_restore(destination, static_cast<uint16_t>(destination + preload.system_sgpr_shift)))
-      return std::nullopt;
-  }
-  return cursor.offset();
-}
-
-[[nodiscard]] std::optional<uint64_t>
-find_dispatch_repair(const FinalValidationEnvironment &environment, uint64_t begin, uint64_t end,
-                     const ConSanMoiDispatchIdPrologueEffect &dispatch, uint32_t restore_count,
-                     uint32_t system_restore_count) {
-  for (uint64_t cursor = begin; cursor < end;) {
-    if (const auto repair_end = validate_dispatch_repair_at(environment, cursor, end, dispatch,
-                                                            restore_count, system_restore_count))
-      return repair_end;
-    const auto decoded = decode_validation_instruction(environment.replacement_text,
-                                                       *environment.decoder, cursor, end);
-    if (!decoded)
-      return std::nullopt;
-    cursor = decoded->next_offset;
-  }
-  return std::nullopt;
 }
 
 struct InventoryRange {
@@ -3153,13 +2926,10 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
                                              std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
-  if (!environment.require_target(
-          errors, "ConSan final validation found no target profile for dispatch-ID prologue",
-          "ConSan final validation could not create a dispatch-ID prologue decoder"))
-    return;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
   const rj_code_arch_t arch = environment.arch();
   const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
-                                  uint64_t entry_end, std::string_view kernel_name,
+                                  std::string_view kernel_name,
                                   bool has_semantic_system_sgpr_restore) {
     if (!patch.dispatch_id_prologue) {
       errors.emplace_back("ConSan final validation found missing dispatch-ID prologue proof");
@@ -3196,26 +2966,74 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     }
     const uint32_t system_restore_count =
         has_semantic_system_sgpr_restore ? 0u : preload.shifted_system_sgpr_count;
+    const uint64_t reload_words =
+        preload.kernarg_reload_count != 0 ? 2u * preload.kernarg_reload_count + 1u : 0u;
+    std::vector<uint32_t> capture_prefix;
+    const auto dependency_delay = instrumentation::build_salu_dependency_delay(arch);
+    if (!dependency_delay) {
+      errors.emplace_back("ConSan final validation cannot encode the target SALU dependency delay");
+      return;
+    }
+    if (captures_sgpr) {
+      const uint16_t persistent = *capture_sgpr;
+      const auto append_salu = [&](uint32_t word) {
+        capture_prefix.push_back(word);
+        capture_prefix.push_back(*dependency_delay);
+      };
+      append_salu(build_s_mov_b32(persistent, preload.dispatch_id_sgpr, arch));
+      append_salu(build_s_mov_b32(static_cast<uint16_t>(persistent + 1u),
+                                  static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
+      append_salu(build_s_add_u32(persistent, persistent, scalar_positive_inline_u32(1), arch));
+      append_salu(build_s_addc_u32(static_cast<uint16_t>(persistent + 1u),
+                                   static_cast<uint16_t>(persistent + 1u),
+                                   scalar_positive_inline_u32(0), arch));
+    } else {
+      const uint16_t persistent = *capture_vgpr;
+      capture_prefix.push_back(build_v_mov_b32_e32(persistent, preload.dispatch_id_sgpr, arch));
+      capture_prefix.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(persistent + 1u),
+                              static_cast<uint16_t>(preload.dispatch_id_sgpr + 1u), arch));
+      const auto successor = instrumentation::build_v_add_u64_literal(persistent, 1u, arch);
+      if (!successor) {
+        errors.emplace_back(
+            "ConSan final validation cannot encode the dispatch-ID VGPR successor for kernel '" +
+            std::string(kernel_name) + "'");
+        return;
+      }
+      capture_prefix.insert(capture_prefix.end(), successor->begin(), successor->end());
+    }
+    const uint64_t scalar_backup_prefix_words =
+        patch.entry_scalar_backup ? 2u * patch.entry_scalar_backup->sgpr_count : 0u;
     const uint64_t patch_end = patch.trampoline_offset + patch.trampoline_size;
-    if (entry_offset > entry_end || entry_end > patch_end ||
-        patch_end > environment.replacement_text.bytes.size() ||
-        (entry_end - entry_offset) % sizeof(uint32_t) != 0) {
+    if (entry_offset > patch_end || patch_end > replacement_text.size() ||
+        (patch_end - entry_offset) % sizeof(uint32_t) != 0) {
       errors.emplace_back(
           "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
           std::string(kernel_name) + "'");
       return;
     }
-    uint64_t scan_begin = entry_offset;
-    if (patch.entry_scalar_backup) {
-      const auto save_end = validate_scalar_lane_transfers(
-          environment, entry_offset, entry_end, *patch.entry_scalar_backup, /*restore=*/false);
-      if (!save_end) {
-        errors.emplace_back(
-            "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
-            std::string(kernel_name) + "'");
-        return;
-      }
-      scan_begin = *save_end;
+    const auto entry_words = std::span<const uint32_t>(
+        reinterpret_cast<const uint32_t *>(replacement_text.data() + entry_offset),
+        static_cast<size_t>((patch_end - entry_offset) / sizeof(uint32_t)));
+    if (scalar_backup_prefix_words > entry_words.size()) {
+      errors.emplace_back(
+          "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
+          std::string(kernel_name) + "'");
+      return;
+    }
+    std::vector<uint32_t> restore_words;
+    restore_words.reserve(2u * (restore_count + system_restore_count));
+    const auto append_restore = [&](uint16_t destination, uint16_t source) {
+      restore_words.push_back(build_s_mov_b32(destination, source, arch));
+      restore_words.push_back(*dependency_delay);
+    };
+    for (uint32_t i = 0; i < restore_count; ++i) {
+      const uint16_t destination = static_cast<uint16_t>(preload.dispatch_id_sgpr + i);
+      append_restore(destination, static_cast<uint16_t>(destination + 2u));
+    }
+    for (uint16_t i = 0; i < system_restore_count; ++i) {
+      const uint16_t destination = static_cast<uint16_t>(preload.original_user_sgpr_count + i);
+      append_restore(destination, static_cast<uint16_t>(destination + preload.system_sgpr_shift));
     }
     // Exact CDNA workgroup identity can be captured before dispatch preload
     // repair, so the dispatch transaction is not necessarily the first
@@ -3223,29 +3041,41 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     // the immediately following ABI repair as one sequence: matching either
     // half independently is ambiguous in a large generated prologue because
     // unrelated instrumentation can encode the same individual moves.
-    const std::optional<uint64_t> repair_end = find_dispatch_repair(
-        environment, scan_begin, entry_end, dispatch, restore_count, system_restore_count);
-    if (!repair_end) {
+    std::vector<uint32_t> dispatch_repair = std::move(capture_prefix);
+    dispatch_repair.insert(dispatch_repair.end(), restore_words.begin(), restore_words.end());
+    const auto repair =
+        std::search(entry_words.begin() + static_cast<ptrdiff_t>(scalar_backup_prefix_words),
+                    entry_words.end(), dispatch_repair.begin(), dispatch_repair.end());
+    if (repair == entry_words.end()) {
       errors.emplace_back(
           "ConSan final validation found no complete dispatch-ID capture and restore in kernel '" +
           std::string(kernel_name) + "'");
       return;
     }
-    DecodedValidationCursor cursor(environment, *repair_end, entry_end);
+    const uint64_t required_suffix_words = dispatch_repair.size() + reload_words;
+    if (required_suffix_words > static_cast<uint64_t>(entry_words.end() - repair)) {
+      errors.emplace_back(
+          "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
+          std::string(kernel_name) + "'");
+      return;
+    }
+    const auto read_word = [&](uint64_t word_index) { return entry_words[word_index]; };
+    uint64_t cursor = static_cast<uint64_t>(repair - entry_words.begin()) + dispatch_repair.size();
     if (preload.kernarg_reload_count != 0) {
       for (uint16_t i = 0; i < preload.kernarg_reload_count; ++i) {
-        std::unique_ptr<Instruction> load = cursor.take();
-        if (!load || !is_scalar_kernarg_reload(
-                         *load, static_cast<uint16_t>(preload.kernarg_reload_sgpr + i),
-                         preload.kernarg_reload_base_sgpr,
-                         static_cast<uint32_t>(preload.kernarg_reload_offset_dwords + i) *
-                             sizeof(uint32_t))) {
+        const auto load = instrumentation::build_s_load_dword(
+            static_cast<uint16_t>(preload.kernarg_reload_sgpr + i),
+            preload.kernarg_reload_base_sgpr,
+            static_cast<uint32_t>(preload.kernarg_reload_offset_dwords + i) * sizeof(uint32_t),
+            arch);
+        if (!load || read_word(cursor++) != (*load)[0] || read_word(cursor++) != (*load)[1]) {
           errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg "
                               "reload in kernel '" +
                               std::string(kernel_name) + "'");
         }
       }
-      if (!take_dependency(cursor, environment, ConSanDependencyKind::ScalarLoadCompletion)) {
+      const auto wait = instrumentation::build_s_wait_scalar_load0(arch);
+      if (!wait || read_word(cursor++) != *wait) {
         errors.emplace_back("ConSan final validation found an invalid dispatch-ID kernarg wait "
                             "in kernel '" +
                             std::string(kernel_name) + "'");
@@ -3264,6 +3094,12 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
       errors.emplace_back("ConSan final validation could not resolve a dispatch-ID prologue owner");
       continue;
     }
+    const bool has_semantic_system_sgpr_restore =
+        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
+                                                                arch, patch);
+    validate_entry(patch,
+                   patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
+                   owner->name, has_semantic_system_sgpr_restore);
     const auto descriptor =
         read_kernel_descriptor(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
                                                             environment.original.image_data()),
@@ -3275,18 +3111,11 @@ void validate_dispatch_id_prologue_semantics(const FinalValidationEnvironment &e
     }
     const bool has_kernarg_preload =
         AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
-    const bool has_semantic_system_sgpr_restore =
-        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan().engine,
-                                                                arch, patch);
-    const uint64_t patch_end = patch.trampoline_offset + patch.trampoline_size;
-    const uint64_t primary =
-        patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset);
-    const uint64_t secondary =
-        patch.dispatch_id_secondary_prologue_offset.value_or(patch.trampoline_offset + 256u);
-    validate_entry(patch, primary, has_kernarg_preload ? secondary : patch_end, owner->name,
-                   has_semantic_system_sgpr_restore);
     if (has_kernarg_preload) {
-      validate_entry(patch, secondary, patch_end, owner->name, has_semantic_system_sgpr_restore);
+      validate_entry(
+          patch,
+          patch.dispatch_id_secondary_prologue_offset.value_or(patch.trampoline_offset + 256u),
+          owner->name, has_semantic_system_sgpr_restore);
     }
   }
   return;
