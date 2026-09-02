@@ -14,6 +14,9 @@ dynamic = ["version", "dependencies"]
 [tool.setuptools]
 package-dir = { "" = "python" }
 
+[tool.setuptools.package-data]
+rocprof_trace_decoder = ["requirements.txt"]
+
 [tool.setuptools.dynamic]
 version = { attr = "rocprof_trace_decoder._version.__version__" }
 dependencies = { file = ["python/rocprof_trace_decoder/requirements.txt"] }
