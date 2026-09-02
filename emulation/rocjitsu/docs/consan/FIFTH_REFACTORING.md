@@ -10966,3 +10966,47 @@ immediate work rather than a new unrelated slice.  The callback design must
 continue to earn its cost through a narrower exact transaction and shared
 mode-owned helpers, or be replaced if that convergence cannot recover the
 remaining tax.
+
+### 16.160 Convergence checkpoint 159: emitted-owner descriptor growth
+
+Barrier planning retained a provisional `persistent_epoch_vgpr_requirements`
+map populated from every selected candidate before placement.  It duplicated
+the persistent assignments already held by the accepted operating point, then
+relied on a late filter to discard requirements for most candidates that did
+not emit.  The fixed-register path was broader still: it provisionally added
+every kernel descriptor even when the eventual patch had exact owner scope.
+
+The transaction now first identifies owners from the patches that actually
+emitted, then reads their accepted persistent assignments and joins the exact
+VGPR extent directly into the descriptor requirements being committed.  The
+fixed-register case retains its all-kernel behavior for an unscoped emitted
+patch, while the existing emitted-owner filter narrows scoped cases.  The
+provisional map, its pre-placement candidate traversal, and its late map merge
+are deleted.  The boundary gate rejects the old map and requires the accepted
+assignment lookup and descriptor update to be driven by emitted owner scope.
+
+| Signal | Checkpoint 159 | Cumulative change | Slice change from checkpoint 158 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,633 | **-2,343** | -14 |
+| Nonblank production lines | 96,215 | **-2,869** | -14 |
+| Production implementation lines | 88,426 | **-3,024** | -14 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **124 / 49** | **-152 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **261 / 52** | **-29 / +1** | 0 / 0 |
+| Provisional barrier persistent-VGPR requirement maps | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `a529401b62b`.  Validation includes a
+successful full `-j16` build and **109/109** nonphysical architecture-boundary
+and barrier-named host tests.  All tests used `-LE physical`; no test was
+removed, renamed, disabled, or replaced, and no physical GPU test was run.
+
+Checkpoints 158 and 159 have now recovered 17 of the 55 implementation lines
+invested in mode-owned planner seams while also removing four duplicate or
+provisional authorities.  The remaining 38-line balance is not itself a quota,
+but it keeps the next work focused on narrowing planner inputs and deleting
+shared staging that no longer earns its place.  Full target/mode locality,
+broad transaction and operating-point reduction, extension-proof
+revalidation, and the independent Section 14 audit remain open.
