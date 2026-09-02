@@ -65,13 +65,6 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
   return common_shift;
 }
 
-[[nodiscard]] bool moi_record_uses_private_owner(const ConSanRequest &request,
-                                                 const ConSanMoiOperatingPoint &point) {
-  return point.moi_initialize_owner_epoch && point.automatic_moi_private_epoch &&
-         request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId &&
-         !point.moi_owner_epoch_vgprs.owner() && !point.moi_persistent_sgprs.owner();
-}
-
 [[nodiscard]] std::optional<MoiWorkitemOwnerDerivationPlan>
 resolve_moi_private_workitem_owner(std::span<const uint8_t> image,
                                    const ResolvedMoiScratchPlan &resources,

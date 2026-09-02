@@ -17,9 +17,6 @@ common_moi_workitem_owner_shift(std::span<const uint8_t> image,
                                 const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
                                 std::vector<std::string> &warnings);
 
-[[nodiscard]] bool moi_record_uses_private_owner(const ConSanRequest &request,
-                                                 const ConSanMoiOperatingPoint &point);
-
 [[nodiscard]] std::optional<consan_detail::MoiWorkitemOwnerDerivationPlan>
 resolve_moi_private_workitem_owner(std::span<const uint8_t> image,
                                    const ResolvedMoiScratchPlan &resources,

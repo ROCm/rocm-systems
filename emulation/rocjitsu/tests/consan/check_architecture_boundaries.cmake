@@ -671,6 +671,13 @@ foreach(_shared_record_replay_emitter_owner IN ITEMS
         "Record/Replay access emission must remain in its mode owner"
     )
 endforeach()
+foreach(_file IN LISTS _consan_production_files)
+    _consan_assert_no_match(
+        "${_file}"
+        "moi_record_uses_private_owner"
+        "Record/Replay private-owner selection must remain at its planning decision"
+    )
+endforeach()
 file(READ
     "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
     _record_replay_access_emission

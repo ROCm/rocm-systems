@@ -172,7 +172,8 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
 
   std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
   if (!event_point.moi_owner_epoch_vgprs.owner() && !event_point.moi_persistent_sgprs.owner()) {
-    if (moi_record_uses_private_owner(request, event_point)) {
+    if (event_point.moi_initialize_owner_epoch && event_point.automatic_moi_private_epoch &&
+        request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
       ResolvedMoiScratchPlan owner_resources = resources;
       if (active_private_segment_size)
         owner_resources.original_private_segment_size = *active_private_segment_size;
