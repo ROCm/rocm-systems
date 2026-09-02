@@ -199,7 +199,7 @@ using MoiBarrierBodyPlan =
 using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
     const ConSanOptions &, ConSanMoiOperatingPoint &, const MoiScalarAbiPlan &,
     std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t,
-    ConSanTransformArtifacts &);
+    const ConSanMoiOperatingPoint &, std::vector<std::string> &, std::vector<std::string> &);
 
 struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
@@ -225,7 +225,9 @@ struct MoiPrivateBarrierPlanningContext {
   const MoiObjectModeSemantics &semantics;
   MoiSpillManagers &spill_managers;
   rj_code_arch_t arch;
-  ConSanTransformArtifacts &result;
+  const ProgramInventory &inventory;
+  const ConSanMoiOperatingPoint &accepted_point;
+  std::vector<std::string> &warnings;
 };
 
 using MoiPrivateBarrierPlanner =
@@ -448,7 +450,9 @@ void try_apply_shared_barrier_patch(
           .semantics = semantics,
           .spill_managers = visible_evidence_spill_managers,
           .arch = arch,
-          .result = result,
+          .inventory = result.program_inventory,
+          .accepted_point = result.moi_operating_point,
+          .warnings = result.warnings,
       });
       if (planned) {
         note_maximum_descriptor_extents(private_requirements,
@@ -544,7 +548,8 @@ void try_apply_shared_barrier_patch(
     }
     const MoiScalarAbiPlan scalar_abi =
         plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
-    body = plan_body(options, candidate_point, scalar_abi, scratch_vgpr, owners, arch, result);
+    body = plan_body(options, candidate_point, scalar_abi, scratch_vgpr, owners, arch,
+                     result.moi_operating_point, result.warnings, result.errors);
     if (!body) {
       if (!result.errors.empty())
         return;

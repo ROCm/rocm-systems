@@ -981,6 +981,14 @@ if(_moi_barrier_planning MATCHES "branch_only_spill")
         "shared barrier plans must not retain operating-point state solely for diagnostics"
     )
 endif()
+if(_moi_barrier_planning MATCHES
+       "using MoiBarrierBodyPlanner[^;]*ConSanTransformArtifacts" OR
+   _moi_barrier_planning MATCHES
+       "struct MoiPrivateBarrierPlanningContext[^}]*ConSanTransformArtifacts")
+    message(FATAL_ERROR
+        "mode-owned barrier planners must consume exact planning facts, not transform artifacts"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES
