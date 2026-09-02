@@ -292,12 +292,11 @@ def run_prof(
         duplicate_rocm_message = _duplicate_rocm_install_message(output)
         if duplicate_rocm_message is not None:
             console_error(duplicate_rocm_message)
-        else:
-            for line in output.splitlines():
-                stripped = line.strip()
-                if stripped:
-                    _classify_output_line(stripped)
-            console_error("Profiling execution failed.")
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped:
+                _classify_output_line(stripped)
+        console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"
     out_pmc_1 = out_dir / "pmc_1"
