@@ -13,7 +13,6 @@ add_library(
     OBJECT
     src/component.cpp
     src/simulation.cpp
-    src/tag_array.cpp
     src/topology.cpp
 )
 set_target_properties(simdojo PROPERTIES POSITION_INDEPENDENT_CODE ON)

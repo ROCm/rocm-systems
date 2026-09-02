@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// @file simdojo_sim_test.cpp
-/// @brief Tests for simdojo simulation engine: LBTS correctness, cross-partition
-/// communication, async causality, termination, pacing, spinlock, and stress.
+/// @brief Tests for simdojo: the simulation engine (LBTS correctness,
+/// cross-partition communication, async causality, termination, pacing,
+/// spinlock, stress) and the components built on it (Cache, TagArray).
 
 #include "simdojo/components/cache.h"
 #include "simdojo/components/tag_array.h"
@@ -17,13 +18,16 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace simdojo;
@@ -1799,6 +1803,7 @@ TEST(BoundedRunTest, ReenteringTheSameEngineIsRefused) {
   RecorderRig rig;
   int refusals = 0;
   ExitReason nested_run = ExitReason::COMPLETED;
+  std::string nested_message;
   rig.recorder->event_.set_handler([&](Tick, Message *) {
     // Every entry point, not just the one that opened the loop: all three
     // drive the same queue, so all three are the same defect.
@@ -1808,20 +1813,28 @@ TEST(BoundedRunTest, ReenteringTheSameEngineIsRefused) {
           rig.engine.run_until_idle();
         else
           rig.engine.step();
-      } catch (const std::logic_error &) {
+      } catch (const std::logic_error &e) {
+        // Matched on the message, not just the type: run_bounded()'s other
+        // rejection throws std::invalid_argument, which is also a logic_error,
+        // so a bare type catch would stay green if the re-entrancy guard were
+        // dropped and the partition check fired instead.
+        EXPECT_STREQ(e.what(), "simulation engine is already executing");
         ++refusals;
       }
     }
     // run() reports the refusal rather than throwing: it may be on a
     // background thread whose top-level lambda has no catch, where an escaping
     // exception would call std::terminate.
-    nested_run = rig.engine.run().reason;
+    const ExitStatus nested = rig.engine.run();
+    nested_run = nested.reason;
+    nested_message = nested.message;
   });
 
   rig.recorder->ask(1000);
   rig.engine.run_until_idle();
   EXPECT_EQ(refusals, 2);
   EXPECT_EQ(nested_run, ExitReason::INTERRUPTED);
+  EXPECT_EQ(nested_message, "simulation engine is already executing");
 
   // And the refusals left the engine usable.
   rig.recorder->event_.set_handler(
@@ -1886,9 +1899,9 @@ TEST(BoundedRunTest, TheGlobalClockKeepsUpWithTheRun) {
   rig.recorder->ask(3000);
   rig.engine.run_until_idle();
 
-  // Each handler sees the tick of the event before it, which is as current as
-  // a value published after processing can be.
-  EXPECT_EQ(observed, (std::vector<Tick>{0, 1000, 2000}));
+  // Each handler sees its OWN tick: the clock is published before the handler
+  // runs, because the handler is the thing that reads it.
+  EXPECT_EQ(observed, (std::vector<Tick>{1000, 2000, 3000}));
   EXPECT_EQ(rig.engine.global_time(), 3000u);
 }
 
@@ -1999,6 +2012,51 @@ TEST(BoundedRunTest, AThrowingHandlerLeavesTheEngineRunnable) {
   EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
 }
 
+TEST(BoundedRunTest, ABoundedRunAfterShutdownIsANoOpRatherThanACrash) {
+  // shutdown() destroys every partition context but leaves the startup latch
+  // set, so the lazy startup reports a started engine. Without a check on the
+  // contexts themselves, the release builds this ships as -- where the created_
+  // assert is gone -- index an empty vector.
+  RecorderRig rig;
+  rig.recorder->ask(1000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+
+  rig.engine.shutdown();
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+}
+
+TEST(BoundedRunTest, AHandlerThatShutsTheEngineDownEndsTheRun) {
+  // The loop cannot hold a PartitionContext reference across a handler call:
+  // shutdown() from inside one frees every context, and the loop reads the
+  // partition again on its way out.
+  RecorderRig rig;
+  rig.recorder->event_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    rig.engine.shutdown();
+  });
+
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+  EXPECT_FALSE(rig.engine.is_created());
+}
+
+TEST(BoundedRunTest, TheTopologyIsWritableAgainBetweenBoundedRuns) {
+  // A resumable engine's whole point is that the caller gets control back. The
+  // read-only-while-running guard has to end with the run, or "drain, inspect
+  // the model, drain again" aborts on the inspect.
+  RecorderRig rig;
+  rig.recorder->ask(1000);
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.engine.topology().partitions().size(), 1u);
+
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 2000u);
+}
+
 TEST(BoundedRunTest, StopsWhenAComponentRequestsExit) {
   RecorderRig rig;
   rig.recorder->event_.set_handler([&](Tick now, Message *) {
@@ -2010,24 +2068,25 @@ TEST(BoundedRunTest, StopsWhenAComponentRequestsExit) {
   rig.recorder->ask(2000);
   EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
   EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+  // The tick request_exit() stamped is the one the handler ran at, not the one
+  // before it: this is what the clock being published ahead of the handler buys.
+  EXPECT_TRUE(rig.engine.is_done());
+  EXPECT_EQ(rig.engine.last_exit().reason, ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(rig.engine.last_exit().tick, 1000u);
+  EXPECT_EQ(rig.engine.last_exit().message, "done here");
 }
 
 TEST(BoundedRunTest, StepAndBoundedRunShareOneLazyStartup) {
   // Both start the engine on their first call. Mixing them must not start it
   // twice, which would double-schedule every component's first event.
   const ClockDomain domain("ghz", 1'000'000'000ULL);
-  SimulationEngine engine({});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *recorder =
-      static_cast<EdgeRecorder *>(root->add_child(std::make_unique<EdgeRecorder>(domain, 4)));
-  engine.topology().set_root(std::move(root));
-  engine.create();
+  EdgeRig rig(domain, 4);
 
-  engine.step();
-  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000}));
-  engine.run_until_idle();
-  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
-  EXPECT_EQ(engine.events_processed(), 4u);
+  rig.engine.step();
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1000}));
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
+  EXPECT_EQ(rig.engine.events_processed(), 4u);
 }
 
 // ============================================================================
@@ -2396,8 +2455,10 @@ TEST(ClockedOnDemandTest, AnAdvanceThatThrowsLeavesTheComponentRecoverable) {
     bool &fail_;
   };
 
-  SimulationEngine engine({});
+  // Domain first: Clocked holds it by const reference, and the engine owns the
+  // component that holds it, so the engine must be destroyed first.
   ClockDomain domain("ghz", 1'000'000'000ULL);
+  SimulationEngine engine({});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *thrower =
       static_cast<Thrower *>(root->add_child(std::make_unique<Thrower>(domain, throw_now)));
@@ -2480,10 +2541,14 @@ TEST(ClockedOnDemandTest, AWakeArmedBeforeStartupIsReportedAsRunning) {
 
 namespace {
 
-/// @brief The byte address of line @p line in set @p set of a @p sets-set,
-///        64-byte-line array.
-uint64_t line_address(uint64_t sets, uint64_t set, uint64_t line) {
-  return ((line * sets) + set) * 64;
+/// @brief The byte address of line @p line in set @p set of a @p sets-set array
+///        with @p line_bytes lines.
+///
+/// @details The line size is a parameter rather than a literal: an address
+/// computed for 64-byte lines and handed to a 128-byte-line array is not the
+/// line the caller named, and the test would go on asserting something else.
+uint64_t line_address(uint64_t sets, uint64_t set, uint64_t line, uint64_t line_bytes = 64) {
+  return ((line * sets) + set) * line_bytes;
 }
 
 /// @brief An independent least-recently-used model, written the obvious way.
@@ -2566,18 +2631,18 @@ TEST(TagArrayTest, EvictsTheLeastRecentlyUsedWay) {
   constexpr uint64_t kSets = 8;
   TagArray tags(kSets, /*ways=*/2, /*line_bytes=*/64);
 
-  const uint64_t a = line_address(kSets, /*set=*/3, /*line=*/0);
-  const uint64_t b = line_address(kSets, /*set=*/3, /*line=*/1);
-  const uint64_t c = line_address(kSets, /*set=*/3, /*line=*/2);
+  const uint64_t kept = line_address(kSets, /*set=*/3, /*line=*/0);
+  const uint64_t evicted = line_address(kSets, /*set=*/3, /*line=*/1);
+  const uint64_t filler = line_address(kSets, /*set=*/3, /*line=*/2);
 
-  EXPECT_FALSE(tags.access(a));
-  EXPECT_FALSE(tags.access(b));
-  EXPECT_TRUE(tags.access(a)); // a is now the more recent of the two
-  EXPECT_FALSE(tags.access(c));
+  EXPECT_FALSE(tags.access(kept));
+  EXPECT_FALSE(tags.access(evicted));
+  EXPECT_TRUE(tags.access(kept)); // kept is now the more recent of the two
+  EXPECT_FALSE(tags.access(filler));
 
-  EXPECT_FALSE(tags.contains(b)) << "the least recently used way should have gone";
-  EXPECT_TRUE(tags.contains(a));
-  EXPECT_TRUE(tags.contains(c));
+  EXPECT_FALSE(tags.contains(evicted)) << "the least recently used way should have gone";
+  EXPECT_TRUE(tags.contains(kept));
+  EXPECT_TRUE(tags.contains(filler));
 }
 
 TEST(TagArrayTest, OnlyTheIndexedSetIsDisturbed) {
@@ -2594,8 +2659,9 @@ TEST(TagArrayTest, OnlyTheIndexedSetIsDisturbed) {
   EXPECT_FALSE(tags.access(line_address(kSets, /*set=*/2, /*line=*/1)));
   EXPECT_FALSE(tags.contains(line_address(kSets, /*set=*/2, /*line=*/0)));
   for (uint64_t set = 0; set < kSets; ++set) {
-    if (set != 2)
+    if (set != 2) {
       EXPECT_TRUE(tags.contains(line_address(kSets, set, /*line=*/0))) << "set " << set;
+    }
   }
 }
 
@@ -2608,12 +2674,17 @@ TEST(TagArrayTest, AgreesWithAnIndependentLruOverALongSequence) {
   TagArray tags(kSets, kWays, kLineBytes);
   ReferenceLru reference(kSets, kWays, kLineBytes);
 
-  uint64_t state = 0x9E3779B9u;
+  // A fixed-seed Mersenne twister rather than a hand-rolled LCG: an LCG modulo
+  // a power of two has short-period low bits, and the two bits that select the
+  // set would repeat every 1024 draws, so a four-thousand-step sequence would
+  // explore a quarter of the interleavings its length suggests.
+  std::mt19937_64 rng(0x9E3779B9u);
+  std::uniform_int_distribution<uint64_t> line_of(0, 63);
+  std::uniform_int_distribution<uint32_t> vmid_of(0, 1);
   uint32_t misses = 0;
   for (uint32_t step = 0; step < 4000; ++step) {
-    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-    const uint32_t vmid = static_cast<uint32_t>((state >> 40) & 1u);
-    const uint64_t address = ((state >> 8) % 64) * kLineBytes;
+    const uint32_t vmid = vmid_of(rng);
+    const uint64_t address = line_of(rng) * kLineBytes;
     const bool hit = tags.access(address, vmid);
     ASSERT_EQ(hit, reference.access(address, vmid)) << "diverged at step " << step;
     misses += hit ? 0u : 1u;
@@ -2637,8 +2708,9 @@ TEST(TagArrayTest, AFreeWayIsFilledBeforeAResidentOneIsEvicted) {
   EXPECT_FALSE(tags.access(0x0));
   EXPECT_FALSE(tags.access(0x40));
   EXPECT_FALSE(tags.invalidate(0x80)) << "nothing resident to drop";
-  // The *newer* line, so that a policy which merely picked the oldest stamp
-  // would evict the other one and still look right.
+  // The *newer* line, so that the freed way is the one a stamp-ordered victim
+  // search would pick last. It is only picked first if invalidate() reset the
+  // stamp rather than just clearing the valid flag.
   EXPECT_TRUE(tags.invalidate(0x40));
 
   EXPECT_FALSE(tags.access(0x80));
@@ -2653,18 +2725,19 @@ TEST(TagArrayTest, AddressSpacesDoNotAliasEachOther) {
   // Same virtual address, different guest: not the same line, and it occupies
   // a way of its own.
   EXPECT_FALSE(tags.access(0x8000, /*vmid=*/2));
-  EXPECT_TRUE(tags.access(0x8000, /*vmid=*/1));
   EXPECT_TRUE(tags.access(0x8000, /*vmid=*/2));
+  // Guest 1 last, so it is the more recent way *and* the first-filled one.
+  // Evicting by arrival order and evicting by recency now disagree, and only
+  // one of them keeps guest 1.
+  EXPECT_TRUE(tags.access(0x8000, /*vmid=*/1));
   EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/3));
 
-  // Both ways are taken, so a third space evicts the least recently used of
-  // them -- which is guest 1's, not whichever came first.
   EXPECT_FALSE(tags.access(0x8000, /*vmid=*/3));
-  EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/1));
-  EXPECT_TRUE(tags.contains(0x8000, /*vmid=*/2));
-
-  EXPECT_TRUE(tags.invalidate(0x8000, /*vmid=*/2));
+  EXPECT_TRUE(tags.contains(0x8000, /*vmid=*/1)) << "evicted by arrival order, not by recency";
   EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/2));
+
+  EXPECT_TRUE(tags.invalidate(0x8000, /*vmid=*/1));
+  EXPECT_FALSE(tags.contains(0x8000, /*vmid=*/1));
   EXPECT_TRUE(tags.contains(0x8000, /*vmid=*/3));
 }
 
@@ -2699,14 +2772,33 @@ TEST(TagArrayTest, InvalidateAllDropsEverythingAndKeepsRecencyOrdered) {
   EXPECT_EQ(tags.sets(), 1u);
   EXPECT_EQ(tags.ways(), 2u);
 
-  // Recency must still be ordered afterwards. A counter reset here would make
-  // lines filled before the flush look newer than lines filled after it.
+  // Replacement still works on the emptied array.
   EXPECT_FALSE(tags.access(0x80));
   EXPECT_FALSE(tags.access(0xC0));
   EXPECT_TRUE(tags.access(0x80));
   EXPECT_FALSE(tags.access(0x100));
   EXPECT_TRUE(tags.contains(0x80)) << "the more recently used line was evicted";
   EXPECT_FALSE(tags.contains(0xC0));
+}
+
+TEST(TagArrayTest, ADroppedLineDoesNotReorderTheOnesThatSurvive) {
+  // The recency counter is never reset, and this is the case that can tell:
+  // a partial invalidate leaves a resident line behind, so a reset would make
+  // it look newer than everything filled afterwards and invert replacement.
+  // invalidate_all() cannot witness it -- it leaves nothing resident, and its
+  // assertions pass whether or not the counter is reset.
+  TagArray tags(/*sets=*/1, /*ways=*/2, /*line_bytes=*/64);
+
+  EXPECT_FALSE(tags.access(0x0)); // the survivor, and the oldest line there is
+  EXPECT_FALSE(tags.access(0x40));
+  EXPECT_TRUE(tags.invalidate(0x40));
+
+  EXPECT_FALSE(tags.access(0x80));
+  // 0x0 predates 0x80, so it is what the next fill must take.
+  EXPECT_FALSE(tags.access(0xC0));
+  EXPECT_FALSE(tags.contains(0x0)) << "the survivor was treated as newer than a later fill";
+  EXPECT_TRUE(tags.contains(0x80));
+  EXPECT_TRUE(tags.contains(0xC0));
 }
 
 TEST(TagArrayTest, GeometryIsReportedAndReconfigurable) {
@@ -2720,9 +2812,13 @@ TEST(TagArrayTest, GeometryIsReportedAndReconfigurable) {
   EXPECT_EQ(tags.line_bytes(), 128u);
   EXPECT_EQ(tags.line_shift(), 7u);
 
+  // Same sets and line size, so 0x400 still decodes to the same line of the
+  // same set: only a reconfigure that actually dropped the entries can miss.
   EXPECT_FALSE(tags.access(0x400));
-  tags.configure(/*sets=*/2, /*ways=*/1, /*line_bytes=*/64);
+  tags.configure(/*sets=*/64, /*ways=*/2, /*line_bytes=*/128);
   EXPECT_FALSE(tags.contains(0x400)) << "reconfiguring must not leave stale residency";
+
+  tags.configure(/*sets=*/2, /*ways=*/1, /*line_bytes=*/64);
   EXPECT_EQ(tags.line_shift(), 6u);
 }
 
@@ -2765,9 +2861,77 @@ TEST(TagArrayTest, AnArrayTooLargeToBeRealIsRejectedRatherThanAllocated) {
                std::length_error);
   EXPECT_FALSE(tags.configured());
 
-  EXPECT_NO_THROW(tags.configure(TagArray::kMaxEntries, /*ways=*/1, /*line_bytes=*/64));
+  // The entry limit is checked, not materialised: configuring at kMaxEntries
+  // would really allocate 2^26 entries -- a gigabyte and a half of zeroed host
+  // memory in a unit test -- to assert something the rejection side already
+  // shows. One entry past the limit is what has to throw.
   EXPECT_THROW(tags.configure(TagArray::kMaxEntries, /*ways=*/2, /*line_bytes=*/64),
                std::length_error);
+  EXPECT_THROW(tags.configure(TagArray::kMaxEntries / 2, /*ways=*/3, /*line_bytes=*/64),
+               std::length_error);
+  EXPECT_FALSE(tags.configured());
+
+  // Comfortably under it, and the array is usable: 2^21 entries, 50 MiB.
+  EXPECT_NO_THROW(tags.configure(TagArray::kMaxEntries / 32, /*ways=*/1, /*line_bytes=*/64));
+  EXPECT_FALSE(tags.access(0x1000));
+}
+
+TEST(TagArrayTest, ACacheTooLargeToBeRealIsRejectedEvenWhenItsTagsWouldFit) {
+  TagArray tags;
+  // sets * ways is small, so the entry limit sees nothing wrong; only the line
+  // size is absurd. Left unchecked, every address in a normal virtual range
+  // collapses onto one or two lines and the array reports a hit for almost
+  // everything, with nothing thrown to point at.
+  EXPECT_THROW(tags.configure(/*sets=*/64, /*ways=*/4, /*line_bytes=*/1ULL << 40),
+               std::length_error);
+  // And the geometry that stays inside the entry limit while claiming a
+  // 256 GiB cache.
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 22, /*ways=*/16, /*line_bytes=*/4096),
+               std::length_error);
+  EXPECT_FALSE(tags.configured());
+
+  // A large but real cache is still fine: 256 MiB at 128-byte lines.
+  EXPECT_NO_THROW(tags.configure(/*sets=*/1ULL << 17, /*ways=*/16, /*line_bytes=*/128));
+}
+
+TEST(TagArrayTest, AGeometryRejectedForItsSizeAlsoLeavesTheArrayAsItWas) {
+  // The counterpart of ARejectedReconfigureLeavesTheArrayAsItWas for the
+  // length_error path, which rejects after the arithmetic checks rather than
+  // before them.
+  TagArray tags(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  ASSERT_FALSE(tags.access(0x400));
+
+  EXPECT_THROW(tags.configure(/*sets=*/1ULL << 40, /*ways=*/16, /*line_bytes=*/64),
+               std::length_error);
+
+  EXPECT_EQ(tags.sets(), 64u);
+  EXPECT_EQ(tags.ways(), 8u);
+  EXPECT_EQ(tags.line_bytes(), 128u);
+  EXPECT_TRUE(tags.contains(0x400)) << "an oversized geometry destroyed a live array";
+}
+
+TEST(TagArrayTest, AMovedFromArrayReportsNoGeometryRatherThanAStaleOne) {
+  // The default move would take the entries and leave the geometry behind, so
+  // the source would answer sets()/line_bytes() with numbers it no longer has
+  // while every operation on it threw -- a plausible answer from an unusable
+  // object, which is worse than no answer.
+  TagArray source(/*sets=*/64, /*ways=*/8, /*line_bytes=*/128);
+  ASSERT_FALSE(source.access(0x400));
+
+  TagArray moved = std::move(source);
+  EXPECT_TRUE(moved.configured());
+  EXPECT_TRUE(moved.contains(0x400));
+
+  EXPECT_FALSE(source.configured()); // NOLINT(bugprone-use-after-move)
+  EXPECT_EQ(source.sets(), 0u);
+  EXPECT_EQ(source.ways(), 0u);
+  EXPECT_EQ(source.line_bytes(), 0u);
+  EXPECT_EQ(source.line_shift(), 0u);
+  EXPECT_THROW((void)source.contains(0x400), std::logic_error);
+
+  // And it is reusable, not merely inert.
+  source.configure(/*sets=*/2, /*ways=*/1, /*line_bytes=*/64);
+  EXPECT_FALSE(source.access(0x400));
 }
 
 TEST(TagArrayTest, EveryOperationRefusesAnArrayWithNoGeometry) {
