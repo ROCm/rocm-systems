@@ -501,7 +501,7 @@ substantial progress toward the campaign floor, but does not satisfy the
 selection therefore returns to the whole production codebase rather than
 continuing mechanically through low-density emission helpers.
 
-### 10.3 Macro-slice 3 (active): one authority for closed vocabularies
+### 10.3 Macro-slice 3 (completed): one authority for closed vocabularies
 
 The post-cutover candidate comparison rejected four more apparent large-file
 opportunities after semantic reads. The host report pipeline is already split
@@ -550,3 +550,39 @@ net lines after the complete qualifying family has converged. Focused tests
 exercise exhaustive iteration, every stable spelling, invalid sentinels, and
 existing parsers; the cutover gate remains the complete nonphysical RocJitsu
 matrix across all four modes and five emulated targets.
+
+The completed cutover introduces the 48-implementation-line
+`ConSanEnumVocabulary` as the only generic mechanism. Twenty-one production
+files now declare each qualifying value/spelling pair once. The same object is
+the iterable value range and the spelling lookup, and the existing
+case-insensitive flavor and MOI-engine parsers obtain their canonical spellings
+from those objects while retaining their explicit aliases. No preprocessor
+generation is involved. Switches that compute semantics remain switches;
+mixed-format renderers whose result depends on detail beyond the enum value
+(barrier-move decoder detail, grouped barrier-member rejection, and growth
+policy values) are deliberately outside this vocabulary family.
+
+The production accounting from the Macro-slice 2 result is:
+
+| Signal | Macro-slice 2 | Macro-slice 3 result | Change |
+| --- | ---: | ---: | ---: |
+| ConSan production files | 310 | 311 | +1 helper |
+| Physical ConSan production lines | 100,517 | 99,966 | **-551** |
+| Nonblank ConSan production lines | 94,112 | 93,515 | **-597** |
+| ConSan implementation lines | 86,379 | 85,778 | **-601** |
+
+The production source diff contains 772 additions and 1,323 deletions. Most
+additions are the retained value/spelling facts moved into their single typed
+authority; the reusable mechanism itself is 48 implementation lines, well
+below the machinery cap. The 601-line net implementation reduction clears the
+500-line abort floor. Five focused test files preserve exhaustive iteration,
+stable names, invalid sentinels, parser aliases, and all 83 hook-only
+diagnostic spellings.
+
+After the final checkpoint, the complete nonphysical RocJitsu gate executed
+9,574 tests with zero failures; one test remained disabled and the normal
+environment-dependent tests were skipped. The gate covered SuperCollider,
+Record/Replay, Sampled, and InlineShadow across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250 emulation. No physical-GPU tests were run. Macro-slice 3
+therefore closes as a qualified subsystem replacement rather than a retained
+cleanup experiment.
