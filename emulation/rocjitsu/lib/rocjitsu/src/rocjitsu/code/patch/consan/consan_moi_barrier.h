@@ -8,9 +8,17 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_placement_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
 
 namespace rocjitsu::consan_moi_impl {
+
+/// Exact island prefix reserved by an earlier lowering pass for barrier
+/// routing. Consumers may validate the reservation against emitted patch
+/// provenance, but must not reconstruct its strided layout from mode state.
+struct MoiBarrierIslandReservation {
+  uint64_t begin = 0u;
+  uint32_t slot_words = 0u;
+  uint64_t reserved_slot_count = 0u;
+};
 
 void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            const ConSanOptions &options,
@@ -19,11 +27,5 @@ void try_apply_inline_shadow_barrier_patch(std::span<const uint8_t> bytes,
                                            MoiResourcePlanningState &resource_state,
                                            const MoiObjectModeSemantics &semantics,
                                            ConSanTransformArtifacts &result);
-
-void try_apply_record_replay_barrier_patch(
-    std::span<const uint8_t> bytes, const ConSanOptions &options,
-    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state, const MoiRecordReplayAccessOutput &access_output,
-    const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result);
 
 } // namespace rocjitsu::consan_moi_impl

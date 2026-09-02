@@ -4,7 +4,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
-#include "rocjitsu/code/patch/consan/consan_moi_barrier.h"
 #include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"

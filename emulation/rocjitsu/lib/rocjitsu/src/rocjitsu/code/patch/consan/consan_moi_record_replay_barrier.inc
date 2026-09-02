@@ -224,8 +224,9 @@ void try_apply_record_replay_barrier_record_patch(
   MoiLocalNopIslandAllocator indirect_allocator(old_text, result.program_inventory, result.patches,
                                                 arch, kMoiLocalIndirectIslandWords);
   if (operating_point.moi_exec_save_sgpr) {
-    const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
-        old_text, result.patches, arch, access_output, selected_candidates.size(),
+    const auto reserved_barrier_island_layout = resolve_reserved_barrier_island_layout(
+        old_text, result.patches, arch, access_output.reserved_sync_islands,
+        selected_candidates.size(),
         moi_reserved_access_sync_island_count(result.program_inventory, result.observation_plan(),
                                               options, options, semantics));
     if (reserved_barrier_island_layout) {
@@ -670,7 +671,7 @@ void try_apply_record_replay_barrier_patch(
   const size_t barrier_count_before = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   try_apply_shared_barrier_patch(bytes, options, operating_point, arch, resource_state,
-                                 access_output, semantics, result);
+                                 access_output.reserved_sync_islands, semantics, result);
   const size_t barrier_count_after = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   if (!result.errors.empty() || barrier_count_after - barrier_count_before < failed_entry_count) {

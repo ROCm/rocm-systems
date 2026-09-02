@@ -1488,7 +1488,7 @@ void try_apply_first_light_access_record_patch(
       return;
     }
     if (reserved_sync_island_count != 0u) {
-      access_output.reserved_sync_islands = MoiReservedBarrierIslandLayout{
+      access_output.reserved_sync_islands = MoiBarrierIslandReservation{
           .begin = original_text_size,
           .slot_words = static_cast<uint32_t>(reserved_sync_slot_words),
           .reserved_slot_count = reserved_sync_island_count,

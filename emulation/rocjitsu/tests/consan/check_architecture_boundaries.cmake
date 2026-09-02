@@ -855,6 +855,9 @@ file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
 file(READ "${_consan_dir}/consan_moi_record_replay_barrier.inc"
      _record_replay_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
+file(READ "${_consan_dir}/consan_moi_barrier.h" _moi_barrier_contract)
+file(READ "${_consan_dir}/consan_moi_record_replay.h"
+     _record_replay_contract)
 if(NOT _moi_barrier_source MATCHES
        "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
@@ -885,15 +888,33 @@ if(NOT _record_replay_barrier_owner MATCHES
         "the Record/Replay barrier owner must retain its complete mode transaction"
     )
 endif()
+if(NOT _moi_barrier_contract MATCHES "struct MoiBarrierIslandReservation" OR
+   NOT _record_replay_contract MATCHES
+       "std::optional<MoiBarrierIslandReservation>[ \t]+reserved_sync_islands" OR
+   NOT _record_replay_contract MATCHES
+       "try_apply_record_replay_barrier_patch" OR
+   _moi_barrier_contract MATCHES
+       "consan_moi_record_replay[.]h|MoiRecordReplayAccessOutput|try_apply_record_replay_barrier_patch" OR
+   NOT _record_replay_barrier_owner MATCHES
+       "access_output[.]reserved_sync_islands")
+    message(FATAL_ERROR
+        "shared barrier reservations and Record/Replay entry points must retain their exact owners"
+    )
+endif()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_record_replay_barrier.inc"
     "const MoiRecordEventEmissionPlan [*]emission[ \t]*=[ \t]*nullptr|uint64_t[ \t]+cave_text_offset[ \t]*=[ \t]*0u|bool[ \t]+branch_only_scalar_spill[ \t]*=[ \t]*false"
     "staged Record/Replay barriers must derive emission, body offset, and route class from retained products"
 )
 if(NOT _moi_barrier_planning MATCHES "try_apply_shared_barrier_patch" OR
-   _moi_barrier_planning MATCHES "try_apply_inline_shadow_barrier_epoch_patch")
+   NOT _moi_barrier_planning MATCHES
+       "resolve_reserved_barrier_island_layout" OR
+   NOT _moi_barrier_planning MATCHES
+       "std::optional<MoiBarrierIslandReservation>[^;]*reserved_sync_islands" OR
+   _moi_barrier_planning MATCHES
+       "try_apply_inline_shadow_barrier_epoch_patch|find_record_replay_reserved_barrier_island_begin|MoiRecordReplayAccessOutput")
     message(FATAL_ERROR
-        "the shared barrier mechanism must retain its mode-neutral entry point"
+        "the shared barrier mechanism must retain its exact mode-neutral reservation contract"
     )
 endif()
 _consan_assert_no_match(
