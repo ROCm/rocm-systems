@@ -5554,7 +5554,7 @@ Output:  Dictionary with fields:
 Field | Description
 ---|---
 `weight` | The link weight
-`link_status` | Link status as an int, derived from the resolved link type rather than live hardware state. On baremetal only `AMDSMI_LINK_STATUS_ENABLED` (0) and `AMDSMI_LINK_STATUS_DISABLED` (1) are produced; the enum also defines `AMDSMI_LINK_STATUS_INACTIVE` (2) and `AMDSMI_LINK_STATUS_ERROR` (3).
+`link_status` | Link status as an int, derived from the resolved link type rather than live hardware state. Every successful baremetal query resolves xGMI or PCIe, so a successful call always returns `AMDSMI_LINK_STATUS_ENABLED` (0); `AMDSMI_LINK_STATUS_DISABLED` (1) is only the initialized default returned with a failure status. The enum also defines `AMDSMI_LINK_STATUS_INACTIVE` (2) and `AMDSMI_LINK_STATUS_ERROR` (3), which are host-only.
 `link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `num_hops` | Number of hops
 `fb_sharing` | 1 if P2P framebuffer access is available between the two GPUs, 0 otherwise. Best-effort: 0 is also reported when the P2P query cannot be completed, which is indistinguishable from a genuine "not shared" result.

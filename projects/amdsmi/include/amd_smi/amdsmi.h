@@ -6894,9 +6894,11 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *  ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
  *
  *  @note On @platform{gpu_bm_linux}, @p link_status is derived from the resolved
- *  link type, not live hardware state. The source only resolves a concrete type
- *  on success, so a successful call always reports ::AMDSMI_LINK_STATUS_ENABLED;
- *  the DISABLED, INACTIVE, and ERROR states are not produced on baremetal.
+ *  link type, not live hardware state. Every successful query resolves either
+ *  xGMI or PCIe, so a successful call always reports ::AMDSMI_LINK_STATUS_ENABLED.
+ *  ::AMDSMI_LINK_STATUS_DISABLED is only the initialized default returned with a
+ *  failure status; ::AMDSMI_LINK_STATUS_INACTIVE and ::AMDSMI_LINK_STATUS_ERROR
+ *  are host-only and never produced on baremetal.
  *
  *  @note @p fb_sharing is best-effort: a P2P query that cannot complete is
  *  reported as 0, indistinguishable from a genuine "not shared" result.
