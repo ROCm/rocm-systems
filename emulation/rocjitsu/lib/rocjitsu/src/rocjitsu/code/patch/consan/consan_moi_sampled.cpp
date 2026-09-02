@@ -346,6 +346,7 @@ const MoiModeOperations kSampledModeOperations = {
     .dense_access_route = {},
     .dense_router = plan_sampled_dense_router,
     .plan_evidence = plan_sampled_evidence_requirements,
+    .auto_report_buffer_ceiling_bytes = kConSanMoiOrdinaryAutoReportBufferCeilingBytes,
     .plan_report_layout = plan_sampled_report_layout,
     .reconstruct_report_inventory = reconstruct_sampled_report_inventory,
 };

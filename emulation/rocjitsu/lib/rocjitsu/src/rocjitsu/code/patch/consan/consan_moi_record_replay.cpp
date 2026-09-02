@@ -266,6 +266,8 @@ const MoiModeOperations kRecordReplayModeOperations = {
                            .preserves_replay_ordering = true},
     .dense_router = plan_record_replay_dense_router,
     .plan_evidence = plan_record_replay_evidence_requirements,
+    // Full identities and dispatch/access hash tables need the larger tier.
+    .auto_report_buffer_ceiling_bytes = 512u * 1024u * 1024u,
     .plan_report_layout = plan_record_replay_report_layout,
     .reconstruct_report_inventory = reconstruct_record_replay_report_inventory,
 };

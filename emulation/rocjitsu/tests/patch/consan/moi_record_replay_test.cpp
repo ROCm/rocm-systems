@@ -4939,7 +4939,8 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsRecordReplayGridAndEventHeadroomForFatO
                                          fitted.record_replay_access_dispatch_bank_count *
                                          fitted.record_replay_access_owner_bank_count *
                                          fitted.record_replay_address_group_headroom);
-  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+  EXPECT_LE(plan.required_bytes,
+            consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::RecordReplay));
 
   auto exact = inventory;
   exact.record_replay_bank_count_adaptive = false;
@@ -4976,7 +4977,8 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsAddressGroupHeadroomForVeryLargeObjects
             fitted.access_range_count * fitted.record_replay_address_group_headroom);
   EXPECT_GE(plan.layout.access_record_capacity,
             fitted.access_range_count * fitted.record_replay_address_group_headroom);
-  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+  EXPECT_LE(plan.required_bytes,
+            consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::RecordReplay));
 }
 
 TEST(ConSanMoi, AutoReportInventoryAdaptsBeforeLargeAccessGeometryExceedsAbiCapacity) {
@@ -5009,7 +5011,8 @@ TEST(ConSanMoi, AutoReportInventoryAdaptsBeforeLargeAccessGeometryExceedsAbiCapa
             inventory.record_replay_access_dispatch_bank_count);
   EXPECT_LT(fitted.record_replay_access_owner_bank_count,
             inventory.record_replay_access_owner_bank_count);
-  EXPECT_LE(plan.required_bytes, kConSanMoiRecordReplayAutoReportBufferCeilingBytes);
+  EXPECT_LE(plan.required_bytes,
+            consan_moi_auto_report_buffer_ceiling_bytes(ConSanMoiEngine::RecordReplay));
 }
 
 TEST(ConSanMoi, AutoReportInventoryDoesNotReduceGeometryForFixedAbiCapacityOverflow) {

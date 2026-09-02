@@ -548,8 +548,11 @@ if(NOT _target_extension_test MATCHES
     message(FATAL_ERROR "ConSan extension-axis exercises are missing")
 endif()
 if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count" OR
-   NOT _mode_extension_test MATCHES "atomic_scratch_vgpr_count")
-    message(FATAL_ERROR "ConSan hypothetical mode must publish synchronization scratch demand")
+   NOT _mode_extension_test MATCHES "atomic_scratch_vgpr_count" OR
+   NOT _mode_extension_test MATCHES "auto_report_buffer_ceiling_bytes")
+    message(FATAL_ERROR
+        "ConSan hypothetical mode must publish synchronization scratch and report capacity demand"
+    )
 endif()
 foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
     file(
@@ -577,6 +580,28 @@ foreach(_atomic_scratch_mode IN ITEMS record_replay sampled inline_shadow)
         )
     endif()
 endforeach()
+file(READ "${_consan_dir}/consan_moi_mode_planning.h" _moi_mode_planning_contract)
+if(NOT _moi_mode_planning_contract MATCHES
+   "uint64_t auto_report_buffer_ceiling_bytes")
+    message(FATAL_ERROR "ConSan MOI mode operations lost report-capacity ownership")
+endif()
+foreach(_report_capacity_mode IN ITEMS record_replay sampled inline_shadow)
+    file(
+        READ "${_consan_dir}/consan_moi_${_report_capacity_mode}.cpp"
+        _report_capacity_mode_owner
+    )
+    if(NOT _report_capacity_mode_owner MATCHES
+       "[.]auto_report_buffer_ceiling_bytes[ ]*=")
+        message(FATAL_ERROR
+            "ConSan ${_report_capacity_mode} must own its report-buffer ceiling selection"
+        )
+    endif()
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_core_types.h.inc"
+    "kConSanMoiRecordReplayAutoReportBufferCeilingBytes|engine[ ]*==[ ]*ConSanMoiEngine"
+    "common report types must not select a mode-specific capacity ceiling"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_pipeline.inc"
     "ConSanProbeIntentKind::(BarrierRecord|SampledBarrierEpoch|ExactBarrierEpoch)|operational_barrier_scratch_count"

@@ -421,6 +421,7 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .dense_access_route = {},
     .dense_router = plan_inline_shadow_dense_router,
     .plan_evidence = plan_inline_shadow_evidence_requirements,
+    .auto_report_buffer_ceiling_bytes = kConSanMoiOrdinaryAutoReportBufferCeilingBytes,
     .plan_report_layout = plan_inline_shadow_report_layout,
     .reconstruct_report_inventory = reconstruct_inline_shadow_report_inventory,
 };

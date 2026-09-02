@@ -275,7 +275,7 @@ struct ConSanMoiAutoReportPlan {
   ConSanMoiAutoReportPlanOutcome outcome = ConSanMoiAutoReportPlanOutcome::Overflow;
   ConSanMoiAutoReportPlanReason reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
   uint64_t required_bytes = 0;
-  uint64_t ceiling_bytes = kConSanMoiAutoReportBufferCeilingBytes;
+  uint64_t ceiling_bytes = 0;
   ConSanMoiReportBufferLayout layout;
 
   [[nodiscard]] constexpr bool complete() const {

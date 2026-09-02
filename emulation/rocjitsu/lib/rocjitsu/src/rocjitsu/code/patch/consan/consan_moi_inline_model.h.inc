@@ -20,7 +20,7 @@ consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
   constexpr uint32_t kMaximumDispatchBankCount = 256u;
   const uint64_t exact_bytes_per_bank =
       static_cast<uint64_t>(max_lds_bytes) * sizeof(ConSanMoiInlineExactShadowSlot);
-  const uint64_t exact_shadow_budget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+  const uint64_t exact_shadow_budget = kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 2u;
   if (exact_bytes_per_bank > exact_shadow_budget)
     return 0u;
   uint32_t bank_count = 1u;

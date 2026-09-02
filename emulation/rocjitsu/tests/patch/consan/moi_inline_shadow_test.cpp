@@ -2265,7 +2265,7 @@ TEST(ConSanMoi, RuntimeLdsApertureOverridesConfiguredDefault) {
 }
 
 TEST(ConSanMoi, InlineExactDispatchBankSelectionCoversFitBoundaries) {
-  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+  constexpr uint64_t kExactShadowBudget = kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 2u;
   constexpr uint64_t kLargestFittingLdsBytes =
       kExactShadowBudget / sizeof(ConSanMoiInlineExactShadowSlot);
 
@@ -2281,7 +2281,7 @@ TEST(ConSanMoi, InlineExactDispatchBanksTrackConfiguredLdsAperture) {
       consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5);
   constexpr uint64_t kExactBytesPerBank =
       kConfiguredLdsBytes * sizeof(ConSanMoiInlineExactShadowSlot);
-  constexpr uint64_t kExactShadowBudget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
+  constexpr uint64_t kExactShadowBudget = kConSanMoiOrdinaryAutoReportBufferCeilingBytes / 2u;
   constexpr uint32_t kConfiguredDispatchBankCount =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(kConfiguredLdsBytes);
   const ConSanMoiAutoReportInventory inventory{

@@ -322,6 +322,7 @@ struct MoiModeOperations {
                                                     const MoiScalarRoutingState &,
                                                     const MoiTargetFacts &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
+  uint64_t auto_report_buffer_ceiling_bytes;
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,
                              uint64_t &cursor);
   std::optional<ConSanMoiAutoReportInventory> (*reconstruct_report_inventory)(

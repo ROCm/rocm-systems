@@ -58,6 +58,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   operations.dynamic_stack_frame_save_sgpr_offset = 1u;
   operations.exec_save_sgpr_count = hypothetical_exec_save_sgpr_count;
   operations.prologue.one_based_owner_ids = true;
+  operations.auto_report_buffer_ceiling_bytes = 96u * 1024u * 1024u;
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
@@ -66,6 +67,7 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
   const auto *selected =
       find_moi_mode_operations<HypotheticalModeKey>(registrations, HypotheticalModeKey::FifthMode);
   ASSERT_EQ(selected, &operations);
+  EXPECT_EQ(selected->auto_report_buffer_ceiling_bytes, 96u * 1024u * 1024u);
   const auto plan = selected->plan({}, {}, {}, {}, {.has_access_candidate = true}, {});
   EXPECT_TRUE(plan.semantics.inline_access_present);
   EXPECT_FALSE(plan.track_atomics);
