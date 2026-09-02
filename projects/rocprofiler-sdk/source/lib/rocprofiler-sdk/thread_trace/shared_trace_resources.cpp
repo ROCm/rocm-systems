@@ -64,9 +64,8 @@ public:
                                uint64_t               buffer_size,
                                uint64_t               num_buffers)
     {
-        const uint64_t slot_count    = std::max<uint64_t>(num_buffers, 1);
-        const uint64_t staging_size  = num_buffers > 1 ? buffer_size : 0;
-        const uint64_t staging_count = num_buffers > 1 ? num_buffers : 0;
+        const uint64_t output_slot_count  = std::max<uint64_t>(num_buffers, 1);
+        const uint64_t staging_slot_count = num_buffers > 1 ? num_buffers : 0;
 
         auto  lk    = std::lock_guard{m_mutex};
         auto& entry = m_agents[agent_id.handle];
@@ -76,30 +75,32 @@ public:
 
         entry.hsa_agent = hsa_agent;
 
-        auto& slot_sizes = entry.requirements.output_slot_sizes;
+        auto& output_slot_sizes  = entry.requirements.output_slot_sizes;
+        auto& staging_slot_sizes = entry.requirements.staging_slot_sizes;
 
         if(entry.resources)
         {
-            const auto& registered = entry.requirements;
-            bool        fits       = slot_count <= slot_sizes.size() &&
-                        staging_size <= registered.staging_buffer_size &&
-                        staging_count <= registered.staging_buffer_count;
-            for(uint64_t slot = 0; fits && slot < slot_count; ++slot)
-                fits = buffer_size <= slot_sizes.at(slot);
+            bool fits = output_slot_count <= output_slot_sizes.size() &&
+                        staging_slot_count <= staging_slot_sizes.size();
+            for(uint64_t slot = 0; fits && slot < output_slot_count; ++slot)
+                fits = buffer_size <= output_slot_sizes.at(slot);
+            for(uint64_t slot = 0; fits && slot < staging_slot_count; ++slot)
+                fits = buffer_size <= staging_slot_sizes.at(slot);
 
             ROCP_FATAL_IF(!fits) << "ATT requirements grew after resources were acquired for agent "
                                  << agent_id.handle;
             return;
         }
 
-        if(slot_sizes.size() < slot_count) slot_sizes.resize(slot_count, 0);
-        for(uint64_t slot = 0; slot < slot_count; ++slot)
-            slot_sizes[slot] = std::max(slot_sizes[slot], buffer_size);
+        if(output_slot_sizes.size() < output_slot_count)
+            output_slot_sizes.resize(output_slot_count, 0);
+        for(uint64_t slot = 0; slot < output_slot_count; ++slot)
+            output_slot_sizes[slot] = std::max(output_slot_sizes[slot], buffer_size);
 
-        entry.requirements.staging_buffer_size =
-            std::max(entry.requirements.staging_buffer_size, staging_size);
-        entry.requirements.staging_buffer_count =
-            std::max(entry.requirements.staging_buffer_count, staging_count);
+        if(staging_slot_sizes.size() < staging_slot_count)
+            staging_slot_sizes.resize(staging_slot_count, 0);
+        for(uint64_t slot = 0; slot < staging_slot_count; ++slot)
+            staging_slot_sizes[slot] = std::max(staging_slot_sizes[slot], buffer_size);
     }
 
     agent_trace_resources_ptr_t acquire(const hsa::AgentCache& agent)
@@ -159,9 +160,7 @@ AgentTraceResources::AgentTraceResources(const hsa::AgentCache&        agent,
                                          trace_resource_requirements_t requirements)
 : m_agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
 , m_requirements(std::move(requirements))
-, m_queue(att_queue_create(agent,
-                           m_requirements.staging_buffer_size,
-                           m_requirements.staging_buffer_count))
+, m_queue(att_queue_create(agent, m_requirements.staging_slot_sizes))
 {}
 
 AgentTraceResources::~AgentTraceResources()

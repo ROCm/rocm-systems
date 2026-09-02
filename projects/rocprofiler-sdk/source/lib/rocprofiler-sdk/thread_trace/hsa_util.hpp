@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -66,8 +67,8 @@ make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
 struct att_queue_t
 {
     hsa_queue_t* hsa_queue{nullptr};
-    /// CPU staging buffers; size matches the user-supplied NUM_BUFFERS. Empty
-    /// in single-buffer (synchronous) mode.
+    /// CPU staging buffers, one per slot requested at creation. Empty in
+    /// single-buffer (synchronous) mode.
     std::vector<void*> cpu_buffers{};
     hsa_agent_t        hsa_agent{};
     hsa_agent_t        near_cpu{};
@@ -78,10 +79,9 @@ struct att_queue_t
                       hsa_signal_t*                 completion){nullptr};
 };
 
-/// @param buffer_size Bytes per CPU staging buffer (0 disables staging).
-/// @param num_buffers Number of CPU staging buffers to allocate (0 if unused).
+/// @param buffer_sizes Bytes to allocate for each CPU staging slot. Empty disables staging.
 att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers = 0);
+att_queue_create(const hsa::AgentCache& agent, const std::vector<uint64_t>& buffer_sizes);
 
 void
 att_queue_destroy(att_queue_t& q);

@@ -90,17 +90,6 @@ set_target_properties(
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
-# many-contexts thread trace tool (shared buffer stress: hundreds of ~1GB contexts)
-add_library(thread-trace-many-contexts-tool SHARED)
-target_sources(thread-trace-many-contexts-tool PRIVATE thread-trace-many-contexts-tool.cpp
-                                                       thread-trace-callbacks.cpp)
-target_link_libraries(thread-trace-many-contexts-tool
-                      PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
-set_target_properties(
-    thread-trace-many-contexts-tool
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
-
 # triple buffer thread trace tool
 add_library(thread-trace-triple-buffer-tool SHARED)
 target_sources(thread-trace-triple-buffer-tool

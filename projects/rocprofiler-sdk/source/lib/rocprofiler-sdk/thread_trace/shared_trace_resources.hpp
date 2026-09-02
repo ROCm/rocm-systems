@@ -51,9 +51,9 @@ struct trace_resource_requirements_t
     // Size of each GPU output slot. A context occupies one slot per requested buffer, so
     // the slot count is the largest request on the agent and each entry is sized to the
     // largest context that reaches that slot.
-    std::vector<uint64_t> output_slot_sizes    = {};
-    uint64_t              staging_buffer_size  = 0;
-    uint64_t              staging_buffer_count = 0;
+    std::vector<uint64_t> output_slot_sizes = {};
+    // Size of each CPU staging slot, following the same per-slot rule.
+    std::vector<uint64_t> staging_slot_sizes = {};
 };
 
 // Owns every heavyweight ATT resource shared by contexts targeting one agent.

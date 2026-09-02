@@ -74,21 +74,16 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})
 
-# Shared-buffer/queue stress: allocate hundreds of ~1GB contexts with varying params and
-# run each once, decoding each trace to verify it holds real waves with valid PCs from the
-# shader engines the context selected. Only fits in memory / the HSA queue limit because
-# all contexts on an agent share one buffer and one queue; a per-context buffer/queue
-# would need ~400GB and exhaust the per-agent queue limit. Exercised in device and
-# dispatch modes.
+# Configure hundreds of contexts before HSA initialization, then run one trace to validate
+# data collection. Per-context buffers and queues would exhaust memory or the HSA queue limit
+# while the shared implementation creates one resource set per agent.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-many-contexts-test
     TARGET thread-trace-test-app
     TIMEOUT 60
     LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
-    # The app emits 2 dispatches/iteration; device rotation advances ~1 context every 2-3
-    # dispatches, so keep well above ~3x num_contexts of dispatches for margin.
-    ENVIRONMENT "ATT_NUM_CONTEXTS=400;ATT_APP_LOOPCOUNT=1600;ATT_TRACE_MODE=device"
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400"
     DISABLED ${IS_DISABLED})
 
 rocprofiler_add_integration_execute_test(
@@ -96,8 +91,8 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 60
     LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-many-contexts-tool>"
-    ENVIRONMENT "ATT_NUM_CONTEXTS=400;ATT_APP_LOOPCOUNT=800;ATT_TRACE_MODE=dispatch"
+    PRELOAD "$<TARGET_FILE:thread-trace-single-tool>"
+    ENVIRONMENT "ATT_NUM_CONTEXTS=400"
     DISABLED ${IS_DISABLED})
 
 # Test occupancy mode

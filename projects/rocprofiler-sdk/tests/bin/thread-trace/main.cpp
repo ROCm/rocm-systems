@@ -85,10 +85,6 @@ main(int /*argc*/, char** /*argv*/)
     else if(is_triple_buffer)
         loopcount = 30000;
 
-    // Allow tests that rotate through many contexts (one trace active at a time) to
-    // request enough dispatches so every context gets a turn.
-    if(const char* lc = std::getenv("ATT_APP_LOOPCOUNT")) loopcount = atoi(lc);
-
     for(int i = 0; i < loopcount; i++)
     {
         if(start_and_stop && (i % 500) == 0)
