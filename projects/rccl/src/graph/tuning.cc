@@ -1060,7 +1060,7 @@ static struct tuningModel tuning_model_10{
       // RS ≤4MB total handled by DDA; Ring kicks in above. For Ring proto selection:
       // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 64MB/rank (=256MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 67108864, 1, 64}},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 2097152, 1, 64}},
       /*AllGather*/
       // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
@@ -1765,12 +1765,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
-    1ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
+    4ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
     16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,         // [8] AlltoAll        -- 2MiB KiB total 
+    64ULL*1024,         // [8] AlltoAll        -- 2MiB KiB total 
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
@@ -1796,7 +1796,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
+    0,      // [8] AlltoAll        -- 2 MiB (LL tiers cover <=2M; Ring/Simple wins 2M-4M; DDA/VMM above)
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
