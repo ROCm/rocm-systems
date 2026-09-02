@@ -38,7 +38,7 @@ elif os.environ.get("HIP_VISIBLE_DEVICES") is not None:
 else:
     ngpus = int(
         subprocess.check_output(
-            'rocminfo | grep "Device Type:.\s*.GPU" | wc -l', shell=True
+            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True
         )
     )
 log_ngpus = int(math.log2(ngpus))
