@@ -15,7 +15,7 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 
-void publish_unplaced_sc_access_rejections(ConSanTransformArtifacts &result);
+void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage, std::vector<std::string> &errors);
 
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          const ConSanTargetProfile &target,

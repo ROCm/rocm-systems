@@ -1,47 +1,27 @@
 [[nodiscard]] std::unordered_set<uint64_t>
 sc_admitted_access_file_offsets(const ProgramInventory &inventory,
-                                const ConSanObservationPlan &observation,
+                                const ConSanCoverageLedger &coverage,
                                 ConSanAccessOrigin origin) {
-  std::unordered_set<uint64_t> admitted_text_offsets;
-  admitted_text_offsets.reserve(observation.probe_intents.size());
-  for (const ConSanProbeIntent &intent : observation.probe_intents) {
-    if (intent.physical_site.code_object == inventory.code_object_id())
-      admitted_text_offsets.insert(intent.physical_site.original_text_offset);
-  }
-
   std::unordered_set<uint64_t> offsets;
-  offsets.reserve(admitted_text_offsets.size());
   for (const ConSanAccessInventorySite &access : inventory.access_sites())
     if (access.origin == origin &&
-        admitted_text_offsets.contains(access.physical_id.original_text_offset))
+        !coverage.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
+                                     access.physical_id)
+             .empty())
       offsets.insert(access.file_offset);
   return offsets;
 }
 
-[[nodiscard]] std::vector<ConSanProbeIntentId>
-sc_pending_access_intent_ids(const ConSanCoverageLedger &coverage, const PhysicalSiteId &site) {
-  std::vector<ConSanProbeIntentId> intent_ids;
-  for (const ConSanProbeIntent &intent : coverage.observation_plan().probe_intents) {
-    if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation ||
-        intent.physical_site != site)
-      continue;
-    const ConSanIntentCoverageEntry *entry = coverage.intent_entry(intent.id);
-    if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending)
-      intent_ids.push_back(intent.id);
-  }
-  return intent_ids;
-}
-
-[[nodiscard]] bool publish_sc_access_rejection(ConSanTransformArtifacts &result,
-                                               const PhysicalSiteId &site,
+[[nodiscard]] bool publish_sc_access_rejection(ConSanCoverageLedger &coverage,
+                                               std::vector<std::string> &errors, const PhysicalSiteId &site,
                                                ConSanLoweringOutcomeKind outcome,
                                                std::string detail) {
-  std::vector<ConSanProbeIntentId> intent_ids =
-      sc_pending_access_intent_ids(result.coverage_ledger, site);
+  std::vector<ConSanProbeIntentId> intent_ids = coverage.pending_intent_ids(
+      ConSanProbeIntentKind::RedundantAccessObservation, site);
   if (intent_ids.empty())
     return true;
-  if (!result.coverage_ledger.publish_lowering_rejection(intent_ids, outcome, std::move(detail))) {
-    result.errors.emplace_back(
+  if (!coverage.publish_lowering_rejection(intent_ids, outcome, std::move(detail))) {
+    errors.emplace_back(
         "ConSan SuperCollider could not publish an intent-bound access rejection");
     return false;
   }
@@ -65,14 +45,15 @@ sc_pending_access_intent_ids(const ConSanCoverageLedger &coverage, const Physica
 /// intent that no site-local lowering transaction consumed. This fallback
 /// consults only immutable intent identity and the ledger's pending state; it
 /// never reconstructs success or failure from patch telemetry.
-void publish_unplaced_sc_access_rejections(ConSanTransformArtifacts &result) {
-  for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
+void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
+                                           std::vector<std::string> &errors) {
+  for (const ConSanProbeIntent &intent : coverage.observation_plan().probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation)
       continue;
-    const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+    const ConSanIntentCoverageEntry *entry = coverage.intent_entry(intent.id);
     if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
       continue;
-    (void)publish_sc_access_rejection(result, intent.physical_site,
+    (void)publish_sc_access_rejection(coverage, errors, intent.physical_site,
                                       ConSanLoweringOutcomeKind::PlacementRejected,
                                       "SuperCollider lowerer selected no access placement");
   }

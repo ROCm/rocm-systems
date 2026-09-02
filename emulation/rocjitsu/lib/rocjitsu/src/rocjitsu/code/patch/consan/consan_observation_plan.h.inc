@@ -1337,6 +1337,19 @@ public:
   /// Resolve one admitted intent entry by its plan-local identifier.
   [[nodiscard]] const ConSanIntentCoverageEntry *intent_entry(ConSanProbeIntentId id) const;
 
+  /// Return pending intents of one semantic kind at one physical site.
+  [[nodiscard]] std::vector<ConSanProbeIntentId>
+  pending_intent_ids(ConSanProbeIntentKind kind, const PhysicalSiteId &site) const {
+    std::vector<ConSanProbeIntentId> ids;
+    for (const ConSanProbeIntent &intent : observation_plan_.probe_intents) {
+      if (const ConSanIntentCoverageEntry *entry = intent_entry(intent.id);
+          intent.kind == kind && intent.physical_site == site && entry != nullptr &&
+          entry->lowering == ConSanLoweringOutcomeKind::Pending)
+        ids.push_back(intent.id);
+    }
+    return ids;
+  }
+
   /// Publish one prepared lowering transaction directly against its intents.
   /// The operation validates every bound identity before changing any entry
   /// and refuses to overwrite an already finalized intent. Accepted commits

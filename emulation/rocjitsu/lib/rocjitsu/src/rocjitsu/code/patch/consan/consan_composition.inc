@@ -692,7 +692,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     }
   }
 
-  publish_unplaced_sc_access_rejections(result);
+  publish_unplaced_sc_access_rejections(result.coverage_ledger, result.errors);
 
   return result;
 }

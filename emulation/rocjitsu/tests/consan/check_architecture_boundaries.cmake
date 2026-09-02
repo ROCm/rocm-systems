@@ -1359,6 +1359,20 @@ foreach(_patch_commit_client IN ITEMS
         "MOI synchronization must use the shared patch-geometry commit owner"
     )
 endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_supercollider_common.inc"
+    "ConSanTransformArtifacts|sc_pending_access_intent_ids"
+    "SuperCollider rejection publication must consume one exact ledger and diagnostic sink"
+)
+file(READ "${_consan_dir}/consan_supercollider.h" _supercollider_contract)
+if(NOT _supercollider_contract MATCHES
+       "publish_unplaced_sc_access_rejections[^;]*ConSanCoverageLedger[^;]*vector<std::string>" OR
+   _supercollider_contract MATCHES
+       "publish_unplaced_sc_access_rejections[^;]*ConSanTransformArtifacts")
+    message(FATAL_ERROR
+        "SuperCollider terminal rejection publication must not receive the transaction bus"
+    )
+endif()
 file(READ "${_consan_dir}/consan_placement.inc" _committed_patch_location_owner)
 if(NOT _committed_patch_location_owner MATCHES
        "make_consan_instrumented_patch_lowering" OR

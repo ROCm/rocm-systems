@@ -607,6 +607,32 @@ TEST(ConSanObservationPlan, CommittedLoweringRejectsExactlyItsBoundIntents) {
   EXPECT_EQ(result.coverage_ledger.lowering_commits().size(), 1u);
 }
 
+TEST(ConSanObservationPlan, PendingIntentQueryJoinsKindSiteAndCurrentLoweringState) {
+  const ConSanAccessPolicyResult policy = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::SuperCollider));
+  ASSERT_TRUE(policy.valid());
+  ConSanObservationPlan plan = policy.plan;
+  ASSERT_TRUE(plan.append(policy.plan));
+  ASSERT_EQ(plan.probe_intents.size(), 2u);
+  const PhysicalSiteId site = plan.probe_intents.front().physical_site;
+  ConSanCoverageLedger ledger(std::move(plan));
+
+  EXPECT_EQ(ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, site),
+            (std::vector<ConSanProbeIntentId>{{0}, {1}}));
+  EXPECT_TRUE(ledger.pending_intent_ids(ConSanProbeIntentKind::BarrierRecord, site).empty());
+  PhysicalSiteId other_site = site;
+  other_site.original_text_offset += 4u;
+  EXPECT_TRUE(
+      ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, other_site)
+          .empty());
+
+  const std::array rejected = {ConSanProbeIntentId{1}};
+  ASSERT_TRUE(ledger.publish_lowering_rejection(
+      rejected, ConSanLoweringOutcomeKind::PlacementRejected, "test rejection"));
+  EXPECT_EQ(ledger.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, site),
+            (std::vector<ConSanProbeIntentId>{{0}}));
+}
+
 TEST(ConSanObservationPlan, CommittedLoweringBatchPublicationIsTransactional) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));

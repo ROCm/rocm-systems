@@ -10,9 +10,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
 
   const std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
-      result.program_inventory, result.observation_plan(), ConSanAccessOrigin::NativeLds);
+      result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::NativeLds);
   const std::unordered_set<uint64_t> admitted_flat_file_offsets = sc_admitted_access_file_offsets(
-      result.program_inventory, result.observation_plan(), ConSanAccessOrigin::Flat);
+      result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::Flat);
   std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
   for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
     if (access.origin == ConSanAccessOrigin::NativeLds &&
@@ -34,7 +34,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     for (const auto &[file_offset, site] : admitted_sites) {
       (void)file_offset;
       (void)publish_sc_access_rejection(
-          result, site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider LDS lowerer found no complete execution owner");
     }
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
@@ -664,7 +664,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     std::ranges::sort(owners);
     owners.erase(std::ranges::unique(owners).begin(), owners.end());
     if (owners.empty()) {
-      (void)publish_sc_access_rejection(result, site.physical_id,
+      (void)publish_sc_access_rejection(result.coverage_ledger, result.errors, site.physical_id,
                                         ConSanLoweringOutcomeKind::ResourceRejected,
                                         "SuperCollider LDS lowerer found no execution owner");
       return;
@@ -731,7 +731,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     if (!complete) {
       (void)publish_sc_access_rejection(
-          result, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
+          result.coverage_ledger, result.errors, site.physical_id, ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider LDS lowerer found no complete planning context");
       return;
     }
@@ -3267,7 +3267,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
     PlannedLdsCheckTrapPatch planned;
     planned.site = &site;
-    planned.intent_ids = sc_pending_access_intent_ids(result.coverage_ledger, site.physical_id);
+    planned.intent_ids =
+        result.coverage_ledger.pending_intent_ids(
+            ConSanProbeIntentKind::RedundantAccessObservation, site.physical_id);
     if (planned.intent_ids.empty()) {
       result.errors.emplace_back(
           "ConSan LDS check/trap proof selected a site without a pending semantic intent");
