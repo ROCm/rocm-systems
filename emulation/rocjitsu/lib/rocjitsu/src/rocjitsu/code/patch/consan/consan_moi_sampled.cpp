@@ -149,19 +149,6 @@ moi_sampled_access_return_scc_sgpr(const MoiScalarRoutingState &routing_state) {
   return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
-/// Sampled probes prefer their entry-stable exact tuple, while retaining the
-/// descriptor source used by sites whose accepted point needs no capture.
-static std::optional<ConSanMoiWorkgroupSources> sampled_workgroup_sources(
-    std::span<const uint8_t> image, uint64_t descriptor_file_offset,
-    const ConSanMoiOperatingPoint &point, rj_code_arch_t arch, std::vector<std::string> &errors,
-    bool uses_cluster_workgroup_id,
-    const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets = nullptr) {
-  if (const auto persistent = moi_exact_entry_workgroup_sources(point, private_offsets))
-    return persistent;
-  return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
-                                          uses_cluster_workgroup_id);
-}
-
 MoiObjectModePlan
 plan_sampled_object_mode(const ConSanRequest &request, const BoundRuntimeResources &resources,
                          const TransformPolicy &policy, const ConSanMoiOperatingPoint &point,

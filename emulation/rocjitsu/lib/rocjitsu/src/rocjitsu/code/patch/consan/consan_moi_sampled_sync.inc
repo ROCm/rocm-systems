@@ -17,12 +17,11 @@ struct SampledBarrierCandidate {
 /// this product; broad request, resource, and operating-point state cannot be
 /// rediscovered while sizing or encoding a cave.
 [[nodiscard]] std::optional<MoiSampledSyncEmissionPlan> plan_sampled_sync_emission(
-    std::span<const uint8_t> bytes, uint64_t descriptor_file_offset, bool uses_cluster_workgroup_id,
     const ConSanRequest &request, const BoundRuntimeResources &bound_resources,
     const ConSanMoiOperatingPoint &base_point, const ConSanMoiOperatingPoint &accepted_point,
     std::span<const uint64_t> owner_descriptors, const ConSanMoiPrivateStateLayout *private_layout,
     uint16_t scratch_vgpr, uint16_t scratch_owner_vgpr, uint16_t scratch_epoch_vgpr,
-    rj_code_arch_t arch, bool transient_assignment_already_resolved,
+    bool transient_assignment_already_resolved,
     std::string_view diagnostic_subject, std::vector<std::string> &errors) {
   if (!bound_resources.moi_report_buffer_address) {
     errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) +
@@ -49,8 +48,8 @@ struct SampledBarrierCandidate {
   } else {
     owner_epoch_vgprs = moi_owner_epoch_vgpr_sources(point.moi_owner_epoch_vgprs);
   }
-  const auto workgroup_sources = sampled_workgroup_sources(
-      bytes, descriptor_file_offset, point, arch, errors, uses_cluster_workgroup_id,
+  const auto workgroup_sources = moi_exact_entry_workgroup_sources(
+      point,
       private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
   if (!workgroup_sources)
     return std::nullopt;
@@ -1040,12 +1039,11 @@ void try_apply_sampled_barrier_sync_patch(
         original_text_size + barrier_index * kIndirectIslandWords * sizeof(uint32_t);
     const uint64_t cave_offset = new_text.size();
     const auto emission_plan = plan_sampled_sync_emission(
-        bytes, *planned.candidate.barrier.kernel_descriptor_file_offset,
-        planned.candidate.uses_cluster_workgroup_id, options, options, operating_point,
+        options, options, operating_point,
         result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + 7u),
-        static_cast<uint16_t>(planned.resources.base + 8u), arch,
+        static_cast<uint16_t>(planned.resources.base + 8u),
         /*transient_assignment_already_resolved=*/false, "sampled barrier sync", result.errors);
     if (!emission_plan)
       return false;
@@ -1324,12 +1322,11 @@ void try_apply_sampled_barrier_sync_patch(
         const Planned &planned = selected[index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         const auto emission_plan = plan_sampled_sync_emission(
-            bytes, *planned.candidate.barrier.kernel_descriptor_file_offset,
-            planned.candidate.uses_cluster_workgroup_id, options, options, operating_point,
+            options, options, operating_point,
             result.moi_operating_point, planned.resources.owner_descriptor_file_offsets,
             planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
             static_cast<uint16_t>(planned.resources.base + 7u),
-            static_cast<uint16_t>(planned.resources.base + 8u), arch,
+            static_cast<uint16_t>(planned.resources.base + 8u),
             /*transient_assignment_already_resolved=*/false, "sampled dense barrier",
             result.errors);
         if (!emission_plan)
@@ -2063,13 +2060,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           bool preserve_guest_at_anchor = false, std::span<const uint32_t> leading_guest_words = {})
       -> std::optional<std::vector<uint32_t>> {
     const auto emission_plan = plan_sampled_sync_emission(
-        bytes, *planned.candidate.atomic.kernel_descriptor_file_offset,
-        planned.candidate.atomic.uses_cluster_workgroup_id, options, options,
+        options, options,
         resolved_point ? *resolved_point : operating_point, result.moi_operating_point,
         planned.resources.owner_descriptor_file_offsets,
         planned.private_layout ? &*planned.private_layout : nullptr, planned.resources.base,
         static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kOwner),
-        static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch), arch,
+        static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch),
         /*transient_assignment_already_resolved=*/resolved_point != nullptr, "sampled atomic sync",
         result.errors);
     if (!emission_plan)

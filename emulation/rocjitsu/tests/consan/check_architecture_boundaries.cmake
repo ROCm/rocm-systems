@@ -1354,15 +1354,33 @@ _consan_assert_no_match(
     "persistent_or_descriptor_workgroup_sources|sampled_workgroup_sources"
     "Sampled workgroup-source fallback must not return to a shared public contract"
 )
-file(READ "${_consan_dir}/consan_moi_sampled.cpp" _sampled_workgroup_source_owner)
-if(NOT _sampled_workgroup_source_owner MATCHES
-       "sampled_workgroup_sources" OR
-   NOT _sampled_workgroup_source_owner MATCHES
-       "moi_exact_entry_workgroup_sources" OR
-   NOT _sampled_workgroup_source_owner MATCHES
-       "moi_descriptor_workgroup_sources")
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_sampled.cpp"
+    "sampled_workgroup_sources|moi_descriptor_workgroup_sources"
+    "Sampled probes must not restore descriptor fallback after exact-entry placement"
+)
+file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+string(FIND "${_moi_sampled_sync_owner}" "plan_sampled_sync_emission"
+       _sampled_sync_plan_begin)
+string(FIND "${_moi_sampled_sync_owner}" "struct SampledDenseSyncRoute"
+       _sampled_sync_plan_end)
+if(_sampled_sync_plan_begin LESS 0 OR
+   _sampled_sync_plan_end LESS_EQUAL _sampled_sync_plan_begin)
+    message(FATAL_ERROR "ConSan Sampled sync-plan boundary could not be located")
+endif()
+math(EXPR _sampled_sync_plan_length
+     "${_sampled_sync_plan_end} - ${_sampled_sync_plan_begin}")
+string(SUBSTRING "${_moi_sampled_sync_owner}" ${_sampled_sync_plan_begin}
+       ${_sampled_sync_plan_length} _sampled_sync_plan_contract)
+if(_sampled_sync_plan_contract MATCHES
+   "sampled_workgroup_sources|moi_descriptor_workgroup_sources|descriptor_file_offset|uses_cluster_workgroup_id|rj_code_arch_t")
     message(FATAL_ERROR
-        "ConSan Sampled owner lost its exact-entry/descriptor workgroup-source policy"
+        "ConSan Sampled emission planning must consume exact-entry workgroup state"
+    )
+endif()
+if(NOT _sampled_sync_plan_contract MATCHES "moi_exact_entry_workgroup_sources")
+    message(FATAL_ERROR
+        "ConSan Sampled emission planning lost its exact-entry workgroup source"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_shared_lowering.h" _moi_private_layout_contract)
@@ -3078,7 +3096,7 @@ endif()
 file(READ "${_consan_dir}/consan_moi_sampled_access.inc" _moi_sampled_access_owner)
 foreach(_selected_sampled_helper IN ITEMS
     "plan_moi_runtime_workgroup_gate[(]"
-    "sampled_workgroup_sources[(]"
+    "moi_exact_entry_workgroup_sources[(]"
 )
     string(
         REGEX MATCHALL
@@ -3101,7 +3119,7 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
-    "sampled_workgroup_sources"
+    "sampled_workgroup_sources|moi_exact_entry_workgroup_sources"
     "Sampled access emission must consume its retained workgroup-source product"
 )
 file(READ "${_consan_dir}/consan_moi_sampled_access_emission.h"
