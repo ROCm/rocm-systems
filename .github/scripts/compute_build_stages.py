@@ -25,8 +25,8 @@ math and cannot drift from the actual build graph:
 
 Fail-safe: whenever the change set cannot be confidently narrowed, this prints
 an empty ``build_stages`` so TheRock builds everything. That happens for: a
-run_all_tests (CI-infra) change, no changed projects, a fan-out project (see
-FANOUT_PROJECTS), an unknown/unmapped project, or any topology-load error.
+run_all_tests (CI-infra) change, no changed projects, a full-build project (see
+FULL_BUILD_PROJECTS), an unknown/unmapped project, or any topology-load error.
 
 Usage:
     python compute_build_stages.py \
@@ -49,16 +49,24 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # Projects whose changes ripple into downstream consumers. For these we build
-# everything (empty allowlist) to preserve coverage, mirroring the pre-multiarch
+# everything (empty allowlist) to preserve coverage, mirroring the pre-multi-arch
 # CI where clr/hip/rocr-runtime, amdsmi, and profiler mapped to
 # -DTHEROCK_ENABLE_ALL=ON in .github/scripts/therock_matrix.py.
-FANOUT_PROJECTS = {
+FULL_BUILD_PROJECTS = {
     "clr",
     "hip",
     "hipother",
     "hip-tests",
     "rocr-runtime",
     "amdsmi",
+    # Legacy profiler bucket used THEROCK_ENABLE_ALL=ON.
+    "aqlprofile",
+    "rocprofiler",
+    "rocprofiler-compute",
+    "rocprofiler-register",
+    "rocprofiler-sdk",
+    "rocprofiler-systems",
+    "roctracer",
 }
 
 
@@ -93,8 +101,8 @@ def compute_build_stages(
         return []
 
     # Fan-out projects ripple into consumers: build everything.
-    if FANOUT_PROJECTS.intersection(projects):
-        logger.info("Fan-out project changed -> build all stages")
+    if FULL_BUILD_PROJECTS.intersection(projects):
+        logger.info("Full-build project changed -> build all stages")
         return []
 
     # Import TheRock's build topology from the checkout. TheRock is the source of

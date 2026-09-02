@@ -4,7 +4,7 @@
 """Tests for compute_build_stages.py.
 
 These cover the rocm-systems-owned logic (project parsing, run_all_tests
-short-circuit, fan-out policy, and the fail-safe branches) without requiring a
+short-circuit, full-build policy, and the fail-safe branches) without requiring a
 real TheRock checkout. Stage narrowing itself is delegated to TheRock's build
 topology and is exercised via a stubbed topology module so the test has no
 external dependency.
@@ -46,13 +46,33 @@ class ComputeBuildStagesTest(unittest.TestCase):
     def test_empty_changed_projects_builds_everything(self):
         self.assertEqual(cbs.compute_build_stages("", "_therock"), [])
 
-    def test_fanout_project_builds_everything(self):
-        # ABI-sensitive projects fan out to consumers -> build all.
+    def test_full_build_project_builds_everything(self):
+        # ABI-sensitive projects fan out to consumers -> build all (full-build).
         self.assertEqual(cbs.compute_build_stages("projects/hip", "_therock"), [])
         self.assertEqual(cbs.compute_build_stages("projects/amdsmi", "_therock"), [])
         self.assertEqual(
             cbs.compute_build_stages("projects/clr,projects/rdc", "_therock"), []
         )
+
+    def test_legacy_profiler_projects_build_everything(self):
+        # Legacy profiler bucket used THEROCK_ENABLE_ALL=ON, so preserve
+        # that coverage by falling back to a full build.
+        profiler_projects = [
+            "aqlprofile",
+            "rocprofiler",
+            "rocprofiler-compute",
+            "rocprofiler-register",
+            "rocprofiler-sdk",
+            "rocprofiler-systems",
+            "roctracer",
+        ]
+
+        for project in profiler_projects:
+            with self.subTest(project=project):
+                self.assertEqual(
+                    cbs.compute_build_stages(f"projects/{project}", "_therock"),
+                    [],
+                )
 
     def test_topology_load_failure_builds_everything(self):
         # Nonexistent TheRock path -> import fails -> fail safe (build all).
