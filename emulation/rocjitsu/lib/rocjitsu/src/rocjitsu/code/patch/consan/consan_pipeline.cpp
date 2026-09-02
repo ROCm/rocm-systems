@@ -281,7 +281,7 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
   for (const ConSanPatchLoweringProduct &patch : patches) {
     const bool has_segment_requirement = patch.required_private_segment_size != 0u ||
                                          patch.dynamic_private_segment_addend != 0u ||
-                                         patch.required_group_segment_size != 0u;
+                                         patch.required_group_segment_size() != 0u;
     if (!has_segment_requirement)
       continue;
     const auto merge_segments = [&](ConSanKernelDispatchRequirement &requirement) {
@@ -290,7 +290,7 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
       requirement.dynamic_private_addend =
           std::max(requirement.dynamic_private_addend, patch.dynamic_private_segment_addend);
       requirement.required_group_bytes =
-          std::max(requirement.required_group_bytes, patch.required_group_segment_size);
+          std::max(requirement.required_group_bytes, patch.required_group_segment_size());
     };
     if (!patch.owner_descriptor_file_offsets.empty()) {
       for (uint64_t owner : patch.owner_descriptor_file_offsets)
@@ -499,9 +499,9 @@ ConSanTransformDiagnosticReport consan_transform_diagnostic_report(const Transfo
         .spilled_vgpr_count = patch.spilled_vgpr_count,
         .required_private_segment_size = patch.required_private_segment_size,
         .dynamic_private_segment_addend = patch.dynamic_private_segment_addend,
-        .workgroup_shadow_base = patch.workgroup_shadow_base,
-        .workgroup_shadow_size = patch.workgroup_shadow_size,
-        .required_group_segment_size = patch.required_group_segment_size,
+        .workgroup_shadow_base = patch.workgroup_shadow ? patch.workgroup_shadow->base : 0u,
+        .workgroup_shadow_size = patch.workgroup_shadow ? patch.workgroup_shadow->size : 0u,
+        .required_group_segment_size = patch.required_group_segment_size(),
     });
   }
   return report;

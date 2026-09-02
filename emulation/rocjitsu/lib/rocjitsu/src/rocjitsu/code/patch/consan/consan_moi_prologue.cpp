@@ -1938,39 +1938,11 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options,
       continue;
     }
     SpillManager manager(layout.ephemeral_base, *private_limit);
-    uint8_t workitem_id_dimensions = 1u;
-    if (access_patch->workgroup_shadow_size != 0u) {
-      const auto workitem_descriptor =
-          read_kernel_descriptor(active_bytes, active_kernel->descriptor_file_offset);
-      if (!workitem_descriptor) {
-        result.errors.emplace_back(
-            "ConSan MOI private-epoch prologue workitem descriptor exceeds ELF bytes");
-        return;
-      }
-      const auto dimensions = moi_descriptor_workitem_id_dimensions(*workitem_descriptor);
-      if (!dimensions) {
-        result.errors.emplace_back(
-            "ConSan MOI private-epoch prologue has invalid workitem-ID dimensions");
-        return;
-      }
-      workitem_id_dimensions = *dimensions;
+    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow = access_patch->workgroup_shadow;
+    if (workgroup_shadow) {
+      workgroup_shadow->initialization_lanes = moi_workgroup_shadow_initialization_lanes(
+          *target, active_kernel->required_workgroup_size);
     }
-    const std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow =
-        access_patch->workgroup_shadow_size == 0u
-            ? std::nullopt
-            : std::optional<ConSanMoiWorkgroupShadowLayout>(ConSanMoiWorkgroupShadowLayout{
-                  .base = access_patch->workgroup_shadow_base,
-                  .size = access_patch->workgroup_shadow_size,
-                  .validity_base = access_patch->workgroup_shadow_validity_base,
-                  .validity_size = access_patch->workgroup_shadow_validity_size,
-                  .required_group_segment_size = access_patch->required_group_segment_size,
-                  .workitem_id_dimensions = workitem_id_dimensions,
-                  .initialization_lanes = moi_workgroup_shadow_initialization_lanes(
-                      *target, active_kernel->required_workgroup_size),
-                  .lazy_initialization = access_patch->workgroup_shadow_lazy_initialization,
-                  .compact = access_patch->workgroup_shadow_compact,
-                  .visible_evidence_sgpr = std::nullopt,
-              });
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     if (has_private_workgroup_key || has_private_record_replay_workgroup) {
       std::vector<std::string> source_errors;
@@ -2495,30 +2467,12 @@ void try_apply_owner_epoch_prologue_patch(
     for (const ConSanPatchLoweringProduct &patch : result.patches) {
       if (!kernel_owns_patch(kernel, patch))
         continue;
-      if (patch.workgroup_shadow_size == 0u)
+      if (!patch.workgroup_shadow)
         continue;
-      const ConSanMoiWorkgroupShadowLayout candidate{
-          .base = patch.workgroup_shadow_base,
-          .size = patch.workgroup_shadow_size,
-          .validity_base = patch.workgroup_shadow_validity_base,
-          .validity_size = patch.workgroup_shadow_validity_size,
-          .required_group_segment_size = patch.required_group_segment_size,
-          .workitem_id_dimensions = *workitem_id_dimensions,
-          .initialization_lanes =
-              moi_workgroup_shadow_initialization_lanes(*target, active.required_workgroup_size),
-          .lazy_initialization = patch.workgroup_shadow_lazy_initialization,
-          .compact = patch.workgroup_shadow_compact,
-          .visible_evidence_sgpr = std::nullopt,
-      };
-      if (workgroup_shadow &&
-          (workgroup_shadow->base != candidate.base || workgroup_shadow->size != candidate.size ||
-           workgroup_shadow->validity_base != candidate.validity_base ||
-           workgroup_shadow->validity_size != candidate.validity_size ||
-           workgroup_shadow->required_group_segment_size != candidate.required_group_segment_size ||
-           workgroup_shadow->workitem_id_dimensions != candidate.workitem_id_dimensions ||
-           workgroup_shadow->initialization_lanes != candidate.initialization_lanes ||
-           workgroup_shadow->lazy_initialization != candidate.lazy_initialization ||
-           workgroup_shadow->compact != candidate.compact)) {
+      ConSanMoiWorkgroupShadowLayout candidate = *patch.workgroup_shadow;
+      candidate.initialization_lanes =
+          moi_workgroup_shadow_initialization_lanes(*target, active.required_workgroup_size);
+      if (workgroup_shadow && *workgroup_shadow != candidate) {
         result.errors.emplace_back(
             "ConSan MOI owner/epoch prologue found incompatible workgroup-shadow layouts");
         return;
@@ -3120,17 +3074,7 @@ void try_apply_owner_epoch_prologue_patch(
       info.entry_scalar_backup_sgpr_base = prologue_plan.entry_scalar_backup->sgpr_base;
       info.entry_scalar_backup_sgpr_count = prologue_plan.entry_scalar_backup->sgpr_count;
     }
-    if (prologue_plan.workgroup_shadow) {
-      info.workgroup_shadow_base = prologue_plan.workgroup_shadow->base;
-      info.workgroup_shadow_size = prologue_plan.workgroup_shadow->size;
-      info.workgroup_shadow_validity_base = prologue_plan.workgroup_shadow->validity_base;
-      info.workgroup_shadow_validity_size = prologue_plan.workgroup_shadow->validity_size;
-      info.workgroup_shadow_lazy_initialization =
-          prologue_plan.workgroup_shadow->lazy_initialization;
-      info.workgroup_shadow_compact = prologue_plan.workgroup_shadow->compact;
-      info.required_group_segment_size =
-          prologue_plan.workgroup_shadow->required_group_segment_size;
-    }
+    info.workgroup_shadow = prologue_plan.workgroup_shadow;
     if (prologue_plan.dispatch_plan && prologue_plan.dispatch_capture.present())
       note_dispatch_id_patch_info(info, *prologue_plan.dispatch_plan,
                                   prologue_plan.dispatch_capture);

@@ -89,12 +89,12 @@ namespace consan_moi_impl {
 
 static std::optional<ConSanRuntimeStaticMapping>
 make_inline_shadow_access_runtime_mapping(ConSanStaticAccessAttribution access,
-                                          const ConSanPatchAbiEffects &patch) {
-  if (!patch.workgroup_shadow_compact)
+                                          const MoiInlineShadowEmissionPlan &emission) {
+  if (!emission.workgroup_shadow || !emission.workgroup_shadow->compact)
     return ConSanRuntimeStaticMapping{};
   return ConSanRuntimeStaticMapping::inline_compact({
       .access = std::move(access),
-      .token = patch.workgroup_shadow_compact_token,
+      .token = emission.workgroup_shadow_compact_token,
   });
 }
 

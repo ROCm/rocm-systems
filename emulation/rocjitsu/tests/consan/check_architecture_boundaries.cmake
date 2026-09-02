@@ -1029,6 +1029,45 @@ _consan_assert_no_match(
     "dispatch identity must remain one typed operating-point allocation"
 )
 
+# InlineShadow's committed workgroup-shadow effect is one typed layout. Patch
+# proof, prologue construction, descriptor growth, and validation must not
+# regain independent scalar copies of that layout or its compact-mode token.
+file(READ "${_consan_dir}/consan.h" _shared_aggregate_contract)
+file(READ
+    "${_consan_dir}/consan_moi_workgroup_shadow_layout.h.inc"
+    _workgroup_shadow_layout_contract
+)
+if(NOT _shared_aggregate_contract MATCHES
+       "consan_moi_workgroup_shadow_layout[.]h[.]inc" OR
+   NOT _workgroup_shadow_layout_contract MATCHES
+       "struct ConSanMoiWorkgroupShadowLayout")
+    message(FATAL_ERROR
+        "ConSan shared patch contract lost its narrow workgroup-shadow layout"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan.h"
+    "consan_moi_core_types[.]h[.]inc"
+    "shared patch contracts must not import the broad MOI report model"
+)
+file(READ "${_consan_dir}/consan_code_object_types.h.inc" _patch_proof_contract)
+if(NOT _patch_proof_contract MATCHES
+   "std::optional<ConSanMoiWorkgroupShadowLayout>[ \t]+workgroup_shadow")
+    message(FATAL_ERROR
+        "ConSan patch proof lost its typed workgroup-shadow layout"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_code_object_types.h.inc"
+    "(uint32_t|bool|std::optional<uint16_t>)[ \t]+(workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization|compact|compact_token)|required_group_segment_size)[ \t]*="
+    "patch proof must not flatten the typed workgroup-shadow layout"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_prologue.cpp"
+    "patch[.]workgroup_shadow_(base|size|validity_base|validity_size|lazy_initialization|compact|compact_token)|patch[.]required_group_segment_size"
+    "prologue construction must consume the typed workgroup-shadow layout"
+)
+
 # Scalar allocations carry their selection provenance. The owner scalar must
 # not return to a loose optional plus a separately mutable automatic marker.
 _consan_assert_no_match(

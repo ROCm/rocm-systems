@@ -985,20 +985,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           planned_patch.emission.private_workgroup_key_offset;
       info.persistent_dispatch_id_private_offset =
           planned_patch.emission.private_dispatch_id_offset;
-      if (planned_patch.emission.workgroup_shadow) {
-        info.workgroup_shadow_base = planned_patch.emission.workgroup_shadow->base;
-        info.workgroup_shadow_size = planned_patch.emission.workgroup_shadow->size;
-        info.workgroup_shadow_validity_base =
-            planned_patch.emission.workgroup_shadow->validity_base;
-        info.workgroup_shadow_validity_size =
-            planned_patch.emission.workgroup_shadow->validity_size;
-        info.workgroup_shadow_lazy_initialization =
-            planned_patch.emission.workgroup_shadow->lazy_initialization;
-        info.workgroup_shadow_compact = planned_patch.emission.workgroup_shadow->compact;
-        info.workgroup_shadow_compact_token = planned_patch.emission.workgroup_shadow_compact_token;
-        info.required_group_segment_size =
-            planned_patch.emission.workgroup_shadow->required_group_segment_size;
-      }
+      info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
@@ -1294,7 +1281,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       auto commit = make_moi_access_lowering_commit(
           result.observation_plan(), candidate, info, ConSanProbeIntentKind::ExactShadowAccess,
           [&](ConSanStaticAccessAttribution access) {
-            return make_inline_shadow_access_runtime_mapping(std::move(access), info);
+            return make_inline_shadow_access_runtime_mapping(std::move(access),
+                                                             planned_patch.emission);
           });
       if (!commit) {
         result.errors.emplace_back(
@@ -1364,27 +1352,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 planned_patch.emission.private_workgroup_key_offset;
             info.persistent_dispatch_id_private_offset =
                 planned_patch.emission.private_dispatch_id_offset;
-            if (planned_patch.emission.workgroup_shadow) {
-              info.workgroup_shadow_base = planned_patch.emission.workgroup_shadow->base;
-              info.workgroup_shadow_size = planned_patch.emission.workgroup_shadow->size;
-              info.workgroup_shadow_validity_base =
-                  planned_patch.emission.workgroup_shadow->validity_base;
-              info.workgroup_shadow_validity_size =
-                  planned_patch.emission.workgroup_shadow->validity_size;
-              info.workgroup_shadow_lazy_initialization =
-                  planned_patch.emission.workgroup_shadow->lazy_initialization;
-              info.workgroup_shadow_compact = planned_patch.emission.workgroup_shadow->compact;
-              info.workgroup_shadow_compact_token =
-                  planned_patch.emission.workgroup_shadow_compact_token;
-              info.required_group_segment_size =
-                  planned_patch.emission.workgroup_shadow->required_group_segment_size;
-            }
+            info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
             return info;
           },
           ConSanProbeIntentKind::ExactShadowAccess,
-          [](ConSanStaticAccessAttribution access, const PlannedInlineShadowPatch &,
-             const auto &patch) {
-            return make_inline_shadow_access_runtime_mapping(std::move(access), patch);
+          [](ConSanStaticAccessAttribution access, const PlannedInlineShadowPatch &planned_patch,
+             const auto &) {
+            return make_inline_shadow_access_runtime_mapping(std::move(access),
+                                                             planned_patch.emission);
           },
           result))
     return;

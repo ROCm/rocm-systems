@@ -3071,7 +3071,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
   const rj_code_arch_t arch = environment.arch();
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-        return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
+        return is_exact_patch(patch) && !patch.workgroup_shadow &&
                !patch.persistent_dispatch_id_private_offset &&
                !result.moi_operating_point.moi_dispatch_identity.sgpr() &&
                !result.moi_operating_point.moi_dispatch_identity.vgpr() &&
@@ -3169,7 +3169,8 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       }
       return count;
     };
-    if (patch.workgroup_shadow_size != 0u) {
+    if (patch.workgroup_shadow) {
+      const ConSanMoiWorkgroupShadowLayout &workgroup_shadow = *patch.workgroup_shadow;
       const auto intent = std::ranges::find_if(
           result.observation_plan().probe_intents, [&](const ConSanProbeIntent &candidate) {
             return candidate.kind == ConSanProbeIntentKind::ExactShadowAccess &&
@@ -3185,7 +3186,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
               ? 0u
               : consan_moi_maximum_cell_count_for_unaligned_bytes(access->decoded_width_bits / 8u);
       const size_t decoded_local_exchange_cell_count =
-          patch.workgroup_shadow_compact
+          workgroup_shadow.compact
               ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
               : decoded_local_exchange_b64_count;
       const bool needs_compact_loop = minimum_cell_count > decoded_local_exchange_cell_count;
@@ -3194,7 +3195,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       // exchange must additionally retain its outer publication loop; merely
       // finding any backward branch would let a bitmap poll mask its removal.
       const bool bitmap_backed_lazy_shadow =
-          patch.workgroup_shadow_lazy_initialization && patch.workgroup_shadow_validity_size != 0u;
+          workgroup_shadow.lazy_initialization && workgroup_shadow.validity_size != 0u;
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_compact_loop ? 1u : 0u);
@@ -3218,14 +3219,14 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
           static_cast<uint16_t>(scratch + diagnostic_claim_offset),
           /*return_old_value=*/true,
           /*scope=*/2, arch);
-      if ((patch.workgroup_shadow_compact && !expected_local_exchange_b32) ||
+      if ((workgroup_shadow.compact && !expected_local_exchange_b32) ||
           !expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
           decoded_cas_count != decoded_local_exchange_cell_count ||
           decoded_local_exchange_count == 0u ||
           access == result.program_inventory.access_sites().end() ||
           decoded_backward_local_loop_count < minimum_backward_loop_count ||
           decoded_nonbackward_local_loop ||
-          (patch.workgroup_shadow_compact
+          (workgroup_shadow.compact
                ? count_pattern(*expected_local_exchange_b32) != decoded_local_exchange_b32_count ||
                      count_pattern(*expected_local_exchange_b64) !=
                          decoded_local_exchange_b64_count ||
@@ -3863,7 +3864,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
         requirement.required_private_bytes =
             std::max(requirement.required_private_bytes, patch.required_private_segment_size);
         requirement.required_group_bytes =
-            std::max(requirement.required_group_bytes, patch.required_group_segment_size);
+            std::max(requirement.required_group_bytes, patch.required_group_segment_size());
         requirement.required_sgpr_count =
             std::max({requirement.required_sgpr_count, patch.required_sgpr_count,
                       patch.indirect_required_sgpr_count});

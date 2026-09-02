@@ -1,23 +1,8 @@
-namespace rocjitsu {
-
 enum class ConSanMoiDiagnosticKind : uint32_t {
   None = 0,
   AccessConflict = 1,
   MetadataFull = 2,
   BarrierDivergence = 3,
-};
-
-struct ConSanMoiWorkgroupShadowLayout {
-  uint32_t base = 0;
-  uint32_t size = 0;
-  uint32_t validity_base = 0;
-  uint32_t validity_size = 0;
-  uint32_t required_group_segment_size = 0;
-  uint8_t workitem_id_dimensions = 1;
-  uint16_t initialization_lanes = 32;
-  bool lazy_initialization = false;
-  bool compact = false;
-  std::optional<uint16_t> visible_evidence_sgpr;
 };
 
 // A lazy, full-width layout with no validity bitmap uses the canonical

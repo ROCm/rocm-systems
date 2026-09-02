@@ -698,14 +698,13 @@ struct ConSanPatchAbiEffects {
   /// addend rather than a sum because their frames are never simultaneously
   /// active.
   uint32_t dynamic_private_segment_addend = 0;
-  uint32_t workgroup_shadow_base = 0;
-  uint32_t workgroup_shadow_size = 0;
-  uint32_t workgroup_shadow_validity_base = 0;
-  uint32_t workgroup_shadow_validity_size = 0;
-  bool workgroup_shadow_lazy_initialization = false;
-  bool workgroup_shadow_compact = false;
-  uint16_t workgroup_shadow_compact_token = 0;
-  uint32_t required_group_segment_size = 0;
+  /// Exact workgroup-local shadow ABI emitted by this patch. Keeping the typed
+  /// layout intact prevents prologue composition and final validation from
+  /// reconstructing it from a flattened mode-specific field replica.
+  std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
+  [[nodiscard]] uint32_t required_group_segment_size() const {
+    return workgroup_shadow ? workgroup_shadow->required_group_segment_size : 0u;
+  }
   /// Kernel descriptors whose dispatches can execute this patch. Shared
   /// helper patches name every reachable owner.
   std::vector<uint64_t> owner_descriptor_file_offsets;

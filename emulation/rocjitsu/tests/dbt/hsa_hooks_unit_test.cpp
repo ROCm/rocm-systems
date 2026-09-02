@@ -9234,7 +9234,7 @@ void configure_consan_symbol_binding_case() {
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
   patch.required_private_segment_size = 64u;
-  patch.required_group_segment_size = 128u;
+  patch.workgroup_shadow.emplace().required_group_segment_size = 128u;
   patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(std::move(patch));
 }

@@ -1474,7 +1474,8 @@ TEST(ConSanMoi, GenerationTaggedLocalAtomicLookupUsesPersistentWorkgroupKey) {
            patch.anchor_offset == 14u * sizeof(uint32_t);
   });
   ASSERT_NE(load_patch, result.patches.end());
-  EXPECT_GT(load_patch->workgroup_shadow_size, 0u);
+  ASSERT_TRUE(load_patch->workgroup_shadow);
+  EXPECT_GT(load_patch->workgroup_shadow->size, 0u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());

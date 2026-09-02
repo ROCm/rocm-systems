@@ -24,9 +24,11 @@
 #include <variant>
 #include <vector>
 
+namespace rocjitsu {
+
 // These fragments declare the report-side contract in dependency order:
-// shared ABI and mechanisms first, then exact-subset and mode-owned models.
-// None exposes lowerer state, patch proof, or resource placement.
+// exact-subset and mode-owned models after the shared types in consan.h. None
+// exposes lowerer state, patch proof, or resource placement.
 #include "rocjitsu/code/patch/consan/consan_moi_core_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc"

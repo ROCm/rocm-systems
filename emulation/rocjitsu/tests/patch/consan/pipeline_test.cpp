@@ -548,20 +548,20 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_segments.kind = ConSanPatchKind::InlineNopRewrite;
   shared_segments.required_private_segment_size = 40u;
   shared_segments.dynamic_private_segment_addend = 8u;
-  shared_segments.required_group_segment_size = 100u;
+  shared_segments.workgroup_shadow.emplace().required_group_segment_size = 100u;
   shared_segments.owner_descriptor_file_offsets = {64u, 128u};
   mechanism.patches.push_back(shared_segments);
   ConSanPatchInfo kernel_a_segments = shared_segments;
   kernel_a_segments.required_private_segment_size = 64u;
   kernel_a_segments.dynamic_private_segment_addend = 16u;
-  kernel_a_segments.required_group_segment_size = 80u;
+  kernel_a_segments.workgroup_shadow->required_group_segment_size = 80u;
   kernel_a_segments.owner_descriptor_file_offsets = {64u};
   mechanism.patches.push_back(kernel_a_segments);
   ConSanPatchInfo legacy_kernel_b_segments = shared_segments;
   legacy_kernel_b_segments.anchor_offset = 12u;
   legacy_kernel_b_segments.required_private_segment_size = 56u;
   legacy_kernel_b_segments.dynamic_private_segment_addend = 0u;
-  legacy_kernel_b_segments.required_group_segment_size = 120u;
+  legacy_kernel_b_segments.workgroup_shadow->required_group_segment_size = 120u;
   legacy_kernel_b_segments.owner_descriptor_file_offsets.clear();
   mechanism.patches.push_back(legacy_kernel_b_segments);
 
