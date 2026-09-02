@@ -2182,6 +2182,31 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 }
 
 void Runtime::AsyncEventsPool::clear() {
+  // The same lock alloc() and free() take. Without it this walks and releases
+  // block_list_, and empties free_list_, while another thread is still handing
+  // items out of them: ConcurrentAsyncEvents::Clear() runs on the async-event
+  // monitor thread, and application threads can be inside
+  // hsa_amd_signal_async_handler() -> PushBack() -> alloc() at the same moment.
+  // Not recursive, so this cannot self-deadlock: neither caller (the destructor,
+  // and ConcurrentAsyncEvents::Clear()) holds the lock.
+  //
+  // What this lock does not cover is an item alloc() already returned. That
+  // caller releases the lock before it runs item->init() and enqueues, so a
+  // clear() landing in between frees the block out from under that write. No
+  // lock here can close that window: the item outlives the critical section it
+  // came from. What closes it is the API contract. Both callers run only from
+  // teardown, reached from Runtime::Unload() under bootstrap_lock(), and the
+  // HSA specification leaves it undefined to call into the runtime concurrently
+  // with the hsa_shut_down() releasing the last reference, so in a conforming
+  // program no PushBack() is in flight by the time either runs. The runtime
+  // does not enforce that, though: IS_OPEN() reads ref_count_ once and holds
+  // nothing for the rest of the call, so a thread can pass it and then be
+  // descheduled while another tears the runtime down. Holding the lock here is
+  // what keeps that program from corrupting the pool's vectors outright, a far
+  // likelier and less debuggable failure than the item-lifetime window it
+  // leaves; it is not a substitute for callers quiescing before shutdown.
+  std::lock_guard<HybridMutex> lock(lock_);
+
   ifdebug {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
@@ -3108,7 +3133,9 @@ hsa_status_t Runtime::LoadHotswapTool() {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
@@ -4107,17 +4134,19 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
-Agent* Runtime::LowestDrmMinorGpu() {
-  auto drm_minor = [](const core::Agent* a) {
-    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
-  };
-  core::Agent* selected = nullptr;
-  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
-    for (auto* candidate : *pool) {
-      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
-    }
+Agent* Runtime::KfdGttAnchorGpu() {
+  HSAuint32 node_id = 0;
+  HSAuint32 gpu_id = 0;
+  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+    return nullptr;
   }
-  return selected;
+
+  auto it = agents_by_node_.find(node_id);
+  if (it == agents_by_node_.end() || it->second.empty()) {
+    return nullptr;
+  }
+
+  return it->second[0];
 }
 
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
@@ -4138,13 +4167,12 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select
-    the first available GPU agent before calling CreateShareableHandle.
-    For device memory, use owner agent. */
+    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
+     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
       if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -4355,7 +4383,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
       if (drm_agent != nullptr) {
         agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);

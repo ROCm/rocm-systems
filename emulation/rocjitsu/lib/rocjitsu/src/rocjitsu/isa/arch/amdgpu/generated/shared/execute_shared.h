@@ -162,7 +162,6 @@ inline void execute_ds_load_addtid_b32_ds([[maybe_unused]] Inst &inst,
     d->exec_mask = exec;
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint32_t offset = (static_cast<uint32_t>(inst.inst_.offset1) << 8) | inst.inst_.offset0;
     uint32_t m0 = wf.m0();
     uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
@@ -1757,7 +1756,7 @@ inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_icache_inv_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  wf.cu().instruction_cache().invalidate_all();
 }
 
 template <typename Inst>
@@ -2396,6 +2395,17 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
   wf.pc = (saved_pc & kPcAddressMask) - inst.size();
 
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
+
   // Returning from the handler puts the interrupted EXEC back. The handler runs
   // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
   // MSG_INTERRUPT -- and restoring that is part of returning, not part of
@@ -2410,8 +2420,7 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
   // The handler sets STATUS.HALT when it wants the wave to stay
   // stopped for the debugger; honour that on the way out.
-  constexpr uint32_t kStatusHalt = 1u << 13;
-  if ((wf.status_raw() & kStatusHalt) != 0) {
+  if (keep_halted) {
     wf.set_debug_single_step(false);
     wf.set_debug_halted(true);
   } else {
@@ -3908,8 +3917,8 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u) - 1u;
-    util::stdx::where(u == 0u, c) = 31u;
+    auto c = util::clz_u32_simd(u);
+    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
     return c;
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3919,7 +3928,7 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       auto s = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
     }());
   }
 }
@@ -3929,8 +3938,8 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u) - 1u;
-    util::stdx::where(u == 0u, c) = 31u;
+    auto c = util::clz_u32_simd(u);
+    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
     return c;
   });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3940,7 +3949,7 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     sdwa::write_lane<false>(inst, wf, inst.vdst, lane, [&]() {
       auto s = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
+      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
     }());
   }
 }
@@ -10117,7 +10126,7 @@ inline void execute_v_div_fixup_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_div_fixup_f32_exceptions(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
         [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   }
@@ -16439,7 +16448,7 @@ template <typename Inst>
 inline void execute_v_mul_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_mul_f32_vop2(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP2_BINARY(float32_t, std::multiplies<>{});
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -16458,7 +16467,7 @@ template <typename Inst>
 inline void execute_v_mul_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_mul_f32_vop3(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, std::multiplies<>{});
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -18085,7 +18094,7 @@ inline void execute_v_rcp_iflag_f32_vop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t,
                                  [](auto a) { return util::rcp_f32_simd(a); });
   }
@@ -18105,7 +18114,7 @@ inline void execute_v_rcp_iflag_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_rcp_iflag_f32_exceptions(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
                                     [](auto a) { return util::rcp_f32_simd(a); });
   }
@@ -18844,7 +18853,7 @@ template <typename Inst>
 inline void execute_v_sqrt_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_sqrt_f32_vop1(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP1_UNARY(float32_t, float32_t,
                                  [](auto a) { return util::sqrt_f32_simd(a); });
   }
@@ -18863,7 +18872,7 @@ template <typename Inst>
 inline void execute_v_sqrt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t alu_causes = classify_sqrt_f32_vop3(inst, wf);
   wf.set_trapsts(wf.trapsts() | alu_causes);
-  if (!(wf.mode_raw() & kAluExceptionModeMask)) {
+  if (!alu_exception_trap_enables(wf)) {
     ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t,
                                     [](auto a) { return util::sqrt_f32_simd(a); });
   }

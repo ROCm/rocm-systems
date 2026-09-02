@@ -616,6 +616,7 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+  int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 

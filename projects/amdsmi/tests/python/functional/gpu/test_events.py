@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """GPU events: GPU counter and event notification."""
 
 import unittest
+from collections import defaultdict
 
 import common.common as common
 from common.common import amdsmi
+
+
+def _event_group(event_type):
+    """Mirror the library's fixed type->group binding (EvtGrpFromEvtID).
+
+    A type added upstream falls outside both ranges and surfaces as GRP_INVALID rather
+    than being folded silently into XGMI.
+    """
+    types = amdsmi.AmdSmiEventType
+    groups = amdsmi.AmdSmiEventGroup
+    if types.XGMI_0_NOP_TX <= event_type <= types.XGMI_1_BEATS_TX:
+        return groups.XGMI
+    if types.XGMI_DATA_OUT_0 <= event_type <= types.XGMI_DATA_OUT_5:
+        return groups.XGMI_DATA_OUT
+    return groups.GRP_INVALID
+
+
+def _api_msg(api, **args):
+    """Render the '### api(arg=value):' header printed above each call's verdict."""
+    rendered = ", ".join(f"{name}={value}" for name, value in args.items())
+    return f"\t### {api}({rendered}):"
 
 
 class TestGpuEvents(unittest.TestCase):
@@ -46,138 +52,143 @@ class TestGpuEvents(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    def _probe_counter_group(self, gpu, gpu_idx, group, group_name):
+        """Ask whether an event group works here; returns (supported, available)."""
+        if group == amdsmi.AmdSmiEventGroup.GRP_INVALID:
+            # GRP_INVALID must never be reported as usable, so SUCCESS is left out.
+            accept = [amdsmi.AmdSmiStatus.NOT_SUPPORTED, amdsmi.AmdSmiStatus.INVAL]
+        else:
+            # An ASIC without DF/xGMI perf counters may legitimately answer "no".
+            accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+
+        supported = False
+        msg = _api_msg("amdsmi_gpu_counter_group_supported", gpu=gpu_idx, event_group=group_name)
+        with self.common.expect_status(msg, accept):
+            amdsmi.amdsmi_gpu_counter_group_supported(gpu, group)
+            supported = True
+
+        available = 0
+        msg = _api_msg("amdsmi_get_gpu_available_counters", gpu=gpu_idx, event_group=group_name)
+        with self.common.expect_status(msg, accept):
+            available = amdsmi.amdsmi_get_gpu_available_counters(gpu, group)
+        self.common.print(f"\t\tavailable counters: {available}")
+
+        return supported, available
+
+    def _control_counter(self, gpu_idx, type_name, handle, command, accept):
+        """Start or stop a counter, returns True when the command was accepted."""
+        msg = _api_msg(
+            "amdsmi_gpu_control_counter",
+            gpu=gpu_idx,
+            event_type=type_name,
+            counter_command=command.name,
+        )
+        controlled = False
+        with self.common.expect_status(msg, accept):
+            amdsmi.amdsmi_gpu_control_counter(handle, command)
+            controlled = True
+        return controlled
+
+    def _run_counter(self, gpu, gpu_idx, event_type, type_name, supported):
+        """Take one counter through create/start/read/stop/destroy.
+
+        Runs on unsupported hardware too: *supported* decides whether each call is
+        expected to succeed or to refuse. Returns the counter that was read, or None.
+        """
+        handle = None
+        msg = _api_msg("amdsmi_gpu_create_counter", gpu=gpu_idx, event_type=type_name)
+        with self.common.expect_status(msg, amdsmi.AmdSmiStatus.SUCCESS):
+            handle = amdsmi.amdsmi_gpu_create_counter(gpu, event_type)
+        if handle is None:
+            return None
+
+        if supported:
+            start_accept = amdsmi.AmdSmiStatus.SUCCESS
+        else:
+            # No perf event source to open, so the sysfs read behind it returns
+            # ENOENT, which the library maps to NOT_SUPPORTED.
+            start_accept = amdsmi.AmdSmiStatus.NOT_SUPPORTED
+
+        started = self._control_counter(
+            gpu_idx, type_name, handle, amdsmi.AmdSmiCounterCommand.CMD_START, start_accept
+        )
+
+        # Nothing was opened yet, so a teardown now reports the missing fd.
+        teardown_accept = amdsmi.AmdSmiStatus.FILE_ERROR
+        counter = None
+        try:
+            if started:
+                read_accept = amdsmi.AmdSmiStatus.SUCCESS
+                teardown_accept = amdsmi.AmdSmiStatus.SUCCESS
+            else:
+                # fd_ stayed -1, so every call below hits EBADF. read reports that as
+                # UNEXPECTED_SIZE because it collapses every error into that one status,
+                # while stop and destroy map it to FILE_ERROR.
+                read_accept = amdsmi.AmdSmiStatus.UNEXPECTED_SIZE
+
+            msg = _api_msg("amdsmi_gpu_read_counter", gpu=gpu_idx, event_type=type_name)
+            with self.common.expect_status(msg, read_accept):
+                counter = amdsmi.amdsmi_gpu_read_counter(handle)
+            if counter is not None:
+                self.common.print(f"\t\t{counter}")
+
+            self._control_counter(
+                gpu_idx, type_name, handle, amdsmi.AmdSmiCounterCommand.CMD_STOP, teardown_accept
+            )
+        finally:
+            msg = _api_msg("amdsmi_gpu_destroy_counter", gpu=gpu_idx, event_type=type_name)
+            with self.common.expect_status(msg, teardown_accept):
+                amdsmi.amdsmi_gpu_destroy_counter(handle)
+
+        return counter
+
     def test_gpu_counter(self):
+        """Exercise every xGMI/DF counter end to end, on supported and unsupported hardware."""
+        # TODO(amdsmi_team): this only judges the status of each call, so nothing here
+        # proves a counter counted anything. Improve it by running on xGMI-capable
+        # hardware with a workload driving xGMI traffic, then assert the value read
+        # back over a sample window.
         self.common.print_func_name("")
 
+        # create_counter takes an event type, not a group, so collect the types per group.
+        types_by_group = defaultdict(list)
+        for type_name, event_type, _ in common.EVENT_TYPES:
+            types_by_group[_event_group(event_type)].append((type_name, event_type))
+
+        # Nothing iterates GRP_INVALID, so a type landing there would go untested. That
+        # means _event_group has drifted from the library's EvtGrpFromEvtID.
+        unclassified = types_by_group[amdsmi.AmdSmiEventGroup.GRP_INVALID]
+        self.assertFalse(unclassified, f"event types not mapped to a group: {unclassified}")
+
         results = {}
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            results[i] = {}
-            for event_group_name, event_group, event_group_cond in common.EVENT_GROUPS:
-                results[i][event_group_name] = {}
-                results[i][event_group_name]["supported"] = False
-                results[i][event_group_name]["counters"] = 0
+        with self.common.status_sweep():
+            for gpu_idx, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(gpu_idx)
+                results[gpu_idx] = {}
 
-                # Is supported
-                msg = f"\t### amdsmi_gpu_counter_group_supported(gpu={i}, event_group={event_group_name}):"
-                try:
-                    event_handle = amdsmi.amdsmi_gpu_counter_group_supported(gpu, event_group)
-                    self.common.print(msg, event_handle)
-                    results[i][event_group_name]["supported"] = True
-                    self.common.check_ret("", "", self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.common.check_ret(msg, e, event_group_cond):
-                        self.raise_exception = e
-
-                # Are counters available
-                msg = f"\t### amdsmi_get_gpu_available_counters(gpu={i}, event_group={event_group_name}):"
-                try:
-                    counters = amdsmi.amdsmi_get_gpu_available_counters(gpu, event_group)
-                    self.common.print(msg, counters)
-                    results[i][event_group_name]["counters"] = counters
-                    self.common.check_ret("", "", self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.common.check_ret(msg, e, event_group_cond):
-                        self.raise_exception = e
-
-                # To continue, both have to pass
-                if (
-                    not results[i][event_group_name]["supported"]
-                    or not results[i][event_group_name]["counters"]
-                ):
-                    msg_add = ""
-                    if not results[i][event_group_name]["supported"]:
-                        msg_add = "\n\tAMDSMI API Returned AMDSMI_STATUS_NOT_SUPPORTED"
-                    # Record that these would have been tested if supported
-                    self.common.print(f"\t### amdsmi_gpu_create_counter(){msg_add}")
-                    self.common.print(f"\t### amdsmi_gpu_control_counter(){msg_add}")
-                    self.common.print(f"\t### amdsmi_gpu_read_counter(){msg_add}")
-                    self.common.print(f"\t### amdsmi_gpu_control_counter(){msg_add}")
-                    self.common.print(f"\t### amdsmi_gpu_destroy_counter(){msg_add}")
-                    continue
-
-                for event_type_name, event_type, event_type_cond in common.EVENT_TYPES:
-                    results[i][event_group_name][event_type_name] = {}
-                    results[i][event_group_name][event_type_name]["handle"] = 0
-                    results[i][event_group_name][event_type_name]["num_counts"] = 0
-
-                    # Create
-                    msg = f"\t### amdsmi_gpu_create_counter(gpu={i}, event_type={event_type_name}):"
-                    try:
-                        event_handle = amdsmi.amdsmi_gpu_create_counter(gpu, event_type)
-                        self.common.print(msg, id(event_handle))
-                        self.common.check_ret("", "", self.common.PASS)
-                        results[i][event_group_name][event_type_name]["handle"] = id(event_handle)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
-                            self.raise_exception = e
-                        # Record that these would have been tested if supported
-                        msg_add = "\n\tAMDSMI API Returned AMDSMI_STATUS_NOT_SUPPORTED"
-                        self.common.print(f"\t### amdsmi_gpu_control_counter(){msg_add}")
-                        self.common.print(f"\t### amdsmi_gpu_read_counter(){msg_add}")
-                        self.common.print(f"\t### amdsmi_gpu_control_counter(){msg_add}")
-                        self.common.print(f"\t### amdsmi_gpu_destroy_counter(){msg_add}")
-                        continue
-
-                    # Start a program that generates the events of interest
-
-                    # Start control counter
-                    counter_command_name, counter_command, counter_commands_cond = (
-                        common.COUNTER_COMMANDS[0]
+                for group_name, group, _ in common.EVENT_GROUPS:
+                    supported, available = self._probe_counter_group(
+                        gpu, gpu_idx, group, group_name
                     )
-                    msg = f"\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):"
-                    try:
-                        ret = amdsmi.amdsmi_gpu_control_counter(event_handle, counter_command)
-                        self.common.print(msg, ret)
-                        self.common.check_ret("", "", self.common.PASS)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
-                            self.raise_exception = e
-
-                    # Wait...
-
-                    # Read control counter
-                    msg = f"\t### amdsmi_gpu_read_counter(event_handle={id(event_handle)}):"
-                    try:
-                        ret = amdsmi.amdsmi_gpu_read_counter(event_handle)
-                        self.common.print(msg, ret)
-                        self.common.check_ret("", "", self.common.PASS)
-                        results[i][event_group_name][event_type_name]["num_counts"] = ret
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
-                            self.raise_exception = e
-
-                    # Stop control counter
-                    counter_command_name, counter_command, counter_commands_cond = (
-                        common.COUNTER_COMMANDS[1]
+                    events = {}
+                    supp_avail_print = (
+                        f" | Supported: {bool(supported)}, Available: {bool(available)}"
                     )
-                    msg = f"\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):"
-                    try:
-                        ret = amdsmi.amdsmi_gpu_control_counter(event_handle, counter_command)
-                        self.common.print(msg, ret)
-                        self.common.check_ret("", "", self.common.PASS)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
-                            self.raise_exception = e
+                    self.common.print(
+                        f"\t\tRunning counters for {group_name} events {supp_avail_print}"
+                    )
+                    for type_name, event_type in types_by_group[group]:
+                        counter = self._run_counter(gpu, gpu_idx, event_type, type_name, supported)
+                        events[type_name] = counter
 
-                    # Destroy control counter
-                    msg = f"\t### amdsmi_gpu_destroy_counter(event_handle={id(event_handle)}):"
-                    try:
-                        ret = amdsmi.amdsmi_gpu_destroy_counter(event_handle)
-                        self.common.print(msg, ret)
-                        self.common.check_ret("", "", self.common.PASS)
-                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if self.common.check_ret(msg, e, event_type_cond):
-                            self.raise_exception = e
+                    results[gpu_idx][group_name] = {
+                        "supported": supported,
+                        "available_counters": available,
+                        "events": events,
+                    }
 
-        msg = "gpu counter results"
-        self.common.print(msg, results)
-
-        if self.raise_exception:
-            raise self.raise_exception
+        self.common.print("gpu counter results", results)
         return
-
-    # integration
 
     def test_gpu_event(self):
         self.common.print_func_name("")

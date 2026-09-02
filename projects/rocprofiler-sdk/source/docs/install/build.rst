@@ -82,7 +82,7 @@ To build ROCprofiler-SDK, install ``CMake`` as explained in the following sectio
 Install CMake
 -------------
 
-Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
+Install `CMake <https://cmake.org/>`_ version 3.24 (or later).
 
 .. note::
 
@@ -92,7 +92,7 @@ Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
 
    .. code-block:: bash
 
-    /usr/local/bin/python -m pip install --user 'cmake==3.22.0'
+    /usr/local/bin/python -m pip install --user 'cmake==3.24.0'
     export PATH=${HOME}/.local/bin:${PATH}
 
 Build ROCprofiler-SDK

@@ -1224,7 +1224,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
-    ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
+    ' return a == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
     ' return static_cast<uint32_t>(exp); }}()',
