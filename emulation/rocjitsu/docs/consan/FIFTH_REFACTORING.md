@@ -10508,3 +10508,70 @@ trace, not evidence that the barrier boundary or the broader Section 14
 mandate is complete.  Further target/mode locality, broad transaction and
 operating-point reduction, extension-proof revalidation, and the independent
 completion audit remain open.
+
+### 16.152 Convergence checkpoint 151: producers publish barrier reservations
+
+Tracing the exact reservation seam backward exposed a surviving reverse-
+engineering path.  Record/Replay access placement published the reservation
+it created, but InlineShadow access placement did not.  The shared barrier
+resolver therefore scanned access patch kinds, anchor offsets, trampoline
+geometry, indirect-island patches, and generated relay provenance to infer a
+layout which the access producer had known exactly.  It also retained an
+older trailing-layout compatibility path despite every current caller being
+part of the same ordered mode transaction.
+
+InlineShadow now carries one local `MoiBarrierIslandReservation` from access
+placement to its barrier entry point, just as Record/Replay carries the same
+shared product inside its mode output.  Both producers publish the exact
+begin, stride, and slot count only after access mutation succeeds.  The common
+barrier mechanism validates that explicit product against expected semantic
+demand and the current text: plain slots must remain NOPs, while the two-word
+branch-only spine may contain only NOPs or encoded branches.  It no longer
+queries prior patch kinds or reconstructs producer geometry.
+
+This forward product makes the old 175-line resolver unnecessary.  It is
+replaced by a 52-line validator and the trailing-layout compatibility branch,
+two patch scans, access-anchor index, trampoline-boundary reconstruction, and
+generated-relay set are deleted.  This is the direct deletion payoff of
+checkpoint 150's narrow seam rather than a second adapter layered over the
+legacy protocol.
+
+The structural gate requires both access producers to publish the reservation,
+requires InlineShadow orchestration to carry the same value through access and
+barrier phases, and forbids all former patch-geometry reconstruction tokens in
+the shared barrier owner.  Existing behavior tests exercise plain seven-word,
+eight-word fence-compatible, and nine-word branch-spine reservations across
+the target matrix, so no parallel test-only access to the private validator is
+introduced.
+
+| Signal | Checkpoint 151 | Cumulative change | Slice change from checkpoint 150 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,598 | **-2,378** | **-110** |
+| Nonblank production lines | 96,181 | **-2,903** | **-104** |
+| Production implementation lines | 88,395 | **-3,055** | **-94** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | **-1 / 0** |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| Reservation producers carrying the exact shared product | **2 / 2** | n/a | **+1** |
+| Patch-geometry reconstruction paths for barrier reservations | **0** | n/a | **-1 legacy resolver** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `a773bf43e3b`.  Validation includes a
+successful full `-j16` build; the architecture-boundary gate and all **109/109**
+barrier-named host tests; and the complete combined **1,150/1,150**
+Record/Replay and InlineShadow simulator-device matrix across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250 (**614** Record/Replay plus **536**
+InlineShadow).  No test was removed, renamed, disabled, or replaced, and no
+physical GPU test was run.
+
+The reservation transaction is now forward-only and size-converged: a later
+phase receives producer knowledge instead of inspecting the mutation ledger.
+The larger barrier component still has mode bodies compiled into one
+translation unit and shared code still uses historically Record/Replay-named
+island constants.  The next trace must decide their real semantic ownership
+in the context of the remaining component boundary rather than merely rename
+them.  Full target/mode locality, broad transaction and operating-point
+reduction, extension-proof revalidation, and the independent Section 14 audit
+remain open.
