@@ -68,6 +68,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Parallelized communicator destruction across child processes to reduce teardown latency.
 
 ### Resolved issues
+* Fixed FP8 E4M3/E5M2 `ncclAvg` packing 1/nRanks as host `rccl_float8` while gfx942 device code decoded FNUZ.
 * Fixed `ncclCommGrow` channel-count divergence causing incorrect collective routing.
 * Fixed `ncclCommGrow` hang when growing to an 8-rank single-node communicator.
 * Fixed symmetric LDS under-reservation in legacy (non-device-linker) builds.

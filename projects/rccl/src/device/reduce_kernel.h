@@ -681,7 +681,7 @@ struct FuncPreMulSum<rccl_float8> {
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
     union {
       uint64_t u64;
-      rccl_float8 val;
+      float val; // opArg carries float bits: host fp8 is OCP, gfx942 device fp8 is FNUZ
     };
     u64 = opArg;
     scalar = (float)(val);
@@ -699,10 +699,34 @@ struct FuncPreMulSum<rccl_bfloat8> {
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
     union {
       uint64_t u64;
-      rccl_bfloat8 val;
+      float val; // opArg carries float bits: host fp8 is OCP, gfx942 device fp8 is FNUZ
     };
     u64 = opArg;
     scalar = (float)(val);
+  }
+};
+
+// A device-resident scalar is still the narrow type in user memory, so promote it
+// here too or the pointer path would disagree with the immediate path above.
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_float8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union { uint64_t u64; float val; };
+    u64 = 0;
+    val = (float)(*(rccl_float8*)ptr);
+    return u64;
+  }
+};
+
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_bfloat8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union { uint64_t u64; float val; };
+    u64 = 0;
+    val = (float)(*(rccl_bfloat8*)ptr);
+    return u64;
   }
 };
 #endif
