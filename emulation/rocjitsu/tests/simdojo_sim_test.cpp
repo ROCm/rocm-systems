@@ -1796,6 +1796,7 @@ TEST(BoundedRunTest, ReenteringTheSameEngineIsRefused) {
   RecorderRig rig;
   int refusals = 0;
   ExitReason nested_run = ExitReason::COMPLETED;
+  std::string nested_message;
   rig.recorder->event_.set_handler([&](Tick, Message *) {
     // Every entry point, not just the one that opened the loop: all three
     // drive the same queue, so all three are the same defect.
@@ -1805,20 +1806,28 @@ TEST(BoundedRunTest, ReenteringTheSameEngineIsRefused) {
           rig.engine.run_until_idle();
         else
           rig.engine.step();
-      } catch (const std::logic_error &) {
+      } catch (const std::logic_error &e) {
+        // Matched on the message, not just the type: run_bounded()'s other
+        // rejection throws std::invalid_argument, which is also a logic_error,
+        // so a bare type catch would stay green if the re-entrancy guard were
+        // dropped and the partition check fired instead.
+        EXPECT_STREQ(e.what(), "simulation engine is already executing");
         ++refusals;
       }
     }
     // run() reports the refusal rather than throwing: it may be on a
     // background thread whose top-level lambda has no catch, where an escaping
     // exception would call std::terminate.
-    nested_run = rig.engine.run().reason;
+    const ExitStatus nested = rig.engine.run();
+    nested_run = nested.reason;
+    nested_message = nested.message;
   });
 
   rig.recorder->ask(1000);
   rig.engine.run_until_idle();
   EXPECT_EQ(refusals, 2);
   EXPECT_EQ(nested_run, ExitReason::INTERRUPTED);
+  EXPECT_EQ(nested_message, "simulation engine is already executing");
 
   // And the refusals left the engine usable.
   rig.recorder->event_.set_handler(
@@ -1883,9 +1892,9 @@ TEST(BoundedRunTest, TheGlobalClockKeepsUpWithTheRun) {
   rig.recorder->ask(3000);
   rig.engine.run_until_idle();
 
-  // Each handler sees the tick of the event before it, which is as current as
-  // a value published after processing can be.
-  EXPECT_EQ(observed, (std::vector<Tick>{0, 1000, 2000}));
+  // Each handler sees its OWN tick: the clock is published before the handler
+  // runs, because the handler is the thing that reads it.
+  EXPECT_EQ(observed, (std::vector<Tick>{1000, 2000, 3000}));
   EXPECT_EQ(rig.engine.global_time(), 3000u);
 }
 
@@ -1996,6 +2005,51 @@ TEST(BoundedRunTest, AThrowingHandlerLeavesTheEngineRunnable) {
   EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{2000}));
 }
 
+TEST(BoundedRunTest, ABoundedRunAfterShutdownIsANoOpRatherThanACrash) {
+  // shutdown() destroys every partition context but leaves the startup latch
+  // set, so the lazy startup reports a started engine. Without a check on the
+  // contexts themselves, the release builds this ships as -- where the created_
+  // assert is gone -- index an empty vector.
+  RecorderRig rig;
+  rig.recorder->ask(1000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+
+  rig.engine.shutdown();
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+}
+
+TEST(BoundedRunTest, AHandlerThatShutsTheEngineDownEndsTheRun) {
+  // The loop cannot hold a PartitionContext reference across a handler call:
+  // shutdown() from inside one frees every context, and the loop reads the
+  // partition again on its way out.
+  RecorderRig rig;
+  rig.recorder->event_.set_handler([&](Tick now, Message *) {
+    rig.recorder->fired.push_back(now);
+    rig.engine.shutdown();
+  });
+
+  rig.recorder->ask(1000);
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
+  EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+  EXPECT_FALSE(rig.engine.is_created());
+}
+
+TEST(BoundedRunTest, TheTopologyIsWritableAgainBetweenBoundedRuns) {
+  // A resumable engine's whole point is that the caller gets control back. The
+  // read-only-while-running guard has to end with the run, or "drain, inspect
+  // the model, drain again" aborts on the inspect.
+  RecorderRig rig;
+  rig.recorder->ask(1000);
+  rig.engine.run_until_idle();
+
+  EXPECT_EQ(rig.engine.topology().partitions().size(), 1u);
+
+  rig.recorder->ask(2000);
+  EXPECT_EQ(rig.engine.run_until_idle(), 2000u);
+}
+
 TEST(BoundedRunTest, StopsWhenAComponentRequestsExit) {
   RecorderRig rig;
   rig.recorder->event_.set_handler([&](Tick now, Message *) {
@@ -2007,22 +2061,23 @@ TEST(BoundedRunTest, StopsWhenAComponentRequestsExit) {
   rig.recorder->ask(2000);
   EXPECT_EQ(rig.engine.run_until_idle(), 1000u);
   EXPECT_EQ(rig.recorder->fired, (std::vector<Tick>{1000}));
+  // The tick request_exit() stamped is the one the handler ran at, not the one
+  // before it: this is what the clock being published ahead of the handler buys.
+  EXPECT_TRUE(rig.engine.is_done());
+  EXPECT_EQ(rig.engine.last_exit().reason, ExitReason::EXIT_REQUEST);
+  EXPECT_EQ(rig.engine.last_exit().tick, 1000u);
+  EXPECT_EQ(rig.engine.last_exit().message, "done here");
 }
 
 TEST(BoundedRunTest, StepAndBoundedRunShareOneLazyStartup) {
   // Both start the engine on their first call. Mixing them must not start it
   // twice, which would double-schedule every component's first event.
   const ClockDomain domain("ghz", 1'000'000'000ULL);
-  SimulationEngine engine({});
-  auto root = std::make_unique<CompositeComponent>("root");
-  auto *recorder =
-      static_cast<EdgeRecorder *>(root->add_child(std::make_unique<EdgeRecorder>(domain, 4)));
-  engine.topology().set_root(std::move(root));
-  engine.create();
+  EdgeRig rig(domain, 4);
 
-  engine.step();
-  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000}));
-  engine.run_until_idle();
-  EXPECT_EQ(recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
-  EXPECT_EQ(engine.events_processed(), 4u);
+  rig.engine.step();
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1000}));
+  rig.engine.run_until_idle();
+  EXPECT_EQ(rig.recorder->edges, (std::vector<Tick>{1000, 2000, 3000, 4000}));
+  EXPECT_EQ(rig.engine.events_processed(), 4u);
 }

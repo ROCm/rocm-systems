@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cassert>
 #include <exception>
-#include <optional>
+#include <new>
 #include <stdexcept>
 #include <string>
 
@@ -26,20 +26,38 @@ namespace {
 /// reports.
 class ExecutionGuard {
 public:
-  /// @throws std::logic_error if the engine is already executing.
-  explicit ExecutionGuard(std::atomic<bool> &executing) : executing_(executing) {
+  /// @brief Claim the engine, or report that someone else holds it. The form
+  /// run() needs, which reports a refusal rather than throwing.
+  ExecutionGuard(std::atomic<bool> &executing, std::nothrow_t) : executing_(executing) {
     bool expected = false;
-    if (!executing_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-      throw std::logic_error("simulation engine is already executing");
+    owned_ = executing_.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
   }
 
-  ~ExecutionGuard() { executing_.store(false, std::memory_order_release); }
+  /// @throws std::logic_error if the engine is already executing.
+  explicit ExecutionGuard(std::atomic<bool> &executing) : ExecutionGuard(executing, std::nothrow) {
+    // The throw runs ~ExecutionGuard(), which is correct precisely because
+    // owned_ is false: it releases nothing it did not claim.
+    if (!owned_)
+      throw std::logic_error(already_executing);
+  }
+
+  ~ExecutionGuard() {
+    if (owned_)
+      executing_.store(false, std::memory_order_release);
+  }
+
+  /// @retval true This guard claimed the engine.
+  explicit operator bool() const { return owned_; }
+
+  /// @brief The one wording both the throw and run()'s ExitStatus report.
+  static constexpr const char *already_executing = "simulation engine is already executing";
 
   ExecutionGuard(const ExecutionGuard &) = delete;
   ExecutionGuard &operator=(const ExecutionGuard &) = delete;
 
 private:
   std::atomic<bool> &executing_;
+  bool owned_ = false;
 };
 
 std::string link_endpoints(const Link &link) {
@@ -83,7 +101,6 @@ void SimulationEngine::create() {
   has_primaries_.store(false, std::memory_order_release);
   exit_status_ = {};
   exit_set_ = false;
-  started_ = false;
   executing_.store(false, std::memory_order_release);
   current_time_.store(0, std::memory_order_release);
   global_lbts_.store(0, std::memory_order_release);
@@ -111,7 +128,6 @@ void SimulationEngine::shutdown() {
   // exception. A failing component hook is reported, not thrown.
   std::exception_ptr component_failure = shutdown_components();
 
-  running_ = false;
   {
     // Exclusive: a foreign thread may be mid-wake or mid-async-schedule on these
     // vectors. Workers are already joined above, so nothing we join can be waiting
@@ -168,12 +184,10 @@ ExitStatus SimulationEngine::run() {
   // Reported rather than thrown: run() may execute on a background thread (the
   // LD_PRELOAD interposer's local VM) whose top-level lambda has no catch, so
   // an escaping exception would call std::terminate.
-  std::optional<ExecutionGuard> execution;
-  try {
-    execution.emplace(executing_);
-  } catch (const std::logic_error &e) {
+  ExecutionGuard execution(executing_, std::nothrow);
+  if (!execution) {
     return ExitStatus(ExitReason::INTERRUPTED, current_time_.load(std::memory_order_acquire),
-                      e.what(), 1);
+                      ExecutionGuard::already_executing, 1);
   }
 
   // A component startup() can throw, and for the same reason it must not escape
@@ -193,7 +207,6 @@ ExitStatus SimulationEngine::run() {
     std::lock_guard<std::mutex> lock(exit_mutex_);
     return exit_status_;
   }
-  running_ = true;
   pacer_.anchor(current_time_.load(std::memory_order_acquire));
 
   if (num_threads == 1) {
@@ -209,7 +222,6 @@ ExitStatus SimulationEngine::run() {
     barrier_.reset();
   }
 
-  running_ = false;
   // Copy under the lock: a foreign thread can still be inside request_exit()
   // assigning exit_status_ as run() unwinds, and the copy reads its message string.
   std::lock_guard<std::mutex> lock(exit_mutex_);
@@ -272,14 +284,14 @@ bool SimulationEngine::wait_until_started() const {
 }
 
 bool SimulationEngine::ensure_started(bool propagate_failure) {
-  if (started_)
-    return true;
-  // A prior startup() throw made this generation terminal (see run()): its
+  // startup_complete_ is the "this generation has been started" flag, latched by
+  // a successful startup below, by fail_startup(), and by the thread-death
+  // backstop. A generation latched by either of the latter two is terminal: its
   // partial event/primary/component state is still live, so re-running startup
   // would double-schedule events and double-register primaries. Report failure;
   // the caller must shutdown() + create() to retry.
-  if (startup_failed())
-    return false;
+  if (startup_complete_.load(std::memory_order_acquire))
+    return !startup_failed();
   // A foreground caller gets the throw after fail_startup() has recorded the
   // same terminal ExitStatus run() would, published it to wait_until_started()
   // waiters, and unwound.
@@ -299,12 +311,9 @@ bool SimulationEngine::ensure_started(bool propagate_failure) {
   if (startup_failed())
     return false;
 
-  started_ = true;
-  // Publish readiness only after every component's startup() has run, so an
-  // embedding that launched run() on a background thread (the LD_PRELOAD
-  // interposer's local VM) does not expose a half-started device.
-  latch_startup(/*failed=*/false);
-
+  // Armed before readiness is latched: latching is what marks this generation
+  // started, so a throw from the push would otherwise leave a permanently
+  // "started" generation with its configured tick cap silently unarmed.
   if (config_.max_ticks > 0 && config_.num_threads == 1) {
     max_ticks_event_.set_handler([this](Tick ts, Message *) {
       set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
@@ -313,6 +322,20 @@ bool SimulationEngine::ensure_started(bool propagate_failure) {
     contexts_[0]->event_queue.push(
         EventQueueEntry{config_.max_ticks, 0, &max_ticks_event_, nullptr});
   }
+
+  // Anchored here rather than in run(), because all three entry points start the
+  // engine through this one. An unanchored PacingController maps wall-now against
+  // a default-constructed epoch, so on a paced engine driven only by step() or
+  // run_bounded() every schedule_event_now() would be stamped at roughly the
+  // machine's uptime. run() re-anchors on each of its own calls, which is what
+  // lets `run_until_idle(); run();` resume without the pacer believing it is
+  // already far behind.
+  pacer_.anchor(current_time_.load(std::memory_order_acquire));
+
+  // Publish readiness only after every component's startup() has run, so an
+  // embedding that launched run() on a background thread (the LD_PRELOAD
+  // interposer's local VM) does not expose a half-started device.
+  latch_startup(/*failed=*/false);
   return true;
 }
 
@@ -322,9 +345,13 @@ bool SimulationEngine::step() {
 
   ExecutionGuard execution(executing_);
 
+  // Checked, not asserted, for the reason spelled out in run_bounded(): a
+  // shutdown() engine still reports itself started.
+  if (contexts_.empty())
+    return false;
+
   if (!ensure_started(/*propagate_failure=*/true))
     return false;
-  running_ = true;
 
   if (done_.load(std::memory_order_acquire))
     return false;
@@ -334,22 +361,21 @@ bool SimulationEngine::step() {
   PartitionContext &ctx = *contexts_[0];
 
   if (ctx.event_queue.empty()) {
-    if (check_termination(TICK_MAX)) {
-      running_ = false;
+    if (check_termination(TICK_MAX))
       return false;
-    }
     return true;
   }
 
   Tick step_tick = ctx.event_queue.next_event_time();
   while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() == step_tick) {
     auto entry = ctx.event_queue.pop();
+    // Published before the handler runs, for the reason spelled out in
+    // run_bounded(): request_exit() and schedule_event_now() read this clock
+    // from inside the handler.
+    current_time_.store(step_tick, std::memory_order_release);
     process_event(ctx, entry);
-    if (done_.load(std::memory_order_acquire)) {
-      current_time_.store(step_tick, std::memory_order_release);
-      running_ = false;
+    if (done_.load(std::memory_order_acquire))
       return false;
-    }
   }
 
   current_time_.store(step_tick, std::memory_order_release);
@@ -357,7 +383,6 @@ bool SimulationEngine::step() {
 }
 
 Tick SimulationEngine::run_bounded(const bool &done) {
-  assert(created_ && "run_bounded() called before create()");
   // Checked rather than asserted, and before anything touches contexts_[0]:
   // popping partition 0's queue while its own worker thread is running it is a
   // data race, and asserts are compiled out of the builds this ships as.
@@ -366,11 +391,17 @@ Tick SimulationEngine::run_bounded(const bool &done) {
 
   ExecutionGuard execution(executing_);
 
+  // Checked for the same reason the partition count is, and it is the likelier
+  // mistake of the two: shutdown() clears contexts_ but leaves the startup latch
+  // set, so ensure_started() below would report a started engine and the deref
+  // would index an empty vector with no diagnostic.
+  if (contexts_.empty())
+    return current_time_.load(std::memory_order_acquire);
+
   if (!ensure_started(/*propagate_failure=*/true))
     return current_time_.load(std::memory_order_acquire);
-  running_ = true;
 
-  PartitionContext &ctx = *contexts_[0];
+  Tick reached = contexts_[0]->current_tick();
   for (;;) {
     // Every iteration, matching what the worker loop does at each of its tick
     // boundaries: this is the one driver whose single call spans many ticks, so
@@ -379,19 +410,27 @@ Tick SimulationEngine::run_bounded(const bool &done) {
     // still invisible in the queue. It costs one acquire load per partition
     // when nothing is pending.
     drain_async_events();
+    // Re-read rather than cached across handler calls: a handler is free to call
+    // shutdown(), which destroys every PartitionContext, and a reference bound
+    // once before the loop would be read again on the way out.
+    if (contexts_.empty())
+      break;
+    PartitionContext &ctx = *contexts_[0];
     if (done || done_.load(std::memory_order_acquire) || ctx.event_queue.empty())
       break;
 
     auto entry = ctx.event_queue.pop();
+    // Published before the handler runs, not after: request_exit() stamps its
+    // tick from this, schedule_event_now() timestamps events from it, and a
+    // handler may read global_time(). Publishing afterwards left all three
+    // reading the previous event's tick, and an async event stamped in the past
+    // sorts ahead of the queue head and rewinds the partition clock.
+    current_time_.store(entry.timestamp, std::memory_order_release);
     process_event(ctx, entry);
-    // Published as it goes, not once on exit: request_exit() stamps its tick
-    // from this, schedule_event_now() timestamps events from it, and a handler
-    // may read global_time(). A single store per event on a path whose event
-    // already costs a handler call.
-    current_time_.store(ctx.current_tick(), std::memory_order_release);
+    reached = entry.timestamp;
   }
 
-  return ctx.current_tick();
+  return reached;
 }
 
 Tick SimulationEngine::run_until_idle() {
@@ -564,8 +603,13 @@ void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &ent
   ctx.event_queue.set_current_tick(entry.timestamp);
 
   if (entry.event->has_handler()) {
-    ctx.events_processed_.fetch_add(1, std::memory_order_relaxed);
     entry.event->execute(entry.timestamp, entry.message.get());
+    // After execute(), so a handler that threw is not counted as work done. A
+    // relaxed load+store rather than fetch_add: the counter has exactly one
+    // writer, and this is the hottest line in the simulator, where a
+    // lock-prefixed read-modify-write costs an order of magnitude more.
+    ctx.events_processed_.store(ctx.events_processed_.load(std::memory_order_relaxed) + 1,
+                                std::memory_order_relaxed);
   }
 }
 
