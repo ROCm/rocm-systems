@@ -92,7 +92,7 @@ concurrency:
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' }}
 
 jobs:
   ci-gate:
@@ -112,9 +112,9 @@ jobs:
     if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
+      skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -131,8 +131,9 @@ jobs:
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
-      - name: Configure CI
-        id: configure
+      - name: Configure CI for pull request
+        id: configure-pr
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -142,6 +143,14 @@ jobs:
             --base-sha "${{ github.event.pull_request.base.sha }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
+
+      - name: Configure CI for manual run
+        id: configure-manual
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "changed_projects=" >> "${GITHUB_OUTPUT}"
+          echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
+          echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
 
   setup:
     needs: [ci-gate, configure]
