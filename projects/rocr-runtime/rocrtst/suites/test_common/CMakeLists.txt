@@ -762,13 +762,16 @@ if(NOT HAVE_HWLOC)
 
   if(HWLOC_LIBRARY)
     add_library(hwloc_imported SHARED IMPORTED)
+    # The bundled thirdparty hwloc is 1.x; expose its matching header through the
+    # imported target's usage requirements so it propagates via
+    # target_link_libraries(${ROCRTST} ${HWLOC_TARGET}) below, independent of
+    # directory/target ordering (and without a global include_directories()).
     set_target_properties(hwloc_imported PROPERTIES
       IMPORTED_LOCATION "${HWLOC_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${ROCRTST_ROOT}/thirdparty/include"
     )
     set(HWLOC_TARGET hwloc_imported)
     set(HAVE_HWLOC TRUE)
-    # The bundled thirdparty hwloc is 1.x; expose its matching header only here.
-    include_directories(${ROCRTST_ROOT}/thirdparty/include/)
     message(STATUS "Found hwloc library (fallback): ${HWLOC_LIBRARY}")
     message(WARNING "Using pre-built hwloc from thirdparty/lib - may have symbol version incompatibilities with TheRock's numa")
   else()
