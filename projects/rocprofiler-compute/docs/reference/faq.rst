@@ -47,25 +47,12 @@ This correction primarily affects L2 cache metrics where counter subtraction is 
 Why does the CLI memory chart look wrapped or garbled?
 =======================================================
 
-The visualized memory chart is a wide terminal diagram (at least 240 columns).
-If the terminal is narrower than the chart, or the terminal wraps long lines,
-boxes and arrows break onto the next line and the layout looks garbled.
+The visualized memory chart needs a terminal width of at least 240 columns.
+If the terminal is narrower or wraps long lines, the diagram breaks across
+lines.
 
-In a terminal, pipe the output to ``less -RS`` so you can scroll horizontally
-without wrapping, while keeping ANSI colors:
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | less -RS
-
-In Visual Studio Code, if you do not need terminal colors, pipe the output into
-the editor:
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 | code -
-
-See :ref:`cli-memory-chart-viewing` in the CLI analysis guide for more detail.
+See :ref:`cli-memory-chart-viewing` for how to page the chart in a terminal
+(``less -RS``) or open it in Visual Studio Code.
 
 How can I SSH tunnel in MobaXterm?
 ==================================
