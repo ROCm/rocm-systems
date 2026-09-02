@@ -63,6 +63,46 @@ static int parseString(const char **p, char *out, int maxLen) {
   return 0;
 }
 
+static int parseJson(const char *buf) {
+  numEntries = 0;
+  const char *p = buf;
+  skipWhitespace(&p);
+  if (*p != '{') return -1;
+  p++;
+
+  while (numEntries < MAX_ENTRIES) {
+    skipWhitespace(&p);
+    if (*p == '}') break;
+
+    // Members after the first must be separated by exactly one comma, and a comma has to
+    // be followed by another member. Without this a file with a missing or trailing comma
+    // parsed as valid and applied part of its settings with no error.
+    if (numEntries > 0) {
+      if (*p != ',') return -1;
+      p++;
+      skipWhitespace(&p);
+      if (*p == '}' || *p == ',') return -1;
+    }
+
+    if (parseString(&p, entries[numEntries].key, MAX_KEY_LEN) != 0) return -1;
+
+    skipWhitespace(&p);
+    if (*p != ':') return -1;
+    p++;
+
+    if (parseString(&p, entries[numEntries].value, MAX_VAL_LEN) != 0) return -1;
+
+    numEntries++;
+  }
+
+  // Consume the closing brace and require nothing but whitespace after it, so a file that
+  // merely starts with valid JSON is not accepted as a whole config.
+  if (*p != '}') return -1;
+  p++;
+  skipWhitespace(&p);
+  return (*p == '\0') ? 0 : -1;
+}
+
 static int loadJsonFile(const char *path) {
   FILE *f = fopen(path, "r");
   if (!f) return -1;
@@ -76,51 +116,9 @@ static int loadJsonFile(const char *path) {
   if (readErr || n > MAX_FILE_SIZE) { free(buf); return -1; }
   buf[n] = '\0';
 
-  numEntries = 0;
-  const char *p = buf;
-  skipWhitespace(&p);
-  if (*p != '{') { free(buf); return -1; }
-  p++;
-
-  while (numEntries < MAX_ENTRIES) {
-    skipWhitespace(&p);
-    if (*p == '}') break;
-
-    // Members after the first must be separated by exactly one comma, and a comma has to
-    // be followed by another member. Without this a file with a missing or trailing comma
-    // parsed as valid and applied part of its settings with no error.
-    if (numEntries > 0) {
-      if (*p != ',') { free(buf); return -1; }
-      p++;
-      skipWhitespace(&p);
-      if (*p == '}' || *p == ',') { free(buf); return -1; }
-    }
-
-    if (parseString(&p, entries[numEntries].key, MAX_KEY_LEN) != 0) {
-      free(buf);
-      return -1;
-    }
-
-    skipWhitespace(&p);
-    if (*p != ':') { free(buf); return -1; }
-    p++;
-
-    if (parseString(&p, entries[numEntries].value, MAX_VAL_LEN) != 0) {
-      free(buf);
-      return -1;
-    }
-
-    numEntries++;
-  }
-
-  // Consume the closing brace and require nothing but whitespace after it, so a file that
-  // merely starts with valid JSON is not accepted as a whole config.
-  if (*p != '}') { free(buf); return -1; }
-  p++;
-  skipWhitespace(&p);
-  int ok = (*p == '\0') ? 0 : -1;
+  int result = parseJson(buf);
   free(buf);
-  return ok;
+  return result;
 }
 
 static ncclResult_t ncclEnvJsonInit(uint8_t ncclMajor, uint8_t ncclMinor,
