@@ -2968,6 +2968,23 @@ patch proof, descriptor accounting, and independent instruction validation.
 The three flattened patch fields and the validator's partial-tuple checks are
 gone; absence is represented only by the optional complete tuple.
 
+Vector owner/epoch effects now retain the registers actually initialized or
+consumed, not a projection of the earlier operating point. One
+`ConSanMoiVgprStateEffect` owns the indivisible pair, optional compact-
+workgroup key, exact Record/Replay workgroup tuple, and transient,
+code-object-persistent, or owner-local-persistent lifetime. This distinction is
+important for Inline Shadow: scalar and private persistence can materialize
+probe-local owner/epoch scratch at registers different from the operating-point
+proposal. Prologue and atomic planning therefore construct the effect from
+their final registers, and final validation consumes that committed proof.
+
+SuperCollider scalar VCC-save fallback also has one mode-owned value.
+`ConSanSuperColliderScalarVccSpill` carries the borrowed scalar source,
+reservoir base, and exact packed-lane, private-spill, or dynamic-stack strategy
+through FLAT/LDS candidate planning, patch proof, diagnostics, and final
+validation. The three independently mutable patch and diagnostic fields and
+their projection logic are gone; stable hook logging is derived at its edge.
+
 ### Slice 4X: delete mirrored owner and dispatch allocation flags
 
 - **Authoritative allocation facts:** The selected owner and dispatch-ID
@@ -5797,12 +5814,12 @@ analysis completed.
   Release-transaction validation reads the exact atomic patch instead of a
   code-object-wide result mirror.
 - **Persistent state is distinguished from entry scratch:** The lifetime is a
-  three-state value: entry-local scratch, code-object-wide persistent ABI, or
-  owner-local persistent ABI. This replaces two booleans that could describe
-  contradictory states and prevents a scalar-persistent prologue's temporary
-  vector carrier from masquerading as vector persistence, while retaining
-  hybrid vector-owner/scalar-workgroup configurations. The contract also owns
-  destination distinctness and the descriptor high-water calculation.
+  three-state value: transient entry/probe scratch, code-object-wide persistent
+  ABI, or owner-local persistent ABI. This replaces two booleans that could
+  describe contradictory states and prevents scalar- or private-persistent
+  temporary vector carriers from masquerading as vector persistence, while
+  retaining hybrid vector-owner/scalar-workgroup configurations. The contract
+  also owns destination distinctness and the descriptor high-water calculation.
 - **Tests consume durable contracts:** Global and per-owner test reporting
   helpers derive their views only from emitted patches. Existing placement and
   instruction tests continue to cover explicit and automatic registers,

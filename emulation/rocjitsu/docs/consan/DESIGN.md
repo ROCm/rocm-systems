@@ -768,15 +768,26 @@ Entry-prologue vector state has the same retained-value discipline.
 `ConSanMoiVgprStateEffect` carries one indivisible owner/epoch pair, the
 optional compact-workgroup key, and the exact Record/Replay workgroup tuple.
 Its three-state lifetime says whether the owner/epoch pair is entry-only
-scratch, the code-object-wide persistent ABI, or an owner-local persistent
-ABI; two independently mutable booleans cannot describe contradictory states.
+or probe-local transient scratch, the code-object-wide persistent ABI, or an
+owner-local persistent ABI; two independently mutable booleans cannot describe
+contradictory states.
 The value proves that all published destinations are distinct and computes
 their descriptor high-water mark. Prologue planning retains it through
 emission and patch publication, Inline Shadow atomic planning publishes the
 same contract for its consumer, and final validation reuses its structural
 invariant before independently checking emitted instructions and descriptor
-growth. Workgroup destinations remain persistent state even when scalar
-owner/epoch selection makes only the pair entry-local.
+growth. Workgroup destinations remain persistent state even when scalar or
+private owner/epoch selection makes only the pair transient.
+
+SuperCollider scalar-pressure preservation is similarly one mode-local
+effect. `ConSanSuperColliderScalarVccSpill` keeps the borrowed scalar VCC-save
+source, first reservoir VGPR, and exact packed-lane, private-spill, or dynamic-
+stack-bootstrap strategy indivisible from candidate selection through patch
+proof and transform diagnostics. FLAT and LDS lowering consume that value
+directly while emitting the save/restore sequence. Final validation rejects
+invalid strategy widths and overflowing reservoir ranges, and the hook derives
+its stable scalar-spill debug fields from the typed value rather than retaining
+a second schema.
 
 Probe preservation now has a cross-engine resource boundary.
 `MoiPlannedProbeResources` is the placement-to-emission state shared by

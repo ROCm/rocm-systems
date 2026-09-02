@@ -9279,7 +9279,7 @@ owner/epoch VGPRs were only per-kernel initialization scratch.
 
 The converged path retains one `ConSanMoiVgprStateEffect`: an indivisible
 owner/epoch pair, optional compact-workgroup key, exact Record/Replay workgroup
-tuple, and an explicit three-state owner/epoch lifetime. Entry-local,
+tuple, and an explicit three-state owner/epoch lifetime. Transient,
 code-object-persistent, and owner-local-persistent are now the only
 representable lifetime states. The contract proves that every destination is
 in range and distinct and computes the combined descriptor high-water mark.
@@ -9332,3 +9332,72 @@ must be deletion-bearing and should exploit the newly retained effect or an
 adjacent broad patch/operating-point boundary. Full target and mode locality,
 remaining broad transaction surfaces, final extension-proof revalidation, and
 the independent Section 14 audit remain open, so the goal remains active.
+
+### 16.134 Convergence checkpoint 133: exact scalar preservation effects
+
+The next patch-ABI trace followed SuperCollider's scalar VCC-save preservation
+from FLAT and LDS candidate selection through native save/restore emission,
+patch publication, diagnostic projection, hook logging, tests, and final
+validation. Candidate and committed patch state represented one preservation
+decision as three independently mutable fields: the borrowed scalar source,
+first reservoir VGPR, and reservoir count. The count implicitly selected three
+different protocols—one packed-lane reservoir, two private-spill reservoirs,
+or four dynamic-stack bootstrap reservoirs—without naming that semantic
+choice.
+
+The converged path retains one optional
+`ConSanSuperColliderScalarVccSpill`. Its mode-named narrow contract owns the
+scalar source, reservoir base, and explicit packed-lane, private-spill, or
+dynamic-stack-bootstrap strategy. FLAT and LDS candidates carry the value
+unchanged into `ConSanPatchAbiEffects`; transform diagnostics retain the same
+value; and the hook derives its stable three debug-log fields only at the
+rendering edge. Native emission now checks the named strategy it implements,
+while final validation rejects invalid strategy values and reservoir overflow.
+Structural enforcement requires the mode-local contract, rejects the three
+flattened spellings at every migrated boundary, and prevents target, MOI, or
+report-policy vocabulary from entering the value.
+
+This trace also exposed a checkpoint-132 correctness bug. The deleted
+`note_moi_persistent_vgpr_state` helper copied the operating-point owner/epoch
+registers into an Inline Shadow atomic patch even when scalar or private
+persistence had rematerialized that pair in probe-local scratch. Atomic
+planning now constructs `ConSanMoiVgprStateEffect` from the actual materialized
+owner/epoch pair and cached workgroup-key register. The lifetime name is
+`Transient`, covering both entry- and probe-local scratch, and one shared
+resolver distinguishes it from code-object and owner-local persistent state.
+The existing scalar-persistent acquire regression now asserts the exact
+materialized pair and transient lifetime; it would have failed against the
+deleted helper. The helper, its declaration, two unused imports, and the
+effect's unused comparison operator are gone.
+
+| Signal | Checkpoint 133 | Cumulative change | Slice change from checkpoint 132 |
+| --- | ---: | ---: | ---: |
+| Production files | 301 | +72 | +1 mode-local contract |
+| Physical production lines | 102,661 | **-2,315** | **-1** |
+| Nonblank production lines | 96,279 | **-2,805** | **-2** |
+| Production implementation lines | 88,517 | **-2,933** | **-1** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **259 / 51** | **-31 / 0** | **-4 / 0** |
+| Flattened SuperCollider scalar-VCC patch fields | **0** | n/a | **-3** |
+| Test inventory | **5,417** | **+72** | **+1** |
+
+The implementation is committed as `689ee2293df`. Validation includes two
+successful compiler-clean `-j16` rebuilds, the architecture-boundary and four
+owning typed-effect/regression tests, all **1,300/1,300** nonphysical
+`ConSan.*` and `ConSanMoi.*` host/component tests, and all **2,918/2,918**
+simulator-device tests across Record/Replay, Sampled, InlineShadow,
+SuperCollider, gfx942, gfx950, gfx1100, gfx1201, and gfx1250. The final dead-
+comparison deletion was followed by the second complete rebuild and focused
+rerun; it changes no executable behavior. No test was removed, renamed,
+disabled, or replaced, and no physical test was run.
+
+This checkpoint pays checkpoint 132's required next-checkpoint deletion debt:
+the complete two-checkpoint pair is 42 implementation lines larger, but the
+second checkpoint itself is deletion-bearing and removes a faulty parallel
+authority rather than retaining it behind the new effect. It strengthens
+Sections 14.1, 14.3, 14.5, 14.6, 14.7, 14.8, and 14.9. Full target and mode
+locality, remaining broad transaction and operating-point surfaces, final
+extension-proof revalidation, and the independent Section 14 audit remain
+open, so the goal remains active.
