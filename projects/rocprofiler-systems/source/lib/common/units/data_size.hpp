@@ -3,15 +3,13 @@
 
 #pragma once
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/base.h>
 
 #include <compare>
-#include <concepts>
 #include <cstdint>
 #include <ratio>
 #include <string_view>
 #include <type_traits>
-#include <utility>
 
 #include "common/units/quantity.hpp"
 
@@ -66,7 +64,7 @@ public:
 
 namespace detail
 {
-inline constexpr std::intmax_t BYTES_PER_KIB = 1024LL;
+inline constexpr std::intmax_t k_bytes_per_kib = 1024LL;
 }  // namespace detail
 
 using bytes = data_size<double, std::ratio<1>>;
@@ -78,15 +76,15 @@ using gigabytes = data_size<double, std::giga>;
 using terabytes = data_size<double, std::tera>;
 
 /// Binary (IEC) sizes: 1 KiB = 1024 B. Suffixes "KiB", "MiB", "GiB", "TiB".
-using kibibytes = data_size<double, std::ratio<detail::BYTES_PER_KIB>>;
+using kibibytes = data_size<double, std::ratio<detail::k_bytes_per_kib>>;
 using mebibytes =
-    data_size<double, std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB>>;
+    data_size<double, std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib>>;
 using gibibytes =
-    data_size<double, std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB *
-                                 detail::BYTES_PER_KIB>>;
+    data_size<double, std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib *
+                                 detail::k_bytes_per_kib>>;
 using tebibytes =
-    data_size<double, std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB *
-                                 detail::BYTES_PER_KIB * detail::BYTES_PER_KIB>>;
+    data_size<double, std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib *
+                                 detail::k_bytes_per_kib * detail::k_bytes_per_kib>>;
 
 namespace detail
 {
@@ -117,49 +115,49 @@ struct data_size_suffix;
 template <>
 struct data_size_suffix<std::ratio<1>>
 {
-    static constexpr std::string_view VALUE = "B";
+    static constexpr std::string_view k_value = "B";
 };
 template <>
 struct data_size_suffix<std::kilo>
 {
-    static constexpr std::string_view VALUE = "KB";
+    static constexpr std::string_view k_value = "KB";
 };
 template <>
 struct data_size_suffix<std::mega>
 {
-    static constexpr std::string_view VALUE = "MB";
+    static constexpr std::string_view k_value = "MB";
 };
 template <>
 struct data_size_suffix<std::giga>
 {
-    static constexpr std::string_view VALUE = "GB";
+    static constexpr std::string_view k_value = "GB";
 };
 template <>
 struct data_size_suffix<std::tera>
 {
-    static constexpr std::string_view VALUE = "TB";
+    static constexpr std::string_view k_value = "TB";
 };
 template <>
-struct data_size_suffix<std::ratio<detail::BYTES_PER_KIB>>
+struct data_size_suffix<std::ratio<detail::k_bytes_per_kib>>
 {
-    static constexpr std::string_view VALUE = "KiB";
+    static constexpr std::string_view k_value = "KiB";
 };
 template <>
-struct data_size_suffix<std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB>>
+struct data_size_suffix<std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib>>
 {
-    static constexpr std::string_view VALUE = "MiB";
+    static constexpr std::string_view k_value = "MiB";
 };
 template <>
-struct data_size_suffix<
-    std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB * detail::BYTES_PER_KIB>>
+struct data_size_suffix<std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib *
+                                   detail::k_bytes_per_kib>>
 {
-    static constexpr std::string_view VALUE = "GiB";
+    static constexpr std::string_view k_value = "GiB";
 };
 template <>
-struct data_size_suffix<std::ratio<detail::BYTES_PER_KIB * detail::BYTES_PER_KIB *
-                                   detail::BYTES_PER_KIB * detail::BYTES_PER_KIB>>
+struct data_size_suffix<std::ratio<detail::k_bytes_per_kib * detail::k_bytes_per_kib *
+                                   detail::k_bytes_per_kib * detail::k_bytes_per_kib>>
 {
-    static constexpr std::string_view VALUE = "TiB";
+    static constexpr std::string_view k_value = "TiB";
 };
 
 /**
@@ -258,6 +256,6 @@ struct fmt::formatter<rocprofsys::common::units::data_size<Rep, Scale>>
     {
         using rocprofsys::common::units::data_size_suffix;
         auto out = fmt::formatter<Rep>::format(value.count(), ctx);
-        return fmt::format_to(out, " {}", data_size_suffix<Scale>::VALUE);
+        return fmt::format_to(out, " {}", data_size_suffix<Scale>::k_value);
     }
 };

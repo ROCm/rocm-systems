@@ -27,7 +27,6 @@
 #include "logger/debug.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <ctime>
 #include <execinfo.h>
 #include <type_traits>

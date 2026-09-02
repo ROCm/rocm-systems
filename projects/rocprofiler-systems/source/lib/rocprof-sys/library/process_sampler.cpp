@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace rocprofsys
@@ -73,17 +74,20 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
         "Background process sampling polling at an interval of {:.2f} seconds...",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
 
-    auto _duration = config::get_process_sampling_duration();
-    if(_duration < 0.0) _duration = config::get_sampling_duration();
-    const bool _has_duration = (_duration > 0.0);
+    auto duration = config::get_process_sampling_duration();
+    if(duration < 0.0)
+    {
+        duration = config::get_sampling_duration();
+    }
+    const bool has_duration = (duration > 0.0);
 
-    auto _now = std::chrono::steady_clock::now();
-    auto _end = _now + std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           std::chrono::duration<double>{ _duration });
+    auto       now = std::chrono::steady_clock::now();
+    const auto end = now + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::duration<double>{ duration });
     while(_state && _state->load() < state::process::Finalized &&
           state::process::get() < state::process::Finalized)
     {
-        std::this_thread::sleep_until(_now);
+        std::this_thread::sleep_until(now);
         if(_state->load() != state::process::Active) continue;
         if(state::process::get() >= state::process::Finalized) break;
         if(state::process::get() != state::process::Active) continue;
@@ -92,18 +96,21 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
         for(auto& itr : instances)
             itr->sample();
         get_sampler_is_sampling().store(false);
-        if(_has_duration && _now >= _end) break;
-        _now = std::chrono::steady_clock::now() + _interval;
+        if(has_duration && now >= end)
+        {
+            break;
+        }
+        now = std::chrono::steady_clock::now() + _interval;
     }
 
     // ensure this is always false
     get_sampler_is_sampling().store(false);
 
-    if(_has_duration && _now >= _end && state::process::get() < state::process::Finalized)
+    if(has_duration && now >= end && state::process::get() < state::process::Finalized)
     {
         LOG_DEBUG("Background process sampling duration of {:.2f} seconds has elapsed. "
                   "Shutting down process sampling...",
-                  _duration);
+                  duration);
     }
 
     LOG_DEBUG("Thread sampler polling completed...");
@@ -139,16 +146,16 @@ sampler::setup()
 
     polling_finished = std::make_unique<promise_t>();
 
-    const auto _freq     = get_process_sampling_freq();
-    const auto _interval = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>{ 1.0 / _freq });
+    const auto freq     = get_process_sampling_freq();
+    const auto interval = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / freq });
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     set_state(state::process::PreInit);
     using poll_fn = void (*)(std::atomic<state::process::State>*, nsec_t, promise_t*);
-    get_thread()  = std::make_unique<std::thread>(
-        static_cast<poll_fn>(&poll), &get_sampler_state(), _interval, nullptr);
+    get_thread()  = std::make_unique<std::thread>(static_cast<poll_fn>(&poll),
+                                                  &get_sampler_state(), interval, nullptr);
 
     set_state(state::process::Active);
 }

@@ -488,7 +488,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     double _duration_sec =
         config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
             .value_or(0.0);
-    auto _duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
+    const auto duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
         std::chrono::duration<double>{ _duration_sec });
 
     if(_delay_sec > 0.0)
@@ -504,7 +504,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         if(_duration_sec > 1.0e-3)
         {
             auto _elapsed = clock_type::now() - _start_time;
-            if(_elapsed >= _duration_nsec)
+            if(_elapsed >= duration_nsec)
             {
                 LOG_DEBUG("[causal] stopping experimentation after {} seconds "
                           "(elapsed: {} seconds)...",

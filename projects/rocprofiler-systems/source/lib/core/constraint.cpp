@@ -242,30 +242,37 @@ spec::operator()(const stages& _stages) const
 
     while(state::process::get() < state::process::Active)
     {
-        std::this_thread::sleep_for(1us);
+        std::this_thread::sleep_for(std::chrono::microseconds{ 1 });
     }
 
     for(std::uint64_t i = 0; i < _n; ++i)
     {
-        auto _spec = spec{ clock_id, delay, duration, i, repeat };
-        auto _wait = [_spec](const auto& _func, auto _dur) {
-            auto _ret = true;
-            auto _now = get_clock_now(_spec.clock_id.value);
-            auto _del = _dur * std::nano::den;
-            auto _end = _now + _del;
-            while(get_clock_now(_spec.clock_id.value) < _end && (_ret = _func(_spec)))
+        auto       specifications = spec{ clock_id, delay, duration, i, repeat };
+        const auto wait           = [specifications](const auto& func, auto dur) {
+            auto       ret = true;
+            const auto now = get_clock_now(specifications.clock_id.value);
+            const auto del = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::duration<double>{ dur })
+                                 .count();
+            const auto end = now + del;
+            while(get_clock_now(specifications.clock_id.value) < end)
             {
+                ret = func(specifications);
+                if(!ret)
+                {
+                    break;
+                }
             }
-            return _ret;
+            return ret;
         };
 
         LOG_DEBUG("Executing constraint spec {} of {} :: delay: {:.3f}, "
                   "duration: {:.3f}, clock: {}",
-                  i, _spec.repeat, _spec.delay, _spec.duration,
-                  _spec.clock_id.as_string());
-        if(_stages.init(_spec) && _wait(_stages.wait, _spec.delay) &&
-           _stages.start(_spec) && _wait(_stages.collect, _spec.duration) &&
-           _stages.stop(_spec))
+                  i, specifications.repeat, specifications.delay, specifications.duration,
+                  specifications.clock_id.as_string());
+        if(_stages.init(specifications) && wait(_stages.wait, specifications.delay) &&
+           _stages.start(specifications) &&
+           wait(_stages.collect, specifications.duration) && _stages.stop(specifications))
         {
         }
         else
