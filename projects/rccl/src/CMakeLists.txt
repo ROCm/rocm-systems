@@ -523,6 +523,7 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
+    src/include/nccl_device/gin/rocshmem_gda/containers/free_list.hpp
     src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
     src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
   )
