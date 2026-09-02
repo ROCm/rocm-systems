@@ -966,6 +966,16 @@ if(_moi_barrier_planning MATCHES
         "private barrier planning must derive owner/layout facts and return descriptor effects once"
     )
 endif()
+if(_moi_barrier_planning MATCHES
+       "persistent_epoch_vgpr_requirements" OR
+   NOT _moi_barrier_planning MATCHES
+       "moi_persistent_vgpr_assignment[(]result[.]moi_operating_point, owner[)]" OR
+   NOT _moi_barrier_planning MATCHES
+       "note_maximum_descriptor_extent[^;]*visible_evidence_vgpr_requirements, owner")
+    message(FATAL_ERROR
+        "barrier persistent-VGPR requirements must be derived from emitted owner scope"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES

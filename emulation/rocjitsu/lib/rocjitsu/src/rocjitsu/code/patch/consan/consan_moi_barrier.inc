@@ -405,7 +405,6 @@ void try_apply_shared_barrier_patch(
 
   std::vector<PlannedBarrierLowering> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
-  MoiDescriptorVgprRequirements persistent_epoch_vgpr_requirements;
   MoiSpillManagers visible_evidence_spill_managers;
   MoiDescriptorVgprRequirements visible_evidence_vgpr_requirements;
   MoiDescriptorSgprRequirements visible_evidence_sgpr_requirements;
@@ -458,33 +457,6 @@ void try_apply_shared_barrier_patch(
                                         planned->patch_abi.required_private_segment_size);
         planned_candidates.push_back(std::move(*planned));
       }
-    }
-  }
-  if (operating_point.moi_persistent_sgprs.complete()) {
-    // The owner-kernel entry prologue grows each descriptor for this scalar
-    // tuple after all emitted patch ownership is known.
-  } else if (operating_point.automatic_moi_persistent_vgprs) {
-    for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
-      const ConSanCandidateResourcePlan *plan =
-          resource_plan_index.find(candidate.site.text_offset);
-      if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
-        result.warnings.emplace_back(
-            "ConSan MOI inline barrier has no owned automatic persistent-state scope");
-        continue;
-      }
-      for (uint64_t descriptor_offset : plan->owner_descriptor_file_offsets) {
-        const auto *assignment =
-            moi_persistent_vgpr_assignment(result.moi_operating_point, descriptor_offset);
-        if (assignment)
-          persistent_epoch_vgpr_requirements[descriptor_offset] =
-              static_cast<uint16_t>(assignment->owner_epoch_vgprs.epoch + 1u);
-      }
-    }
-  } else if (!operating_point.automatic_moi_private_epoch) {
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      persistent_epoch_vgpr_requirements.emplace(
-          kernel.descriptor_file_offset,
-          static_cast<uint32_t>(operating_point.moi_owner_epoch_vgprs->epoch) + 1u);
     }
   }
   for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
@@ -1414,8 +1386,22 @@ void try_apply_shared_barrier_patch(
     emitted_owner_descriptors.insert(patch.owner_descriptor_file_offsets.begin(),
                                      patch.owner_descriptor_file_offsets.end());
   }
-  merge_maximum_descriptor_extents(visible_evidence_vgpr_requirements,
-                                   persistent_epoch_vgpr_requirements);
+  if (!operating_point.moi_persistent_sgprs.complete()) {
+    if (operating_point.automatic_moi_persistent_vgprs) {
+      for (uint64_t owner : emitted_owner_descriptors) {
+        const auto *assignment = moi_persistent_vgpr_assignment(result.moi_operating_point, owner);
+        if (assignment)
+          note_maximum_descriptor_extent(
+              visible_evidence_vgpr_requirements, owner,
+              static_cast<uint16_t>(assignment->owner_epoch_vgprs.epoch + 1u));
+      }
+    } else if (!operating_point.automatic_moi_private_epoch) {
+      const uint16_t required_vgprs = operating_point.moi_owner_epoch_vgprs->epoch + 1u;
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+        note_maximum_descriptor_extent(visible_evidence_vgpr_requirements,
+                                       kernel.descriptor_file_offset, required_vgprs);
+    }
+  }
   merge_maximum_descriptor_extents(visible_evidence_private_requirements, private_requirements);
   const auto retain_emitted_owners = [&](auto &requirements) {
     if (has_unscoped_emitted_patch)
