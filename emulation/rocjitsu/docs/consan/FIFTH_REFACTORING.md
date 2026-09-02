@@ -10575,3 +10575,66 @@ in the context of the remaining component boundary rather than merely rename
 them.  Full target/mode locality, broad transaction and operating-point
 reduction, extension-proof revalidation, and the independent Section 14 audit
 remain open.
+
+### 16.153 Convergence checkpoint 152: mode-neutral barrier geometry
+
+The follow-on ownership trace distinguished two concepts which the old names
+had conflated.  A compact seven-word indirect island is a shared placement
+mechanism consumed by Record/Replay access, Sampled access and synchronization,
+mode planning, and common barrier lowering.  The two-word relay spine and the
+twenty-word borrowed entry, by contrast, are Record/Replay policy.  Keeping all
+of these facts under Record/Replay names either made shared consumers appear to
+depend on that mode or encouraged genuinely mode-specific geometry to remain in
+the common placement contract.
+
+The seven-word constant and its entry-size helper now have mode-neutral
+`MoiCompact` names in the shared placement contract.  The relay size, relay-slot
+size, and borrowed-entry size moved to the Record/Replay contract beside their
+only mode consumers.  The shared barrier code consequently contains no
+Record/Replay geometry symbol.
+
+The common reservation validator had one deeper dependency: it recognized the
+special nine-word Record/Replay slot in order to protect only the seven-word
+barrier prefix and allow branches in the trailing relay pair.  The reservation
+product now publishes `protected_prefix_words`.  InlineShadow declares its full
+slot protected; Record/Replay declares either its full slot or the compact
+prefix of a relay-spine slot.  Common validation checks those explicit bounds
+and contents without knowing which mode selected the layout.  This adds one
+field while removing a mode-specific layout switch from the shared mechanism.
+
+The architecture-boundary gate requires both producers to populate the exact
+prefix, requires the shared compact contract and its consumers to retain
+mode-neutral names, and requires all three relay/borrowed-entry constants to
+remain in the Record/Replay owner.  It rejects restoration of either historical
+Record/Replay-shaped shared symbol.
+
+| Signal | Checkpoint 152 | Cumulative change | Slice change from checkpoint 151 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,600 | **-2,376** | +2 |
+| Nonblank production lines | 96,183 | **-2,901** | +2 |
+| Production implementation lines | 88,397 | **-3,053** | +2 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| Record/Replay geometry symbols in shared barrier/placement owners | **0** | n/a | **-5 symbols** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `a55c97d488e`.  Validation includes a
+successful full `-j16` build; the architecture-boundary gate and all **109/109**
+barrier-named host tests; and **50/50** focused Record/Replay, InlineShadow, and
+Sampled fence/barrier-publication, sparse-dense, and dense branch-only simulator
+cases across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.  Checkpoint 151
+supplies the immediately preceding complete **1,150/1,150** Record/Replay plus
+InlineShadow five-target simulator matrix.  No test was removed, renamed,
+disabled, or replaced, and no physical GPU test was run.
+
+The two-line production investment is an explicit product field which deletes
+a shared-to-mode policy peephole and makes the next producer independent of
+hard-coded mode recognition.  It follows checkpoint 151's 94-line deletion;
+the next convergence work must seek its deletion payoff rather than accumulate
+further representational fields.  The aggregate barrier translation unit still
+compiles mode bodies beside the common mechanism.  Full target/mode locality,
+broad transaction and operating-point reduction, extension-proof revalidation,
+and the independent Section 14 audit remain open.
