@@ -72,6 +72,97 @@ private:
   bool saved_;
 };
 
+struct ExactF64Sum {
+  double value;
+  double error;
+};
+
+/// @brief Add two finite F64 values while retaining the exact rounding residual.
+inline ExactF64Sum add_exact(double lhs, double rhs) {
+  const double value = lhs + rhs;
+  const double rhs_virtual = value - lhs;
+  const double error = (lhs - (value - rhs_virtual)) + (rhs - rhs_virtual);
+  return {value, error};
+}
+
+/// @brief Compare an exact two-component sum with an exactly representable value.
+inline int compare_exact(ExactF64Sum sum, double value) {
+  if (sum.value < value)
+    return -1;
+  if (sum.value > value)
+    return 1;
+  return sum.error < 0.0 ? -1 : sum.error > 0.0 ? 1 : 0;
+}
+
+inline uint16_t next_up_bf16(uint16_t value) {
+  if ((value & 0x7fffu) > 0x7f80u || value == 0x7f80u)
+    return value;
+  if (value == 0xff80u)
+    return 0xff7fu;
+  if ((value & 0x7fffu) == 0)
+    return 0x0001u;
+  return static_cast<uint16_t>((value & 0x8000u) != 0 ? value - 1u : value + 1u);
+}
+
+inline uint16_t next_down_bf16(uint16_t value) {
+  if ((value & 0x7fffu) > 0x7f80u || value == 0xff80u)
+    return value;
+  if (value == 0x7f80u)
+    return 0x7f7fu;
+  if ((value & 0x7fffu) == 0)
+    return 0x8001u;
+  return static_cast<uint16_t>((value & 0x8000u) != 0 ? value + 1u : value - 1u);
+}
+
+inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
+  constexpr double kMaxBf16 = 0x1.fep127;
+  constexpr double kRneOverflowThreshold = 0x1.ffp127;
+  const int zero_cmp = compare_exact(sum, 0.0);
+
+  if (compare_exact(sum, kMaxBf16) > 0) {
+    if ((round_mode & 3u) == 1u ||
+        ((round_mode & 3u) == 0u && compare_exact(sum, kRneOverflowThreshold) >= 0))
+      return 0x7f80u;
+    return 0x7f7fu;
+  }
+  if (compare_exact(sum, -kMaxBf16) < 0) {
+    if ((round_mode & 3u) == 2u ||
+        ((round_mode & 3u) == 0u && compare_exact(sum, -kRneOverflowThreshold) <= 0))
+      return 0xff80u;
+    return 0xff7fu;
+  }
+
+  const float approximation = static_cast<float>(sum.value);
+  const uint16_t candidate = util::f32_to_bf16_rne(approximation);
+  const double candidate_value = util::bf16_to_f32(candidate);
+  const int candidate_cmp = compare_exact(sum, candidate_value);
+  if (candidate_cmp == 0)
+    return candidate;
+
+  const uint16_t lower = candidate_cmp > 0 ? candidate : next_down_bf16(candidate);
+  const uint16_t upper = candidate_cmp < 0 ? candidate : next_up_bf16(candidate);
+  switch (round_mode & 3u) {
+  case 0: {
+    const double midpoint =
+        (static_cast<double>(util::bf16_to_f32(lower)) + util::bf16_to_f32(upper)) * 0.5;
+    const int midpoint_cmp = compare_exact(sum, midpoint);
+    if (midpoint_cmp < 0)
+      return lower;
+    if (midpoint_cmp > 0)
+      return upper;
+    return (lower & 1u) == 0 ? lower : upper;
+  }
+  case 1:
+    return upper;
+  case 2:
+    return lower;
+  case 3:
+    return zero_cmp < 0 ? upper : lower;
+  default:
+    return candidate;
+  }
+}
+
 } // namespace detail
 
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
@@ -117,6 +208,37 @@ inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
   if ((value & 0x7f80u) == 0 && (value & 0x007fu) != 0)
     value &= 0x8000u;
   return (value & 0x7fffu) == 0 ? 0 : value;
+}
+
+/// @brief Execute an F32-source fused multiply-add and round once to BF16.
+/// @details An F32 product is exact in F64. The error-free sum retains the exact addend residual,
+/// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
+inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
+                                uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
+  if (!std::isfinite(multiplicand) || !std::isfinite(multiplier) || !std::isfinite(addend)) {
+    float result = std::fma(multiplicand, multiplier, addend);
+    if (clamp) {
+      if ((clamp_nan_to_zero && std::isnan(result)) || result <= 0.0f)
+        result = 0.0f;
+      else if (result > 1.0f)
+        result = 1.0f;
+    }
+    return util::f32_to_bf16_round(result, round_mode);
+  }
+
+  const double product = static_cast<double>(multiplicand) * static_cast<double>(multiplier);
+  const detail::ExactF64Sum exact = detail::add_exact(product, static_cast<double>(addend));
+  if (exact.value == 0.0 && exact.error == 0.0) {
+    detail::ScopedFenv environment(round_mode);
+    return util::f32_to_bf16_round(std::fma(multiplicand, multiplier, addend), round_mode);
+  }
+  if (clamp) {
+    if (detail::compare_exact(exact, 0.0) <= 0)
+      return 0;
+    if (detail::compare_exact(exact, 1.0) > 0)
+      return 0x3f80u;
+  }
+  return detail::round_exact_to_bf16(exact, round_mode);
 }
 
 inline float finalize_omod_f32(float value, uint32_t omod) {

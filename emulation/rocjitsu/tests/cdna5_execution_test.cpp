@@ -1870,21 +1870,29 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
 
 TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
   struct TestCase {
-    uint32_t input;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t src2;
     std::array<uint16_t, 4> expected;
   };
   constexpr std::array test_cases{
-      TestCase{0x3f800000u, {0x3f80u, 0x3f80u, 0x3f80u, 0x3f80u}}, // Exact.
-      TestCase{0x3f807fffu, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}}, // Below tie.
-      TestCase{0x3f808000u, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}}, // Positive tie.
-      TestCase{0x3f808001u, {0x3f81u, 0x3f81u, 0x3f80u, 0x3f80u}}, // Positive.
-      TestCase{0x3f818000u, {0x3f82u, 0x3f82u, 0x3f81u, 0x3f81u}}, // Odd tie.
-      TestCase{0xbf818000u, {0xbf82u, 0xbf81u, 0xbf82u, 0xbf81u}}, // Negative odd tie.
-      TestCase{0xbf808001u, {0xbf81u, 0xbf80u, 0xbf81u, 0xbf80u}}, // Negative.
-      TestCase{0x00018000u, {0x0002u, 0x0002u, 0x0001u, 0x0001u}}, // Subnormal.
-      TestCase{0x80018000u, {0x8002u, 0x8001u, 0x8002u, 0x8001u}}, // Negative subnormal.
-      TestCase{0x7f7f8000u, {0x7f80u, 0x7f80u, 0x7f7fu, 0x7f7fu}}, // Overflow.
-      TestCase{0xff7f8000u, {0xff80u, 0xff7fu, 0xff80u, 0xff7fu}}, // Negative overflow.
+      TestCase{0x3f800000u, 0x3f800000u, 0, {0x3f80u, 0x3f80u, 0x3f80u, 0x3f80u}},
+      TestCase{0x3f807fffu, 0x3f800000u, 0, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
+      TestCase{0x3f808000u, 0x3f800000u, 0, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
+      TestCase{0x3f808001u, 0x3f800000u, 0, {0x3f81u, 0x3f81u, 0x3f80u, 0x3f80u}},
+      TestCase{0x3f818000u, 0x3f800000u, 0, {0x3f82u, 0x3f82u, 0x3f81u, 0x3f81u}},
+      TestCase{0xbf818000u, 0x3f800000u, 0, {0xbf82u, 0xbf81u, 0xbf82u, 0xbf81u}},
+      TestCase{0xbf808001u, 0x3f800000u, 0, {0xbf81u, 0xbf80u, 0xbf81u, 0xbf80u}},
+      TestCase{0x00018000u, 0x3f800000u, 0, {0x0002u, 0x0002u, 0x0001u, 0x0001u}},
+      TestCase{0x80018000u, 0x3f800000u, 0, {0x8002u, 0x8001u, 0x8002u, 0x8001u}},
+      TestCase{0x7f7f8000u, 0x3f800000u, 0, {0x7f80u, 0x7f80u, 0x7f7fu, 0x7f7fu}},
+      TestCase{0xff7f8000u, 0x3f800000u, 0, {0xff80u, 0xff7fu, 0xff80u, 0xff7fu}},
+      // Exact product is below a BF16 midpoint, but its F32 rounding is the midpoint.
+      TestCase{0x3f70df0du, 0x3f8de289u, 0, {0x3f85u, 0x3f86u, 0x3f85u, 0x3f85u}},
+      // Exact product is above an exactly representable BF16 result.
+      TestCase{0x3f2a3ce6u, 0x3f172134u, 0, {0x3ec9u, 0x3ecau, 0x3ec9u, 0x3ec9u}},
+      // A tiny addend is lost in F64, but still affects directed BF16 rounding.
+      TestCase{0x3f800000u, 0x3f800000u, 0x00000001u, {0x3f80u, 0x3f81u, 0x3f80u, 0x3f80u}},
   };
   constexpr uint32_t kDstSeed = 0xa5a55a5au;
   constexpr uint32_t kIdentityQuadPerm = 0xe4u;
@@ -1907,7 +1915,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
           raw.src0 = amdgpu::SRC_DPP;
           raw.src1 = 257;
           raw.src2 = 258;
-          raw.opsel_hi = 2;
+          raw.opsel_hi = 0;
           raw.vsrc0 = 0;
           raw.dpp_ctrl = kIdentityQuadPerm;
           raw.fi = 1;
@@ -1918,7 +1926,7 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
           instruction.reset(decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
         } else {
           const auto words = cdna5::build_vop3p(
-              opcode, {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 2});
+              opcode, {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 0});
           instruction.reset(decode_valid(*decoder, words.data()));
         }
         ASSERT_NE(instruction, nullptr);
@@ -1931,9 +1939,9 @@ TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundMode) {
         wf->set_mode_raw(round_mode << 2);
         const uint32_t vgpr_base = wf->vgpr_alloc().base;
         for (uint32_t lane = 0; lane < test_cases.size(); ++lane) {
-          cu->write_vgpr(vgpr_base, lane, test_cases[lane].input);
-          cu->write_vgpr(vgpr_base + 1, lane, 0xcafe3f80u); // BF16 1.0 in low half.
-          cu->write_vgpr(vgpr_base + 2, lane, 0u);
+          cu->write_vgpr(vgpr_base, lane, test_cases[lane].src0);
+          cu->write_vgpr(vgpr_base + 1, lane, test_cases[lane].src1);
+          cu->write_vgpr(vgpr_base + 2, lane, test_cases[lane].src2);
           cu->write_vgpr(vgpr_base + 3, lane, kDstSeed);
         }
 

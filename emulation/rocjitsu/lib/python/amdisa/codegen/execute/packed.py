@@ -928,15 +928,19 @@ def gen_mad_mix_bf16(
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append('    float result = std::fma(a, b, c);')
-    L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
     if result == 'f32':
+        L.append('    float result = std::fma(a, b, c);')
+        L.append(
+            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+        )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
         )
     else:
         L.append(
-            f'    uint16_t h = util::f32_to_bf16_round(result, wf.fp_round_mode_f16_f64());'
+            '    uint16_t h = amdgpu::fp_mode::fma_f32_to_bf16('
+            'a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, '
+            'amdgpu::floating_clamp_nan_to_zero(wf));'
         )
         if result == 'lo':
             L.append(
