@@ -27,8 +27,7 @@
 
 #if defined(ROCPROFILER_REGISTER_TEST_SDK_FIXTURE)
 
-extern "C"
-{
+extern "C" {
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     ROCPROFILER_REGISTER_EXPORT_DECORATOR;
@@ -45,8 +44,7 @@ rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
 
 using register_api_table_func_t = decltype(&rocprofiler_register_library_api_table);
 
-extern "C"
-{
+extern "C" {
 int
 rocprofiler_attach_set_api_table(const char*,
                                  uint64_t,
