@@ -63,35 +63,25 @@ two ways at once and comparing them to it would credit the effect to the wrong c
 
 Resolution limit for this run: 0.74 pp. Baseline 0.5253 ms, 4088 GB/s read+write.
 
-Two things to take from this. No temporal hint is separable from noise on an isolated 1 GiB
-copy, and access width dominates by two orders of magnitude.
+No temporal hint is separable from noise here; access width dominates by two orders of
+magnitude. The middle rows use width-matched controls because `nt-store-64` reads +77.55%
+against `plain-128` but +0.23% against `plain-64` — the width did the work, not the hint. That
+is why PR 2616 looks like evidence against non-temporal stores when it is evidence about width.
 
-The controls are chosen so each row isolates one variable, which is why the middle rows are
-not measured against production. `nt-store-64` is +77.55% against `plain-128` — which would
-read as non-temporal stores being catastrophic — but +0.23% against `plain-64`. It differs from
-production in two respects, and only the width-matched control says which one did the work.
-That distinction is the whole reason PR 2616 looks like evidence against non-temporal stores
-when it is really evidence about access width.
+#### Alternative: `TH_STORE_NT_RT`
 
-#### One alternative was measured and rejected
-
-`TH_STORE_NT_RT` is a different temporal hint: non-temporal in the near caches, but *regular*
-in GL2, so the line still lands there. It has no compiler builtin, so reaching it means
-hand-writing a gfx12 instruction into an OpenCL kernel that must compile for every target — it
-was never a shippable candidate. It is recorded here so the question has an answer.
+Not shippable: no builtin, so it needs hand-written gfx12 asm in a kernel that compiles for
+every target. Measured anyway, so the question has an answer.
 
 | change | measured against | effect [95% CI] |
 |---|---|---|
 | hand-written store, *default* hint | `plain-128` | **-1.26% [-1.71, -0.95]** |
 | `TH_STORE_NT_RT` hint | `asm-plain-128` | -0.29% [-0.59, +0.05] (noise) |
 
-It needs its own control because hand-writing a store is worth something by itself: it takes
-the instruction out of the compiler's hands and changes scheduling around it. Against
-`plain-128` the variant reads **-1.56%** and looks like a real win, but `asm-plain-128` — the
-identical hand-written store carrying the *default* hint — accounts for -1.26% of that. The
-hint itself is worth nothing, which fits: it does not spare GL2, so there is no pollution for
-it to avoid. An earlier revision of this report published the -1.4% as an NT_RT win; see
-[CHANGELOG.md](CHANGELOG.md).
+Against `plain-128` it reads -1.56% and looks like a win, but -1.26% of that is the
+hand-writing, not the hint. The hint is worth nothing — it leaves the line in GL2, so there is
+no pollution for it to avoid. [CHANGELOG.md](CHANGELOG.md) has the earlier revision that
+credited it.
 
 ### Where in the size range the hint does anything
 
