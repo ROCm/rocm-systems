@@ -16,16 +16,19 @@ non-zero exit code.
 A volume is reported as hipFile-capable when it mirrors the fast-path
 eligibility the hipFile library enforces for a regular file:
 
-  * filesystem is xfs, or ext4 mounted with data=ordered (the ext4 default), and
+  * filesystem is xfs, or ext4 mounted with data=ordered (the ext4 default),
+  * the backing device is a local NVMe, or an LVM logical volume whose physical
+    volumes are all local NVMe, and
   * direct I/O (O_DIRECT) opens succeed on the filesystem.
 
 See src/amd_detail/mountinfo.cpp (fstype/journaling classification) and
 src/amd_detail/backend/fastpath.cpp (the accept rule) for the authoritative
 logic the volume scan reproduces.
 
-The BACKING column (nvme, lvm, md, ...) is informational only: a local NVMe
-(non multipath) device is required by amdgpu/kfd, but that constraint is
-enforced by the driver, not by the library's fast-path scoring.
+The BACKING column (nvme, lvm, md, ...) names the block layer under the
+filesystem. Raw local NVMe and LVM stacked directly on local NVMe qualify; any
+other interposing layer (multipath, dm-crypt, MD RAID, loopback) breaks the
+direct P2P-DMA path and forces the compatibility fallback.
 """
 
 # pylint: enable=invalid-name
@@ -597,6 +600,75 @@ def probe_odirect(mountpoint):
             pass
 
 
+def dm_uuid_prefix(sysfs_dir):
+    """
+    Return the lowercased device-mapper target-type prefix for a sysfs block
+    directory (e.g. "lvm", "mpath", "crypt"), or None when the node is not a
+    device-mapper device (its dm/uuid cannot be read).
+    """
+    try:
+        with open(os.path.join(sysfs_dir, "dm", "uuid"), "r", encoding="utf-8") as f:
+            uuid = f.read().strip()
+    except OSError:
+        return None
+    return uuid.split("-", 1)[0].lower()
+
+
+def block_slaves(sysfs_dir):
+    """
+    Return the realpaths of the block devices a device-mapper or MD node is
+    stacked on (its sysfs "slaves" entries), or None when they can't be read.
+    """
+    slaves_dir = os.path.join(sysfs_dir, "slaves")
+    try:
+        names = os.listdir(slaves_dir)
+    except OSError:
+        return None
+    return [os.path.realpath(os.path.join(slaves_dir, n)) for n in names]
+
+
+def lvm_over_nvme(devno):
+    """
+    Whether an LVM (device-mapper) mount is stacked directly on local NVMe.
+
+    Walks the dm slave tree from the mount's block device. Returns True only
+    when every device-mapper layer in the stack is an LVM target and every
+    underlying physical block device is NVMe. Returns False when a non-LVM dm
+    layer (multipath, dm-crypt, ...) or a non-NVMe leaf (scsi, MD RAID, ...) is
+    found, and None when the topology can't be resolved from sysfs.
+    """
+    try:
+        start = os.path.realpath(os.path.join("/sys/dev/block", devno))
+    except OSError:
+        return None
+
+    seen = set()
+    stack = [start]
+    saw_leaf = False
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+
+        prefix = dm_uuid_prefix(node)
+        if prefix is None:
+            # Not a device-mapper node: a physical leaf that must be NVMe.
+            if not os.path.basename(node).startswith("nvme"):
+                return False
+            saw_leaf = True
+            continue
+        # Only LVM targets are allowed anywhere in the stack.
+        if prefix != "lvm":
+            return False
+        slaves = block_slaves(node)
+        if not slaves:
+            return None
+        stack.extend(slaves)
+
+    return True if saw_leaf else None
+
+
 def backing_storage(devno):
     """
     Resolve a maj:min to (backing_type, disk_name) via sysfs.
@@ -615,13 +687,8 @@ def backing_storage(devno):
 
     # device-mapper targets (lvm, multipath, crypt, ...) carry a dm/uuid whose
     # prefix names the target type.
-    try:
-        with open(os.path.join(real, "dm", "uuid"), "r", encoding="utf-8") as f:
-            uuid = f.read().strip()
-    except OSError:
-        uuid = None
-    if uuid is not None:
-        prefix = uuid.split("-", 1)[0].lower()
+    prefix = dm_uuid_prefix(real)
+    if prefix is not None:
         backing = {"lvm": "lvm", "mpath": "mpath", "crypt": "crypt"}.get(prefix, "dm")
     elif name.startswith("md"):
         backing = "md"
@@ -639,19 +706,25 @@ def backing_storage(devno):
     return backing, name
 
 
-def backing_supported(backing):
+def backing_supported(backing, devno):
     """
     Whether the backing storage allows hipFile's direct P2P-DMA path.
 
-    hipFile is limited to local NVMe (INSTALL.md), and even multipath NVMe is
-    unsupported. Any interposing layer (LVM/dm, multipath, dm-crypt, MD RAID,
-    loopback) breaks the direct path to the device, so the kernel rejects the IO
-    at runtime (pcie_p2pdma_distance < 0) even when the filesystem and O_DIRECT
-    checks pass. Returns None when the backing could not be determined.
+    Raw local NVMe qualifies, as does an LVM logical volume whose underlying
+    physical volumes are all local NVMe (see lvm_over_nvme). Any other
+    interposing layer (multipath, dm-crypt, MD RAID, loopback) breaks the direct
+    path to the device, so the kernel rejects the IO at runtime
+    (pcie_p2pdma_distance < 0) even when the filesystem and O_DIRECT checks pass.
+
+    Returns None when the backing could not be determined.
     """
     if backing is None:
         return None
-    return backing == "nvme"
+    if backing == "nvme":
+        return True
+    if backing == "lvm":
+        return lvm_over_nvme(devno)
+    return False
 
 
 def tri(value, unknown="?"):
@@ -677,14 +750,14 @@ def collect(mounts):
 
         backing, disk = backing_storage(m.devno)
         supported_fs = fs_supported(m)
-        backing_ok = backing_supported(backing)
+        backing_ok = backing_supported(backing, m.devno)
 
         # Only probe fs types that can qualify; unsupported fs is never capable.
         odirect = probe_odirect(m.mountpoint) if supported_fs else None
 
         # A volume is capable only when the filesystem qualifies, the backing is
-        # a direct local NVMe (interposing layers like LVM disqualify it), and
-        # O_DIRECT works. Unknown backing leaves the verdict unverified.
+        # a direct local NVMe (or LVM stacked on local NVMe), and O_DIRECT works.
+        # Unknown backing leaves the verdict unverified.
         if not supported_fs or backing_ok is False:
             capable = False
         elif backing_ok is None:

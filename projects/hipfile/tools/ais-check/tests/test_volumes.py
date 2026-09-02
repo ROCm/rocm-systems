@@ -46,6 +46,126 @@ def test_fstype_label_folds_ext4_journal_mode(ais_check):
     assert ais_check.fstype_label(_mount(ais_check, fstype="xfs")) == "xfs"
 
 
+def _fake_topology(ais_check, monkeypatch, prefixes, slaves):
+    """
+    Drive lvm_over_nvme against an in-memory sysfs tree.
+
+    `prefixes` maps a node path to its dm target prefix (or None for a physical
+    leaf); `slaves` maps a node path to the child node paths it is stacked on.
+    realpath is stubbed to identity so nodes are addressed by plain strings.
+    """
+    monkeypatch.setattr(ais_check.os.path, "realpath", lambda p: p)
+    monkeypatch.setattr(ais_check, "dm_uuid_prefix", lambda node: prefixes.get(node))
+    monkeypatch.setattr(ais_check, "block_slaves", lambda node: slaves.get(node))
+
+
+def test_lvm_over_nvme_direct_on_nvme(ais_check, monkeypatch):
+    lv = "/sys/dev/block/253:0"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm", "/dev/nvme0n1p1": None},
+        slaves={lv: ["/dev/nvme0n1p1"]},
+    )
+    assert ais_check.lvm_over_nvme("253:0") is True
+
+
+def test_lvm_over_nvme_spanning_multiple_nvme(ais_check, monkeypatch):
+    lv = "/sys/dev/block/253:0"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm", "/dev/nvme0n1p1": None, "/dev/nvme1n1p1": None},
+        slaves={lv: ["/dev/nvme0n1p1", "/dev/nvme1n1p1"]},
+    )
+    assert ais_check.lvm_over_nvme("253:0") is True
+
+
+def test_lvm_over_nvme_nested_lvm(ais_check, monkeypatch):
+    lv, inner = "/sys/dev/block/253:1", "/sys/dev/block/253:0"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm", inner: "lvm", "/dev/nvme0n1p1": None},
+        slaves={lv: [inner], inner: ["/dev/nvme0n1p1"]},
+    )
+    assert ais_check.lvm_over_nvme("253:1") is True
+
+
+def test_lvm_over_nvme_on_scsi_rejected(ais_check, monkeypatch):
+    lv = "/sys/dev/block/253:0"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm", "/dev/sda1": None},
+        slaves={lv: ["/dev/sda1"]},
+    )
+    assert ais_check.lvm_over_nvme("253:0") is False
+
+
+def test_lvm_over_nvme_on_mpath_rejected(ais_check, monkeypatch):
+    lv, mpath = "/sys/dev/block/253:1", "/sys/dev/block/253:0"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm", mpath: "mpath", "/dev/nvme0n1p1": None},
+        slaves={lv: [mpath], mpath: ["/dev/nvme0n1p1"]},
+    )
+    assert ais_check.lvm_over_nvme("253:1") is False
+
+
+def test_lvm_over_nvme_unresolvable_topology(ais_check, monkeypatch):
+    lv = "/sys/dev/block/253:0"
+    _fake_topology(ais_check, monkeypatch, prefixes={lv: "lvm"}, slaves={})
+    assert ais_check.lvm_over_nvme("253:0") is None
+
+
+def test_backing_supported_nvme(ais_check):
+    assert ais_check.backing_supported("nvme", "259:0") is True
+
+
+def test_backing_supported_lvm_delegates(ais_check, monkeypatch):
+    monkeypatch.setattr(ais_check, "lvm_over_nvme", lambda devno: True)
+    assert ais_check.backing_supported("lvm", "253:0") is True
+    monkeypatch.setattr(ais_check, "lvm_over_nvme", lambda devno: False)
+    assert ais_check.backing_supported("lvm", "253:0") is False
+
+
+def test_backing_supported_other_layers_rejected(ais_check):
+    assert ais_check.backing_supported("mpath", "253:0") is False
+    assert ais_check.backing_supported("crypt", "253:0") is False
+    assert ais_check.backing_supported("md", "9:0") is False
+
+
+def test_backing_supported_unknown_is_none(ais_check):
+    assert ais_check.backing_supported(None, "0:0") is None
+
+
+def test_collect_lvm_on_nvme_capable(ais_check, monkeypatch):
+    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("lvm", "dm-0"))
+    monkeypatch.setattr(ais_check, "lvm_over_nvme", lambda devno: True)
+    monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
+
+    rows = ais_check.collect(
+        [_mount(ais_check, fstype="ext4", source="/dev/mapper/vg-lv")]
+    )
+
+    assert rows[0]["backing"] == "lvm"
+    assert rows[0]["capable"] is True
+
+
+def test_collect_lvm_not_on_nvme_not_capable(ais_check, monkeypatch):
+    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("lvm", "dm-0"))
+    monkeypatch.setattr(ais_check, "lvm_over_nvme", lambda devno: False)
+    monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
+
+    rows = ais_check.collect(
+        [_mount(ais_check, fstype="ext4", source="/dev/mapper/vg-lv")]
+    )
+
+    assert rows[0]["capable"] is False
+
+
 def test_collect_skips_pseudo_and_non_block(ais_check, monkeypatch):
     monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1"))
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
