@@ -17,6 +17,138 @@ This topic orients you to how ROCm Systems Profiler is put together and how to i
 .. _glance-capabilities:
 
 Capabilities
+==============
+
+The feature set is spread across several how-to and conceptual pages; the following tables are a quick index into them:
+
+Tracing
+-------
+
+.. list-table::
+   :header-rows: 1
+   :width: 100%
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - ROCm API tracing
+     - Traces ROCm API and runtime domains via ROCprofiler-SDK, including HIP, HSA, ROCTx, RCCL, kernel dispatches, memory events, rocDecode, and rocJPEG. List available domains with ``rocprof-sys-avail --list-domains``.
+     - :ref:`rocprof-sys-feature-gpu-metrics`
+   * - MPI and communication tracing
+     - Records collective and point-to-point operation timing with per-rank attribution across MPI (via standard PMPI wrappers), RCCL, UCX, and OpenSHMEM/rocSHMEM.
+     - :doc:`how-to/communication-runtime-profiling`
+   * - OpenMP tracing
+     - Captures thread team creation, parallel regions, task execution, and synchronization via the OMPT callback interface.
+     - :doc:`how-to/openmp-profiling`
+   * - Unified memory
+     - Tracks page faults and host/device migrations for HIP managed memory (KFD).
+     - :doc:`how-to/unified-memory-profiling`
+
+Metrics
+-------
+
+.. list-table::
+   :header-rows: 1
+   :width: 100%
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - GPU telemetry
+     - Samples GPU temperature, power, utilization, clocks, memory, XGMI/PCIe bandwidth, and VCN/JPEG engine activity via ``amd-smi``.
+     - :ref:`rocprof-sys-feature-gpu-metrics`, :doc:`how-to/xgmi-pcie-sdma-sampling`, :doc:`how-to/vcn-jpeg-sampling`
+   * - GPU hardware counters
+     - Collects GPU hardware counters (occupancy, VALU utilization, wavefront counts, etc.) via ``--gpu-events``. See ``rocprof-sys-avail -H -c GPU`` for the device-specific list.
+     - :ref:`rocprof-sys-feature-gpu-metrics`
+   * - CPU hardware counters
+     - Reads IPC, cache misses, branch mispredictions, and other CPU PMU events via the Linux ``perf`` subsystem. See ``rocprof-sys-avail -H -c CPU`` for the device-specific list.
+     - :ref:`rocprof-sys-feature-cpu-metrics`
+   * - Network (NIC) metrics
+     - Samples NIC throughput and errors (PAPI); AINIC where supported.
+     - :doc:`how-to/nic-profiling`
+
+Collection mechanism (host-side correlation)
+---------------------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :width: 100%
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - Binary instrumentation
+     - Inserts probes at selected function entry/exit with no source changes (runtime instrumentation or binary rewrite). Complete, deterministic host call-stack data.
+     - :ref:`glance-modes-compared`
+   * - Call-stack sampling
+     - Periodically interrupts the application and records the host call stack (and related metrics). Lower-overhead statistical data to correlate with the GPU timeline.
+     - :ref:`glance-modes-compared`
+   * - Python hooks
+     - Instruments Python interpreter call frames for mixed Python/C++/HIP workload analysis.
+     - :doc:`how-to/profiling-python-scripts`
+   * - Process attachment
+     - Attaches to an already-running process without restarting it.
+     - :doc:`how-to/attaching-to-running-process`
+
+Analysis
+--------
+
+.. list-table::
+   :header-rows: 1
+   :width: 100%
+   :widths: 25 45 30
+
+   * - Feature
+     - Description
+     - See also
+   * - Trace
+     - Event timeline of GPU APIs, kernels, copies, and correlated host activity. Default analysis mode.
+     - :doc:`conceptual/data-collection-modes`, :doc:`how-to/understanding-rocprof-sys-output`
+   * - Profile
+     - High-level summary profiles with statistical aggregations (mean, min, max, stddev) per function. Lower overhead than a full timeline; JSON and text outputs are generated.
+     - :doc:`conceptual/data-collection-modes`
+   * - Causal profiling
+     - Estimates the end-to-end speedup from optimizing a given function or line by selectively slowing other code regions.
+     - :doc:`how-to/performing-causal-profiling`
+
+.. _glance-architecture:
+
+How it works
+=============
+
+ROCm Systems Profiler couples GPU kernel dispatches, memory copies, and device telemetry with the host-side activity around them. GPU data is captured via ROCprofiler-SDK callbacks and ``amd-smi`` polling; host call stacks, MPI, OpenMP, and Python frames are captured via binary instrumentation, statistical sampling, callback APIs, or symbol interception. Everything is merged into a single trace/profile output, correlated on the GPU timeline.
+
+.. image:: data/how_systems_profiler_works.png
+   :width: 60%
+   :align: center
+
+For the full explanation of each collection mode, including overhead trade-offs and a worked instrumentation-vs-sampling example, see :doc:`conceptual/data-collection-modes`.
+
+.. _glance-modes-compared:
+
+Binary instrumentation vs. call-stack sampling
+================================================
+
+Binary instrumentation and call-stack sampling can be used independently or together, trading overhead against completeness:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Mode
+     - Overhead
+     - Best for
+   * - Binary instrumentation
+     - Higher
+     - Function-level profiling of selected functions when complete, deterministic call data is needed and the added overhead is acceptable.
+   * - Call-stack sampling
+     - Low
+     - Whole application context at low overhead. For example, long-running jobs, MPI workloads, etc.
+   * - Combined (both enabled)
+     - Higher than sampling alone
+     - Enable statistical sampling after binary instrumentation to help "fill in the gaps" between instrumented regions.
 
 To use ROCm Systems Profiler for instrumentation, follow these two configuration steps:
 
