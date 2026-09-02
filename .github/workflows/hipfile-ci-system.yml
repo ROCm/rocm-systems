@@ -8,12 +8,13 @@ env:
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
   AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
   AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
+  AIS_INPUT_MOUNT_LABEL: ${{ inputs.mount_label }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_MOUNT_PATH: ${{ inputs.ais_mount_path }}
   # Pass the backing NVMe partition through to the container only for the LVM
-  # setup (/mnt/logicalvolume1); the ext4 mount does not need a raw device.
-  AIS_EXTRA_DOCKER_DEVICE: ${{ case(inputs.ais_mount_path == '/mnt/logicalvolume1', '--device=/dev/nvme0n1p3', '') }}
+  # setup (/mnt/ais/lvm); the ext4 mount does not need a raw device.
+  AIS_EXTRA_DOCKER_DEVICE: ${{ case(inputs.ais_mount_path == '/mnt/ais/lvm', '--device=/dev/nvme0n1p3', '') }}
   AIS_PKG_INSTALL_CMD: >-
     ${{
       case(
@@ -75,6 +76,7 @@ permissions:
 jobs:
 
   run_system_tests:
+    name: run_system_tests (${{ inputs.mount_label }})
     runs-on: [AIS]
     steps:
       - name: Set early AIS CI environment variables
@@ -83,7 +85,7 @@ jobs:
           echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${{ inputs.mount_label }}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_MOUNT_LABEL}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching hipFile repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
