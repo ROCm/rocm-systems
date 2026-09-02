@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "common/defines.hpp"
+
 #include <rocprofiler-register/rocprofiler-register.h>
 
 #include <cstdint>
@@ -30,7 +32,7 @@
 extern "C" {
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
-    ROCPROFILER_REGISTER_EXPORT_DECORATOR;
+    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
 
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
@@ -52,7 +54,7 @@ rocprofiler_attach_set_api_table(const char*,
                                  void**,
                                  uint64_t,
                                  register_api_table_func_t)
-    ROCPROFILER_REGISTER_EXPORT_DECORATOR;
+    ROCPROFILER_REGISTER_TEST_PUBLIC_API;
 
 int
 rocprofiler_attach_set_api_table(const char*,

@@ -50,11 +50,6 @@
 #define ROCPROFILER_REGISTER_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
 #define ROCPROFILER_REGISTER_PP_COMBINE(X, Y) X##Y
 
-#if !defined(ROCPROFILER_REGISTER_EXPORT_DECORATOR)
-#    define ROCPROFILER_REGISTER_EXPORT_DECORATOR                                        \
-        ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"))
-#endif
-
 #if defined(rocprofiler_register_EXPORTS)
 // only defined in build tree
 #    define ROCPROFILER_REGISTER_VISIBILITY(MODE)                                        \

@@ -5,6 +5,7 @@
 set(RUNTIME_SONAME_SDK_V0_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures/sdk-v0")
 set(RUNTIME_SONAME_SDK_V1_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures/sdk-v1")
 set(RUNTIME_SONAME_ATTACH_V1_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fixtures/attach-v1")
+set(RUNTIME_SONAME_TEST_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/..")
 
 if(TARGET rocprofiler-register::headers)
     set(RUNTIME_SONAME_HEADERS_TARGET rocprofiler-register::headers)
@@ -17,6 +18,8 @@ endif()
 add_library(runtime-soname-sdk-fixture SHARED runtime-soname-fixture.cpp)
 target_compile_definitions(runtime-soname-sdk-fixture
                            PRIVATE ROCPROFILER_REGISTER_TEST_SDK_FIXTURE=1)
+target_include_directories(runtime-soname-sdk-fixture
+                           PRIVATE ${RUNTIME_SONAME_TEST_INCLUDE_DIR})
 target_link_libraries(runtime-soname-sdk-fixture PRIVATE ${RUNTIME_SONAME_HEADERS_TARGET})
 set_target_properties(
     runtime-soname-sdk-fixture
@@ -28,6 +31,8 @@ set_target_properties(
 add_library(runtime-soname-sdk-v0-fixture SHARED runtime-soname-fixture.cpp)
 target_compile_definitions(runtime-soname-sdk-v0-fixture
                            PRIVATE ROCPROFILER_REGISTER_TEST_SDK_FIXTURE=1)
+target_include_directories(runtime-soname-sdk-v0-fixture
+                           PRIVATE ${RUNTIME_SONAME_TEST_INCLUDE_DIR})
 target_link_libraries(runtime-soname-sdk-v0-fixture
                       PRIVATE ${RUNTIME_SONAME_HEADERS_TARGET})
 set_target_properties(
@@ -40,6 +45,8 @@ set_target_properties(
 add_library(runtime-soname-attach-fixture SHARED runtime-soname-fixture.cpp)
 target_compile_definitions(runtime-soname-attach-fixture
                            PRIVATE ROCPROFILER_REGISTER_TEST_ATTACH_FIXTURE=1)
+target_include_directories(runtime-soname-attach-fixture
+                           PRIVATE ${RUNTIME_SONAME_TEST_INCLUDE_DIR})
 target_link_libraries(runtime-soname-attach-fixture
                       PRIVATE ${RUNTIME_SONAME_HEADERS_TARGET})
 set_target_properties(
