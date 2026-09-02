@@ -84,9 +84,10 @@ public:
     constexpr uint32_t kFtzMask = 1u << 15;
     _mm_setcsr(_mm_getcsr() & ~(kDazMask | kFtzMask));
 #elif defined(__aarch64__)
+    constexpr uint64_t kFizMask = uint64_t{1} << 0;
     constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
     constexpr uint64_t kFzMask = uint64_t{1} << 24;
-    write_fpcr(read_fpcr() & ~(kFzMask | kFz16Mask));
+    write_fpcr(read_fpcr() & ~(kFizMask | kFz16Mask | kFzMask));
 #endif
   }
 
