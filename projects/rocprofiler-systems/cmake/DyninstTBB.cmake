@@ -47,12 +47,9 @@ if(ROCPROFSYS_BUILD_TBB)
     set(TBB_ROOT_DIR "${TPL_STAGING_PREFIX}/tbb" CACHE PATH "TBB root directory" FORCE)
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/include" "${TBB_ROOT_DIR}/lib")
 
-    # oneTBB's tbbmalloc version script (src/tbbmalloc/def/lin64-tbbmalloc.def) hides
-    # libtbb/libirc symbols by exact name in its local: block, but libtbbmalloc defines
-    # none of them. lld reports that under --no-undefined-version, which is the upstream
-    # default, so opt this ExternalProject back out. Not forwarded from the parent scope:
-    # CONFIGURE_COMMAND passes an explicit flag list.
-    # Upstream: https://github.com/uxlfoundation/oneTBB/issues/1274 (open since 2023).
+    # oneTBB's tbbmalloc version script hides libtbb/libirc symbols it never defines;
+    # lld rejects those under --no-undefined-version (uxlfoundation/oneTBB#1274).
+    # Set here because CONFIGURE_COMMAND does not forward CMAKE_SHARED_LINKER_FLAGS.
     include(CheckLinkerFlag)
     check_linker_flag(C "-Wl,--undefined-version" _tbb_have_undefined_version)
     if(_tbb_have_undefined_version)
