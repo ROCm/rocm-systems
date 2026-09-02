@@ -100,6 +100,32 @@ jobs:
             projects/hipfile
           cmake --build /tmp/build --parallel "$(nproc)"
 
+      - name: Report memory usage
+        # Runs on failure too, which is when it matters most: exit code 137
+        # from the build step above means the kernel OOM killed it.
+        #
+        # memory.peak is a kernel-maintained high-water mark for the whole
+        # container (build, CodeQL extractor and runner agent alike), so it
+        # captures the true peak without having to sample. A non-zero oom_kill
+        # in memory.events confirms the kernel killed something in this cgroup.
+        # dmesg is not usable here: reading the kernel ring buffer needs
+        # CAP_SYSLOG, which this container does not have.
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          show() {
+            printf '  %-20s %s\n' "$1" "$(cat "/sys/fs/cgroup/$1" 2>/dev/null || echo '(unavailable)')"
+          }
+          echo "cgroup memory (bytes, 'max' means no limit set):"
+          show memory.max
+          show memory.peak
+          show memory.current
+          show memory.swap.max
+          show memory.swap.peak
+          show memory.swap.current
+          echo "memory.events (oom_kill > 0 means the kernel killed a process here):"
+          sed 's/^/  /' /sys/fs/cgroup/memory.events 2>/dev/null || echo "  (unavailable)"
+
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
         with:
