@@ -91,43 +91,62 @@ int main(int argc, char** argv) {
     std::printf("  %-20s %10.1f %+9.2f%%\n", kVariants[v].name, gbs, (ms / baseMs - 1.0) * 100.0);
   }
 
-  // Each row below pairs a variant against the control that differs from it in
-  // exactly one respect, which is not always plain-128. Comparing the hand-written
-  // -asm variants against plain-128 conflates the temporal hint with the effect of
-  // writing the store by hand, and that effect turns out to be larger than any
-  // hint measured here.
+  // Each row pairs a variant against the control that differs from it in exactly
+  // one respect, named in the output so a reader never has to infer it.
   struct Comparison {
     const char* question;
     int arm;
     int against;
   };
+
+  // The shipped change, and the width question the ticket turns on.
   const Comparison comparisons[] = {
       {"NT store hint, 128-bit (shipped)", CopyNtStore128, CopyPlain128},
       {"also hinting the load", CopyNtBoth128, CopyNtStore128},
-      {"hand-written store, default hint", CopyAsmPlain128, CopyPlain128},
-      {"TH_STORE_NT_RT hint", CopyNtRtStore128, CopyAsmPlain128},
       {"NT store hint at 64-bit width", CopyNtStore64, CopyPlain64},
       {"NT store hint at 32-bit width", CopyPr2616Actual32, CopyPlain32},
       {"64-bit instead of 128-bit", CopyPlain64, CopyPlain128},
       {"32-bit instead of 128-bit", CopyPlain32, CopyPlain128},
   };
 
-  std::printf("\n  Controlled comparisons: each row changes exactly one thing from its control\n");
-  std::printf("  %-34s %-18s %-30s\n", "change", "measured against", "effect [95% CI]");
-  std::printf("  %s\n", std::string(84, '-').c_str());
-  for (const Comparison& c : comparisons) {
-    const Delta d = r.effect(c.arm, c.against);
-    char cell[80];
-    formatDelta(cell, sizeof(cell), d, r.isSignificant(d));
-    std::printf("  %-34s %-18s %-30s\n", c.question, kVariants[c.against].name, cell);
-    char extra[96];
-    std::snprintf(extra, sizeof(extra), "vs=%s sig=%d", kVariants[c.against].name,
-                  static_cast<int>(r.isSignificant(d)));
-    emitRow("isolated_copy_controlled", kVariants[c.arm].name, "delta_pct", d.median, "pct", extra);
-  }
+  // Reported separately because neither is a candidate change. TH_STORE_NT_RT has
+  // no builtin, so reaching it means hand-writing a gfx12 instruction into an
+  // OpenCL kernel that has to compile for every target - not shippable. It is
+  // measured anyway so that "did you try the other hint?" has an answer, and it
+  // needs its own control because hand-writing the store moves performance on its
+  // own, by more than any temporal hint here.
+  const Comparison alternatives[] = {
+      {"hand-written store, default hint", CopyAsmPlain128, CopyPlain128},
+      {"TH_STORE_NT_RT hint", CopyNtRtStore128, CopyAsmPlain128},
+  };
+
+  auto printComparisons = [&](const Comparison* rows, size_t count) {
+    std::printf("  %-34s %-18s %-30s\n", "change", "measured against", "effect [95% CI]");
+    std::printf("  %s\n", std::string(84, '-').c_str());
+    for (size_t i = 0; i < count; ++i) {
+      const Comparison& c = rows[i];
+      const Delta d = r.effect(c.arm, c.against);
+      char cell[80];
+      formatDelta(cell, sizeof(cell), d, r.isSignificant(d));
+      std::printf("  %-34s %-18s %-30s\n", c.question, kVariants[c.against].name, cell);
+      char extra[96];
+      std::snprintf(extra, sizeof(extra), "vs=%s sig=%d", kVariants[c.against].name,
+                    static_cast<int>(r.isSignificant(d)));
+      emitRow("isolated_copy_controlled", kVariants[c.arm].name, "delta_pct", d.median, "pct",
+              extra);
+    }
+  };
+
+  std::printf("\n  The change: each row alters exactly one thing from its control\n");
+  printComparisons(comparisons, sizeof(comparisons) / sizeof(comparisons[0]));
   std::printf("  negative is faster; '(noise)' means smaller than this run's %.2f pp\n"
               "  resolution limit, so no effect was found\n",
               r.resolutionLimit());
+
+  std::printf("\n  Alternative that cannot ship: TH_STORE_NT_RT needs a hand-written\n");
+  std::printf("  instruction. Measured against the same hand-written store carrying the\n");
+  std::printf("  DEFAULT hint, so the number below is the hint alone, not the hand-writing.\n");
+  printComparisons(alternatives, sizeof(alternatives) / sizeof(alternatives[0]));
 
   std::printf("\n");
   for (int v = 0; v < kNumVariants; ++v) {
