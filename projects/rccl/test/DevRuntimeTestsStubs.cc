@@ -662,6 +662,19 @@ HIP_FAKE hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mod
   return g_hipThreadExchangeStreamCaptureMode(mode);
 }
 
+// Not called from dev_runtime.cc's own text, which is why an audit of that file
+// misses them -- they come from the CHECK macro bodies that expand into this
+// same TU (rocmwrap.h:133,143,155 and checks.h:36,37,43). WARN is
+// unconditional, so hipGetErrorString's argument is evaluated on every checked
+// failure, which is most of the failure-path tests in this suite. Deliberately
+// not seams: no test asserts on the text of an error message, and a fixed
+// string keeps the WARN output readable.
+HIP_FAKE const char* hipGetErrorString(hipError_t err) {
+  return err == hipSuccess ? "hipSuccess" : "hipError (DevRuntimeTests fake)";
+}
+
+HIP_FAKE hipError_t hipGetLastError(void) { return hipSuccess; }
+
 // ---------------------------------------------------------------------------
 // Params are not cached here (see DevRuntimeTestsStubs.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
@@ -714,4 +727,16 @@ void ResetDevRuntimeFakes() {
   g_rmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_loadParam                               = DefaultLoadParam;
+
+  // The liveness set is state, not a hook, but it is just as capable of
+  // outliving a test: anything that installs a non-freeing g_shadowPoolFree
+  // leaves its entries behind, and DefaultShadowPoolToHost keeps honouring
+  // them for the rest of the process. Clearing it keeps the header's "a test
+  // cannot leak behaviour into the next one" true rather than nearly true.
+  //
+  // Cleared, not freed. Several fixtures free shadow-pool buffers themselves
+  // in TearDown (they hold the only pointer to them once the window is gone),
+  // so freeing here as well is a double free. What leaks is a bounded number
+  // of small per-test buffers; what is fixed is the stale oracle.
+  ShadowPoolLive().clear();
 }

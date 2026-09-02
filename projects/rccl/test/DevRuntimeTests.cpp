@@ -49,11 +49,13 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -757,8 +759,22 @@ TEST_F(SymImportAndMapSegmentTest, ImportFails_ReturnsErrorWithoutMapping) {
 
 // Branch: import failure on the POSIX-FD path, which is a separate CUCHECKGOTO
 // from the fabric one above.
+//
+// The descriptor is owned by the test rather than by DefaultProxyClientGetFdBlocking
+// so the leak below is contained: dev_runtime.cc:359 jumps to fail on import
+// failure, skipping the close(fd) at :362, so the fd is still open when this
+// returns -- one leaked descriptor per failed import. EXPECT_EQ(fcntl(fd,
+// F_GETFD), -1) is the assertion that belongs here and fails today; see
+// AICOMRCCL-2180 finding 14. Pinning the current state instead would lock the
+// leak in, so the test just cleans up after it.
 TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  int handedOut = -1;
+  ScopedHook proxy(g_proxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    handedOut = open("/dev/null", O_RDONLY);
+    if (fd) *fd = handedOut;
+    return handedOut >= 0 ? ncclSuccess : ncclSystemError;
+  });
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) {
                       return hipErrorInvalidValue;
@@ -766,6 +782,9 @@ TEST_F(SymImportAndMapSegmentTest, PosixFdImportFails_ReturnsError) {
 
   EXPECT_NE(symMemoryImportAndMapSegmentHandle(comm, 1, kAddr, &msg, {}, /*reuseLocal=*/false), ncclSuccess);
   EXPECT_EQ(import.calls, 1);
+
+  ASSERT_GE(handedOut, 0);
+  if (fcntl(handedOut, F_GETFD) != -1) close(handedOut);  // no double close if the leak is ever fixed
 }
 
 // Branch: the SYSCHECK on close(). A stale descriptor from the proxy fails with
@@ -1162,56 +1181,43 @@ protected:
 // Kept distinct so each suite name still names one function.
 class SymBindTeamMemoryTest : public SymTeamMemoryTest {};
 
-// Branch: nvlsSupport == 0 short circuits the mcBasePtr check.
-TEST_F(SymBindTeamMemoryTest, NvlsUnsupported_ReturnsSuccess) {
-  comm->nvlsSupport = 0;
-  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
-  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
-}
-
-// Branch: NVLS is available but the team has no multicast mapping.
-TEST_F(SymBindTeamMemoryTest, NoMulticastBase_ReturnsSuccess) {
-  comm->nvlsSupport = 1;
-  team->mcBasePtr = nullptr;
-  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
-}
-
-// Branch: both arms hold, entering the guarded block.
-TEST_F(SymBindTeamMemoryTest, NvlsWithMulticastBase_ReturnsSuccess) {
-  comm->nvlsSupport = 1;
-  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
-  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
+// One test, not one per guard arm. On this build the guarded body is empty, so
+// the function is `return ncclSuccess` regardless of its inputs: inverting
+// nvlsSupport, dropping an && arm or deleting the `if` outright changes
+// nothing observable. Splitting this across the guard's arms would report
+// branch coverage the build cannot actually exercise. Walk the input space in
+// one case instead, so the no-op is asserted without overclaiming.
+TEST_F(SymBindTeamMemoryTest, IsANoOpOnThisBuild) {
+  for (int nvls : {0, 1}) {
+    for (void* mc : {static_cast<void*>(nullptr), reinterpret_cast<void*>(0x1000)}) {
+      comm->nvlsSupport = nvls;
+      team->mcBasePtr = mc;
+      EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess) << "nvls=" << nvls << " mc=" << mc;
+    }
+  }
 }
 
 
 // ---------------------------------------------------------------------------
 // symUnbindTeamMemory is the counterpart to symBindTeamMemory, with a third
 // guard arm: !mem->globalHasSysmemSegment. Its body is behind the same
-// CUDART_VERSION check and so is likewise not compiled on HIP.
+// CUDART_VERSION check and so is likewise not compiled on HIP -- see the note
+// on SymBindTeamMemoryTest for why this is one test rather than one per arm.
 
 class SymUnbindTeamMemoryTest : public SymTeamMemoryTest {};
 
-// Branch: nvlsSupport == 0 short circuits the rest.
-TEST_F(SymUnbindTeamMemoryTest, NvlsUnsupported_ReturnsSuccess) {
-  comm->nvlsSupport = 0;
-  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
-  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
-}
-
-// Branch: NVLS is available but the team has no multicast mapping.
-TEST_F(SymUnbindTeamMemoryTest, NoMulticastBase_ReturnsSuccess) {
-  comm->nvlsSupport = 1;
-  team->mcBasePtr = nullptr;
-  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
-}
-
-// Branch: CPU-backed memory is never multicast-bound, so there is nothing to
-// unbind -- the arm bind has no equivalent of.
-TEST_F(SymUnbindTeamMemoryTest, SysmemSegment_ReturnsSuccess) {
-  comm->nvlsSupport = 1;
-  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
-  mem.globalHasSysmemSegment = true;
-  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
+TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
+  for (int nvls : {0, 1}) {
+    for (void* mc : {static_cast<void*>(nullptr), reinterpret_cast<void*>(0x1000)}) {
+      for (bool sysmem : {false, true}) {
+        comm->nvlsSupport = nvls;
+        team->mcBasePtr = mc;
+        mem.globalHasSysmemSegment = sysmem;
+        EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess)
+          << "nvls=" << nvls << " mc=" << mc << " sysmem=" << sysmem;
+      }
+    }
+  }
 }
 
 // Branch: all three arms hold, entering the guarded block.
@@ -1230,8 +1236,8 @@ TEST_F(SymUnbindTeamMemoryTest, NvlsDeviceMemory_ReturnsSuccess) {
 // Its multimem half is behind `#if CUDART_VERSION >= 12010`, which no HIP build
 // defines, so only the nvlsSupport check survives there. The supported-but-
 // compiled-out case is deliberately untested: it returns ncclSuccess without
-// writing *outTeam, and a test would lock that in as expected. See
-// ~/rccl-dev-runtime-findings.md.
+// writing *outTeam, so a test asserting that would lock the bug in as expected
+// behaviour. Written up against AICOMRCCL-2180.
 
 class SymTeamObtainTest : public ::testing::Test {
 protected:
@@ -1439,6 +1445,11 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
   comm->nvlsSupport = 1;
   PushTeam(reinterpret_cast<void*>(0x400000));
   ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  // Required, not optional: without it DefaultMemAddressFree munmap()s the
+  // fabricated 0x400000 for real. Harmless only while the binary is PIE and
+  // that address sits below the load base -- test/host links -no-pie, where
+  // 0x400000 is the ELF text base.
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -1451,6 +1462,7 @@ TEST_F(SymTeamDestroyAllTest, MixedList_TearsDownOnlyMulticastTeams) {
   PushTeam(nullptr);
   PushTeam(reinterpret_cast<void*>(0x400000));
   ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
@@ -2666,7 +2678,7 @@ TEST_F(SymWindowDestroyTest, WindowInChainedTable_IsFound) {
 // The return code is deliberately not asserted. remove_winSorted ends with
 // NCCLCHECKGOTO on the map removal, and that macro assigns unconditionally, so
 // a successful removal overwrites the earlier error with ncclSuccess. Asserting
-// either value would lock that in; see ~/rccl-dev-runtime-findings.md.
+// either value would lock that in. Written up against AICOMRCCL-2180.
 TEST_F(SymWindowDestroyTest, TeardownFailure_StillRemovesFromSortedList) {
   ncclWindow_vidmem* winDev = MakeWindow(reinterpret_cast<void*>(0x100000));
   ScopedHook poolFree(g_shadowPoolFree,
@@ -3198,6 +3210,14 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 class DevrWindowRegisterInGroupSymTest : public DevrWindowRegisterInGroupTest {
 protected:
   void SetUp() override {
+#if ROCM_VERSION < 70000
+    // Below 7.0 alloc.h compiles ncclCuMemGetAddressRange as a WARN plus
+    // `return ncclInternalError` (alloc.h:805-810) that never consults the
+    // g_hipMemGetAddressRange seam, so every test here would fail on the first
+    // call rather than exercising anything. The binary's own floor is 6.4, so
+    // skip rather than fail on a 6.4-6.9 build.
+    GTEST_SKIP() << "ncclCuMemGetAddressRange is a stub below ROCm 7.0";
+#endif
     DevrWindowRegisterInGroupTest::SetUp();
     comm->symmetricSupport = 1;
     comm->devrState.bigSize = size_t(1) << 32;
@@ -3264,6 +3284,13 @@ TEST_F(DevrWindowRegisterInGroupSymTest, AddressRangeFails_ReleasesLocalRegistra
 // Branch: a window not aligned to NCCL_WIN_REQUIRED_ALIGNMENT within its
 // allocation is rejected. The base is reported one byte below the user pointer,
 // which is the smallest offset that cannot satisfy the requirement.
+//
+// Unlike every other rejection in this function, this one is *not* asserted to
+// deregister: dev_runtime.cc:1336 jumps to fail, not fail_locReg, so
+// ncclCommDeregister never runs and the local registration taken at :1284 leaks
+// (as does the memHandles array allocated at :1304). EXPECT_EQ(dereg.calls, 1)
+// belongs here and fails today; see AICOMRCCL-2180 finding 13. Asserting
+// the current count instead would pin the leak.
 TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
     if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(static_cast<char*>(dptr) - 1);
@@ -3284,9 +3311,11 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
   });
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(dereg.calls, 1);  // this arm does unwind, unlike the misaligned one above
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -3305,26 +3334,48 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers
 TEST_F(DevrWindowRegisterInGroupSymTest, UnsupportedSegmentType_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(hipMemLocationTypeInvalid));
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclInvalidArgument);
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
-// Branch: retaining a segment handle fails part-way, so the handles already
-// retained are released rather than leaked.
-TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_ReleasesEarlierHandles) {
+// Branch: retaining a segment handle fails part-way through the validation
+// loop, after an earlier segment's handle was already retained into
+// memHandles[].
+//
+// Retain budget: ncclCuMemGetAddressRange's walk (alloc.h) retains and releases
+// once per iteration, and userSize=8192 over 4096-byte segments gives it two
+// iterations, so retains 1 and 2 are the walk's and are already released by the
+// time it returns. numSegments is then 2, so the validation loop
+// (dev_runtime.cc:1339) retains again per segment: retain 3 lands in
+// memHandles[0], and retain 4 is the one made to fail.
+//
+// Deliberately NOT asserting that memHandles[0] is released: it is not.
+// dev_runtime.cc:1344 jumps to fail_locReg, which is *below*
+// fail_locReg_memHandle's release loop and free(memHandles), so both are
+// skipped -- the retained handle and the array leak. Same for the two other
+// exits in this loop (:1346, :1354). Asserting the release count here would
+// pin that leak in place; see AICOMRCCL-2180 finding 12. What is asserted
+// is the part that does work: the error propagates and the local registration
+// is unwound.
+TEST_F(DevrWindowRegisterInGroupSymTest, RetainFails_PropagatesErrorAndUnwindsLocalRegistration) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   int retained = 0;
   ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t* h, void*) {
-    if (++retained > 2) return hipErrorInvalidValue;  // the address-range walk retains once first
+    if (++retained > 3) return hipErrorInvalidValue;
     if (h) *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
     return hipSuccess;
   });
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook dereg(g_ncclCommDeregister, [](const ncclComm_t, void*) { return ncclSuccess; });
 
   ncclWindow_t out = nullptr;
   EXPECT_NE(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 8192, 0, &out), ncclSuccess);
+  EXPECT_EQ(retained, 4);  // proves the failure landed in the validation loop, not the walk
+  EXPECT_EQ(dereg.calls, 1);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
@@ -4399,10 +4450,10 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
 // team, and ncclGetLsaMultimemDevicePointer is the public wrapper.
 //
 // Only the arm that finds an already-bound team is exercised. Reaching
-// symTeamObtain with multimem on a team that is not bound yet hits the bug in
-// ~/rccl-dev-runtime-findings.md #3: on HIP that call returns ncclSuccess
-// without writing its out-parameter, so the caller here dereferences an
-// uninitialised pointer. A test driving it would crash rather than assert.
+// symTeamObtain with multimem on a team that is not bound yet hits a known bug
+// (AICOMRCCL-2180): on HIP that call returns ncclSuccess without writing its
+// out-parameter, so the caller here dereferences an uninitialised pointer. A
+// test driving it would crash rather than assert.
 
 class DevrGetLsaTeamPtrMCTest : public ::testing::Test {
 protected:
@@ -4590,9 +4641,13 @@ TEST(DevCommDumpTest, DumpsWithoutReadableHandles) {
   EXPECT_NE(out.find("Dev Comm Dump"), std::string::npos);
 }
 
-// Branch: per-connection dumps are dispatched by device type. The copy fake
-// fails by default, so each helper prints nothing rather than reading through a
-// handle that is not real device memory.
+// Branch: per-connection dumps are dispatched by device type -- GDAKI to
+// ncclDevCommGdakiDump, PROXY to ncclDevCommProxyDump (dev_runtime.cc:1524-25).
+// Both helpers read their context through cudaMemcpy before printing, so the
+// copy seam is what proves the dispatch actually happened and that each handle
+// reached the right helper. Asserting only on "Connections 2" would not: that
+// line prints unconditionally above the loop, so both dispatch lines could be
+// deleted and it would still pass.
 TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
   ncclDevComm devComm{};
   devComm.ginConnectionCount = 2;
@@ -4601,10 +4656,20 @@ TEST(DevCommDumpTest, DispatchesPerConnectionDumps) {
   devComm.ginHandles[0] = reinterpret_cast<void*>(0x1000);
   devComm.ginHandles[1] = reinterpret_cast<void*>(0x2000);
 
+  std::vector<const void*> readFrom;
+  ScopedHook copy(g_hipMemcpy, [&](void* dst, const void* src, size_t n, hipMemcpyKind) {
+    readFrom.push_back(src);
+    if (dst) memset(dst, 0, n);  // the helpers print through the context they read
+    return hipSuccess;
+  });
+
   testing::internal::CaptureStdout();
   ncclDevCommDump(&devComm);
   std::string out = testing::internal::GetCapturedStdout();
-  EXPECT_NE(out.find("Connections 2"), std::string::npos);
+
+  EXPECT_EQ(readFrom, (std::vector<const void*>{devComm.ginHandles[0], devComm.ginHandles[1]}));
+  EXPECT_NE(out.find("GDAKI qp"), std::string::npos);
+  EXPECT_NE(out.find("PROXY nranks"), std::string::npos);
 }
 
 

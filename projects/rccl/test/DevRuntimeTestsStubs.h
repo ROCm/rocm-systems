@@ -1,6 +1,8 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
+ * See LICENSE.txt for license information
+ *
  * Controllable seams exposed by DevRuntimeTestsStubs.cc.
  *
  * Each hook defaults to the success behaviour the rest of the suite relies on.
@@ -17,6 +19,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 
 extern std::function<hipError_t(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>
