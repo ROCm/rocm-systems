@@ -524,13 +524,6 @@ public:
 
   [[nodiscard]] uint64_t offset() const { return cursor_; }
 
-  [[nodiscard]] bool consume_validated_region(uint64_t end) {
-    if (end < cursor_ || end > end_)
-      return false;
-    cursor_ = end;
-    return true;
-  }
-
 private:
   const FinalValidationEnvironment &environment_;
   uint64_t cursor_;
@@ -542,234 +535,6 @@ private:
                                    ConSanDependencyKind kind) {
   std::unique_ptr<Instruction> instruction = cursor.take();
   return instruction && validate_consan_dependency(environment.arch(), kind, *instruction);
-}
-
-[[nodiscard]] bool operand_is_scalar_selector(const Operand *operand, uint16_t selector,
-                                              uint8_t width = 1u) {
-  const std::string name = operand ? operand->name() : std::string{};
-  if (selector == kAmdGpuVccLo)
-    return operand_is_register(operand, RegClass::VCC, 0u, width) ||
-           (width == 1u && (name == "vcc" || name == "vcc_lo" || name == "VCC_LO"));
-  if (selector == kAmdGpuVccHi)
-    return operand_is_register(operand, RegClass::VCC, 1u, width) ||
-           (width == 1u && (name == "vcc_hi" || name == "VCC_HI"));
-  if (selector == kAmdGpuExecLo)
-    return operand_is_register(operand, RegClass::EXEC, 0u, width) ||
-           (width == 1u && (name == "exec" || name == "exec_lo" || name == "EXEC_LO"));
-  if (selector == kAmdGpuExecHi)
-    return operand_is_register(operand, RegClass::EXEC, 1u, width) ||
-           (width == 1u && (name == "exec_hi" || name == "EXEC_HI"));
-  return operand_is_register(operand, RegClass::SGPR, selector, width);
-}
-
-[[nodiscard]] bool is_scalar_selector_move(const Instruction &instruction, uint16_t destination,
-                                           uint16_t source) {
-  return instruction.mnemonic() == "s_mov_b32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
-         operand_is_scalar_selector(instruction.src_operand(0), source);
-}
-
-[[nodiscard]] bool is_scalar_move_constant(const Instruction &instruction, uint16_t destination,
-                                           uint64_t value) {
-  return instruction.mnemonic() == "s_mov_b32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
-         operand_is_constant(instruction.src_operand(0), value);
-}
-
-[[nodiscard]] bool is_scalar_compare_equal(const Instruction &instruction, uint16_t source,
-                                           uint64_t value) {
-  return instruction.mnemonic() == "s_cmp_eq_u32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 2 && operand_is_scc(instruction.dst_operand(0)) &&
-         operand_is_scalar_selector(instruction.src_operand(0), source) &&
-         operand_is_constant(instruction.src_operand(1), value);
-}
-
-[[nodiscard]] bool is_scalar_binary(const Instruction &instruction,
-                                    std::initializer_list<std::string_view> mnemonics,
-                                    uint16_t destination, uint16_t lhs, uint16_t rhs) {
-  const bool right_opcode = std::ranges::find(mnemonics, instruction.mnemonic()) != mnemonics.end();
-  return right_opcode && (instruction.num_dst_operands() == 1 ||
-                          (instruction.num_dst_operands() == 2 &&
-                           operand_is_scc(instruction.dst_operand(1)))) &&
-         instruction.num_src_operands() == 2 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
-         operand_is_scalar_selector(instruction.src_operand(0), lhs) &&
-         operand_is_scalar_selector(instruction.src_operand(1), rhs);
-}
-
-[[nodiscard]] bool is_scalar_binary_constant(
-    const Instruction &instruction, std::initializer_list<std::string_view> mnemonics,
-    uint16_t destination, uint16_t lhs, uint64_t rhs) {
-  const bool right_opcode = std::ranges::find(mnemonics, instruction.mnemonic()) != mnemonics.end();
-  return right_opcode && (instruction.num_dst_operands() == 1 ||
-                          (instruction.num_dst_operands() == 2 &&
-                           operand_is_scc(instruction.dst_operand(1)))) &&
-         instruction.num_src_operands() == 2 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
-         operand_is_scalar_selector(instruction.src_operand(0), lhs) &&
-         operand_is_constant(instruction.src_operand(1), rhs);
-}
-
-[[nodiscard]] bool is_direct_transfer_to(const Instruction &instruction,
-                                         std::string_view mnemonic, uint64_t source,
-                                         uint64_t target) {
-  const std::optional<int64_t> delta = instruction.branch_offset_bytes();
-  if (instruction.mnemonic() != mnemonic || !delta ||
-      source > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      instruction.size() <= 0)
-    return false;
-  const int64_t destination = static_cast<int64_t>(source) + instruction.size() + *delta;
-  return destination >= 0 && static_cast<uint64_t>(destination) == target;
-}
-
-[[nodiscard]] bool is_scc0_branch_to(const Instruction &instruction, uint64_t source,
-                                     uint64_t target) {
-  return instruction.num_dst_operands() == 0 && instruction.num_src_operands() == 2 &&
-         operand_is_scc(instruction.src_operand(1)) &&
-         is_direct_transfer_to(instruction, "s_cbranch_scc0", source, target);
-}
-
-[[nodiscard]] bool is_endpgm(const Instruction &instruction) {
-  return instruction.mnemonic() == "s_endpgm" && instruction.num_dst_operands() == 0 &&
-         instruction.num_src_operands() == 0;
-}
-
-[[nodiscard]] bool is_scalar_nop(const Instruction &instruction) {
-  return instruction.mnemonic() == "s_nop" && instruction.num_dst_operands() == 0 &&
-         instruction.num_src_operands() == 1 && instruction.src_operand(0)->encoding_value() == 0;
-}
-
-[[nodiscard]] bool is_scc_capture(const Instruction &instruction, uint16_t destination) {
-  return instruction.mnemonic() == "s_cselect_b32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 3 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination) &&
-         operand_is_constant(instruction.src_operand(0), 1u) &&
-         operand_is_constant(instruction.src_operand(1), 0u) && operand_is_scc(instruction.src_operand(2));
-}
-
-[[nodiscard]] bool is_scc_restore(const Instruction &instruction, uint16_t source) {
-  return instruction.mnemonic() == "s_cmp_lg_u32" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 2 && operand_is_scc(instruction.dst_operand(0)) &&
-         operand_is_scalar_selector(instruction.src_operand(0), source) &&
-         operand_is_constant(instruction.src_operand(1), 0u);
-}
-
-[[nodiscard]] bool operand_is_pc(const Operand *operand) {
-  if (!operand || !operand->is_fieldless())
-    return false;
-  const std::string name = operand->name();
-  return name == "pc" || name == "pc_all";
-}
-
-[[nodiscard]] bool is_direct_call_to(const Instruction &instruction, uint16_t return_pair,
-                                     uint64_t source, uint64_t target) {
-  return instruction.mnemonic() == "s_call_i64" && instruction.num_dst_operands() == 2 &&
-         instruction.num_src_operands() == 2 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), return_pair, 2u) &&
-         operand_is_pc(instruction.dst_operand(1)) && operand_is_pc(instruction.src_operand(1)) &&
-         is_direct_transfer_to(instruction, "s_call_i64", source, target);
-}
-
-[[nodiscard]] bool is_getpc(const Instruction &instruction, uint16_t destination) {
-  return (instruction.mnemonic() == "s_getpc_b64" ||
-          instruction.mnemonic() == "s_get_pc_i64") &&
-         instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), destination, 2u) &&
-         operand_is_pc(instruction.src_operand(0));
-}
-
-[[nodiscard]] bool is_setpc(const Instruction &instruction, uint16_t source) {
-  return (instruction.mnemonic() == "s_setpc_b64" ||
-          instruction.mnemonic() == "s_set_pc_i64") &&
-         instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 1 &&
-         operand_is_pc(instruction.dst_operand(0)) &&
-         operand_is_scalar_selector(instruction.src_operand(0), source, 2u);
-}
-
-[[nodiscard]] bool is_scalar_pc_half_adjust(const Instruction &instruction, uint16_t scalar,
-                                            uint64_t constant, bool subtract, bool carry) {
-  const std::string_view mnemonic = instruction.mnemonic();
-  const bool right_opcode =
-      subtract ? (carry ? mnemonic == "s_subb_u32" || mnemonic == "s_sub_co_ci_u32"
-                        : mnemonic == "s_sub_u32" || mnemonic == "s_sub_co_u32")
-               : (carry ? mnemonic == "s_addc_u32" || mnemonic == "s_add_co_ci_u32"
-                        : mnemonic == "s_add_u32" || mnemonic == "s_add_co_u32");
-  return right_opcode && instruction.num_dst_operands() == 2 &&
-         instruction.num_src_operands() == (carry ? 3 : 2) &&
-         operand_is_scalar_selector(instruction.dst_operand(0), scalar) &&
-         operand_is_scc(instruction.dst_operand(1)) &&
-         operand_is_scalar_selector(instruction.src_operand(0), scalar) &&
-         operand_is_constant(instruction.src_operand(1), constant) &&
-         (!carry || operand_is_scc(instruction.src_operand(2)));
-}
-
-[[nodiscard]] bool is_scalar_pc_pair_adjust(const Instruction &instruction, uint16_t scalar,
-                                            uint64_t constant) {
-  return instruction.mnemonic() == "s_add_nc_u64" && instruction.num_dst_operands() == 1 &&
-         instruction.num_src_operands() == 2 &&
-         operand_is_scalar_selector(instruction.dst_operand(0), scalar, 2u) &&
-         operand_is_scalar_selector(instruction.src_operand(0), scalar, 2u) &&
-         operand_is_constant(instruction.src_operand(1), constant);
-}
-
-[[nodiscard]] bool take_pc_delta(DecodedValidationCursor &cursor, uint64_t delta_end,
-                                 uint16_t pc_sgpr, int64_t delta) {
-  std::unique_ptr<Instruction> low = cursor.take();
-  if (!low)
-    return false;
-  if (is_scalar_pc_pair_adjust(*low, pc_sgpr, static_cast<uint64_t>(delta))) {
-    while (cursor.offset() < delta_end) {
-      std::unique_ptr<Instruction> padding = cursor.take();
-      if (!padding || !is_scalar_nop(*padding))
-        return false;
-    }
-    return cursor.offset() == delta_end;
-  }
-
-  const bool subtract = delta < 0;
-  const uint64_t magnitude =
-      subtract ? (~static_cast<uint64_t>(delta) + 1u) : static_cast<uint64_t>(delta);
-  if (!is_scalar_pc_half_adjust(*low, pc_sgpr, static_cast<uint32_t>(magnitude), subtract,
-                                /*carry=*/false))
-    return false;
-  std::unique_ptr<Instruction> high = cursor.take();
-  return high && is_scalar_pc_half_adjust(*high, static_cast<uint16_t>(pc_sgpr + 1u),
-                                          static_cast<uint32_t>(magnitude >> 32u), subtract,
-                                          /*carry=*/true) &&
-         cursor.offset() == delta_end;
-}
-
-[[nodiscard]] bool validate_scc_preserving_indirect_transfer(
-    const FinalValidationEnvironment &environment, uint64_t offset, uint64_t target,
-    const ConSanIndirectJumpSgprs &jump, bool capture_scc) {
-  constexpr uint64_t kTransferBytes = kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
-  if (offset > environment.replacement_text.bytes.size() ||
-      kTransferBytes > environment.replacement_text.bytes.size() - offset ||
-      target > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) -
-                   2u * sizeof(uint32_t))
-    return false;
-
-  const uint64_t end = offset + kTransferBytes;
-  DecodedValidationCursor cursor(environment, offset, end);
-  std::unique_ptr<Instruction> first = cursor.take();
-  std::unique_ptr<Instruction> getpc = cursor.take();
-  const int64_t delta = static_cast<int64_t>(target) -
-                        static_cast<int64_t>(offset + 2u * sizeof(uint32_t));
-  const bool first_ok = first && (capture_scc ? is_scc_capture(*first, jump.scc_save_sgpr)
-                                             : is_scalar_nop(*first));
-  const bool getpc_ok = getpc && is_getpc(*getpc, jump.pc_sgpr);
-  const bool delta_ok = take_pc_delta(cursor, offset + 5u * sizeof(uint32_t), jump.pc_sgpr, delta);
-  if (!first_ok || !getpc_ok || !delta_ok)
-    return false;
-  std::unique_ptr<Instruction> restore_scc = cursor.take();
-  std::unique_ptr<Instruction> setpc = cursor.take();
-  return restore_scc && is_scc_restore(*restore_scc, jump.scc_save_sgpr) && setpc &&
-         is_setpc(*setpc, jump.pc_sgpr) && cursor.offset() == end;
 }
 
 [[nodiscard]] std::optional<uint64_t>
@@ -1218,21 +983,29 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
       continue;
     }
     const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
+    const uint16_t pc = route.jump.pc_sgpr;
+    const uint16_t scc_save = route.jump.scc_save_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
     const bool gfx9_cdna =
         environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
         environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
     const uint16_t vcc_save_width = is_flat_body || gfx9_cdna ? 2u : 1u;
+    std::vector<uint32_t> expected_entry;
+    std::vector<uint32_t> expected_return;
+    const bool encoded =
+        append_lds_check_trap_indirect_jump(expected_entry, island.trampoline_offset,
+                                            body->trampoline_offset, pc, scc_save,
+                                            *environment.target_profile) &&
+        append_lds_check_trap_indirect_return(expected_return, route.return_offset,
+                                              body->anchor_offset + body->original_size, pc,
+                                              scc_save, *environment.target_profile);
     if (!body->sc_indirect_body_route->is_well_formed(vcc_save_width) ||
-        body->required_sgpr_count < route.minimum_required_sgpr_count(vcc_save_width) ||
-        island.trampoline_size != kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t) ||
-        !validate_scc_preserving_indirect_transfer(environment, island.trampoline_offset,
-                                                   body->trampoline_offset, route.jump,
-                                                   /*capture_scc=*/true) ||
-        !validate_scc_preserving_indirect_transfer(
-            environment, route.return_offset, body->anchor_offset + body->original_size,
-            route.jump, /*capture_scc=*/false)) {
+        body->required_sgpr_count < route.minimum_required_sgpr_count(vcc_save_width) || !encoded ||
+        expected_entry.size() != kLdsCheckTrapIndirectJumpWords ||
+        expected_return.size() != kLdsCheckTrapIndirectJumpWords ||
+        !environment.replacement_text.matches(island.trampoline_offset, expected_entry) ||
+        !environment.replacement_text.matches(route.return_offset, expected_return)) {
       errors.emplace_back(
           "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
     }
@@ -1294,45 +1067,58 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
         static_cast<uint16_t>(jump.pc_sgpr + 1u),
         jump.scc_save_sgpr,
     };
-    const uint64_t transfer_offset =
-        patch.anchor_offset + borrowed.size() * 2u * sizeof(uint32_t);
-    const uint64_t transfer_end =
-        transfer_offset + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
-    const uint64_t anchor_end = patch.anchor_offset + patch.original_size;
-    if (transfer_end > anchor_end)
-      return false;
-    DecodedValidationCursor saves(environment, patch.anchor_offset, transfer_offset);
+    std::vector<uint32_t> expected_entry;
+    std::vector<uint32_t> expected_restore;
     for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
-      std::unique_ptr<Instruction> save = saves.take();
-      if (!save || !is_scalar_lane_save(*save, borrowed[lane], entry.backup_vgpr, lane))
+      const auto save =
+          instrumentation::build_v_writelane_b32(entry.backup_vgpr, borrowed[lane], lane, arch);
+      const auto restore =
+          instrumentation::build_v_readlane_b32(borrowed[lane], entry.backup_vgpr, lane, arch);
+      if (!save || !restore)
         return false;
+      expected_entry.insert(expected_entry.end(), save->begin(), save->end());
+      expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
     }
-    if (saves.offset() != transfer_offset ||
-        !validate_scc_preserving_indirect_transfer(environment, transfer_offset,
-                                                   patch.trampoline_offset, jump,
-                                                   /*capture_scc=*/true))
+    const auto save_scc = instrumentation::build_s_cselect_b32(
+        jump.scc_save_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
+    const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (!save_scc || !restore_wait)
       return false;
-    DecodedValidationCursor padding(environment, transfer_end, anchor_end);
-    while (padding.offset() < anchor_end) {
-      std::unique_ptr<Instruction> instruction = padding.take();
-      if (!instruction || !is_scalar_nop(*instruction))
-        return false;
-    }
-    const uint64_t trampoline_end = patch.trampoline_offset + patch.trampoline_size;
-    DecodedValidationCursor restores(environment, patch.trampoline_offset, trampoline_end);
-    for (uint16_t lane = 0u; lane < borrowed.size(); ++lane) {
-      std::unique_ptr<Instruction> restore = restores.take();
-      if (!restore ||
-          !is_scalar_lane_restore(*restore, borrowed[lane], entry.backup_vgpr, lane))
-        return false;
-    }
-    if (!take_dependency(restores, environment, ConSanDependencyKind::ValuToSalu))
+    expected_entry.push_back(*save_scc);
+    const uint64_t getpc_offset = patch.anchor_offset + expected_entry.size() * sizeof(uint32_t);
+    expected_entry.push_back(build_s_getpc_b64(jump.pc_sgpr, arch));
+    const uint64_t pc_after_getpc = getpc_offset + sizeof(uint32_t);
+    if (patch.trampoline_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        !append_pc_delta_builder(
+            expected_entry, arch, jump.pc_sgpr,
+            static_cast<int64_t>(patch.trampoline_offset) - static_cast<int64_t>(pc_after_getpc),
+            /*minimum_words=*/3u,
+            /*prefer_literal64=*/
+            environment.target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)) {
       return false;
+    }
+    const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
+        jump.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+    if (!restore_scc)
+      return false;
+    expected_entry.push_back(*restore_scc);
+    expected_entry.push_back(build_s_setpc_b64(jump.pc_sgpr, arch));
+    if (expected_entry.size() > patch.original_size / sizeof(uint32_t))
+      return false;
+    expected_entry.resize(patch.original_size / sizeof(uint32_t), build_s_nop(0u, arch));
+
+    expected_restore.push_back(*restore_wait);
+    if (!environment.replacement_text.matches(patch.anchor_offset, expected_entry) ||
+        !environment.replacement_text.matches(patch.trampoline_offset, expected_restore)) {
+      return false;
+    }
     if (patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord)
       return !entry.empty_exec_continuation_offset;
     if (!entry.empty_exec_continuation_offset)
       return false;
-    const uint64_t guard_offset = restores.offset();
+    const uint64_t guard_offset =
+        patch.trampoline_offset + expected_restore.size() * sizeof(uint32_t);
     const uint64_t continuation_offset = *entry.empty_exec_continuation_offset;
     const uint64_t return_source =
         patch.trampoline_offset + patch.trampoline_size - sizeof(uint32_t);
@@ -1432,6 +1218,8 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
   const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
   if (!environment.require_target(errors, "ConSan dense-call proof found no target profile"))
     return;
+  const rj_code_arch_t arch = environment.arch();
+  const uint32_t nop = build_s_nop(0, arch);
   const auto has_other_indirect_route = [](const ConSanPatchInfo &patch) {
     return patch.branch_only_route || patch.sc_indirect_body_route ||
            patch.sc_relay_reservoir_route;
@@ -1463,6 +1251,8 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       errors.emplace_back("ConSan dense-call proof found an invalid entry-host pairing");
       continue;
     }
+    const uint16_t jump_pc = route.jump.pc_sgpr;
+    const uint16_t saved_scc = route.jump.scc_save_sgpr;
     const bool explicit_key = route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
     const uint16_t dispatch_key = route.key_sgpr;
 
@@ -1481,63 +1271,74 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
     }
 
     const uint64_t island_offset = host->anchor_offset + sizeof(uint32_t);
-    DecodedValidationCursor host_anchor(environment, host->anchor_offset, island_offset);
-    std::unique_ptr<Instruction> host_entry = host_anchor.take();
+    const std::optional<uint32_t> host_entry =
+        explicit_key ? std::optional<uint32_t>(
+                           build_s_mov_b32(dispatch_key, scalar_positive_inline_u32(0), arch))
+                     : instrumentation::build_s_call_i64(dispatch_key, 0, arch);
+    std::vector<uint32_t> island_words;
     if (!host_entry ||
-        !(explicit_key ? is_scalar_move_constant(*host_entry, dispatch_key, 0u)
-                       : is_direct_call_to(*host_entry, dispatch_key, host->anchor_offset,
-                                           island_offset)) ||
-        host_anchor.offset() != island_offset ||
-        !validate_scc_preserving_indirect_transfer(environment, island_offset,
-                                                   dispatcher.trampoline_offset, route.jump,
-                                                   /*capture_scc=*/true)) {
+        !append_lds_check_trap_indirect_jump(island_words, island_offset,
+                                             dispatcher.trampoline_offset, jump_pc, saved_scc,
+                                             *environment.target_profile) ||
+        island_words.size() != kLdsCheckTrapIndirectJumpWords) {
+      errors.emplace_back("ConSan dense-call proof could not reconstruct its entry host");
+      continue;
+    }
+    std::vector<uint32_t> expected_host_anchor = {*host_entry};
+    expected_host_anchor.insert(expected_host_anchor.end(), island_words.begin(),
+                                island_words.end());
+    if (!environment.replacement_text.matches(host->anchor_offset, expected_host_anchor)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted entry host");
       continue;
     }
 
-    const uint64_t host_return_offset = host->trampoline_offset + host->original_size;
-    if (!std::ranges::equal(original_text.subspan(host->anchor_offset, host->original_size),
-                            replacement_text.subspan(host->trampoline_offset,
-                                                     host->original_size)) ||
-        !validate_scc_preserving_indirect_transfer(
-            environment, host_return_offset, host->anchor_offset + host->original_size,
-            route.jump, /*capture_scc=*/true)) {
+    std::vector<uint32_t> expected_host_body(host->original_size / sizeof(uint32_t));
+    std::memcpy(expected_host_body.data(), original_text.data() + host->anchor_offset,
+                host->original_size);
+    if (!append_lds_check_trap_indirect_jump(expected_host_body, host->trampoline_offset,
+                                             host->anchor_offset + host->original_size, jump_pc,
+                                             saved_scc, *environment.target_profile) ||
+        !environment.replacement_text.matches(host->trampoline_offset, expected_host_body)) {
       errors.emplace_back("ConSan dense-call proof found a corrupted relocated entry host");
       continue;
     }
 
-    const uint64_t dispatcher_end = dispatcher.trampoline_offset + dispatcher.trampoline_size;
-    DecodedValidationCursor dispatcher_cursor(environment, dispatcher.trampoline_offset,
-                                               dispatcher_end);
+    std::vector<uint32_t> dispatcher_words;
     if (!explicit_key) {
-      std::unique_ptr<Instruction> subtract_pc = dispatcher_cursor.take();
-      std::unique_ptr<Instruction> add_origin = dispatcher_cursor.take();
-      if (dispatcher.trampoline_offset < island_offset || !subtract_pc ||
-          !is_scalar_binary(*subtract_pc, {"s_sub_u32", "s_sub_co_u32", "s_sub_nc_u32"},
-                            dispatch_key, dispatch_key, route.jump.pc_sgpr) ||
-          !add_origin ||
-          !is_scalar_binary_constant(*add_origin,
-                                     {"s_add_u32", "s_add_co_u32", "s_add_nc_u32"},
-                                     dispatch_key, dispatch_key,
-                                     dispatcher.trampoline_offset - island_offset)) {
-        errors.emplace_back("ConSan dense-call proof found a corrupted dispatch key");
+      const auto subtract_pc =
+          instrumentation::build_s_sub_u32(dispatch_key, dispatch_key, jump_pc, arch);
+      if (!subtract_pc) {
+        errors.emplace_back("ConSan dense-call proof could not reconstruct its dispatch key");
         continue;
       }
+      dispatcher_words.push_back(*subtract_pc);
+      dispatcher_words.push_back(build_s_add_u32(dispatch_key, dispatch_key, 255u, arch));
+      dispatcher_words.push_back(
+          static_cast<uint32_t>(dispatcher.trampoline_offset - island_offset));
     }
-    const auto validate_target = [&](uint64_t key, uint64_t target) {
-      std::unique_ptr<Instruction> compare = dispatcher_cursor.take();
-      const uint64_t branch_offset = dispatcher_cursor.offset();
-      std::unique_ptr<Instruction> skip = dispatcher_cursor.take();
-      const uint64_t transfer_offset = dispatcher_cursor.offset();
-      const uint64_t transfer_end =
-          transfer_offset + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t);
-      return compare && is_scalar_compare_equal(*compare, dispatch_key, key) && skip &&
-             is_scc0_branch_to(*skip, branch_offset, transfer_end) &&
-             validate_scc_preserving_indirect_transfer(environment, transfer_offset, target,
-                                                        route.jump, /*capture_scc=*/false) &&
-             dispatcher_cursor.consume_validated_region(transfer_end);
+    const auto append_target = [&](uint32_t key, uint64_t target) {
+      const auto compare = instrumentation::build_s_cmp_eq_u32(
+          dispatch_key, explicit_key || key == 0u ? scalar_positive_inline_u32(key) : 255u, arch);
+      if (!compare)
+        return false;
+      dispatcher_words.push_back(*compare);
+      if (!explicit_key && key != 0u)
+        dispatcher_words.push_back(key);
+      std::vector<uint32_t> matched;
+      const uint64_t matched_offset =
+          dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+      if (!append_lds_check_trap_indirect_return(matched, matched_offset, target, jump_pc,
+                                                 saved_scc, *environment.target_profile))
+        return false;
+      const auto skip =
+          instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched.size()), arch);
+      if (!skip)
+        return false;
+      dispatcher_words.push_back(*skip);
+      dispatcher_words.insert(dispatcher_words.end(), matched.begin(), matched.end());
+      return true;
     };
-    bool valid = validate_target(0u, host->trampoline_offset);
+    bool valid = append_target(0u, host->trampoline_offset);
     for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
       const ConSanPatchInfo *body = bodies[body_index];
       const auto body_route = body->sc_dense_route->body;
@@ -1552,32 +1353,39 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
                                           static_cast<uint32_t>(body_route->vcc_save_sgpr) +
                                               vcc_save_width)
                      : std::numeric_limits<uint32_t>::max();
-      DecodedValidationCursor anchor(environment, body->anchor_offset,
-                                     body->anchor_offset + 2u * sizeof(uint32_t));
-      std::unique_ptr<Instruction> entry = anchor.take();
-      const uint64_t continuation_offset = anchor.offset();
-      std::unique_ptr<Instruction> continuation = anchor.take();
-      const bool valid_anchor =
-          entry && continuation && anchor.offset() == body->anchor_offset + 2u * sizeof(uint32_t) &&
-          (explicit_key
-               ? body_index < 64u &&
-                     is_scalar_move_constant(*entry, dispatch_key, body_index + 1u) &&
-                     is_direct_transfer_to(*continuation, "s_branch", continuation_offset,
-                                           island_offset)
-               : is_direct_call_to(*entry, dispatch_key, body->anchor_offset, island_offset) &&
-                     is_scalar_nop(*continuation));
-      const uint64_t key = explicit_key ? body_index + 1u
-                                        : body->anchor_offset + sizeof(uint32_t) - island_offset;
+      const auto delta = compute_sopp_branch_simm16(
+          body->anchor_offset + (explicit_key ? sizeof(uint32_t) : 0u), island_offset);
+      std::optional<std::array<uint32_t, 2>> anchor;
+      if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
+          body_required_sgprs <= body->required_sgpr_count && explicit_key && delta &&
+          body_index < 64u) {
+        anchor = std::array<uint32_t, 2>{
+            build_s_mov_b32(dispatch_key,
+                            scalar_positive_inline_u32(static_cast<uint16_t>(body_index + 1u)),
+                            arch),
+            build_s_branch(*delta, arch)};
+      } else if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
+                 body_required_sgprs <= body->required_sgpr_count && !explicit_key && delta) {
+        const auto call = instrumentation::build_s_call_i64(dispatch_key, *delta, arch);
+        if (call)
+          anchor = std::array<uint32_t, 2>{*call, nop};
+      }
+      std::vector<uint32_t> expected_return;
       valid &=
-          body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
-          body_required_sgprs <= body->required_sgpr_count && valid_anchor &&
-          validate_scc_preserving_indirect_transfer(
-              environment, body_route->return_offset, body->anchor_offset + body->original_size,
-              route.jump, /*capture_scc=*/false) &&
-          validate_target(key, body->trampoline_offset);
+          body_route && anchor.has_value() &&
+          environment.replacement_text.matches(body->anchor_offset, *anchor) &&
+          append_lds_check_trap_indirect_return(expected_return, body_route->return_offset,
+                                                body->anchor_offset + body->original_size, jump_pc,
+                                                saved_scc, *environment.target_profile) &&
+          environment.replacement_text.matches(body_route->return_offset, expected_return) &&
+          append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
+                                     : static_cast<uint32_t>(body->anchor_offset +
+                                                             sizeof(uint32_t) - island_offset),
+                        body->trampoline_offset);
     }
-    std::unique_ptr<Instruction> terminator = dispatcher_cursor.take();
-    valid &= terminator && is_endpgm(*terminator) && dispatcher_cursor.offset() == dispatcher_end;
+    dispatcher_words.push_back(build_s_endpgm(arch));
+    valid &= dispatcher.trampoline_size == dispatcher_words.size() * sizeof(uint32_t) &&
+             environment.replacement_text.matches(dispatcher.trampoline_offset, dispatcher_words);
     if (!valid)
       errors.emplace_back("ConSan dense-call proof found corrupted call or dispatch geometry");
   }
@@ -1992,39 +1800,41 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
       errors.emplace_back("ConSan relay reservoir proof found a corrupted displaced sequence");
       return;
     }
+    std::vector<uint32_t> expected_entry;
+    std::vector<uint32_t> expected_return;
     const ConSanSuperColliderRelayReservoirRoute &route = *patch->sc_relay_reservoir_route;
     const ConSanSuperColliderRelayEncodingScratch scratch =
         route.encoding_scratch({kAmdGpuVccLo, kAmdGpuExecHi});
     const bool wave32_vcc = scratch.entry_vcc_save_sgpr.has_value();
-    const auto validate_vcc_transfer = [&](uint64_t offset, uint16_t destination,
-                                           uint16_t source) {
-      const auto decoded = decode_validation_instruction(environment.replacement_text,
-                                                         *environment.decoder, offset,
-                                                         offset + sizeof(uint32_t));
-      return decoded &&
-             (wave32_vcc ? is_scalar_selector_move(*decoded->instruction, destination, source)
-                         : is_scalar_nop(*decoded->instruction));
-    };
-    const uint64_t entry_transfer = patch->anchor_offset + sizeof(uint32_t);
-    const uint64_t return_prefix =
-        patch->trampoline_offset + sizeof(uint32_t) + patch->original_size;
-    const uint64_t return_transfer = return_prefix + sizeof(uint32_t);
-    const uint64_t return_target = patch->anchor_offset + patch->original_size -
-                                   kScRelayTailRestoreWords * sizeof(uint32_t);
-    if (!validate_vcc_transfer(patch->anchor_offset,
-                               scratch.entry_vcc_save_sgpr.value_or(0u), kAmdGpuVccLo) ||
-        !validate_scc_preserving_indirect_transfer(
-            environment, entry_transfer, patch->trampoline_offset, scratch.entry_jump,
-            /*capture_scc=*/true) ||
-        !validate_vcc_transfer(patch->trampoline_offset, kAmdGpuVccLo,
-                               scratch.entry_vcc_save_sgpr.value_or(0u)) ||
-        !validate_vcc_transfer(return_prefix, scratch.return_vcc_save_sgpr.value_or(0u),
-                               kAmdGpuVccLo) ||
-        !validate_scc_preserving_indirect_transfer(
-            environment, return_transfer, return_target, scratch.return_jump,
-            /*capture_scc=*/true) ||
-        !validate_vcc_transfer(return_target, kAmdGpuVccLo,
-                               scratch.return_vcc_save_sgpr.value_or(0u))) {
+    expected_entry.push_back(wave32_vcc
+                                 ? build_s_mov_b32(*scratch.entry_vcc_save_sgpr, kAmdGpuVccLo, arch)
+                                 : build_s_nop(0, arch));
+    expected_return.push_back(
+        wave32_vcc ? build_s_mov_b32(*scratch.return_vcc_save_sgpr, kAmdGpuVccLo, arch)
+                   : build_s_nop(0, arch));
+    if (!append_lds_check_trap_indirect_jump(expected_entry, patch->anchor_offset,
+                                             patch->trampoline_offset, scratch.entry_jump.pc_sgpr,
+                                             scratch.entry_jump.scc_save_sgpr,
+                                             *environment.target_profile) ||
+        !append_lds_check_trap_indirect_jump(
+            expected_return, patch->trampoline_offset + sizeof(uint32_t) + patch->original_size,
+            patch->anchor_offset + patch->original_size -
+                kScRelayTailRestoreWords * sizeof(uint32_t),
+            scratch.return_jump.pc_sgpr, scratch.return_jump.scc_save_sgpr,
+            *environment.target_profile) ||
+        std::memcmp(expected_entry.data(), replacement_text.data() + patch->anchor_offset,
+                    expected_entry.size() * sizeof(uint32_t)) != 0 ||
+        environment.replacement_text.word(patch->trampoline_offset) !=
+            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.entry_vcc_save_sgpr, arch)
+                        : build_s_nop(0, arch)) ||
+        std::memcmp(expected_return.data(),
+                    replacement_text.data() + patch->trampoline_offset + sizeof(uint32_t) +
+                        patch->original_size,
+                    expected_return.size() * sizeof(uint32_t)) != 0 ||
+        environment.replacement_text.word(patch->anchor_offset + patch->original_size -
+                                          sizeof(uint32_t)) !=
+            (wave32_vcc ? build_s_mov_b32(kAmdGpuVccLo, *scratch.return_vcc_save_sgpr, arch)
+                        : build_s_nop(0, arch))) {
       errors.emplace_back("ConSan relay reservoir proof found a corrupted normal execution path");
       return;
     }
