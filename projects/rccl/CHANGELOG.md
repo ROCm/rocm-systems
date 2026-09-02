@@ -31,6 +31,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.29.7.
 * Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
+* Added accl-profiler profiler plugin for per-collective timing decomposition (`ACCL_PROFILER_OUTPUT_DIR`, `ACCL_PROFILER_MIN_SIZE_BYTES`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
 * Added GPU-Initiated Networking (GIN) InfiniBand proxy backend for device-initiated collectives on RDMA-capable NICs. Select with `NCCL_GIN_TYPE=2` (proxy). Requires symmetric window registration and Linux kernel ≥ 6.8 for expected performance.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
