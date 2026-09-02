@@ -67,8 +67,7 @@ make_consan_moi_report_header_for_layout(uint64_t generation, uint64_t dispatch_
   header.sampled_causal_window_capacity = layout.sampled_causal_window_capacity;
   header.sampled_sync_metadata_capacity = layout.sampled_sync_metadata_capacity;
   header.sampled_pending_acquire_capacity = layout.sampled_pending_acquire_capacity;
-  if (layout.engine == ConSanMoiEngine::InlineShadow)
-    header.layout_flags = kConSanMoiReportKnownLayoutFlags;
+  header.layout_flags = layout.layout_flags;
   return header;
 }
 

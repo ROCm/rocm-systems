@@ -14,6 +14,7 @@ namespace rocjitsu::consan_moi_impl {
 bool plan_inline_shadow_report_layout(const ConSanMoiAutoReportInventory &inventory,
                                       ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
+  layout.layout_flags = kConSanMoiReportKnownLayoutFlags;
   // Provision one external slot per LDS byte. Objects containing subword
   // traffic use those slots directly; four-byte cells use a bounded subset.
   const uint64_t exact_shadow_cells = inventory.inline_lds_bytes;

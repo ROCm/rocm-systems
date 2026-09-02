@@ -2637,6 +2637,28 @@ foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipel
         "resource planning must return a typed result for coordinator publication"
     )
 endforeach()
+foreach(_common_report_layout_owner IN ITEMS
+    consan_moi_report_layout.h.inc
+    consan_moi_report_helpers.h.inc
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_common_report_layout_owner}"
+        "ConSanMoiEngine::InlineShadow"
+        "common report layout code must consume mode-owned ABI flags"
+    )
+endforeach()
+foreach(_inline_report_layout_owner IN ITEMS
+    consan_moi_inline_shadow_report_contract.h.inc
+    consan_moi_inline_shadow_report_plan.cpp
+)
+    file(READ "${_consan_dir}/${_inline_report_layout_owner}" _inline_report_layout_text)
+    if(NOT _inline_report_layout_text MATCHES
+       "layout[.]layout_flags[ ]*=[ ]*kConSanMoiReportKnownLayoutFlags")
+        message(FATAL_ERROR
+            "InlineShadow report layout owner lost its ABI layout flags"
+        )
+    endif()
+endforeach()
 foreach(_read_only_transaction_client IN ITEMS
     consan_sync_analysis.inc
     consan_placement.h

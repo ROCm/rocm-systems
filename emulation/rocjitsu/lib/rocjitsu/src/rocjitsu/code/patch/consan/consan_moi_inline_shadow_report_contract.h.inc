@@ -78,6 +78,7 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
     uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity) {
   ConSanMoiReportBufferLayout layout;
   layout.engine = ConSanMoiEngine::InlineShadow;
+  layout.layout_flags = kConSanMoiReportKnownLayoutFlags;
   layout.inline_exact_dispatch_bank_count = kConSanMoiInlineMaximumDispatchBankCount;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader) ||
       report_buffer_size > std::numeric_limits<size_t>::max())

@@ -24,12 +24,10 @@
 consan_moi_report_layout_matches_header(const ConSanMoiReportHeader &header,
                                         const ConSanMoiReportBufferLayout &layout,
                                         ConSanMoiEngine engine, uint64_t report_buffer_size) {
-  const uint32_t expected_layout_flags =
-      engine == ConSanMoiEngine::InlineShadow ? kConSanMoiReportKnownLayoutFlags : 0u;
   return consan_moi_report_header_is_current(header) && layout.valid &&
          layout.required_bytes <= report_buffer_size &&
          header.engine == static_cast<uint32_t>(engine) &&
-         header.layout_flags == expected_layout_flags &&
+         header.layout_flags == layout.layout_flags &&
          header.record_replay_dispatch_token_capacity ==
              layout.record_replay_dispatch_token_capacity &&
          header.access_record_capacity == layout.access_record_capacity &&

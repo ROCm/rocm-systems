@@ -799,6 +799,33 @@ TEST(ConSanMoiAutoReportPlan, CanonicalLayoutRoundTripsHeterogeneousSampledLayou
                                                       plan.required_bytes));
 }
 
+TEST(ConSanMoiAutoReportPlan, ModeOwnedLayoutFlagsDriveHeaderConstructionAndRevalidation) {
+  const ConSanMoiAutoReportPlan record = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1});
+  const ConSanMoiAutoReportPlan sampled = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::Sampled,
+       .sampled_range_bank_count = 1,
+       .sampled_watchpoint_count = 1});
+  const ConSanMoiAutoReportPlan inline_shadow = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::InlineShadow, .inline_lds_bytes = 4});
+  ASSERT_TRUE(record.complete());
+  ASSERT_TRUE(sampled.complete());
+  ASSERT_TRUE(inline_shadow.complete());
+
+  EXPECT_EQ(record.layout.layout_flags, 0u);
+  EXPECT_EQ(sampled.layout.layout_flags, 0u);
+  EXPECT_EQ(inline_shadow.layout.layout_flags, kConSanMoiReportKnownLayoutFlags);
+  const ConSanMoiReportHeader header =
+      make_consan_moi_report_header_for_layout(7, 9, inline_shadow.layout);
+  EXPECT_EQ(header.layout_flags, inline_shadow.layout.layout_flags);
+
+  ConSanMoiReportBufferLayout stale = inline_shadow.layout;
+  stale.layout_flags = 0u;
+  EXPECT_FALSE(revalidate_consan_moi_report_layout(
+                   stale, ConSanMoiEngine::InlineShadow, inline_shadow.required_bytes)
+                   .valid);
+}
+
 TEST(ConSanMoiAutoReportPlan, CanonicalLayoutRejectsCorruptOffsetWrongEngineAndShortAllocation) {
   const ConSanMoiAutoReportPlan plan =
       plan_consan_moi_auto_report({.engine = ConSanMoiEngine::RecordReplay,
