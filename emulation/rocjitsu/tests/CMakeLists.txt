@@ -444,6 +444,7 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
+    amdgpu_elf_test_support.cpp
     analysis/free_registers_test.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -469,7 +470,6 @@ add_executable(
     dbt/virtual_lds_metadata_test.cpp
     dbt/encoding_translator_test.cpp
     dbt/legalization_table_test.cpp
-    dbt/support/translate_test_support.cpp
     dbt/translate_gfx1250_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp

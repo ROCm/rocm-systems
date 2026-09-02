@@ -22,6 +22,9 @@
 #include "cudawrap.h"
 #include "dev_runtime_internal.h"
 #include "gin/gin_host.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
 #include "rma/rma_proxy.h"
 #include "nccl_device/core_tmp.h"
 #include "nccl_device/lsa_barrier.h"
@@ -297,6 +300,14 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+#ifdef ENABLE_ROCSHMEM_GIN
+// Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
+// which is itself behind ENABLE_ROCSHMEM_GIN. Ported from develop's
+// test/DevRuntimeTestsStubs.cc (#10388) when that file moved here.
+ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm*, void*, size_t, int, int) {
+  return ncclSuccess;
+}
+#endif
 // Seams: symMemoryRegisterGin NCCLCHECKs both, and its rollback path is only
 // observable through the deregister count.
 static ncclResult_t DefaultGinRegister(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],

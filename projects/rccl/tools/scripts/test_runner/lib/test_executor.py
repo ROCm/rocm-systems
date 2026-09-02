@@ -635,10 +635,18 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        # Expand env vars / ~ (e.g. ${WORKDIR}, ${ROCM_SYSTEMS:-...}) so build
+        # paths need not be hardcoded. Mirrors build_rccl_tests(); a no-op for
+        # flags/options that contain no ${VAR} references.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        install_flags = [_expand(f) for f in self.build_config.get("install_flags", [])]
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
-            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
+            cmake_options = " ".join(f"-D{k}={_expand(v)}" for k, v in cmake_options.items())
+        else:
+            cmake_options = _expand(cmake_options)
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
