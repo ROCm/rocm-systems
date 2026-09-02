@@ -69,13 +69,33 @@ class RunnerTest(unittest.TestCase):
 
     def _run(self, matrix, name: str, process=None, samples=None):
         output = self.root / name
+        packages = {
+            "rocm-sdk-devel": "7.2.0",
+            "torch": "2.10.0",
+            "triton": "3.6.0",
+        }
         with (
             mock.patch.object(
                 runner,
                 "_source_info",
-                return_value={"revision": "a", "dirty": False},
+                return_value={
+                    "commit_sha": "a" * 40,
+                    "commit_timestamp": "2026-09-01T21:42:10Z",
+                    "dirty": False,
+                },
             ),
-            mock.patch.object(runner, "_environment_info", return_value={}),
+            mock.patch.object(
+                runner,
+                "_environment_info",
+                return_value={
+                    "hostname": "benchmark-host",
+                    "platform": "Linux-test",
+                    "kernel": "6.14.0",
+                    "cpu": "test-cpu",
+                    "python": "3.12.0",
+                    "packages": packages,
+                },
+            ),
             mock.patch.object(
                 runner,
                 "_run_command",
@@ -94,6 +114,7 @@ class RunnerTest(unittest.TestCase):
     def test_default_manifest_has_full_ordered_matrix(self) -> None:
         matrix = runner.select_matrix(self.suite)
         self.assertEqual(len(matrix), 24)
+        self.assertEqual(set(runner.CASE_METADATA), set(self.suite.cases))
         self.assertEqual(
             matrix[:4],
             (
@@ -189,25 +210,188 @@ class RunnerTest(unittest.TestCase):
     def test_validate_and_aggregate_workload(self) -> None:
         path = self.root / "workload.json"
         cell = runner.Cell("hip.launch_noop", "gfx950")
-        path.write_text(json.dumps(self._payload(cell, [30, 10, 20])), encoding="utf-8")
+        payload = self._payload(cell, [30, 10, 20])
+        payload["parameters"] = {
+            "threads_per_block": 64,
+            "nested_values": [{"input_dtype": "fp16"}],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
         result = runner.validate_workload(path, cell, 3)
-        self.assertEqual(result["timings_ns"], [30, 10, 20])
         self.assertEqual(
-            (result["min_ns"], result["median_ns"], result["max_ns"]),
-            (10, 20, 30),
+            result["problem"],
+            {
+                "threadsPerBlock": 64,
+                "nestedValues": [{"inputDtype": "fp16"}],
+            },
         )
+        self.assertEqual(result["durationSeconds"], 20 / 1_000_000_000)
+        self.assertEqual(
+            result["timing"],
+            {
+                "unit": "ns",
+                "samples": [30, 10, 20],
+                "minimum": 10,
+                "median": 20,
+                "maximum": 30,
+            },
+        )
+
+    def test_dashboard_parameter_conversion_rejects_collisions(self) -> None:
+        self.assertEqual(
+            runner._dashboard_value(
+                {
+                    "input_dtype": "bf16",
+                    "alreadyCamel": True,
+                    "nested_list": [{"threads_per_block": 256}],
+                }
+            ),
+            {
+                "inputDtype": "bf16",
+                "alreadyCamel": True,
+                "nestedList": [{"threadsPerBlock": 256}],
+            },
+        )
+        for parameters in (
+            {"foo_bar": 1, "fooBar": 2},
+            {"nested": {"foo__bar": 1, "foo_bar": 2}},
+        ):
+            with self.subTest(parameters=parameters):
+                with self.assertRaisesRegex(runner.RunnerError, "collide as 'fooBar'"):
+                    runner._dashboard_value(parameters)
 
     def test_success_writes_compact_artifacts(self) -> None:
         matrix = self._matrix("hip.launch_noop")
         output, result = self._run(matrix, "success", samples=3)
-        self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["results"][0]["timings_ns"], [1, 2, 3])
-        self.assertIsNone(result["results"][0]["failure"])
+        self.assertEqual(
+            set(result),
+            {
+                "schemaVersion",
+                "timestamp",
+                "finishedAt",
+                "status",
+                "wallTimeSeconds",
+                "benchmarkSuite",
+                "targets",
+                "measurement",
+                "provenance",
+                "environment",
+                "tests",
+            },
+        )
+        self.assertEqual(result["schemaVersion"], 1)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["benchmarkSuite"], "nightly")
+        self.assertEqual(result["targets"], ["gfx950"])
+        self.assertEqual(
+            result["measurement"],
+            {"warmups": 3, "samples": 3, "timeoutSeconds": 300.0},
+        )
+        self.assertEqual(
+            result["provenance"],
+            {
+                "rocjitsuCommitSha": "a" * 40,
+                "rocjitsuCommitTimestamp": "2026-09-01T21:42:10Z",
+                "dirty": False,
+                "buildType": "Release",
+                "rocmSdkVersion": "7.2.0",
+                "pythonVersion": "3.12.0",
+                "torchVersion": "2.10.0",
+                "tritonVersion": "3.6.0",
+                "tritonCommitSha": None,
+                "tensileLiteCommitSha": None,
+                "packages": {
+                    "rocm-sdk-devel": "7.2.0",
+                    "torch": "2.10.0",
+                    "triton": "3.6.0",
+                },
+            },
+        )
+        self.assertEqual(
+            result["environment"],
+            {
+                "hostname": "benchmark-host",
+                "platform": "Linux-test",
+                "kernel": "6.14.0",
+                "cpu": "test-cpu",
+            },
+        )
+        test = result["tests"][0]
+        self.assertEqual(
+            set(test),
+            {
+                "testId",
+                "logicalTestId",
+                "suite",
+                "name",
+                "target",
+                "operation",
+                "dataType",
+                "problem",
+                "execMode",
+                "numThreads",
+                "durationSeconds",
+                "timing",
+                "status",
+                "exitCode",
+                "timedOut",
+                "error",
+                "artifacts",
+            },
+        )
+        self.assertEqual(test["testId"], "gfx950:hip.launch_noop")
+        self.assertEqual(test["logicalTestId"], "hip.launch_noop")
+        self.assertEqual(test["suite"], "HIP")
+        self.assertEqual(test["name"], "Launch overhead")
+        self.assertEqual(test["operation"], "Launch")
+        self.assertIsNone(test["dataType"])
+        self.assertEqual(test["problem"], {"fixture": True})
+        self.assertEqual(test["execMode"], "functional")
+        self.assertEqual(test["numThreads"], 1)
+        self.assertEqual(test["durationSeconds"], 2 / 1_000_000_000)
+        self.assertEqual(
+            test["timing"],
+            {
+                "unit": "ns",
+                "samples": [1, 2, 3],
+                "minimum": 1,
+                "median": 2,
+                "maximum": 3,
+            },
+        )
+        self.assertEqual(test["status"], "completed")
+        self.assertEqual(test["exitCode"], 0)
+        self.assertFalse(test["timedOut"])
+        self.assertIsNone(test["error"])
+        self.assertNotIn("canonical", result["provenance"])
         self.assertTrue((output / "run.json").is_file())
+        self.assertEqual(
+            json.loads((output / "run.json").read_text(encoding="utf-8")), result
+        )
         self.assertEqual(
             (output / "cases/hip.launch_noop/gfx950/stdout.txt").read_text(),
             "out",
         )
+
+    def test_initial_checkpoint_is_a_running_v1_run(self) -> None:
+        observed = None
+
+        def inspect_checkpoint(argv, **kwargs):
+            nonlocal observed
+            workload = Path(argv[argv.index("--output") + 1])
+            observed = json.loads((workload.parents[3] / "run.json").read_text())
+            return self._successful_process(argv, **kwargs)
+
+        self._run(
+            self._matrix("hip.launch_noop"),
+            "running-checkpoint",
+            process=inspect_checkpoint,
+            samples=1,
+        )
+        self.assertIsNotNone(observed)
+        self.assertEqual(observed["schemaVersion"], 1)
+        self.assertEqual(observed["status"], "running")
+        self.assertIsNone(observed["finishedAt"])
+        self.assertEqual(observed["tests"], [])
 
     def test_nonzero_exit_preserves_logs(self) -> None:
         def fail(argv, **_kwargs):
@@ -217,8 +401,24 @@ class RunnerTest(unittest.TestCase):
             self._matrix("hip.launch_noop"), "nonzero", process=fail
         )
         self.assertEqual(result["status"], "failed")
-        self.assertIn("status 7", result["results"][0]["failure"])
-        self.assertIsNone(result["results"][0]["artifacts"]["workload"])
+        test = result["tests"][0]
+        self.assertEqual(test["status"], "failed")
+        self.assertEqual(test["exitCode"], 7)
+        self.assertFalse(test["timedOut"])
+        self.assertIn("status 7", test["error"])
+        self.assertIsNone(test["problem"])
+        self.assertIsNone(test["durationSeconds"])
+        self.assertEqual(
+            test["timing"],
+            {
+                "unit": "ns",
+                "samples": [],
+                "minimum": None,
+                "median": None,
+                "maximum": None,
+            },
+        )
+        self.assertIsNone(test["artifacts"]["workload"])
         self.assertEqual(
             (output / "cases/hip.launch_noop/gfx950/stderr.txt").read_text(),
             "failure text",
@@ -233,6 +433,116 @@ class RunnerTest(unittest.TestCase):
         with self.assertRaisesRegex(runner.RunnerError, "belongs to"):
             runner.validate_build(self.build, self._matrix("hip.launch_noop"))
 
+    def test_target_metadata_is_read_from_selected_configuration(self) -> None:
+        configuration = self.root / "target.json"
+        configuration.write_text(
+            json.dumps({"exec_mode": "parallel", "num_threads": 8}),
+            encoding="utf-8",
+        )
+        with mock.patch.dict(
+            runner.TARGET_CONFIGS, {"gfx950": configuration}, clear=True
+        ):
+            metadata = runner._target_metadata("gfx950")
+            _, result = self._run(
+                self._matrix("hip.launch_noop"), "target-metadata", samples=1
+            )
+        self.assertEqual(metadata, runner.TargetMetadata("parallel", 8))
+        self.assertEqual(result["tests"][0]["execMode"], "parallel")
+        self.assertEqual(result["tests"][0]["numThreads"], 8)
+
+    def test_target_metadata_rejects_invalid_fields(self) -> None:
+        configuration = self.root / "target.json"
+        invalid_values = (
+            [],
+            {"exec_mode": "", "num_threads": 1},
+            {"exec_mode": "functional", "num_threads": True},
+            {"exec_mode": "functional", "num_threads": 0},
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                configuration.write_text(json.dumps(value), encoding="utf-8")
+                with (
+                    mock.patch.dict(
+                        runner.TARGET_CONFIGS,
+                        {"gfx950": configuration},
+                        clear=True,
+                    ),
+                    self.assertRaises(runner.RunnerError),
+                ):
+                    runner._target_metadata("gfx950")
+        configuration.write_text("{", encoding="utf-8")
+        with (
+            mock.patch.dict(
+                runner.TARGET_CONFIGS, {"gfx950": configuration}, clear=True
+            ),
+            self.assertRaisesRegex(runner.RunnerError, "cannot read"),
+        ):
+            runner._target_metadata("gfx950")
+
+    def test_commit_timestamp_is_normalized_to_utc(self) -> None:
+        self.assertEqual(
+            runner._normalize_timestamp("2026-09-02T09:30:00-07:00"),
+            "2026-09-02T16:30:00Z",
+        )
+        self.assertEqual(
+            runner._normalize_timestamp("2026-09-02T16:30:00+00:00"),
+            "2026-09-02T16:30:00Z",
+        )
+        for value in ("", "not-a-timestamp", "2026-09-02T16:30:00"):
+            with self.subTest(value=value):
+                self.assertIsNone(runner._normalize_timestamp(value))
+
+    def test_source_info_preserves_sha_when_timestamp_is_invalid(self) -> None:
+        with mock.patch.object(
+            runner.subprocess,
+            "check_output",
+            side_effect=["abc123\n", "invalid\n", " M local-file\n"],
+        ) as check_output:
+            result = runner._source_info()
+        self.assertEqual(
+            result,
+            {
+                "commit_sha": "abc123",
+                "commit_timestamp": None,
+                "dirty": True,
+            },
+        )
+        self.assertEqual(
+            check_output.call_args_list[1].args[0],
+            ["git", "show", "-s", "--format=%cI", "abc123"],
+        )
+        for call in check_output.call_args_list:
+            self.assertEqual(call.kwargs["cwd"], runner.ROCJITSU_ROOT)
+            self.assertIs(call.kwargs["stderr"], subprocess.DEVNULL)
+
+    def test_source_info_ties_timestamp_to_resolved_sha(self) -> None:
+        with mock.patch.object(
+            runner.subprocess,
+            "check_output",
+            side_effect=["abc123\n", "2026-09-02T09:30:00-07:00\n", ""],
+        ) as check_output:
+            result = runner._source_info()
+        self.assertEqual(result["commit_sha"], "abc123")
+        self.assertEqual(result["commit_timestamp"], "2026-09-02T16:30:00Z")
+        self.assertEqual(
+            check_output.call_args_list[1].args[0],
+            ["git", "show", "-s", "--format=%cI", "abc123"],
+        )
+
+    def test_source_info_falls_back_when_git_is_unavailable(self) -> None:
+        unavailable = subprocess.CalledProcessError(128, ["git"])
+        with mock.patch.object(
+            runner.subprocess,
+            "check_output",
+            side_effect=[unavailable, unavailable],
+        ) as check_output:
+            result = runner._source_info()
+        self.assertEqual(
+            result,
+            {"commit_sha": None, "commit_timestamp": None, "dirty": None},
+        )
+        self.assertEqual(check_output.call_count, 2)
+
     def test_timeout_preserves_captured_output(self) -> None:
         def timeout(argv, **_kwargs):
             raise subprocess.TimeoutExpired(
@@ -242,11 +552,31 @@ class RunnerTest(unittest.TestCase):
         output, result = self._run(
             self._matrix("hip.launch_noop"), "timeout", process=timeout
         )
-        self.assertIn("timed out", result["results"][0]["failure"])
+        test = result["tests"][0]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(test["status"], "timeout")
+        self.assertIsNone(test["exitCode"])
+        self.assertTrue(test["timedOut"])
+        self.assertIn("timed out", test["error"])
+        self.assertIsNone(test["problem"])
+        self.assertIsNone(test["durationSeconds"])
         self.assertEqual(
             (output / "cases/hip.launch_noop/gfx950/stdout.txt").read_text(),
             "partial out",
         )
+
+    def test_zero_exit_without_workload_is_a_failed_test(self) -> None:
+        def missing(argv, **_kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        _, result = self._run(
+            self._matrix("hip.launch_noop"), "missing-workload", process=missing
+        )
+        test = result["tests"][0]
+        self.assertEqual(test["status"], "failed")
+        self.assertEqual(test["exitCode"], 0)
+        self.assertIsNone(test["artifacts"]["workload"])
+        self.assertIn("cannot read workload result", test["error"])
 
     def test_malformed_samples_fail_validation(self) -> None:
         def malformed(argv, **_kwargs):
@@ -266,7 +596,9 @@ class RunnerTest(unittest.TestCase):
             samples=2,
         )
         self.assertEqual(result["status"], "failed")
-        self.assertIn("positive integers", result["results"][0]["failure"])
+        self.assertEqual(result["tests"][0]["exitCode"], 0)
+        self.assertFalse(result["tests"][0]["timedOut"])
+        self.assertIn("positive integers", result["tests"][0]["error"])
 
     def test_nonfinite_parameters_fail_without_aborting_suite(self) -> None:
         def nonfinite(argv, **_kwargs):
@@ -285,7 +617,7 @@ class RunnerTest(unittest.TestCase):
             samples=1,
         )
         self.assertEqual(result["status"], "failed")
-        self.assertIn("non-finite JSON value", result["results"][0]["failure"])
+        self.assertIn("non-finite JSON value", result["tests"][0]["error"])
         persisted = json.loads((output / "run.json").read_text(encoding="utf-8"))
         self.assertEqual(persisted["status"], "failed")
 
@@ -368,17 +700,18 @@ class RunnerTest(unittest.TestCase):
         matrix = self._matrix("hip.launch_noop", "hip.copy_fp32_32m")
         output, result = self._run(matrix, "partial", process=one_failure, samples=2)
         self.assertEqual(
-            [item["status"] for item in result["results"]],
-            ["failed", "passed"],
+            [item["status"] for item in result["tests"]],
+            ["failed", "completed"],
         )
         persisted = json.loads((output / "run.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(persisted["results"]), 2)
+        self.assertEqual(len(persisted["tests"]), 2)
         self.assertEqual(persisted["status"], "failed")
 
     def test_list_needs_no_build_or_dependency_metadata(self) -> None:
         stdout = io.StringIO()
         with (
             mock.patch.object(runner, "_environment_info", side_effect=AssertionError),
+            mock.patch.object(runner, "_target_metadata", side_effect=AssertionError),
             contextlib.redirect_stdout(stdout),
         ):
             status = runner.main(

@@ -79,6 +79,52 @@ class PreparedCommand:
     workload_path: Path
 
 
+@dataclasses.dataclass(frozen=True)
+class CaseMetadata:
+    suite: str
+    name: str
+    operation: str
+    data_type: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class TargetMetadata:
+    exec_mode: str
+    num_threads: int
+
+
+CASE_METADATA = {
+    "hip.launch_noop": CaseMetadata("HIP", "Launch overhead", "Launch", None),
+    "hip.copy_fp32_32m": CaseMetadata("HIP", "32 MiB FP32 copy", "Copy", "fp32"),
+    "hip.vector_add_fp32_tail": CaseMetadata(
+        "HIP", "FP32 vector add with tail", "Vector add", "fp32"
+    ),
+    "triton.softmax_fp16_aligned": CaseMetadata(
+        "Triton", "Aligned FP16 softmax", "Softmax", "fp16"
+    ),
+    "triton.softmax_fp16_boundary": CaseMetadata(
+        "Triton", "Boundary FP16 softmax", "Softmax", "fp16"
+    ),
+    "triton.rmsnorm_bf16": CaseMetadata("Triton", "BF16 RMSNorm", "RMSNorm", "bf16"),
+    "triton.gemm_bf16_aligned": CaseMetadata(
+        "Triton", "Aligned BF16 GEMM", "GEMM", "bf16"
+    ),
+    "triton.gemm_bf16_ragged": CaseMetadata(
+        "Triton", "Ragged BF16 GEMM", "GEMM", "bf16"
+    ),
+    "triton.attention_fp16": CaseMetadata(
+        "Triton", "FP16 attention", "Attention", "fp16"
+    ),
+    "tensile.gemm_fp16": CaseMetadata("TensileLite", "FP16 GEMM", "GEMM", "fp16"),
+    "tensile.gemm_bf16_batched": CaseMetadata(
+        "TensileLite", "Batched BF16 GEMM", "GEMM", "bf16"
+    ),
+    "tensile.gemm_fp8_scaled": CaseMetadata(
+        "TensileLite", "Scaled FP8 GEMM", "GEMM", "fp8"
+    ),
+}
+
+
 def provider_for(case_id: str) -> str:
     """Derive the public provider name from a built-in case ID."""
 
@@ -130,6 +176,8 @@ def load_manifest(path: str | Path = DEFAULT_MANIFEST) -> Suite:
     cases = _string_list(value["cases"], "cases")
     for case_id in cases:
         provider_for(case_id)
+        if case_id not in CASE_METADATA:
+            raise RunnerError(f"benchmark case has no metadata: {case_id!r}")
     timeout = value["timeout_seconds"]
     if (
         isinstance(timeout, bool)
@@ -275,6 +323,52 @@ def validate_build(build_dir: str | Path, matrix: Sequence[Cell]) -> str:
     return build_type
 
 
+def _target_metadata(target: str) -> TargetMetadata:
+    path = TARGET_CONFIGS[target]
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunnerError(
+            f"cannot read target configuration {path}: {error}"
+        ) from error
+    if not isinstance(value, Mapping):
+        raise RunnerError(f"target configuration must be a JSON object: {path}")
+    exec_mode = value.get("exec_mode")
+    num_threads = value.get("num_threads")
+    if not isinstance(exec_mode, str) or not exec_mode:
+        raise RunnerError(f"target configuration has invalid exec_mode: {path}")
+    if (
+        isinstance(num_threads, bool)
+        or not isinstance(num_threads, int)
+        or num_threads <= 0
+    ):
+        raise RunnerError(f"target configuration has invalid num_threads: {path}")
+    return TargetMetadata(exec_mode=exec_mode, num_threads=num_threads)
+
+
+def _camel_case(key: str) -> str:
+    head, *tail = key.split("_")
+    return head + "".join(part[:1].upper() + part[1:] for part in tail)
+
+
+def _dashboard_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise RunnerError("workload parameter keys must be strings")
+            dashboard_key = _camel_case(key)
+            if dashboard_key in normalized:
+                raise RunnerError(
+                    f"workload parameter keys collide as {dashboard_key!r}"
+                )
+            normalized[dashboard_key] = _dashboard_value(item)
+        return normalized
+    if isinstance(value, list):
+        return [_dashboard_value(item) for item in value]
+    return value
+
+
 def validate_workload(path: Path, cell: Cell, samples: int) -> dict[str, Any]:
     """Validate and aggregate one workload's small JSON contract."""
 
@@ -322,12 +416,17 @@ def validate_workload(path: Path, cell: Cell, samples: int) -> dict[str, Any]:
         for item in timings
     ):
         raise RunnerError("workload timings must be positive integers")
+    median = statistics.median(timings)
     return {
-        "parameters": parameters,
-        "timings_ns": timings,
-        "min_ns": min(timings),
-        "median_ns": statistics.median(timings),
-        "max_ns": max(timings),
+        "problem": _dashboard_value(parameters),
+        "durationSeconds": median / 1_000_000_000,
+        "timing": {
+            "unit": "ns",
+            "samples": timings,
+            "minimum": min(timings),
+            "median": median,
+            "maximum": max(timings),
+        },
     }
 
 
@@ -337,19 +436,56 @@ def _utc_now() -> str:
     )
 
 
+def _normalize_timestamp(value: str) -> str | None:
+    try:
+        parsed = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _source_info() -> dict[str, Any]:
+    revision = None
+    commit_timestamp = None
+    dirty = None
     try:
         revision = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROCJITSU_ROOT, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROCJITSU_ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
         ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    if revision is not None:
+        try:
+            value = subprocess.check_output(
+                ["git", "show", "-s", "--format=%cI", revision],
+                cwd=ROCJITSU_ROOT,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            commit_timestamp = _normalize_timestamp(value)
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    try:
         dirty = bool(
             subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=ROCJITSU_ROOT, text=True
+                ["git", "status", "--porcelain"],
+                cwd=ROCJITSU_ROOT,
+                stderr=subprocess.DEVNULL,
+                text=True,
             ).strip()
         )
     except (OSError, subprocess.CalledProcessError):
-        revision, dirty = "unknown", None
-    return {"revision": revision, "dirty": dirty}
+        pass
+    return {
+        "commit_sha": revision,
+        "commit_timestamp": commit_timestamp,
+        "dirty": dirty,
+    }
 
 
 def _environment_info() -> dict[str, Any]:
@@ -365,6 +501,25 @@ def _environment_info() -> dict[str, Any]:
         "kernel": platform.release(),
         "cpu": platform.processor() or platform.machine(),
         "python": platform.python_version(),
+        "packages": packages,
+    }
+
+
+def _provenance(
+    source: Mapping[str, Any], environment: Mapping[str, Any], build_type: str
+) -> dict[str, Any]:
+    packages = environment["packages"]
+    return {
+        "rocjitsuCommitSha": source["commit_sha"],
+        "rocjitsuCommitTimestamp": source["commit_timestamp"],
+        "dirty": source["dirty"],
+        "buildType": build_type,
+        "rocmSdkVersion": packages["rocm-sdk-devel"],
+        "pythonVersion": environment["python"],
+        "torchVersion": packages["torch"],
+        "tritonVersion": packages["triton"],
+        "tritonCommitSha": None,
+        "tensileLiteCommitSha": None,
         "packages": packages,
     }
 
@@ -436,24 +591,37 @@ def _run_command(
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
-def _failed_result(cell: Cell, failure: str) -> dict[str, Any]:
+def _failed_test(cell: Cell, target: TargetMetadata, error: str) -> dict[str, Any]:
+    metadata = CASE_METADATA[cell.case]
     base = f"cases/{cell.case}/{cell.target}"
     return {
-        "case": cell.case,
+        "testId": f"{cell.target}:{cell.case}",
+        "logicalTestId": cell.case,
+        "suite": metadata.suite,
+        "name": metadata.name,
         "target": cell.target,
-        "provider": cell.provider,
-        "parameters": None,
-        "timings_ns": [],
-        "min_ns": None,
-        "median_ns": None,
-        "max_ns": None,
+        "operation": metadata.operation,
+        "dataType": metadata.data_type,
+        "problem": None,
+        "execMode": target.exec_mode,
+        "numThreads": target.num_threads,
+        "durationSeconds": None,
+        "timing": {
+            "unit": "ns",
+            "samples": [],
+            "minimum": None,
+            "median": None,
+            "maximum": None,
+        },
         "status": "failed",
+        "exitCode": None,
+        "timedOut": False,
+        "error": error,
         "artifacts": {
             "workload": f"{base}/workload.json",
             "stdout": f"{base}/stdout.txt",
             "stderr": f"{base}/stderr.txt",
         },
-        "failure": failure,
     }
 
 
@@ -483,29 +651,31 @@ def run_suite(
     )
     build = Path(build_dir).expanduser().resolve()
     build_type = validate_build(build, matrix)
+    targets = tuple(dict.fromkeys(cell.target for cell in matrix))
+    target_metadata = {target: _target_metadata(target) for target in targets}
     started = time.monotonic()
+    timestamp = _utc_now()
     source = _source_info()
     environment = _environment_info()
     output_path.mkdir(parents=True)
     run: dict[str, Any] = {
-        "schema": "rocjitsu.benchmark.run.v1",
+        "schemaVersion": 1,
+        "timestamp": timestamp,
+        "finishedAt": None,
         "status": "running",
-        "started_at": _utc_now(),
-        "finished_at": None,
-        "wall_time_seconds": 0.0,
-        "source": source,
-        "environment": environment,
-        "build": {"type": build_type},
-        "suite": {
-            "name": suite.name,
-            "matrix": [dataclasses.asdict(cell) for cell in matrix],
-            "measurement": {
-                "warmups": selected_warmups,
-                "samples": selected_samples,
-                "timeout_seconds": suite.timeout_seconds,
-            },
+        "wallTimeSeconds": 0.0,
+        "benchmarkSuite": suite.name,
+        "targets": list(targets),
+        "measurement": {
+            "warmups": selected_warmups,
+            "samples": selected_samples,
+            "timeoutSeconds": suite.timeout_seconds,
         },
-        "results": [],
+        "provenance": _provenance(source, environment, build_type),
+        "environment": {
+            key: environment[key] for key in ("hostname", "platform", "kernel", "cpu")
+        },
+        "tests": [],
     }
     _write_run(output_path, run)
 
@@ -520,7 +690,9 @@ def run_suite(
         )
         stdout = ""
         stderr = ""
-        result = _failed_result(cell, "workload did not run")
+        result = _failed_test(
+            cell, target_metadata[cell.target], "workload did not run"
+        )
         try:
             completed = _run_command(
                 command.argv,
@@ -530,35 +702,38 @@ def run_suite(
             )
             stdout = _captured_text(completed.stdout)
             stderr = _captured_text(completed.stderr)
+            result["exitCode"] = completed.returncode
             if completed.returncode != 0:
                 raise RunnerError(f"command exited with status {completed.returncode}")
             aggregate = validate_workload(command.workload_path, cell, selected_samples)
             result.update(aggregate)
-            result["status"] = "passed"
-            result["failure"] = None
+            result["status"] = "completed"
+            result["error"] = None
         except subprocess.TimeoutExpired as error:
             stdout = _captured_text(error.stdout)
             stderr = _captured_text(error.stderr)
-            result["failure"] = (
+            result["status"] = "timeout"
+            result["timedOut"] = True
+            result["error"] = (
                 f"command timed out after {suite.timeout_seconds:g} seconds"
             )
         except (OSError, RunnerError) as error:
-            result["failure"] = str(error)
+            result["error"] = str(error)
         if not command.workload_path.is_file():
             result["artifacts"]["workload"] = None
         (cell_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
         (cell_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-        run["results"].append(result)
-        run["wall_time_seconds"] = time.monotonic() - started
+        run["tests"].append(result)
+        run["wallTimeSeconds"] = time.monotonic() - started
         _write_run(output_path, run)
 
     run["status"] = (
-        "passed"
-        if all(item["status"] == "passed" for item in run["results"])
+        "completed"
+        if all(item["status"] == "completed" for item in run["tests"])
         else "failed"
     )
-    run["finished_at"] = _utc_now()
-    run["wall_time_seconds"] = time.monotonic() - started
+    run["finishedAt"] = _utc_now()
+    run["wallTimeSeconds"] = time.monotonic() - started
     _write_run(output_path, run)
     return run
 
@@ -600,7 +775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         artifact = arguments.output.expanduser().resolve() / "run.json"
         print(f"run {run['status']}: {artifact}")
-        return 0 if run["status"] == "passed" else 1
+        return 0 if run["status"] == "completed" else 1
     except RunnerError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

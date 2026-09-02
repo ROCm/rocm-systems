@@ -506,7 +506,9 @@ Only the 21 samples contribute to the reported minimum, median, and maximum.
 Process startup, setup, warmups, JSON output, and teardown are excluded. For a
 native or Triton case, one sample contains one kernel launch. For a hipBLASLt
 case, one sample contains one `hipblasLtMatmul` call, which may launch more than
-one internal kernel.
+one internal kernel. In `run.json`, `durationSeconds` is the median of these
+samples converted from nanoseconds to seconds. It is not the cell wall time or
+the end-to-end suite runtime.
 
 This first version does not establish numerical correctness for the benchmark
 adapters. It validates execution and timing integrity only: the runner rejects
@@ -596,19 +598,114 @@ case on `gfx950` with one warmup and three samples:
 
 Each cell has a 300-second default timeout. A cell failure is recorded and does
 not discard results from other cells. The command returns failure when any
-selected cell fails.
+selected cell fails. An individual test is recorded as `completed`, `failed`,
+or `timeout`; the run is `completed` only when every selected test completes
+successfully and is otherwise `failed`. While the runner is checkpointing a
+partial artifact, the run status is `running`.
 
 ### Artifacts
 
-The output root contains `run.json` with schema
-`rocjitsu.benchmark.run.v1`. It records:
+The output root contains a dashboard-oriented, single-run `run.json` with
+numeric `schemaVersion: 1`. Each invocation writes one document; combining runs
+into a historical catalog or dashboard dataset is the responsibility of a
+future publishing step. The root has this shape:
 
-- overall status, timestamps, and wall time;
-- the git revision and dirty state;
-- host, Python, build type, and installed dependency versions;
-- the selected matrix and effective warmup/sample policy;
-- each cell's provider, parameters, raw timings, minimum, median, maximum,
-  status, artifact paths, and failure message.
+```json
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-09-02T16:44:33.681024Z",
+  "finishedAt": "2026-09-02T16:48:20.437715Z",
+  "status": "completed",
+  "wallTimeSeconds": 226.807,
+  "benchmarkSuite": "nightly",
+  "targets": ["gfx950", "gfx1250"],
+  "measurement": {
+    "warmups": 3,
+    "samples": 21,
+    "timeoutSeconds": 300
+  },
+  "provenance": {
+    "rocjitsuCommitSha": "6806affe...",
+    "rocjitsuCommitTimestamp": "2026-09-01T21:42:10Z",
+    "dirty": false,
+    "buildType": "Release",
+    "rocmSdkVersion": "...",
+    "pythonVersion": "...",
+    "torchVersion": "...",
+    "tritonVersion": "...",
+    "tritonCommitSha": null,
+    "tensileLiteCommitSha": null,
+    "packages": {}
+  },
+  "environment": {
+    "hostname": "...",
+    "platform": "...",
+    "kernel": "...",
+    "cpu": "..."
+  },
+  "tests": []
+}
+```
+
+`timestamp` is when the benchmark started. `rocjitsuCommitTimestamp` is the Git
+committer timestamp of the checked-out HEAD, read with `%cI` and normalized to
+ISO-8601 UTC. It is `null` when Git metadata is unavailable. A dirty run still
+reports the timestamp and SHA of HEAD and records `dirty: true`; there is no
+separate `canonical` flag. The run timestamp distinguishes multiple executions
+of the same commit.
+
+Each entry in `tests` normalizes one case/target cell for dashboard consumers:
+
+```json
+{
+  "logicalTestId": "hip.copy_fp32_32m",
+  "testId": "gfx950:hip.copy_fp32_32m",
+  "suite": "HIP",
+  "name": "32 MiB FP32 copy",
+  "target": "gfx950",
+  "operation": "Copy",
+  "dataType": "fp32",
+  "problem": {
+    "bytes": 33554432,
+    "blockSize": 256
+  },
+  "execMode": "functional",
+  "numThreads": 1,
+  "durationSeconds": 0.237324234,
+  "timing": {
+    "unit": "ns",
+    "samples": [230000000, 237324234, 245000000],
+    "minimum": 230000000,
+    "median": 237324234,
+    "maximum": 245000000
+  },
+  "status": "completed",
+  "exitCode": 0,
+  "timedOut": false,
+  "error": null,
+  "artifacts": {
+    "workload": "cases/hip.copy_fp32_32m/gfx950/workload.json",
+    "stdout": "cases/hip.copy_fp32_32m/gfx950/stdout.txt",
+    "stderr": "cases/hip.copy_fp32_32m/gfx950/stderr.txt"
+  }
+}
+```
+
+`logicalTestId` is the stable case ID and `testId` adds the target so every
+entry in a run is unique. Display metadata is normalized independently of the
+compact suite manifest. Successful workload parameters appear under `problem`
+with camelCase keys. `dataType` is a normalized lowercase string, or `null` for
+an operation such as launch overhead that has no element type. `execMode` and
+`numThreads` come from the selected target configuration.
+
+The nested `timing` object preserves every synchronized raw sample for variance
+analysis together with its minimum, median, and maximum. `durationSeconds` is
+the same median converted from nanoseconds to seconds. A failed or timed-out
+test has `durationSeconds: null`; if it produced no valid workload result, its
+`problem` is `null`, its sample list is empty, and its timing statistics are
+`null`. `exitCode` retains the child process status when one exists,
+`timedOut` distinguishes a deadline from an ordinary failure, and `error`
+contains the diagnostic message.
 
 Per-cell files are retained under `cases/<case>/<target>/`:
 
@@ -618,11 +715,13 @@ stdout.txt
 stderr.txt
 ```
 
-`workload.json` uses `rocjitsu.benchmark.workload.v1` and contains the case,
-target, parameters, and raw synchronized timings emitted by the workload. The
-stdout and stderr files make failures diagnosable without expanding the root
-artifact. If a workload fails before emitting JSON, its artifact entry is null;
-the logs and partial `run.json` remain available.
+`workload.json` remains unchanged at `rocjitsu.benchmark.workload.v1`. It
+contains the case, target, provider, parameters, and raw synchronized timings
+emitted by the workload and remains the producer contract shared by the native
+HIP, Triton, and hipBLASLt adapters. The stdout and stderr files make failures
+diagnosable without expanding the root artifact. If a workload fails before
+emitting JSON, its workload artifact entry is null; the logs and partial
+`run.json` remain available.
 
 The runner intentionally has no built-in comparison, throughput pass, or
 profiling collector. Historical analysis can consume `run.json` after enough
@@ -649,7 +748,10 @@ time is not comparable to the synchronized samples in a Release nightly run.
 
 ### Adding a case
 
-Implement the fixed case in the corresponding provider and add its ID to the
-suite manifest. A workload must use the public runtime path, check the reported
-target, emit the workload schema, return exactly the requested positive timing
-samples, and avoid autotuning or network access during a run.
+Implement the fixed case in the corresponding provider, add its display
+metadata to the runner, and add its ID to the suite manifest. A workload must
+use the public runtime path, check the reported target, emit the workload
+schema, return exactly the requested positive timing samples, and avoid
+autotuning or network access during a run. Keep an ID stable while its problem
+definition is stable; use a new ID when dimensions or other comparison-defining
+parameters change materially.
