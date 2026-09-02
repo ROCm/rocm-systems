@@ -347,7 +347,7 @@ bool covered_by_recorded_alloc(const fs::path& archive_path, uint64_t addr) {
 // CPU-only: the sidecar framing
 // ===========================================================================
 
-TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
   ScopedDir dir(fs::temp_directory_path() / "hrr_region_framing");
   const fs::path archive = dir.path / "pid-1";
   const fs::path stream = archive / "regions" / "synthetic.hrrr";
@@ -473,7 +473,7 @@ void install_sidecar(const fs::path& archive_path,
 // The layout HRR could not see, supplied after the fact, changes what replay
 // can say about the same archive.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_Roundtrip", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_roundtrip.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -547,7 +547,7 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
 // already has must not allocate anything, or the captured layout the replay is
 // reproducing would be shadowed by a second buffer.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_segments.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -603,7 +603,7 @@ TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[hrr]") {
 // exclusively inside the struct. A replay that ignores embedded pointers
 // materialises nothing at all.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_embedded.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
