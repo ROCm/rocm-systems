@@ -215,6 +215,7 @@ inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
 /// which is needed when the rounded F64 value lands on a BF16 boundary or midpoint.
 inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float addend,
                                 uint32_t round_mode, bool clamp, bool clamp_nan_to_zero) {
+  detail::ScopedFenv nearest_environment(0);
   if (!std::isfinite(multiplicand) || !std::isfinite(multiplier) || !std::isfinite(addend)) {
     float result = std::fma(multiplicand, multiplier, addend);
     if (clamp) {
@@ -229,7 +230,9 @@ inline uint16_t fma_f32_to_bf16(float multiplicand, float multiplier, float adde
   const double product = static_cast<double>(multiplicand) * static_cast<double>(multiplier);
   const detail::ExactF64Sum exact = detail::add_exact(product, static_cast<double>(addend));
   if (exact.value == 0.0 && exact.error == 0.0) {
-    detail::ScopedFenv environment(round_mode);
+    if (clamp)
+      return 0;
+    detail::ScopedFenv result_environment(round_mode);
     return util::f32_to_bf16_round(std::fma(multiplicand, multiplier, addend), round_mode);
   }
   if (clamp) {
