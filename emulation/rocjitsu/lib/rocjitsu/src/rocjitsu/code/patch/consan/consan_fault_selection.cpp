@@ -48,6 +48,23 @@ exact_barrier_drop_pair_range(const ExactBarrierDropPair &pair) {
   return {begin, end};
 }
 
+constexpr auto kExactBarrierDropPairIssues = make_consan_enum_vocabulary(
+    "invalid exact barrier-drop pair issue", consan_enum(ExactBarrierDropPairIssue::None, ""),
+    consan_enum(ExactBarrierDropPairIssue::MissingExactIdentity,
+                "an exact site identity and logical sequence identity are both required"),
+    consan_enum(ExactBarrierDropPairIssue::SequenceNotFound,
+                "the exact logical sequence identity was not found"),
+    consan_enum(ExactBarrierDropPairIssue::SequenceNotQualified,
+                "the exact sequence is not an owned complete conservative two-member barrier"),
+    consan_enum(ExactBarrierDropPairIssue::PrimaryNotMember,
+                "the exact site is not a member of the requested logical barrier"),
+    consan_enum(ExactBarrierDropPairIssue::MemberSiteMissing,
+                "a logical barrier member has no exact owned patch site"),
+    consan_enum(ExactBarrierDropPairIssue::MemberSiteAmbiguous,
+                "a logical barrier member maps to multiple patch sites"),
+    consan_enum(ExactBarrierDropPairIssue::InvalidPairGeometry,
+                "the exact logical barrier does not have two distinct one-word patch sites"));
+
 } // namespace
 
 bool consan_fault_admits_cross_block_barrier_move(const ConSanBarrierMoveDestination &destination,
@@ -282,28 +299,7 @@ resolve_exact_barrier_drop_group(const ConSanFaultSelectionView &inventory,
 }
 
 std::string_view exact_barrier_drop_pair_issue_message(ExactBarrierDropPairIssue issue) {
-  using Issue = ExactBarrierDropPairIssue;
-  switch (issue) {
-  case Issue::None:
-    return {};
-  case Issue::MissingExactIdentity:
-    return "an exact site identity and logical sequence identity are both required";
-  case Issue::SequenceNotFound:
-    return "the exact logical sequence identity was not found";
-  case Issue::SequenceNotQualified:
-    return "the exact sequence is not an owned complete conservative two-member barrier";
-  case Issue::PrimaryNotMember:
-    return "the exact site is not a member of the requested logical barrier";
-  case Issue::MemberSiteMissing:
-    return "a logical barrier member has no exact owned patch site";
-  case Issue::MemberSiteAmbiguous:
-    return "a logical barrier member maps to multiple patch sites";
-  case Issue::InvalidPairGeometry:
-    return "the exact logical barrier does not have two distinct one-word patch sites";
-  case Issue::Count:
-    break;
-  }
-  return "invalid exact barrier-drop pair issue";
+  return kExactBarrierDropPairIssues.name(issue);
 }
 
 std::string exact_barrier_drop_group_issue_message(ExactBarrierDropGroupIssue issue,

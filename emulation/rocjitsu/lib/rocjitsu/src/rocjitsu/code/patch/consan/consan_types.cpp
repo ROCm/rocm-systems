@@ -100,6 +100,23 @@ constexpr auto kConSanResourcePlanAlternativeOutcomes = make_consan_enum_vocabul
     consan_enum(ConSanResourcePlanAlternativeOutcome::Contributed, "contributed"),
     consan_enum(ConSanResourcePlanAlternativeOutcome::Vetoed, "vetoed"));
 
+constexpr auto kConSanBarrierLifecycleIssues = make_consan_enum_vocabulary(
+    "invalid barrier-lifecycle issue", consan_enum(ConSanBarrierLifecycleIssue::None, ""),
+    consan_enum(ConSanBarrierLifecycleIssue::InitMissingStaticIdOrScope,
+                "lifecycle init has no proven static ID and scope"),
+    consan_enum(ConSanBarrierLifecycleIssue::NonContiguousRun,
+                "lifecycle run crosses a block, container, or instruction gap"),
+    consan_enum(ConSanBarrierLifecycleIssue::MemberIdOrScopeMismatch,
+                "lifecycle members do not have one matching static ID and scope"),
+    consan_enum(ConSanBarrierLifecycleIssue::MissingJoin,
+                "lifecycle leave has no preceding matching static join association"),
+    consan_enum(ConSanBarrierLifecycleIssue::MissingCompletingBarrier,
+                "lifecycle run has no contiguous same-block completing barrier pair"),
+    consan_enum(ConSanBarrierLifecycleIssue::MissingLeave,
+                "lifecycle run has no contiguous same-block leave operation"),
+    consan_enum(ConSanBarrierLifecycleIssue::InvalidLeaveEncoding,
+                "lifecycle leave is not the fixed-zero GFX12 encoding"));
+
 } // namespace
 
 std::string consan_barrier_move_destination_issue_message(ConSanBarrierMoveDestinationIssue issue,
@@ -125,28 +142,7 @@ std::string consan_barrier_move_destination_issue_message(ConSanBarrierMoveDesti
 }
 
 std::string_view consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue) {
-  using Issue = ConSanBarrierLifecycleIssue;
-  switch (issue) {
-  case Issue::None:
-    return {};
-  case Issue::InitMissingStaticIdOrScope:
-    return "lifecycle init has no proven static ID and scope";
-  case Issue::NonContiguousRun:
-    return "lifecycle run crosses a block, container, or instruction gap";
-  case Issue::MemberIdOrScopeMismatch:
-    return "lifecycle members do not have one matching static ID and scope";
-  case Issue::MissingJoin:
-    return "lifecycle leave has no preceding matching static join association";
-  case Issue::MissingCompletingBarrier:
-    return "lifecycle run has no contiguous same-block completing barrier pair";
-  case Issue::MissingLeave:
-    return "lifecycle run has no contiguous same-block leave operation";
-  case Issue::InvalidLeaveEncoding:
-    return "lifecycle leave is not the fixed-zero GFX12 encoding";
-  case Issue::Count:
-    break;
-  }
-  return "invalid barrier-lifecycle issue";
+  return kConSanBarrierLifecycleIssues.name(issue);
 }
 
 bool ConSanFaultMutationPlan::well_formed() const {

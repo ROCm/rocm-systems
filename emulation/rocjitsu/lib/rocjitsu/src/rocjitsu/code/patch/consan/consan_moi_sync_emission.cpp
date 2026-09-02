@@ -226,31 +226,21 @@ sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
 
 std::string_view sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason) {
   using Reason = SampledAtomicSemanticsReason;
-  switch (reason) {
-  case Reason::None:
-    return "";
-  case Reason::UnqualifiedSharedSyncSequence:
-    return "unqualified-shared-sync-sequence";
-  case Reason::UnsupportedQualifiedMemoryRole:
-    return "unsupported-qualified-memory-role";
-  case Reason::MissingQualifiedScope:
-    return "missing-qualified-scope";
-  case Reason::UnsupportedQualifiedScope:
-    return "unsupported-qualified-scope";
-  case Reason::UnsupportedQualifiedByteRange:
-    return "unsupported-qualified-byte-range";
-  case Reason::CompareExchangeDynamicOutcomeUnavailable:
-    return "compare-exchange-dynamic-outcome-unavailable";
-  case Reason::UnsupportedQualifiedRmwOutcome:
-    return "unsupported-qualified-rmw-outcome";
-  case Reason::SampledSyncAbiRejectedQualifiedSequence:
-    return "sampled-sync-abi-rejected-qualified-sequence";
-  case Reason::SampledSyncAbiRejectedCasFailure:
-    return "sampled-sync-abi-rejected-cas-failure";
-  case Reason::Count:
-    return "invalid-sampled-atomic-semantics-reason";
-  }
-  return "invalid-sampled-atomic-semantics-reason";
+  constexpr auto vocabulary = make_consan_enum_vocabulary(
+      "invalid-sampled-atomic-semantics-reason", consan_enum(Reason::None, ""),
+      consan_enum(Reason::UnqualifiedSharedSyncSequence, "unqualified-shared-sync-sequence"),
+      consan_enum(Reason::UnsupportedQualifiedMemoryRole, "unsupported-qualified-memory-role"),
+      consan_enum(Reason::MissingQualifiedScope, "missing-qualified-scope"),
+      consan_enum(Reason::UnsupportedQualifiedScope, "unsupported-qualified-scope"),
+      consan_enum(Reason::UnsupportedQualifiedByteRange, "unsupported-qualified-byte-range"),
+      consan_enum(Reason::CompareExchangeDynamicOutcomeUnavailable,
+                  "compare-exchange-dynamic-outcome-unavailable"),
+      consan_enum(Reason::UnsupportedQualifiedRmwOutcome, "unsupported-qualified-rmw-outcome"),
+      consan_enum(Reason::SampledSyncAbiRejectedQualifiedSequence,
+                  "sampled-sync-abi-rejected-qualified-sequence"),
+      consan_enum(Reason::SampledSyncAbiRejectedCasFailure,
+                  "sampled-sync-abi-rejected-cas-failure"));
+  return vocabulary.name(reason);
 }
 
 [[nodiscard]] ConSanAtomicSite
