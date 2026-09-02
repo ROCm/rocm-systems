@@ -13,15 +13,24 @@
 /// analysis reports the footprint and subtracts only the return-link pair,
 /// which every convention supplies by construction.
 ///
-/// Ordinary registers only — SGPR, VGPR, AccVGPR. Special state (EXEC, VCC,
-/// SCC, M0, FLAT_SCRATCH) is outside the `LivenessAnalysis` dataflow model
-/// (`analysis/liveness.h`) and `RegisterSet` has no bits for it, so an implicit
-/// dependence on special state is neither detected nor reported here. That is a
-/// deliberate scope limit, not an oversight: covering it needs a read-side
-/// special-state analysis that does not exist. Note in particular that GFX9 /
-/// CDNA `ds_*` instructions implicitly read M0, which a kernel prologue
-/// initializes, so an LDS-using probe carries an input this analysis is blind
-/// to.
+/// Scope: ordinary registers — SGPR, VGPR, AccVGPR — read before being defined.
+/// That is the shape of a value the kernel prologue supplies and an arbitrary
+/// instrumentation site does not, which is the dependence this analysis exists
+/// to find.
+///
+/// Special state (EXEC, VCC, SCC, M0, FLAT_SCRATCH) is the trampoline's to
+/// handle, not this analysis's: `RegisterSet` cannot represent it
+/// (`isa/register_set.h`) and `LivenessAnalysis` does not model it. A probe
+/// reading special state it never wrote is therefore accepted here — including
+/// SCC, which the call envelope's address arithmetic clobbers outright, and M0,
+/// which CDNA `ds_*` reads implicitly. Neither is a gap in this gate.
+///
+/// The one thing this scope does oblige is that the encoded operands name every
+/// ordinary register the body reads. Relative and GPR-indexed forms break that
+/// by displacing an index at runtime, so they are rejected rather than analyzed:
+/// the VGPR forms via `LivenessAnalysis::global_vgpr_usage_is_complete()`, the
+/// scalar `s_movrel*` family via a local scan, since liveness models no scalar
+/// equivalent.
 
 #pragma once
 
@@ -59,8 +68,8 @@ namespace rocjitsu {
 /// when the analysis could not run: an unrecognized convention, a probe object
 /// whose `.text` layout the scope walk cannot address, no decoder for @p arch, a
 /// decode failure, a probe entry that does not start a decoded block, or a body
-/// whose relative / GPR-indexed VGPR access means its encoded operands do not
-/// name every register it reads.
+/// whose relative / GPR-indexed VGPR access or relative SGPR access means its
+/// encoded operands do not name every register it reads.
 [[nodiscard]] std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj,
                                                                 const ResolvedProbeSymbol &sym,
                                                                 rj_code_arch_t arch,

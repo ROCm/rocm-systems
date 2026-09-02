@@ -88,8 +88,11 @@ void dfs_reverse_post_order(const BasicBlock &start,
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-VGPR access properties into decoded instruction
-  // metadata so future ISA variants cannot bypass this completeness gate.
+  // TODO: Move indirect-access properties into decoded instruction metadata so
+  // future ISA variants cannot bypass this completeness gate. The scalar
+  // s_movrel* family displaces an SGPR index through M0 the same way and has no
+  // equivalent gate here, so consumers needing one scan mnemonics themselves
+  // (code/patch/probe_live_in.cpp).
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }

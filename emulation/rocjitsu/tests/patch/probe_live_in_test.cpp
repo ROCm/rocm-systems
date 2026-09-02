@@ -37,6 +37,7 @@ constexpr uint32_t kVMovV0S4 = 0x7e000204;           // v_mov_b32 v0, s4
 constexpr uint32_t kSMovS4Zero = 0xbe840080;         // s_mov_b32 s4, 0
 constexpr uint32_t kSCbranchScc0Skip1 = 0xbf840001;  // s_cbranch_scc0 over one word
 constexpr uint32_t kSSetGprIdxOnS0Src0 = 0xbf110100; // s_set_gpr_idx_on s0, gpr_idx(SRC0)
+constexpr uint32_t kSMovrelsS5S4 = 0xbe852a04;       // s_movrels_b32 s5, s4
 
 constexpr uint64_t kTextAddr = 0x1000;
 constexpr uint64_t kTextOffset = 0x100;
@@ -256,6 +257,15 @@ TEST(ProbeLiveInTest, RejectsGprIndexedVgprAccess) {
   std::string err;
   EXPECT_FALSE(live_ins({kSSetGprIdxOnS0Src0, kVMovV0V31, kSSetpcS30S31}, &err).has_value());
   EXPECT_NE(err.find("GPR-indexed"), std::string::npos) << err;
+}
+
+// The scalar counterpart, which liveness does not model: s_movrels_b32 reads
+// s[4 + m0], so defining s4 locally is enough to empty the reported set while the
+// body still reads an SGPR nothing in the scope wrote.
+TEST(ProbeLiveInTest, RejectsRelativeSgprAccess) {
+  std::string err;
+  EXPECT_FALSE(live_ins({kSMovS4Zero, kSMovrelsS5S4, kSSetpcS30S31}, &err).has_value());
+  EXPECT_NE(err.find("relative SGPR"), std::string::npos) << err;
 }
 
 // gfx1250 resolves an encoded VGPR operand through MODE.VGPR_MSB, whose value at
