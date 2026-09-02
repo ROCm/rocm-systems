@@ -7985,3 +7985,63 @@ The same shared mechanism's Sampled access consumer still rediscovers both its
 workgroup tuple and gate plan during emission; that is the next coherent
 consumer migration. Material whole-refactoring shrinkage and the independent
 completion audit remain open, so the goal remains active.
+
+### 16.112 Convergence checkpoint 111: retained Sampled workgroup selection
+
+The corresponding Sampled trace found a wider planning/emission loop. The
+access-body builder rediscovered its exact workgroup tuple every time it was
+called: once for provisional sizing and again for appended, inline, or
+high-bank final emission. External entry-island and dense-body fast gates then
+performed yet another tuple lookup and called the runtime gate planner again.
+The planned patch retained three placement booleans but neither of the
+products consumed by emission.
+
+Candidate planning now resolves one exact `ConSanMoiWorkgroupSources` product
+and retains it with the optional selected `MoiRuntimeWorkgroupGatePlan`. The
+access-body builder requires the exact tuple and no longer accepts private
+offsets from which it can rediscover one. Provisional sizing and every final
+body rebuild consume that tuple. Entry-island and dense-body fast gates consume
+the retained tuple and gate plan directly; the existing `dense_call_anchor`
+selects their placement, so the parallel dense-fast-gate flag is deleted. The
+spill-safe body-gate boolean remains because it selects a genuinely different
+vector implementation inside the Sampled access body.
+
+This migration exposed a pre-existing branch-only bug. A branch-only scalar
+route has no external entry island, but the old fast-gate predicate did not
+exclude it. With register-backed workgroup identity, planning could therefore
+disable the in-body gate without emitting the selected external gate. The
+predicate now keeps branch-only runtime selection in the spill-safe body. A
+new CDNA4 regression exhausts scalar routing registers while retaining a
+persistent VGPR workgroup tuple and proves that exact fallback. Structural
+checks require one Sampled tuple selection and one fast-gate planning call,
+reject emission-time tuple discovery, and reject restoration of the dense
+parallel flag.
+
+| Signal | Checkpoint 111 | Cumulative change | Slice change from checkpoint 110 |
+| --- | ---: | ---: | ---: |
+| Production files | 295 | +66 | 0 |
+| Physical production lines | 102,855 | **-2,121** | **-26** |
+| Nonblank production lines | 96,513 | **-2,571** | **-25** |
+| Production implementation lines | 88,787 | **-2,663** | **-25** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **121 / 48** | **-155 / -9** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 209 / 31 | +9 / +3 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | 322 / 61 | +32 / +10 | 0 / 0 |
+| Sampled access workgroup-source selections | **1** | n/a | consolidated to one |
+| Sampled access fast-gate planner calls | **1** | n/a | **-2** |
+| Parallel planned Sampled fast-gate booleans | **0** | n/a | **-2** |
+| Test inventory | **5,413** | **+68** | **+1** |
+
+Validation includes a complete `-j16` rebuild, all Sampled host and
+architecture-boundary tests **160/160**, and all **1,296/1,296** `ConSan.*`
+and `ConSanMoi.*` host/component tests. The new branch-only regression failed
+until its body-gate ownership was fixed. No test was removed, renamed,
+disabled, or replaced, and no physical gfx1201 test was run.
+
+This slice closes the remaining Sampled access planning/emission loop for the
+shared runtime gate and fixes one lost-selection bug, strengthening Sections
+14.2, 14.3, 14.5, 14.6, 14.7, and 14.9. The gate planner itself still accepts
+the broad request, resources, operating point, and architecture even though
+its consumers already hold exact normalized facts. Narrowing that shared
+boundary is the next coherent step. Material whole-refactoring shrinkage and
+the independent completion audit remain open, so the goal remains active.
