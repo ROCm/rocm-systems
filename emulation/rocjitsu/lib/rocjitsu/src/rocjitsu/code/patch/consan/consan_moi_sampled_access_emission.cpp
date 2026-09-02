@@ -187,8 +187,8 @@ using consan_moi_detail::ConSanMoiRecordEmitter;
 }
 
 [[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
-                                 const BoundRuntimeResources &resources,
+append_sampled_window_bank_index(std::vector<uint32_t> &words,
+                                 const consan_moi_detail::ConSanMoiReportDispatchIdSource &dispatch,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
                                  uint16_t owner_vgpr, rj_code_arch_t arch) {
@@ -201,9 +201,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     words.insert(words.end(), zero->begin(), zero->end());
     return true;
   }
-  if (!append_moi_report_dispatch_id_pair(
-          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, resources}), bank_vgpr,
-          temporary_vgpr, arch)) {
+  if (!append_moi_report_dispatch_id_pair(words, dispatch, bank_vgpr, temporary_vgpr, arch)) {
     return false;
   }
   const auto mix = [&](uint16_t source) {
@@ -661,9 +659,9 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     words.push_back(*narrow_selected);
   }
   if (runtime_sampled || window_bank_count > 1) {
-    if (!append_sampled_window_bank_index(words, point, bound_resources, workgroup_sources,
-                                          window_bank_count, bank_vgpr, high_vgpr, owner_vgpr,
-                                          arch)) {
+    if (!append_sampled_window_bank_index(
+            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+            workgroup_sources, window_bank_count, bank_vgpr, high_vgpr, owner_vgpr, arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not select a window bank");
       return std::nullopt;
     }
@@ -1201,8 +1199,8 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOp
     words.insert(words.end(), owner->words.begin(), owner->words.end());
   }
   if (point.moi_persistent_sgprs.complete()) {
-    if (!consan_detail::validate_scalar_state_temporaries(point, owner_epoch_vgprs, "sampled probe",
-                                                          errors))
+    if (!consan_detail::validate_scalar_state_temporaries(
+            point.moi_persistent_sgprs, owner_epoch_vgprs, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
         build_v_mov_b32_e32(*owner_epoch_vgprs.owner, *point.moi_persistent_sgprs.owner(), arch));

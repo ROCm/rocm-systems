@@ -1853,6 +1853,23 @@ _consan_assert_no_match(
     "moi_persistent_or_descriptor_workgroup_sources"
     "Sampled access emission must consume its retained workgroup-source product"
 )
+file(READ "${_consan_dir}/consan_moi_sampled_access_emission.h"
+     _moi_sampled_access_emission_contract)
+if(_moi_sampled_access_emission_contract MATCHES
+   "append_sampled_window_bank_index[^;]*(ConSanMoiOperatingPoint|BoundRuntimeResources)")
+    message(
+        FATAL_ERROR
+        "ConSan Sampled bank hashing must consume exact dispatch and workgroup sources"
+    )
+endif()
+file(READ "${_consan_dir}/consan_moi_internal.h" _moi_internal_contract)
+if(_moi_internal_contract MATCHES
+   "validate_scalar_state_temporaries[^;]*ConSanMoiOperatingPoint")
+    message(
+        FATAL_ERROR
+        "ConSan scalar-state validation must consume the exact persistent scalar state"
+    )
+endif()
 foreach(_file IN LISTS _consan_sources)
     file(STRINGS "${_file}" _generated_includes REGEX "isa/arch/amdgpu/generated/")
     if(NOT _generated_includes)

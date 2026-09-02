@@ -282,9 +282,10 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
       return std::nullopt;
     }
     words.push_back(*restore_scan_exec);
-    if (!append_sampled_window_bank_index(words, point, bound_resources, *workgroup_sources,
-                                          window.bank_count, bank_vgpr, value,
-                                          *owner_epoch_vgprs.owner, arch)) {
+    if (!append_sampled_window_bank_index(
+            words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+            *workgroup_sources, window.bank_count, bank_vgpr, value, *owner_epoch_vgprs.owner,
+            arch)) {
       errors.emplace_back("ConSan MOI sampled barrier failed at causal-window bank selection");
       return std::nullopt;
     }

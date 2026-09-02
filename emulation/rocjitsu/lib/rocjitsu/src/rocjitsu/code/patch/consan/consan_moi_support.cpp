@@ -558,10 +558,10 @@ bool consan_detail::scalar_owner_contexts_admit_reserved_window(
 }
 
 bool consan_detail::validate_scalar_state_temporaries(
-    const ConSanMoiOperatingPoint &point, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
-    std::string_view consumer, std::vector<std::string> &errors) {
-  if (!point.moi_persistent_sgprs.complete() ||
-      (owner_epoch_vgprs.owner && owner_epoch_vgprs.epoch)) {
+    const ConSanMoiPersistentSgprState &persistent_sgprs,
+    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs, std::string_view consumer,
+    std::vector<std::string> &errors) {
+  if (!persistent_sgprs.complete() || (owner_epoch_vgprs.owner && owner_epoch_vgprs.epoch)) {
     return true;
   }
   errors.emplace_back("ConSan MOI " + std::string(consumer) +

@@ -253,8 +253,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                             owner_epoch_vgprs, *private_layout, arch, errors))
     return false;
   if (point.moi_persistent_sgprs.complete()) {
-    if (!consan_detail::validate_scalar_state_temporaries(point, owner_epoch_vgprs,
-                                                          "sampled atomic prelude", errors))
+    if (!consan_detail::validate_scalar_state_temporaries(
+            point.moi_persistent_sgprs, owner_epoch_vgprs, "sampled atomic prelude", errors))
       return false;
     words.push_back(
         build_v_mov_b32_e32(*owner_epoch_vgprs.owner, *point.moi_persistent_sgprs.owner(), arch));
@@ -374,9 +374,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      arch, saved_address, /*defer_guest=*/false, prelude, errors,
                                      guest_instruction_offset, trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(words, point, bound_resources, *workgroup_sources,
-                                        bank_count, bank, expected, *owner_epoch_vgprs.owner,
-                                        arch)) {
+  if (!append_sampled_window_bank_index(
+          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+          *workgroup_sources, bank_count, bank, expected, *owner_epoch_vgprs.owner, arch)) {
     errors.emplace_back("ConSan MOI sampled pending acquire failed at bank selection");
     return std::nullopt;
   }
@@ -714,9 +714,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      arch, saved_address, defer_guest, prelude, errors,
                                      guest_instruction_offset, trailing_guest_words))
     return std::nullopt;
-  if (!append_sampled_window_bank_index(words, point, bound_resources, *workgroup_sources,
-                                        bank_count, bank, expected, *owner_epoch_vgprs.owner,
-                                        arch)) {
+  if (!append_sampled_window_bank_index(
+          words, consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
+          *workgroup_sources, bank_count, bank, expected, *owner_epoch_vgprs.owner, arch)) {
     errors.emplace_back("ConSan MOI sampled atomic metadata failed at bank selection");
     return std::nullopt;
   }

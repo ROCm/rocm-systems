@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
 
 namespace rocjitsu::consan_moi_impl {
 
 [[nodiscard]] bool
-append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanMoiOperatingPoint &point,
-                                 const BoundRuntimeResources &resources,
+append_sampled_window_bank_index(std::vector<uint32_t> &words,
+                                 const consan_moi_detail::ConSanMoiReportDispatchIdSource &dispatch,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
                                  uint16_t owner_vgpr, rj_code_arch_t arch);

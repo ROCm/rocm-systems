@@ -1368,7 +1368,7 @@ resolve_scalar_owner_contexts(bool planning_state_valid,
 /// emission. This remains release-active because ConSan rewrites untrusted
 /// code objects and must fail cleanly if placement and emission ever diverge.
 [[nodiscard]] bool
-validate_scalar_state_temporaries(const ConSanMoiOperatingPoint &point,
+validate_scalar_state_temporaries(const ConSanMoiPersistentSgprState &persistent_sgprs,
                                   const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
                                   std::string_view consumer, std::vector<std::string> &errors);
 

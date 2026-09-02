@@ -1252,8 +1252,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationIsNoopWhenDisabled) {
   MoiOptions disabled;
   std::vector<std::string> errors;
   EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(
-      disabled, moi_owner_epoch_vgpr_sources(disabled.moi_owner_epoch_vgprs), "test consumer",
-      errors));
+      disabled.moi_persistent_sgprs, moi_owner_epoch_vgpr_sources(disabled.moi_owner_epoch_vgprs),
+      "test consumer", errors));
   EXPECT_TRUE(errors.empty());
 }
 
@@ -1268,8 +1268,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
     };
     std::vector<std::string> errors;
 
-    EXPECT_FALSE(consan_detail::validate_scalar_state_temporaries(options, owner_epoch_vgprs,
-                                                                  "test consumer", errors));
+    EXPECT_FALSE(consan_detail::validate_scalar_state_temporaries(
+        options.moi_persistent_sgprs, owner_epoch_vgprs, "test consumer", errors));
     ASSERT_EQ(errors.size(), 1u);
     EXPECT_NE(errors.front().find("test consumer has no scalar-state VGPR temporaries"),
               std::string::npos);
@@ -1280,7 +1280,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   valid.set_moi_owner_epoch_vgprs(6u, 7u);
   std::vector<std::string> errors;
   EXPECT_TRUE(consan_detail::validate_scalar_state_temporaries(
-      valid, moi_owner_epoch_vgpr_sources(valid.moi_owner_epoch_vgprs), "test consumer", errors));
+      valid.moi_persistent_sgprs, moi_owner_epoch_vgpr_sources(valid.moi_owner_epoch_vgprs),
+      "test consumer", errors));
   EXPECT_TRUE(errors.empty());
 }
 
