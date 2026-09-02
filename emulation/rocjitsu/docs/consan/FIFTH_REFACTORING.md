@@ -10390,3 +10390,52 @@ new mode owner still reaches the broad private transaction store because both
 fragments compile as one component.  Those facts, along with full target/mode
 locality, narrow component interfaces, extension-proof revalidation, and the
 independent Section 14 audit, remain open.
+
+### 16.150 Convergence checkpoint 149: exact Record/Replay staging products
+
+The first follow-through trace inside the new mode owner found that its staged
+barrier record retained three facts in parallel with products that survived
+the whole transaction.  An `emission` pointer always addressed
+`planned.emission`; `cave_text_offset` always equaled
+`placement.body_offset`; and `branch_only_scalar_spill` was the result of the
+accepted operating point's owner-local transient assignment.  No later phase
+could legitimately change any of those relationships.
+
+Those three fields and their writes are deleted.  Relay request construction
+and publication now use the retained placement body offset, emission comes
+from the retained planned record event, and route classification is projected
+from the accepted owner assignment at its consumer.  Local aliases continue
+to make the mutation phase readable without creating another stored
+authority.  The boundary gate rejects restoration of any of the three staged
+fields while separately enforcing the mode owner and shared fallback seam.
+
+| Signal | Checkpoint 149 | Cumulative change | Slice change from checkpoint 148 |
+| --- | ---: | ---: | ---: |
+| Production files | 308 | +79 | 0 |
+| Physical production lines | 102,712 | **-2,264** | **-4** |
+| Nonblank production lines | 96,289 | **-2,795** | **-4** |
+| Production implementation lines | 88,493 | **-2,957** | **-4** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **120 / 49** | **-156 / -8** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 211 / 32 | +11 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **248 / 51** | **-42 / 0** | 0 / 0 |
+| Parallel staged Record/Replay barrier facts | **0** | n/a | **-3** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The implementation is committed as `bd7729e0c9f`.  Validation includes a
+current successful full `-j16` build; the architecture-boundary gate and all
+**109/109** barrier-named host tests; and **40/40** correct/incorrect
+Record/Replay sparse-dense, dense branch-only, long-range full-pressure, and
+fence/barrier-publication simulator cases across gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250.  Checkpoint 148 supplies the immediately preceding
+complete **614/614** five-target Record/Replay simulator matrix, and checkpoint
+141 remains the preceding complete all-mode **4,789/4,789** nonphysical gate.
+No test was removed, renamed, disabled, or replaced, and no physical GPU test
+was run.
+
+This small deletion is the required representation follow-through on the
+larger physical mode split: the new owner is not allowed to preserve the old
+transaction's redundant staging shape merely because that shape is now in a
+better-named file.  Further common-barrier narrowing, target/mode locality,
+compiled interface enforcement, extension proof, and the independent Section
+14 audit remain open.
