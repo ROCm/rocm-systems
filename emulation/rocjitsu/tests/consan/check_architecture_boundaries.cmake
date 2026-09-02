@@ -2628,7 +2628,7 @@ endif()
 foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipeline.inc)
     _consan_assert_no_match(
         "${_consan_dir}/${_resource_planning_owner}"
-        "const[ \\t]+ConSanTransformArtifacts"
+        "ConSanTransformArtifacts|publish_pending_moi_lowering_rejections"
         "resource planning must consume its immutable problem, not the mutable transaction bus"
     )
     _consan_assert_no_match(

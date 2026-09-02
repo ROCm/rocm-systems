@@ -52,6 +52,56 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   result.patches.clear();
   if (!result.errors.empty())
     return result;
+
+  /// Close every MOI intent that did not participate in a committed byte
+  /// mutation. Unsupported resource plans reject the exact intent IDs they
+  /// governed; all other still-pending intents receive an explicit placement
+  /// rejection. This terminal transaction never searches patches, anchors,
+  /// or graph geometry to rediscover what lowering attempted.
+  const auto publish_pending_moi_lowering_rejections =
+      [&](std::optional<ConSanRegisterPlanReason> whole_transform_resource_failure = std::nullopt) {
+        for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+          if (plan.source != ConSanRegisterAllocationSource::Unsupported || plan.intent_ids.empty())
+            continue;
+          std::vector<ConSanProbeIntentId> pending;
+          for (ConSanProbeIntentId id : plan.intent_ids) {
+            const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
+            if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Pending &&
+                std::ranges::find(pending, id) == pending.end()) {
+              pending.push_back(id);
+            }
+          }
+          if (pending.empty())
+            continue;
+          if (!result.coverage_ledger.publish_lowering_rejection(
+                  pending, ConSanLoweringOutcomeKind::ResourceRejected,
+                  "MOI resource plan rejected intents: " +
+                      std::string(consan_register_plan_reason_name(plan.reason)),
+                  plan.reason)) {
+            result.errors.emplace_back("ConSan MOI could not publish a resource rejection");
+            return;
+          }
+        }
+
+        for (const ConSanProbeIntent &intent : result.observation_plan().probe_intents) {
+          const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+          if (entry == nullptr || entry->lowering != ConSanLoweringOutcomeKind::Pending)
+            continue;
+          const std::array<ConSanProbeIntentId, 1> ids = {intent.id};
+          const ConSanLoweringOutcomeKind outcome =
+              whole_transform_resource_failure ? ConSanLoweringOutcomeKind::ResourceRejected
+                                               : ConSanLoweringOutcomeKind::PlacementRejected;
+          const std::string_view detail =
+              whole_transform_resource_failure
+                  ? "MOI whole-transform resource validation rejected the admitted intent"
+                  : "MOI lowerer selected no placement for the admitted intent";
+          if (!result.coverage_ledger.publish_lowering_rejection(
+                  ids, outcome, std::string(detail), whole_transform_resource_failure)) {
+            result.errors.emplace_back("ConSan MOI could not publish a placement rejection");
+            return;
+          }
+        }
+      };
   if (execution != nullptr)
     execution->note_resource_solving_and_lowering();
   std::vector<ConSanMoiCandidate> moi_candidates = consan_detail::build_moi_candidates(
@@ -214,7 +264,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    publish_pending_moi_lowering_rejections(result, ConSanRegisterPlanReason::NoLegalWindow);
+    publish_pending_moi_lowering_rejections(ConSanRegisterPlanReason::NoLegalWindow);
     return result;
   }
   // Sampled persistent-state demand depends on the immutable semantic sync
@@ -246,7 +296,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
-    publish_pending_moi_lowering_rejections(result, ConSanRegisterPlanReason::NoLegalWindow);
+    publish_pending_moi_lowering_rejections(ConSanRegisterPlanReason::NoLegalWindow);
     return result;
   }
   if (mode_plan.reserve_dynamic_stack_prologue_entry &&
@@ -308,12 +358,12 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   if (result.errors.empty())
     result.moi_operating_point = effective_point;
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
-    publish_pending_moi_lowering_rejections(result);
+    publish_pending_moi_lowering_rejections();
     return result;
   }
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
-  publish_pending_moi_lowering_rejections(result);
+  publish_pending_moi_lowering_rejections();
   std::vector<ConSanPatchKind> patch_kinds;
   patch_kinds.reserve(result.patches.size());
   std::ranges::transform(result.patches, std::back_inserter(patch_kinds),
