@@ -286,13 +286,19 @@ struct CapturedAccess {
 ///        told with what routing decided.
 class MemoryObservationPlugin final : public ExecutionPlugin {
 public:
-  MemoryObservationPlugin() : ExecutionPlugin("memory_observation") {}
+  /// @param wants_hook What observes_memory_routing() answers. False models a
+  ///        plugin that implements the hook but never opts in, which must
+  ///        receive nothing.
+  explicit MemoryObservationPlugin(bool wants_hook = true)
+      : ExecutionPlugin("memory_observation"), wants_hook_(wants_hook) {}
 
-  bool observes_memory_routing() const override { return true; }
+  bool observes_memory_routing() const override { return wants_hook_; }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
     before_tag.push_back(inst.data()->tag());
-    if (inst.data()->tag() != SCALAR_MEM) {
+    // Only the two vector tags carry a VectorMemState. An instruction no
+    // pipeline will take has neither, and downcasting it walks off the object.
+    if (inst.data()->tag() == GLOBAL_MEM || inst.data()->tag() == LOCAL_MEM) {
       const auto &state = *inst.data_as<VectorMemState>();
       before_first_address.push_back(state.per_lane_addr[0]);
       before_wait_counter.push_back(state.wait_counter_type);
@@ -340,6 +346,7 @@ public:
 
   std::vector<CapturedAccess> accesses;
   std::vector<uint8_t> before_tag;
+  const bool wants_hook_ = true;
   std::vector<uint64_t> before_first_address;
   std::vector<WaitCounterType> before_wait_counter;
 };
@@ -994,9 +1001,9 @@ struct PluginFixture {
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
   /// Attach a MemoryObservationPlugin, fire onInit, and return a raw pointer.
-  MemoryObservationPlugin *attach_memory_observation_plugin() {
+  MemoryObservationPlugin *attach_memory_observation_plugin(bool wants_hook = true) {
     plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    auto plugin = std::make_unique<MemoryObservationPlugin>();
+    auto plugin = std::make_unique<MemoryObservationPlugin>(wants_hook);
     auto *p = plugin.get();
     plugin_group_->add(std::move(plugin));
     soc->set_plugin_group(plugin_group_);
@@ -4306,11 +4313,7 @@ TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
   EXPECT_EQ(contents, "destroyed\n");
 }
 
-} // namespace
-
-// ============================================================================
-// Routed memory observation
-// ============================================================================
+// Routed memory observation.
 
 TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   PluginFixture fixture;
@@ -4497,6 +4500,8 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
   EXPECT_EQ(access.scratch_lane_mask, 0b0001u);
   EXPECT_EQ(access.scratch_element_stride_bytes, 256u);
   EXPECT_EQ(access.addresses[0], kAddress);
+  // The atomic really ran; the observation describes an access that happened.
+  EXPECT_EQ(fixture.mem->read32(kAddress), initial + increment);
 }
 
 TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
@@ -4692,6 +4697,30 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   ExecutionPluginGroup wanting{PluginSinkConfig{}};
   wanting.add(std::make_unique<MemoryObservationPlugin>());
   EXPECT_TRUE(wanting.observes_memory_routing());
+
+  // And the guard itself, not just the flag driving it: a plugin that
+  // implements the hook but does not opt in must receive nothing. Without
+  // this, deleting the guard and building an observation for every memory
+  // instruction would pass the whole suite.
+  PluginFixture declining;
+  auto *quiet = declining.attach_memory_observation_plugin(/*wants_hook=*/false);
+  EXPECT_FALSE(declining.plugin_group().observes_memory_routing());
+  auto *cu = declining.cu();
+  auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x800, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0b1);
+  auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = 0b1;
+  state->lane_mask = 0b1;
+  state->per_lane_addr[0] = 0x40;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+  EXPECT_TRUE(quiet->accesses.empty()) << "the observation was built for a plugin that declined it";
+  // The pre-routing hook is not gated, so it still fired.
+  EXPECT_EQ(quiet->before_tag.size(), 1u);
 }
 
 TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped) {
@@ -4718,3 +4747,5 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
   EXPECT_EQ(access.pc, 0x600u);
   EXPECT_TRUE(access.addresses.empty());
 }
+
+} // namespace

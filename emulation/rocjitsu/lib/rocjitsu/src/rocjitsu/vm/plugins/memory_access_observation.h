@@ -4,8 +4,7 @@
 /// @file memory_access_observation.h
 /// @brief What one AMDGPU memory instruction turned out to be, after routing.
 
-#ifndef ROCJITSU_VM_PLUGINS_MEMORY_ACCESS_OBSERVATION_H_
-#define ROCJITSU_VM_PLUGINS_MEMORY_ACCESS_OBSERVATION_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -18,6 +17,9 @@
 namespace rocjitsu::amdgpu {
 
 /// @brief The pipeline a memory instruction was actually issued to.
+/// @details The enumerators deliberately share MemPipelineTag's numbering. The
+/// pairing is pinned by static_assert where the two headers meet, in
+/// compute_unit.cpp, so a new pipeline tag cannot gain a route silently.
 enum class MemoryRoute : uint8_t {
   UNKNOWN, ///< Not issued to any pipeline; reported so it is not silently lost.
   SCALAR,  ///< Scalar (constant) memory.
@@ -67,6 +69,11 @@ struct MemoryAccessObservation {
   uint32_t wavefront_id = 0; ///< Wavefront slot within the compute unit.
   uint32_t process_id = 0;   ///< VMID of the address space the addresses live in.
 
+  /// @brief The pipeline that took the access.
+  ///
+  /// @details UNKNOWN means no pipeline did. Every field below is then left at
+  /// its default and means nothing; only the identity above and the mnemonic
+  /// describe the instruction. Check this before reading anything else.
   MemoryRoute route = MemoryRoute::UNKNOWN;
   /// @brief Whether a FLAT access was rewritten from global into LDS.
   ///
@@ -76,7 +83,19 @@ struct MemoryAccessObservation {
   /// separate these from instructions that were LDS to begin with.
   bool normalized_to_local = false;
 
+  /// @brief Whether the access returns a value to registers.
+  ///
+  /// @details Not a statement about direction when @ref atomic_op is set: a
+  /// returning atomic has this true and a non-returning one false, and both
+  /// read and write the line. Split read from write traffic on the pair, not
+  /// on this flag alone.
   bool is_load = true;
+  /// @brief Atomic read-modify-write operation, NONE for a plain access.
+  ///
+  /// @details APPEND and CONSUME are wave-collapsing: the whole wavefront
+  /// performs one 4-byte LDS read-modify-write at the first valid lane's
+  /// address, and the per-lane addresses are all that address. Costing them
+  /// per requesting lane over-reports by the lane count.
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   /// @brief The counter this access will post to, which is what an s_waitcnt
@@ -84,9 +103,15 @@ struct MemoryAccessObservation {
   ///        an aperture-rewritten FLAT posts to LGKMCNT, not VMCNT.
   WaitCounterType wait_counter = WaitCounterType::VMCNT;
 
-  uint32_t wavefront_size = 1;     ///< Lanes in the issuing wavefront; 1 for scalar.
+  /// @brief Lanes in the issuing wavefront; 1 for scalar, 0 when the route is
+  ///        UNKNOWN and there is no wavefront width to report.
+  uint32_t wavefront_size = 0;
   uint32_t element_size_bytes = 0; ///< Bytes per element.
-  uint32_t elements_per_lane = 0;  ///< Elements each participating lane moves.
+  /// @brief Elements each participating lane moves, through one address set.
+  ///
+  /// @details A DS dual access has two address sets and moves this many
+  /// through each; see @ref secondary_addresses.
+  uint32_t elements_per_lane = 0;
 
   /// @brief Lanes the instruction issued with.
   ///
@@ -110,11 +135,22 @@ struct MemoryAccessObservation {
   uint64_t scratch_lane_mask = 0;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
+  ///
+  /// @details Reported from the instruction's own state, so it is set on an
+  /// atomic whose lanes are swizzled scratch even though the atomic path
+  /// applies no stride.
   uint32_t scratch_element_stride_bytes = 0;
 
   bool non_temporal = false;    ///< Documented not to allocate in a cache honouring it.
   bool force_l1_bypass = false; ///< Request-side first-level lookup forced to miss.
-  bool lds_destination = false; ///< Global load whose result is written to LDS.
+  /// @brief Global load whose result is written to LDS rather than to VGPRs.
+  ///
+  /// @details The addresses reported here are the global side only. The LDS
+  /// side -- the destination addresses, and the cluster multicast fan-out that
+  /// can replicate the write to several workgroups' allocations -- is not part
+  /// of this observation, so an LDS bandwidth or bank-conflict model cannot be
+  /// built from these accesses.
+  bool lds_destination = false;
 
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
@@ -126,9 +162,15 @@ struct MemoryAccessObservation {
   std::span<const uint64_t> element_lane_masks;
   /// @brief Addresses of the second access of a DS dual-access instruction.
   ///        Empty unless the instruction has one.
+  ///
+  /// @details The second access moves the same bytes per lane through the same
+  /// lanes as the first, so an instruction with a non-empty set here moves
+  /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
 
-  /// @brief Bytes each participating lane moves, ignoring scratch swizzling.
+  /// @brief Bytes each participating lane moves through one address set,
+  ///        ignoring scratch swizzling. Double it when @ref
+  ///        secondary_addresses is non-empty.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;
   }
@@ -154,5 +196,3 @@ struct MemoryAccessObservation {
 };
 
 } // namespace rocjitsu::amdgpu
-
-#endif // ROCJITSU_VM_PLUGINS_MEMORY_ACCESS_OBSERVATION_H_
