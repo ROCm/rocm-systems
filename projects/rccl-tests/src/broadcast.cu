@@ -1204,7 +1204,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
 #endif
   } else {
     switch(deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       case 3: {
         // Broadcast-specific LSA<->GIN threshold. Default = 256 KiB (full
         // message): on 8x MI355X (NCCL_GIN_TYPE=5) LSA wins <=256K and GIN wins
