@@ -223,8 +223,9 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevis
   pal::Settings* palSettings = new pal::Settings();
   settings_ = palSettings;
 
-  // Report 512MB for all offline devices
-  Pal::GpuMemoryHeapProperties heaps[Pal::GpuHeapCount];
+  // Report 512MB for all offline devices. Zero the rest so the heaps fillDeviceInfo()
+  // reads below are defined rather than whatever the stack held.
+  Pal::GpuMemoryHeapProperties heaps[Pal::GpuHeapCount] = {};
   heaps[Pal::GpuHeapLocal].logicalSize = heaps[Pal::GpuHeapLocal].physicalSize = 512 * Mi;
 
   Pal::WorkStationCaps wscaps = {};
@@ -438,7 +439,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   // that 4x single alloc
   info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
 
-  // Offline devices populate only the Local heap, so the rest of heaps[] is stale here.
+  // Offline devices carry a synthetic 512MB Local heap, so the breakdown says nothing.
   if (isOnline()) {
     ClPrint(amd::LOG_INFO, amd::LOG_INIT,
             "PAL memory: visible FB %llu MiB, invisible FB %llu MiB, aperture %llu MiB "
