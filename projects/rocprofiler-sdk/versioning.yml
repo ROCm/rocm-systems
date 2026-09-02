@@ -1,0 +1,61 @@
+versioning:
+  schema-version: 0.1
+  name: rocprofiler-sdk
+  build-directory: build
+  cmake-build-type: RelWithDebInfo
+  cmake-generator: Ninja
+  cmake-config-args: "-DROCPROFILER_BUILD_DEBUG=ON"
+  source-tree:
+    version-file: VERSION
+    working-directory: "."
+    require-working-directory-exists: True
+    sources:
+      # files to use/not use for determining a version ID. This is mostly
+      # used for restoring cached data in continuous integration.
+      recursive-include:
+        - source/include/rocprofiler-sdk/**/*.h
+        - source/include/rocprofiler-sdk/**/*.h.in
+        - source/include/rocprofiler-sdk/cxx/**/*.hpp
+        - source/lib/rocprofiler-sdk/**
+        - source/lib/common/**
+      recursive-exclude:
+        - '**/*.md'
+        - source/**/CMakeLists.txt
+        - source/**/*.cmake
+        - source/scripts/**
+        - source/docs/**
+        - source/**/tests/**
+    headers:
+      # same as source except these files are used with abidw via the --header-file option
+      recursive-include:
+        - source/include/rocprofiler-sdk/**/*.h
+        - source/include/rocprofiler-sdk/cxx/**/*.hpp
+
+  # values relative to this file's path in the build tree
+  build-tree:
+    version-file: VERSION
+    # root directory is {{ build-directory }}
+    working-directory: "."
+    # allow hash to be computed even if build directory does not exist
+    require-working-directory-exists: False
+    # files to check for ABI-compatibility
+    abi-check:
+      include:
+        - lib/librocprofiler-sdk.so
+        - lib/librocprofiler-sdk.so.?
+
+  # values relative to this file's path in the install tree
+  install-tree:
+    working-directory: "../.."
+    # relative to dirname(versioning.yml)/ {working-directory}
+    version-file: share/rocprofiler-sdk/VERSION
+    require-working-directory-exists: True
+    #
+    headers:
+      recursive-include:
+        - include/rocprofiler-sdk/**/*.h
+        - include/rocprofiler-sdk/cxx/**/*.hpp
+    abi-check:
+      include:
+        - lib/librocprofiler-sdk.so
+        - lib/librocprofiler-sdk.so.?

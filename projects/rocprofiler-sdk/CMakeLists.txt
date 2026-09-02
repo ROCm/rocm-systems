@@ -9,11 +9,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND CMAKE_CURRENT_SOURCE_DIR STREQ
     message(AUTHOR_WARNING "In-source build")
 endif()
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
-string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
-string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3"
-                     ROCPROFILER_SDK_VERSION "${FULL_VERSION_STRING}")
-
 foreach(_LANG C CXX)
     set(CMAKE_${_LANG}_FLAGS_COVERAGE_INIT
         "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage -DCODECOV=1"
@@ -22,6 +17,13 @@ foreach(_LANG C CXX)
         "${CMAKE_${_LANG}_FLAGS_COVERAGE_INIT}"
         CACHE STRING "${_LANG} flags for code coverage builds")
 endforeach()
+
+set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../../cmake ${CMAKE_MODULE_PATH})
+include(rocm_versioning)
+
+rocm_versioning_read_version_file(
+    rocprofiler-sdk ROCPROFILER_SDK ${CMAKE_CURRENT_LIST_DIR}/VERSION
+    ${CMAKE_CURRENT_LIST_DIR}/versioning.yml)
 
 project(
     rocprofiler-sdk
@@ -68,15 +70,23 @@ else()
     set(ROCPROFILER_SDK_GIT_REVISION "")
 endif()
 
+# for backward compatibility
+set(FULL_VERSION_STRING "${ROCPROFILER_SDK_FULL_VERSION_STRING}")
+# for SOVERSION
+set(ROCPROFILER_SDK_SOVERSION "${ROCPROFILER_SDK_VERSION_MAJOR}")
+
 # make sure that cmake re-runs when version file changes
-configure_file(${PROJECT_SOURCE_DIR}/VERSION ${PROJECT_BINARY_DIR}/VERSION COPYONLY)
+rocm_versioning_configure_version_files(FILES ${PROJECT_SOURCE_DIR}/VERSION
+                                        ${PROJECT_SOURCE_DIR}/versioning.yml)
 
 message(
     STATUS
         "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
     )
-message(STATUS "[${PROJECT_NAME}] git revision: ${ROCPROFILER_SDK_GIT_REVISION}")
-message(STATUS "[${PROJECT_NAME}] git describe: ${ROCPROFILER_SDK_GIT_DESCRIBE}")
+message(STATUS "[${PROJECT_NAME}] git revision:  ${ROCPROFILER_SDK_GIT_REVISION}")
+message(STATUS "[${PROJECT_NAME}] git describe:  ${ROCPROFILER_SDK_GIT_DESCRIBE}")
+message(STATUS "[${PROJECT_NAME}] build version: ${ROCPROFILER_SDK_VERSION_BUILD}")
+message(STATUS "[${PROJECT_NAME}] version hash:  ${ROCPROFILER_SDK_VERSION_HASH}")
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Modules
                       ${CMAKE_MODULE_PATH})
 

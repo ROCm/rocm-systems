@@ -103,6 +103,7 @@ jobs:
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
+          cmake
           projects/rocprofiler-sdk
           projects/clr
           projects/hip
