@@ -1025,17 +1025,22 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   assert(num_agents > 0);
   auto& driver = agents[0]->driver();
 
-  uint64_t altAddress;
-  HsaMemMapFlags map_flags;
-  map_flags.Value = 0;
-  map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
-                                num_agents, nodes) != HSA_STATUS_SUCCESS) {
-    map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+  // The DRM import path in hsakmt_fmm_register_graphics_handle already
+  // maps the BO into the GPU VA via amdgpu_bo_va_op_raw2, so skip the
+  // separate MakeMemoryResident call which would try to map again via KFD.
+  if (!flag().enable_drm()) {
+    uint64_t altAddress;
+    HsaMemMapFlags map_flags;
+    map_flags.Value = 0;
+    map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
     if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
                                   num_agents, nodes) != HSA_STATUS_SUCCESS) {
-      driver.DeregisterMemory(info.MemoryAddress);
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+      if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
+                                    num_agents, nodes) != HSA_STATUS_SUCCESS) {
+        driver.DeregisterMemory(info.MemoryAddress);
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
     }
   }
 

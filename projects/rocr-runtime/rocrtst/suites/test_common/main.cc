@@ -208,6 +208,20 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, DmaBufExportImportTest) {
+  MemoryAllocationTest ma(false, true);
+  if (!RunCustomTestProlog(&ma)) return;
+  ma.DmaBufExportImportTest();
+  RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, DmaBufImportInvalidFd_Negative) {
+  MemoryAllocationTest ma(false, true);
+  if (!RunCustomTestProlog(&ma)) return;
+  ma.DmaBufImportInvalidFd_Negative();
+  RunCustomTestEpilog(&ma);
+}
+
 TEST(rocrtstFunc, MemoryFillTest) {
   MemoryFill mf;
   if (!RunCustomTestProlog(&mf)) return;

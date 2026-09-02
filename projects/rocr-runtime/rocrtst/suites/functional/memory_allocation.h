@@ -77,6 +77,8 @@ class MemoryAllocationTest : public TestBase {
 
   void MemoryBasicAllocationAndFree(void);
   void MemoryAllocateContiguousTest(void);
+  void DmaBufExportImportTest(void);
+  void DmaBufImportInvalidFd_Negative(void);
 
 
  private:
@@ -84,6 +86,7 @@ class MemoryAllocationTest : public TestBase {
   void MemoryBasicAllocationAndFree(hsa_agent_t agent,
                                                hsa_amd_memory_pool_t pool);
   void MemoryAllocateContiguousTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+  void DmaBufExportImportTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 
   void WriteAQLPktToQueue(hsa_queue_t* q);
 };

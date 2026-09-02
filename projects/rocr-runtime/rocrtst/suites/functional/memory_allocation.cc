@@ -578,3 +578,153 @@ void MemoryAllocationTest::MemoryAllocateContiguousTest(void) {
     std::cout << kSubTestSeparator << std::endl;
   }
 }
+
+void MemoryAllocationTest::DmaBufExportImportTest(hsa_agent_t agent,
+                                                   hsa_amd_memory_pool_t pool) {
+  rocrtst::pool_info_t pool_i;
+  hsa_device_type_t ag_type;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+
+  if (verbosity() > 0) PrintAgentNameAndType(agent);
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+
+  if (ag_type != HSA_DEVICE_TYPE_GPU || !pool_i.alloc_allowed || !pool_i.alloc_granule ||
+      !pool_i.alloc_alignment) {
+    return;
+  }
+
+  if (verbosity() > 0) PrintSegmentNameAndType(pool_i.segment);
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+
+  const size_t alloc_size = pool_i.alloc_granule * 1024;
+
+  char* memoryPtr;
+
+  // Allocate WITHOUT the contiguous flag
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(pool, alloc_size, 0,
+                                              reinterpret_cast<void**>(&memoryPtr)));
+  if (!memoryPtr) return;
+
+  // Export as dmabuf fd
+  int dmabuf = -1;
+  uint64_t offset;
+  ASSERT_SUCCESS(hsa_amd_portable_export_dmabuf(memoryPtr, alloc_size, &dmabuf, &offset));
+  ASSERT_GE(dmabuf, 0);
+
+  if (verbosity() > 0) {
+    std::cout << "    Exported dmabuf fd=" << dmabuf
+              << " offset=" << offset
+              << " size=" << alloc_size << std::endl;
+  }
+
+  // Find accessible GPUs for import
+  std::vector<hsa_agent_t> accessible_gpus;
+  for (auto gpuIter : gpus) {
+    hsa_amd_memory_pool_access_t access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+    ASSERT_SUCCESS(hsa_amd_agent_memory_pool_get_info(gpuIter, pool,
+                   HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access));
+    if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED)
+      accessible_gpus.push_back(gpuIter);
+  }
+
+  // Import the dmabuf
+  void* importedPtr = nullptr;
+  size_t importedSz;
+
+  ASSERT_SUCCESS(hsa_amd_interop_map_buffer(accessible_gpus.size(), accessible_gpus.data(),
+                                            dmabuf, 0, &importedSz, &importedPtr, 0, NULL));
+  ASSERT_NE(importedPtr, nullptr);
+  ASSERT_GE(importedSz, alloc_size + offset);
+
+  if (verbosity() > 0) {
+    std::cout << "    Imported ptr=" << importedPtr
+              << " size=" << importedSz << std::endl;
+  }
+
+  // Close the dmabuf fd
+  close(dmabuf);
+
+  // Unmap the imported buffer
+  ASSERT_SUCCESS(hsa_amd_interop_unmap_buffer(importedPtr));
+
+  // Free the original allocation
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(memoryPtr));
+}
+
+void MemoryAllocationTest::DmaBufExportImportTest(void) {
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("DmaBufExportImportTest");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+
+  auto pool_idx = 0;
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      if (verbosity() > 0) {
+        std::cout << "  Pool " << pool_idx++ << ":" << std::endl;
+      }
+      DmaBufExportImportTest(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "subtest Passed" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void MemoryAllocationTest::DmaBufImportInvalidFd_Negative(void) {
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("DmaBufImportInvalidFd_Negative");
+  }
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+
+  if (gpus.empty()) {
+    if (verbosity() > 0) {
+      std::cout << "    No GPUs found, skipping test" << std::endl;
+    }
+    SUCCEED();
+    return;
+  }
+
+  const int kIterations = 100;
+
+  for (int i = 0; i < kIterations; i++) {
+    void* importedPtr = nullptr;
+    size_t importedSz = 0;
+
+    if (verbosity() > 0) {
+      std::cout << "    [" << (i + 1) << "/" << kIterations
+                << "] Attempting to import invalid fd (-1)" << std::endl;
+    }
+
+    hsa_status_t status = hsa_amd_interop_map_buffer(
+        gpus.size(), gpus.data(),
+        -1,  // Invalid fd - should trigger error path in DRM import
+        0, &importedSz, &importedPtr, 0, NULL);
+
+    ASSERT_NE(status, HSA_STATUS_SUCCESS)
+      << "Iteration " << (i + 1) << ": Expected interop_map_buffer to reject invalid fd";
+    ASSERT_EQ(importedPtr, nullptr)
+      << "Iteration " << (i + 1) << ": Expected null pointer on failure";
+
+    if (verbosity() > 0) {
+      std::cout << "    [" << (i + 1) << "/" << kIterations
+                << "] Correctly rejected with status: "
+                << std::hex << status << std::dec << std::endl;
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "subtest Passed (" << kIterations
+              << " iterations, no hang, mutex released correctly)" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
