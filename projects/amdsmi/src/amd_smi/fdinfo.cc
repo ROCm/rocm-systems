@@ -19,19 +19,6 @@
 
 extern "C" {
 
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc99-designator"
-#endif
-// Using known extension, array designators
-static const char* container_type_name[AMDSMI_MAX_CONTAINER_TYPE] = {
-    [AMDSMI_CONTAINER_LXC] = "lxc",
-    [AMDSMI_CONTAINER_DOCKER] = "docker",
-};
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
 amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   DIR* d;
   struct dirent* dir;
@@ -209,24 +196,8 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
     std::ifstream cgroup_info(cgroup_path.c_str());
     for (std::string line; getline(cgroup_info, line);) cgroup_lines.push_back(line);
   }
+  amd::smi::ResolveContainerId(cgroup_lines, info.container_name, sizeof(info.container_name));
 
-  // The SHA-256 scan covers every OCI runtime, and so Kubernetes, whatever
-  // the cgroup driver. The named-type scan then handles the formats that
-  // carry no SHA-256: LXC names and Docker short IDs.
-  for (const auto& line : cgroup_lines) {
-    if (amd::smi::ExtractOciContainerId(line, info.container_name, sizeof(info.container_name)) >
-        0) {
-      break;
-    }
-  }
-  for (int i = 0; info.container_name[0] == '\0' && i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
-    for (const auto& line : cgroup_lines) {
-      if (amd::smi::ExtractContainerId(line, container_type_name[i], info.container_name,
-                                       sizeof(info.container_name)) > 0) {
-        break;
-      }
-    }
-  }
   info.pid = (uint32_t)pid;
 
   return AMDSMI_STATUS_SUCCESS;

@@ -20,15 +20,15 @@ using amdsmi_test::ExtractOciIdString;
 namespace {
 struct ParseCase {
   std::string line;
-  const char* type_name;
+  const char* prefix;
   std::string expected;
   const char* desc;
 };
 }  // namespace
 
 // One row per runtime + host-OS cgroup format seen in ROCm deployments.
-// The kubernetes/containerd rows expect "" from the named-type scan, whose
-// type set is {lxc, docker}; ExtractOciContainerId covers them, below.
+// The kubernetes/containerd rows expect "" from the prefix scan, whose prefix
+// set names only LXC and Docker; ExtractOciContainerId covers them, below.
 TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
   const std::string kDocker64 = amdsmi_test::kDocker64;
   const std::string k8s_line =
@@ -37,69 +37,71 @@ TEST(SystemUnit, ContainerIdHandlesKnownCgroupFormats) {
       "cri-containerd-" +
       kDocker64 + ".scope";
   const std::vector<ParseCase> cases = {
-      {"0::/docker/" + kDocker64, "docker", kDocker64, "docker raw cgroup v1"},
-      {"0::/system.slice/docker-" + kDocker64 + ".scope", "docker", kDocker64,
+      {"0::/docker/" + kDocker64, "docker/", kDocker64, "docker raw cgroup v1"},
+      {"0::/system.slice/docker-" + kDocker64 + ".scope", "docker-", kDocker64,
        "docker systemd scope"},
-      {k8s_line, "docker", "", "k8s+containerd not in type set (docker)"},
-      {k8s_line, "lxc", "", "k8s+containerd not in type set (lxc)"},
-      {"0::/lxc/" + kDocker64, "lxc", kDocker64, "lxc name that looks like a sha256"},
-      {"0::/lxc/my-container", "lxc", "my-container", "lxc named"},
-      {"0::/lxc.payload.web", "lxc", "", "lxc systemd payload not anchored"},
-      {"0::/lxc/parent/child", "lxc", "parent", "lxc nested stops at slash"},
-      {"0::/lxc/my_app_v2", "lxc", "my_app_v2", "lxc with underscores"},
-      {"0::/docker/abc123def456", "docker", "abc123def456", "docker short id"},
-      {"0::/docker/", "docker", "", "empty after prefix"},
-      {"0::/docker/abc123", "docker", "abc123", "short id at end of line"},
+      {k8s_line, "docker/", "", "k8s+containerd not in prefix set (docker)"},
+      {k8s_line, "lxc/", "", "k8s+containerd not in prefix set (lxc)"},
+      {"0::/lxc/" + kDocker64, "lxc/", kDocker64, "lxc name that looks like a sha256"},
+      {"0::/lxc/my-container", "lxc/", "my-container", "lxc named"},
+      {"0::/lxc.payload.web", "lxc.payload.", "web", "lxc systemd payload"},
+      {"0::/lxc/parent/child", "lxc/", "parent", "lxc nested stops at slash"},
+      {"0::/lxc/my_app_v2", "lxc/", "my_app_v2", "lxc with underscores"},
+      {"0::/docker/abc123def456", "docker/", "abc123def456", "docker short id"},
+      {"0::/docker/", "docker/", "", "empty after prefix"},
+      {"0::/docker/abc123", "docker/", "abc123", "short id at end of line"},
       {"0::/user.slice/user-1000.slice/user@1000.service/app.slice/docker-" + kDocker64 + ".scope",
-       "docker", kDocker64, "cgroup v2 unified hierarchy"},
+       "docker-", kDocker64, "cgroup v2 unified hierarchy"},
   };
   for (const auto& c : cases) {
-    EXPECT_EQ(ExtractIdString(c.line, c.type_name), c.expected) << "format: " << c.desc;
+    EXPECT_EQ(ExtractIdString(c.line, c.prefix), c.expected) << "format: " << c.desc;
   }
 }
 
-// The original unanchored find("docker") matched inside "/not-docker-evil/",
-// so the type name now needs '/' (or start-of-line) before it and '/' or '-'
-// after. Accepting '-' is forced by Docker's "/docker-<id>.scope" format, and
-// it leaves a residual false positive on "/docker-compose-tool/" that the
-// anchor alone cannot distinguish from a real entry.
+// The original unanchored find("docker") matched inside "/not-docker-evil/", so
+// a prefix now has to sit at a cgroup path-component boundary: '/' (or
+// start-of-line) immediately before it. Docker's "/docker-<id>.scope" format
+// forces "docker-" into the prefix set, which leaves a residual false positive
+// on "/docker-compose-tool/" that the anchor alone cannot distinguish from a
+// real entry.
 TEST(SystemUnit, ContainerIdAnchorBoundaryRules) {
   const std::vector<ParseCase> cases = {
-      {"0::/not-docker-evil/attackerstring", "docker", "", "no '/' before docker -> rejected"},
-      {"0::/path/to/docker-compose-tool/extra/id", "docker", "compose-tool",
-       "'/'+'-' anchor succeeds; residual false-positive"},
-      {"0::/path/to/lxc-tools/extra", "lxc", "tools",
-       "'/'+'-' anchor succeeds; residual false-positive"},
-      {"0::xdocker/id", "docker", "", "'x' precedes docker -> rejected"},
-      {"docker/abc123", "docker", "abc123", "start-of-line is a valid prefix"},
-      {"0::/path/docker", "docker", "", "no '/' or '-' after docker -> rejected"},
-      {"0::/Docker/abc123", "docker", "", "case-sensitive: Docker != docker"},
+      {"0::/not-docker-evil/attackerstring", "docker-", "", "no '/' before docker -> rejected"},
+      {"0::/path/to/docker-compose-tool/extra/id", "docker-", "compose-tool",
+       "anchored '/docker-' succeeds; residual false-positive"},
+      {"0::/path/to/lxc-tools/extra", "lxc/", "", "'lxc-' is not a container prefix"},
+      {"0::xdocker/id", "docker/", "", "'x' precedes docker -> rejected"},
+      {"docker/abc123", "docker/", "abc123", "start-of-line is a valid prefix"},
+      {"0::/path/docker", "docker/", "", "no separator after docker -> rejected"},
+      {"0::/system.slice/docker.service", "docker/", "", "docker.service is not a container"},
+      {"0::/system.slice/docker.service", "docker-", "", "docker.service is not a container"},
+      {"0::/Docker/abc123", "docker/", "", "case-sensitive: Docker != docker"},
   };
   for (const auto& c : cases) {
-    EXPECT_EQ(ExtractIdString(c.line, c.type_name), c.expected) << "prefix case: " << c.desc;
+    EXPECT_EQ(ExtractIdString(c.line, c.prefix), c.expected) << "prefix case: " << c.desc;
   }
 }
 
 // Cases where there is no match to make. The arithmetic hazard is find()
-// returning npos: adding strlen(type_name) + 1 to it must not underflow into
-// an in-range offset, and a type name at the very end must not be read past.
+// returning npos: adding strlen(prefix) to it must not underflow into an
+// in-range offset, and a prefix at the very end must not be read past.
 TEST(SystemUnit, ContainerIdEdgeCaseInvariants) {
   const std::vector<ParseCase> cases = {
-      {"0::/kubepods/besteffort/abc", "docker", "",
-       "type not found, no integer underflow (docker)"},
-      {"0::/kubepods/besteffort/abc", "lxc", "", "type not found, no integer underflow (lxc)"},
-      {"0::/docker", "docker", "", "type at exact end of line, no over-read"},
-      {"0::/docker/", "docker", "", "separator but no id"},
-      {"", "docker", "", "empty line"},
-      {"0::/docker/abc", "", "", "empty type_name safely rejected"},
-      {"0::/docker/first/lxc/second", "docker", "first",
+      {"0::/kubepods/besteffort/abc", "docker/", "",
+       "prefix not found, no integer underflow (docker)"},
+      {"0::/kubepods/besteffort/abc", "lxc/", "", "prefix not found, no integer underflow (lxc)"},
+      {"0::/docker", "docker/", "", "runtime name at exact end of line, no over-read"},
+      {"0::/docker/", "docker/", "", "separator but no id"},
+      {"", "docker/", "", "empty line"},
+      {"0::/docker/abc", "", "", "empty prefix safely rejected"},
+      {"0::/docker/first/lxc/second", "docker/", "first",
        "multiple markers resolve independently (docker)"},
-      {"0::/docker/first/lxc/second", "lxc", "second",
+      {"0::/docker/first/lxc/second", "lxc/", "second",
        "multiple markers resolve independently (lxc)"},
-      {"0::/lxc/AbC_dEf-123", "lxc", "AbC_dEf-123", "id preserves mixed case"},
+      {"0::/lxc/AbC_dEf-123", "lxc/", "AbC_dEf-123", "id preserves mixed case"},
   };
   for (const auto& c : cases) {
-    EXPECT_EQ(ExtractIdString(c.line, c.type_name), c.expected) << "edge case: " << c.desc;
+    EXPECT_EQ(ExtractIdString(c.line, c.prefix), c.expected) << "edge case: " << c.desc;
   }
 }
 

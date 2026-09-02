@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace amd::smi {
 
@@ -92,37 +93,46 @@ inline size_t ExtractOciContainerId(const std::string& line, char* out, size_t o
   return 0;
 }
 
-// Locate `type_name` inside `line` where both surrounding boundaries are
-// cgroup-path separators: the byte before must be '/' (or start-of-line),
-// and the byte after must be '/' or '-'. Returns std::string::npos if no
+// Cgroup path components that introduce a container identifier, each written
+// with the separator that precedes the identifier so the whole component is
+// matched at once. A bare runtime name cannot do this job: "docker" alone also
+// matches "/system.slice/docker.service", and "lxc" alone cannot reach the name
+// in "/lxc.payload.<name>", which is how LXC 3+ and LXD name a container cgroup
+// under systemd.
+inline constexpr const char* kContainerIdPrefixes[] = {
+    "lxc/",          // LXC, classic layout
+    "lxc.payload.",  // LXC 3+ / LXD under systemd
+    "docker/",       // Docker, cgroupfs driver
+    "docker-",       // Docker, systemd driver
+};
+
+// Locate `prefix` inside `line` at a cgroup path-component boundary: the byte
+// before it must be '/' (or start-of-line). Returns std::string::npos if no
 // anchored match exists.
-inline size_t FindAnchoredContainerType(const std::string& line, const char* type_name) {
-  const size_t type_len = std::strlen(type_name);
-  if (type_len == 0) return std::string::npos;
+inline size_t FindAnchoredPrefix(const std::string& line, const char* prefix) {
+  if (std::strlen(prefix) == 0) return std::string::npos;
   size_t pos = 0;
-  while ((pos = line.find(type_name, pos)) != std::string::npos) {
-    const bool prefix_ok = (pos == 0) || (line[pos - 1] == '/');
-    const size_t after = pos + type_len;
-    const bool suffix_ok = (after < line.size()) && (line[after] == '/' || line[after] == '-');
-    if (prefix_ok && suffix_ok) return pos;
+  while ((pos = line.find(prefix, pos)) != std::string::npos) {
+    if (pos == 0 || line[pos - 1] == '/') return pos;
     ++pos;
   }
   return std::string::npos;
 }
 
-// Extract a container ID for `type_name` from a cgroup `line` into the
+// Extract the container ID that follows `prefix` in a cgroup `line` into the
 // caller-supplied `out` buffer (capacity `out_cap`, always NUL-terminated
-// on non-zero capacity). Returns the number of bytes written, not counting
-// the NUL, or 0 if no valid ID is found or the ID does not fit in `out_cap`.
-inline size_t ExtractContainerId(const std::string& line, const char* type_name, char* out,
+// on non-zero capacity). `prefix` is one of kContainerIdPrefixes. Returns the
+// number of bytes written, not counting the NUL, or 0 if no valid ID is found
+// or the ID does not fit in `out_cap`.
+inline size_t ExtractContainerId(const std::string& line, const char* prefix, char* out,
                                  size_t out_cap) {
   if (out_cap == 0) return 0;
   out[0] = '\0';
 
-  const size_t type_pos = FindAnchoredContainerType(line, type_name);
-  if (type_pos == std::string::npos) return 0;
+  const size_t prefix_pos = FindAnchoredPrefix(line, prefix);
+  if (prefix_pos == std::string::npos) return 0;
 
-  const size_t id_start = type_pos + std::strlen(type_name) + 1;
+  const size_t id_start = prefix_pos + std::strlen(prefix);
   if (id_start >= line.size()) return 0;
 
   size_t id_len = 0;
@@ -137,6 +147,32 @@ inline size_t ExtractContainerId(const std::string& line, const char* type_name,
   std::memcpy(out, line.data() + id_start, id_len);
   out[id_len] = '\0';
   return id_len;
+}
+
+// Resolve the container ID for a process from the lines of its
+// /proc/<pid>/cgroup file, into `out` (capacity `out_cap`, always
+// NUL-terminated on non-zero capacity). Returns the number of bytes written,
+// not counting the NUL, or 0 when no line names a container.
+//
+// The SHA-256 scan runs first because it covers every OCI runtime, and so
+// Kubernetes, whatever the cgroup driver. The prefix scan then handles the
+// layouts that carry no SHA-256: LXC names and Docker short IDs.
+inline size_t ResolveContainerId(const std::vector<std::string>& cgroup_lines, char* out,
+                                 size_t out_cap) {
+  if (out_cap == 0) return 0;
+  out[0] = '\0';
+
+  for (const auto& line : cgroup_lines) {
+    const size_t len = ExtractOciContainerId(line, out, out_cap);
+    if (len > 0) return len;
+  }
+  for (const char* prefix : kContainerIdPrefixes) {
+    for (const auto& line : cgroup_lines) {
+      const size_t len = ExtractContainerId(line, prefix, out, out_cap);
+      if (len > 0) return len;
+    }
+  }
+  return 0;
 }
 
 }  // namespace amd::smi

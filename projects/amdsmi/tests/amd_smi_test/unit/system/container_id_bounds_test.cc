@@ -20,7 +20,7 @@ TEST(SystemUnit, ContainerIdFullDockerIdIsNullTerminated) {
   constexpr size_t kIdLen = sizeof(amdsmi_test::kDocker64) - 1;
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
-  size_t n = amd::smi::ExtractContainerId(line, "docker", gb.buf, sizeof(gb.buf));
+  size_t n = amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf));
   EXPECT_EQ(n, kIdLen);
   EXPECT_EQ(std::string(gb.buf), amdsmi_test::kDocker64);
   EXPECT_EQ(gb.buf[kIdLen], '\0');
@@ -32,7 +32,7 @@ TEST(SystemUnit, ContainerIdFullDockerIdIsNullTerminated) {
 TEST(SystemUnit, ContainerIdExceedingCapacityIsRejected) {
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<16> gb;
-  size_t n = amd::smi::ExtractContainerId(line, "docker", gb.buf, sizeof(gb.buf));
+  size_t n = amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf));
   EXPECT_EQ(n, 0u);
   EXPECT_EQ(gb.buf[0], '\0');
   EXPECT_TRUE(gb.CanariesIntact());
@@ -44,13 +44,13 @@ TEST(SystemUnit, ContainerIdCapacityBoundaryIsExact) {
   const std::string line = "0::/docker/" + id;
   {
     GuardedBuffer<16> gb;  // 15 bytes of ID + NUL: fits exactly
-    EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker", gb.buf, sizeof(gb.buf)), 15u);
+    EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf)), 15u);
     EXPECT_EQ(std::string(gb.buf), id);
     EXPECT_TRUE(gb.CanariesIntact());
   }
   {
     GuardedBuffer<15> gb;  // one byte short
-    EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker", gb.buf, sizeof(gb.buf)), 0u);
+    EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf)), 0u);
     EXPECT_TRUE(gb.CanariesIntact());
   }
 }
@@ -59,7 +59,7 @@ TEST(SystemUnit, ContainerIdOverlongInputLeavesCanariesIntact) {
   std::string line = "0::/docker/";
   line.append(1024, 'z');
   GuardedBuffer<AMDSMI_MAX_STRING_LENGTH> gb;
-  EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker", gb.buf, sizeof(gb.buf)), 0u);
+  EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker/", gb.buf, sizeof(gb.buf)), 0u);
   EXPECT_TRUE(gb.CanariesIntact());
 }
 
@@ -91,6 +91,6 @@ TEST(SystemUnit, ContainerIdOciCapacityBoundaryIsExact) {
 TEST(SystemUnit, ContainerIdZeroCapacityBufferIsNotWritten) {
   const std::string line = std::string("0::/docker/") + amdsmi_test::kDocker64;
   GuardedBuffer<1> gb;
-  EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker", gb.buf, 0), 0u);
+  EXPECT_EQ(amd::smi::ExtractContainerId(line, "docker/", gb.buf, 0), 0u);
   EXPECT_TRUE(gb.CanariesIntact());
 }

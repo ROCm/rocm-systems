@@ -1777,7 +1777,7 @@ Field | Description
 ---|---
 `pid` | Process ID
 `name` | Name of process. If user does not have permission this will be "N/A"
-`container_name` | Container name, when the process runs inside a container
+`container_name` | Identifier of the container the process runs in, or empty if it is not in a container. For Docker, containerd, CRI-O and Podman this is the full 64-character container ID; for LXC it is the container name
 `gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:

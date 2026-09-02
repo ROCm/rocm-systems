@@ -24,7 +24,7 @@ TEST(SystemUnit, ContainerIdHaltsAtFirstByteOutsideCharset) {
 
     const bool accepted = amd::smi::IsContainerIdChar(static_cast<unsigned char>(b));
     const std::string expected = accepted ? std::string("abc") + byte + "def" : "abc";
-    EXPECT_EQ(ExtractIdString(line, "docker"), expected)
+    EXPECT_EQ(ExtractIdString(line, "docker/"), expected)
         << "byte 0x" << std::hex << b
         << (accepted ? " wrongly halted the scan" : " leaked through the charset filter");
   }
@@ -38,7 +38,7 @@ TEST(SystemUnit, ContainerIdIsEmptyWhenFirstByteIsOutsideCharset) {
     std::string line = "0::/docker/";
     line.push_back(static_cast<char>(b));
     line += "smuggled";
-    EXPECT_EQ(ExtractIdString(line, "docker"), "")
+    EXPECT_EQ(ExtractIdString(line, "docker/"), "")
         << "byte 0x" << std::hex << b << " started an ID";
   }
 }

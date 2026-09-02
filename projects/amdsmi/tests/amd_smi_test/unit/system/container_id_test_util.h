@@ -22,9 +22,9 @@ namespace amdsmi_test {
 inline constexpr char kDocker64[] =
     "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-inline std::string ExtractIdString(const std::string& line, const char* type_name) {
+inline std::string ExtractIdString(const std::string& line, const char* prefix) {
   char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
-  amd::smi::ExtractContainerId(line, type_name, buf, sizeof(buf));
+  amd::smi::ExtractContainerId(line, prefix, buf, sizeof(buf));
   return std::string(buf);
 }
 
