@@ -449,7 +449,12 @@ public:
   /// @retval true A wake armed in this generation is still queued.
   /// @retval false Nothing is queued, or what is queued is from a dead
   ///         generation.
-  bool wake_pending(const Event &event) const { return event.wake_pending(epoch_); }
+  ///
+  /// @note created_ is part of the answer: shutdown() destroys the queues but
+  /// leaves epoch_ where it is, so without it a wake armed in the generation
+  /// just torn down would still read as pending against an engine that has no
+  /// queue to hold it.
+  bool wake_pending(const Event &event) const { return created_ && event.wake_pending(epoch_); }
 
 private:
   /// @brief Worker loop executed by each partition thread.
@@ -560,9 +565,18 @@ private:
 
   /// @brief The partition context that owns @p event's target component.
   /// @param event Event being scheduled; must have a target component.
-  /// @param caller Name of the calling entry point, for assertion messages.
   /// @returns The owning partition's context.
-  PartitionContext &partition_for(Event *event, const char *caller);
+  PartitionContext &partition_for(Event *event);
+
+  /// @brief Discard superseded wake entries from the front of @p ctx's queue.
+  ///
+  /// @details A superseded entry can never run, so anything that reads the
+  /// queue's next event time -- the multi-threaded LBTS, the termination
+  /// check, an emptiness test -- must not see one. process_event() drops them
+  /// too, but only once they surface, which is after the LBTS has already been
+  /// computed from their timestamp.
+  /// @param ctx Partition whose queue front is to be cleaned.
+  void drop_stale_wakes(PartitionContext &ctx);
 
   /// @brief Start components and arm the max-ticks sentinel, once per create().
   ///

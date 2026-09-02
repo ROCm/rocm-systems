@@ -195,6 +195,15 @@ protected:
   /// @returns The owning partition's current tick.
   Tick current_tick() const;
 
+  /// @brief Whether this component is owned by a live partition context.
+  ///
+  /// @details A non-null engine pointer is not enough on its own: shutdown()
+  /// destroys the partition contexts and leaves every component holding its
+  /// engine, and a component no partition claimed keeps INVALID_PARTITION_ID.
+  /// @retval true The owning partition context exists and can be indexed.
+  /// @retval false This component has no live partition to schedule into.
+  bool attached() const;
+
   /// @brief Schedule a collapsing wake for @p event.
   ///
   /// @details Convenience method for subclasses. Delegates to

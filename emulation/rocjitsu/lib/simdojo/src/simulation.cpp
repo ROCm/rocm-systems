@@ -338,6 +338,7 @@ bool SimulationEngine::step() {
 
   PartitionContext &ctx = *contexts_[0];
 
+  drop_stale_wakes(ctx);
   if (ctx.event_queue.empty()) {
     if (check_termination(TICK_MAX)) {
       running_ = false;
@@ -387,6 +388,7 @@ Tick SimulationEngine::run_bounded(const bool &done) {
     // still invisible in the queue. It costs one acquire load per partition
     // when nothing is pending.
     drain_async_events();
+    drop_stale_wakes(ctx);
     if (done || done_.load(std::memory_order_acquire) || ctx.event_queue.empty())
       break;
 
@@ -452,6 +454,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
 
       // Queue drained now update global time for external observers.
       current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
+      drop_stale_wakes(ctx);
 
       // Throttle: PI-controlled pacing against wall clock.
       pacer_.throttle(ctx.event_queue.current_tick());
@@ -533,6 +536,12 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       }
 
       // Phase 3: Publish local_next.
+      // Superseded wakes first: next_event_time() cannot tell one from a live
+      // entry, and a phantom timestamp here becomes the global LBTS, which
+      // barrier_completion() publishes as current_time_ and feeds to
+      // check_termination() -- charging simulated time, and a max-ticks exit,
+      // to work that never runs.
+      drop_stale_wakes(ctx);
       Tick next = std::min(ctx.event_queue.next_event_time(), ctx.local_min_outgoing);
       ctx.local_next.store(next, std::memory_order_relaxed);
       ctx.local_min_outgoing = TICK_MAX;
@@ -587,19 +596,26 @@ void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &ent
   }
 }
 
-PartitionContext &SimulationEngine::partition_for(Event *event, const char *caller) {
+PartitionContext &SimulationEngine::partition_for(Event *event) {
   Component *target = event->target();
   assert(target != nullptr && "scheduled event has no target component");
   PartitionID pid = target->partition_id();
   assert(pid < contexts_.size() && "scheduled event's target partition ID is out of range");
-  static_cast<void>(caller);
   return *contexts_[pid];
+}
+
+void SimulationEngine::drop_stale_wakes(PartitionContext &ctx) {
+  while (!ctx.event_queue.empty()) {
+    const EventQueueEntry &front = ctx.event_queue.peek();
+    if (front.wake_generation == 0 || front.event->is_current_wake(front.wake_generation))
+      return;
+    ctx.event_queue.pop();
+  }
 }
 
 void SimulationEngine::schedule_event(Event *event, Tick timestamp,
                                       std::unique_ptr<Message> message) {
-  partition_for(event, "schedule_event")
-      .event_queue.push(EventQueueEntry{timestamp, 0, event, std::move(message)});
+  partition_for(event).event_queue.push(EventQueueEntry{timestamp, 0, event, std::move(message)});
 }
 
 void SimulationEngine::send_cross_partition(PartitionID src_partition, PartitionID dst_partition,
@@ -735,7 +751,7 @@ bool SimulationEngine::schedule_wake(Event *event, Tick timestamp) {
   if (timestamp == TICK_MAX)
     return false;
 
-  PartitionContext &ctx = partition_for(event, "schedule_wake");
+  PartitionContext &ctx = partition_for(event);
   timestamp = std::max(timestamp, ctx.event_queue.current_tick());
   if (event->wake_pending(epoch_) && timestamp >= event->wake_tick())
     return false;

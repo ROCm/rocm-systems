@@ -2395,8 +2395,10 @@ TEST(ClockedOnDemandTest, AnAdvanceThatThrowsLeavesTheComponentRecoverable) {
     bool &fail_;
   };
 
-  SimulationEngine engine({});
+  // Domain first: Clocked holds it by const reference, and the engine owns the
+  // component that holds it, so the engine must be destroyed first.
   ClockDomain domain("ghz", 1'000'000'000ULL);
+  SimulationEngine engine({});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *thrower =
       static_cast<Thrower *>(root->add_child(std::make_unique<Thrower>(domain, throw_now)));

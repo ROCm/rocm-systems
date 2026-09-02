@@ -50,7 +50,6 @@ public:
   void startup() override {
     assert(this->engine() && "Clocked component must be added to a topology before startup()");
     busy_until_ = 0;
-    running_ = this->wake_pending(clock_event_);
     if (clock_at_startup())
       arm_edge(domain_.first_edge());
   }
@@ -82,8 +81,15 @@ public:
   ///
   /// A tick beyond the domain's last representable edge is ignored, because
   /// there is no edge to wake on.
+  ///
+  /// Asked from inside advance(), the floor is the edge *after* the one being
+  /// advanced, not that edge itself. next_edge() is idempotent on an edge, so
+  /// a tick at or before now would otherwise align to now, and the entry the
+  /// engine pushes at the tick it is already draining is popped again in the
+  /// same iteration -- advance() re-entered at the same edge, with simulated
+  /// time frozen, for as long as it keeps asking.
   /// @param tick Earliest tick to advance at.
-  void wake_at(Tick tick) { arm_edge(domain_.next_edge(std::max(tick, this->current_tick()))); }
+  void wake_at(Tick tick) { arm_edge(domain_.next_edge(std::max(tick, wake_floor()))); }
 
   /// @brief Occupy this component for @p cycles, starting no earlier than
   ///        @p ready and no earlier than when it is next free.
@@ -123,9 +129,15 @@ public:
   void resume_clock(Tick after) { wake_at(after); }
 
   /// @brief Return whether the clock is currently running.
+  ///
+  /// @details Asked of the engine rather than mirrored in a member: the clock
+  /// is live exactly when a wake is still queued for it in this create()
+  /// generation. A cached flag would go stale wherever the engine changes the
+  /// answer without going through this class -- across shutdown(), which
+  /// destroys the queue entry, and across an advance() that throws.
   /// @retval true Clock is active and scheduling events.
   /// @retval false Clock is stopped.
-  bool running() const { return running_; }
+  bool running() const { return this->wake_pending(clock_event_); }
 
   /// @brief Return the clock domain this component belongs to.
   /// @returns Const reference to the clock domain.
@@ -156,28 +168,47 @@ private:
     if (edge == TICK_MAX)
       return;
     this->schedule_wake(&clock_event_, edge);
-    // True whether this ask was the one that armed the event or an earlier one
-    // already had: either way a visit is coming.
-    running_ = true;
+  }
+
+  /// @brief The earliest edge wake_at() may arm.
+  ///
+  /// @details The partition's current tick normally, but strictly past it
+  /// while this component is inside advance(): that edge has already been
+  /// serviced, so arming it again is a same-tick re-entry rather than a visit.
+  /// @returns Floor tick for the next wake.
+  Tick wake_floor() const {
+    const Tick now = this->current_tick();
+    return advancing_ ? domain_.edge_after(now) : now;
   }
 
   const ClockDomain &domain_; ///< Clock source for period/phase.
   /// @brief Reusable clock edge event.
   ///
-  /// @details The flag is cleared before advance() runs and recomputed after,
-  /// from the engine rather than from a guess: the clock is live exactly when
-  /// something is still queued for it, whether that is the re-arm below or an
-  /// advance() that asked for a later visit itself. Clearing first is what
-  /// leaves an advance() that throws stopped and restartable, rather than
-  /// stuck reporting a clock it does not have.
+  /// @details The engine consumes the wake before this runs, so running() is
+  /// already false for the duration of advance() and an advance() that throws
+  /// leaves the component stopped and restartable rather than reporting a
+  /// clock it does not have.
+  ///
+  /// The automatic re-arm is skipped when advance() armed a wake itself.
+  /// edge_after(now) is the earliest edge there is, so it would supersede any
+  /// later visit advance() asked for and destroy the request outright -- a
+  /// component that says "clock me, and specifically at 9000" would be clocked
+  /// at the next edge and never at 9000.
   Event clock_event_{this, EventType::TIMER_CALLBACK, [this](Tick now, Message *) {
-                       running_ = false;
-                       if (advance(now))
+                       advancing_ = true;
+                       bool keep_clocking = false;
+                       try {
+                         keep_clocking = advance(now);
+                       } catch (...) {
+                         advancing_ = false;
+                         throw;
+                       }
+                       advancing_ = false;
+                       if (keep_clocking && !this->wake_pending(clock_event_))
                          arm_edge(domain_.edge_after(now));
-                       running_ = this->wake_pending(clock_event_);
                      }};
-  bool running_ = false; ///< True while the clock is active.
-  Tick busy_until_ = 0;  ///< Tick this component's serialised work completes.
+  bool advancing_ = false; ///< True while this component is inside advance().
+  Tick busy_until_ = 0;    ///< Tick this component's serialised work completes.
 };
 
 } // namespace simdojo

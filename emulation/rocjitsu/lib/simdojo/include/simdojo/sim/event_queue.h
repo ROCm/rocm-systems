@@ -194,6 +194,14 @@ public:
     return entry;
   }
 
+  /// @brief Peek at the earliest entry without removing it.
+  /// @details The queue must not be empty.
+  /// @returns Const reference to the entry pop() would return.
+  const EventQueueEntry &peek() const {
+    assert(!entries_.empty());
+    return entries_.front();
+  }
+
   /// @brief Peek at the earliest entry's timestamp without removing it.
   /// @returns Timestamp of the next entry, or TICK_MAX if empty.
   Tick next_event_time() const { return entries_.empty() ? TICK_MAX : entries_.front().timestamp; }
