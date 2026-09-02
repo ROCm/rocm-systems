@@ -11669,3 +11669,62 @@ with an explicit extension contract.  That is a deliberate convergence cost,
 but not an endpoint: subsequent slices should exploit the new authority to
 delete remaining common engine tests and avoid adding another broad policy
 record unless its consumers demonstrably share the same stability boundary.
+
+### 16.175 Convergence checkpoint 174: unreachable InlineShadow protocol deletion
+
+A complete trace from workgroup-shadow planning through emission, validation,
+report sizing, runtime registration, decoding, and rendering found two
+alternate InlineShadow protocols still compiled into production: a compact
+four-byte local cell and a full-width generation-tagged local cell.  Neither
+was reachable.  The sole production layout selector chooses an eagerly
+initialized full-width mirror on gfx9 CDNA targets and a bitmap-backed lazy
+full-width mirror on gfx12 targets; an object for which its selected local
+layout does not fit uses the external exact-shadow table.  No request, runtime
+input, or serialized layout could select either alternate planner.
+
+The alternate planners and layout discriminant are now deleted together with
+all downstream accommodation: compact token assignment and emission, the
+generation derivation path, compact exchange validation, host-side static
+mapping, one report-layout region and ABI record, runtime upload and
+validation, compact diagnostic decoding, and renderer evidence.  InlineShadow
+committed lowerings now carry the empty runtime-static-mapping alternative,
+because its live diagnostics already contain their full instruction
+attribution.  Record/Replay and Sampled retain their typed host-side static
+mappings.  Automatic InlineShadow report planning consequently no longer
+reserves one 16-byte token-mapping record per retained access.
+
+Four tests that directly exercised only the unselectable prototype planners
+were removed, and one test whose name incorrectly described the live
+bitmap-backed layout as generation-tagged was renamed.  Production layout
+coverage remains in the eager- and lazy-full-width planner tests, the
+architecture-specific host tests, and the complete five-target simulated
+InlineShadow matrix.  The architecture boundary now rejects restoration of
+the retired planners, layout schema, token mapping, and runtime metadata.
+
+| Signal | Checkpoint 174 | Cumulative change | Slice change from checkpoint 173 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,179 | **-2,797** | **-411** |
+| Nonblank production lines | 95,770 | **-3,314** | **-398** |
+| Production implementation lines | 88,035 | **-3,415** | **-346** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Unselectable InlineShadow local-shadow protocols | **0 / 2** | n/a | **-2** |
+| Test inventory | **5,424** | **+79** | **-4 prototype-only tests** |
+
+The implementation is committed as `f0d3bb5a1ba`.  Validation includes
+successful full `-j16` builds, **827/827** nonphysical `ConSanMoi` host tests,
+**293/293** report-planning, evidence-requirements, observation-plan,
+runtime-hook, and architecture-boundary tests, and **536/536** InlineShadow
+simulated-device tests across gfx942, gfx950, gfx1100, gfx1201, and gfx1250.
+All test invocations used `-LE physical`; no physical GPU test was run.
+
+This is both a locality and a deletion result: the live InlineShadow path has
+one local-shadow representation per actual target-family strategy, while a
+second cross-runtime protocol and its associated capacity cost have vanished.
+It demonstrates why extension-surface tracing must include negative reachability
+proofs: otherwise a prototype can look like required architecture variability
+and keep multiplying obligations across planning, emission, validation, ABI,
+and runtime layers.
