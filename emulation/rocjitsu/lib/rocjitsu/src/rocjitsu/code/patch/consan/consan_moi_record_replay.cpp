@@ -163,7 +163,10 @@ MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
   MoiPersistentStateDemand demand =
-      make_exact_workgroup_capture_demand(request, resources, point, facts);
+      make_exact_workgroup_capture_demand(point, facts);
+  demand.private_workgroup_tuple_supported =
+      demand.needs_entry_workgroup_tuple &&
+      !record_replay_uses_automatic_banked_capture(request, resources);
   demand.needs_persistent_state =
       point.moi_initialize_owner_epoch || demand.needs_entry_workgroup_tuple;
   demand.needs_persistent_dispatch_capture =

@@ -621,6 +621,35 @@ foreach(_file IN LISTS _consan_production_files)
         "shared exact-entry workgroup state must not return to Record/Replay ownership"
     )
 endforeach()
+file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_owner)
+string(FIND "${_moi_mode_planning_owner}" "make_exact_workgroup_capture_demand"
+       _exact_capture_demand_begin)
+string(FIND "${_moi_mode_planning_owner}" "make_moi_object_mode_plan"
+       _exact_capture_demand_end)
+if(_exact_capture_demand_begin LESS 0 OR
+   _exact_capture_demand_end LESS_EQUAL _exact_capture_demand_begin)
+    message(FATAL_ERROR "ConSan exact-capture demand boundary could not be located")
+endif()
+math(EXPR _exact_capture_demand_length
+     "${_exact_capture_demand_end} - ${_exact_capture_demand_begin}")
+string(SUBSTRING "${_moi_mode_planning_owner}" ${_exact_capture_demand_begin}
+       ${_exact_capture_demand_length} _exact_capture_demand_contract)
+if(_exact_capture_demand_contract MATCHES
+   "ConSanRequest|BoundRuntimeResources|record_replay|Sampled|ConSanMoiEngine")
+    message(FATAL_ERROR
+        "ConSan shared exact-capture demand must not contain mode policy"
+    )
+endif()
+foreach(_exact_capture_mode IN ITEMS record_replay sampled)
+    file(READ "${_consan_dir}/consan_moi_${_exact_capture_mode}.cpp"
+         _exact_capture_mode_owner)
+    if(NOT _exact_capture_mode_owner MATCHES
+       "private_workgroup_tuple_supported[ ]*=")
+        message(FATAL_ERROR
+            "ConSan ${_exact_capture_mode} must own private exact-capture support"
+        )
+    endif()
+endforeach()
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"

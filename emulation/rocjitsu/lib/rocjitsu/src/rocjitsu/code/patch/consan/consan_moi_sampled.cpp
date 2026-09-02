@@ -218,10 +218,11 @@ uint16_t sampled_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm &,
 }
 
 MoiPersistentStateDemand plan_sampled_persistent_state_demand(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
+    const ConSanRequest &request, const BoundRuntimeResources &,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
   MoiPersistentStateDemand demand =
-      make_exact_workgroup_capture_demand(request, resources, point, facts);
+      make_exact_workgroup_capture_demand(point, facts);
+  demand.private_workgroup_tuple_supported = demand.needs_entry_workgroup_tuple;
   // A synchronization-aware Sampled probe must preserve one owner identity
   // from kernel entry through both access and sync sites. Access-only Sampled
   // objects retain the cheaper private-state choice.

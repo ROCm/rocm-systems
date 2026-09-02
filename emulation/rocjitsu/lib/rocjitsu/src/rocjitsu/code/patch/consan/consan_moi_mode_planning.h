@@ -220,7 +220,6 @@ struct MoiTargetFacts {
 
 /// Shared Record/Replay + Sampled entry-identity lifetime rule.
 [[nodiscard]] MoiPersistentStateDemand make_exact_workgroup_capture_demand(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts);
 
 [[nodiscard]] MoiObjectModePlan

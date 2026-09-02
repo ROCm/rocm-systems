@@ -18,17 +18,12 @@ MoiTargetFacts resolve_moi_target_facts(rj_code_arch_t arch) {
              : MoiTargetFacts{};
 }
 
-MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanRequest &request,
-                                                             const BoundRuntimeResources &resources,
-                                                             const ConSanMoiOperatingPoint &point,
+MoiPersistentStateDemand make_exact_workgroup_capture_demand(const ConSanMoiOperatingPoint &point,
                                                              const MoiPersistentStateFacts &facts) {
   MoiPersistentStateDemand demand;
   demand.needs_entry_workgroup_tuple =
       (facts.access_count || facts.atomic_count || facts.barrier_count || facts.fence_count) &&
       !consan_moi_detail::moi_has_exact_entry_workgroup_capture(point);
-  demand.private_workgroup_tuple_supported =
-      demand.needs_entry_workgroup_tuple &&
-      !consan_moi_detail::record_replay_uses_automatic_banked_capture(request, resources);
   return demand;
 }
 
