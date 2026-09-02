@@ -1,12 +1,10 @@
 RCCL_ROOT := ../../..
-# nccl.h is generated into the build tree; point RCCL_BUILD at a configured build dir.
-RCCL_BUILD ?= $(RCCL_ROOT)/build/release
 ROCM_PATH ?= /opt/rocm
 # ?= would lose to make's built-in CXX default (g++); only replace that default.
 ifeq ($(origin CXX),default)
 CXX := $(ROCM_PATH)/bin/amdclang++
 endif
-INC := -I$(RCCL_ROOT)/src/include/plugin -I$(RCCL_ROOT)/src/include -I$(RCCL_BUILD)/include -I$(RCCL_ROOT)/plugins/net/example/nccl -I$(ROCM_PATH)/include -I$(CURDIR)
+INC := -I$(RCCL_ROOT)/plugins/net/example/nccl -I$(ROCM_PATH)/include -I$(CURDIR)
 CXXFLAGS := -D__HIP_PLATFORM_AMD__ -include rccl_compat_v5.h
 PLUGIN_SO := librccl-net.so
 

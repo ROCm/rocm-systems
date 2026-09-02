@@ -8,10 +8,7 @@
 #
 .PHONY=test
 
-NCCL_PLUGINS:=../..
-NCCL_HOME:=../../../build
-CUDA_HOME:=/usr/local/cuda
-INC:= -I$(NCCL_HOME)/include -I$(CUDA_HOME)/include -I$(NCCL_PLUGINS)/net/example/nccl -I$(NCCL_PLUGINS)/tuner/example/nccl
+INC:= -I$(CURDIR)/nccl
 
 ifeq ($(shell uname -s), Linux)
   CFLAGS += -DNCCL_OS_LINUX

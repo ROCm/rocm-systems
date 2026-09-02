@@ -4,9 +4,7 @@
 #
 # See LICENSE.txt for license information
 #
-RCCL_HOME:=../../build/release
-HIP_HOME:=/opt/rocm
-INC:= -I$(RCCL_HOME)/include/  -I$(HIP_HOME)/include/ -D__HIP_PLATFORM_AMD__ -Inccl
+INC:= -Inccl
 PLUGIN_SO:=librccl-tuner.so
 
 default: $(PLUGIN_SO)
