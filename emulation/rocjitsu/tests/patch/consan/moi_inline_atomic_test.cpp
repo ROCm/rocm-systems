@@ -2228,6 +2228,18 @@ TEST(ConSanMoi, FinalValidationPinsVersionedCausalReleaseTransaction) {
     return error.find("versioned release transaction semantics") != std::string::npos;
   }));
 
+  ConSanTransformArtifacts missing_all_claims = valid;
+  for (size_t position : cas_positions) {
+    std::memcpy(missing_all_claims.replacement.data() + body_file_offset +
+                    position * sizeof(uint32_t),
+                atomic_add->data(), atomic_add->size() * sizeof(uint32_t));
+  }
+  const std::vector<std::string> missing_claim_errors =
+      validate_consan_modified_elf(bytes, missing_all_claims);
+  EXPECT_TRUE(std::ranges::any_of(missing_claim_errors, [](const std::string &error) {
+    return error.find("versioned release transaction semantics") != std::string::npos;
+  })) << testing::PrintToString(missing_claim_errors);
+
   ConSanTransformArtifacts missing_failed_comparison_rollback = valid;
   const size_t rollback_byte_offset = cas_positions[1] * sizeof(uint32_t);
   std::memcpy(missing_failed_comparison_rollback.replacement.data() + body_file_offset +

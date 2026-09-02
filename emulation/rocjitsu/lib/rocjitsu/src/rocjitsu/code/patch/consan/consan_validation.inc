@@ -270,128 +270,6 @@ struct FinalValidationEnvironment {
   }
 };
 
-/// One independently decoded instruction inside a proof-owned byte range.
-/// The decoder has already copied every semantic field into the instruction;
-/// validation deliberately does not inspect its transient raw-encoding view.
-struct DecodedValidationInstruction {
-  uint64_t offset = 0;
-  uint64_t next_offset = 0;
-  std::unique_ptr<Instruction> instruction;
-};
-
-[[nodiscard]] std::optional<DecodedValidationInstruction>
-decode_validation_instruction(ValidationText text, Decoder &decoder, uint64_t offset,
-                              uint64_t end) {
-  if (!text.available || offset % sizeof(uint32_t) != 0 || end % sizeof(uint32_t) != 0 ||
-      offset >= end || end > text.bytes.size() || sizeof(uint32_t) > end - offset)
-    return std::nullopt;
-  std::array<uint32_t, 4> words{};
-  const size_t available = static_cast<size_t>(end - offset);
-  const size_t copied = std::min(available, words.size() * sizeof(uint32_t));
-  std::memcpy(words.data(), text.bytes.data() + offset, copied);
-  std::unique_ptr<Instruction> instruction = decode_bounded_instruction(
-      decoder, std::span<const uint32_t>(words).first(copied / sizeof(uint32_t)), offset);
-  if (!instruction || instruction->size() <= 0 ||
-      instruction->size() % static_cast<int>(sizeof(uint32_t)) != 0 ||
-      static_cast<uint64_t>(instruction->size()) > end - offset)
-    return std::nullopt;
-  return DecodedValidationInstruction{
-      .offset = offset,
-      .next_offset = offset + static_cast<uint64_t>(instruction->size()),
-      .instruction = std::move(instruction),
-  };
-}
-
-[[nodiscard]] bool operand_is_register(const Operand *operand, RegClass cls, uint16_t index,
-                                       uint8_t width = 1u) {
-  return operand && operand->to_register_ref() == RegisterRef{cls, index, width};
-}
-
-[[nodiscard]] bool operand_is_constant(const Operand *operand, uint64_t value) {
-  return operand && operand->const_value() == value;
-}
-
-template <typename Predicate>
-[[nodiscard]] size_t count_instruction_sources(const Instruction &instruction,
-                                               Predicate predicate) {
-  size_t count = 0;
-  for (int index = 0; index < instruction.num_src_operands(); ++index)
-    count += predicate(instruction.src_operand(index));
-  return count;
-}
-
-[[nodiscard]] bool is_scalar_lane_save(const Instruction &instruction, uint16_t sgpr, uint16_t vgpr,
-                                       uint16_t lane) {
-  return instruction.mnemonic() == "v_writelane_b32" && instruction.size() == 8 &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 3 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::VGPR, vgpr) &&
-         count_instruction_sources(instruction,
-                                   [&](const Operand *operand) {
-                                     return operand_is_register(operand, RegClass::SGPR, sgpr);
-                                   }) == 1u &&
-         count_instruction_sources(instruction,
-                                   [&](const Operand *operand) {
-                                     return operand_is_register(operand, RegClass::VGPR, vgpr);
-                                   }) == 1u &&
-         count_instruction_sources(instruction, [&](const Operand *operand) {
-           return operand_is_constant(operand, lane);
-         }) == 1u;
-}
-
-[[nodiscard]] bool is_scalar_lane_restore(const Instruction &instruction, uint16_t sgpr,
-                                          uint16_t vgpr, uint16_t lane) {
-  return instruction.mnemonic() == "v_readlane_b32" && instruction.size() == 8 &&
-         instruction.num_dst_operands() == 1 && instruction.num_src_operands() == 2 &&
-         operand_is_register(instruction.dst_operand(0), RegClass::SGPR, sgpr) &&
-         count_instruction_sources(instruction,
-                                   [&](const Operand *operand) {
-                                     return operand_is_register(operand, RegClass::VGPR, vgpr);
-                                   }) == 1u &&
-         count_instruction_sources(instruction, [&](const Operand *operand) {
-           return operand_is_constant(operand, lane);
-         }) == 1u;
-}
-
-[[nodiscard]] std::optional<uint64_t>
-validate_scalar_lane_transfers(const FinalValidationEnvironment &environment, uint64_t offset,
-                               uint64_t end, const ConSanMoiEntryScalarBackup &backup,
-                               bool restore) {
-  uint64_t cursor = offset;
-  for (uint16_t index = 0; index < backup.sgpr_count; ++index) {
-    const auto decoded = decode_validation_instruction(environment.replacement_text,
-                                                       *environment.decoder, cursor, end);
-    const uint16_t sgpr = static_cast<uint16_t>(backup.sgpr_base + index);
-    if (!decoded ||
-        !(restore ? is_scalar_lane_restore(*decoded->instruction, sgpr, backup.vgpr, index)
-                  : is_scalar_lane_save(*decoded->instruction, sgpr, backup.vgpr, index)))
-      return std::nullopt;
-    cursor = decoded->next_offset;
-  }
-  if (!restore)
-    return cursor;
-  const auto wait = decode_validation_instruction(environment.replacement_text,
-                                                  *environment.decoder, cursor, end);
-  if (!wait || !validate_consan_dependency(environment.arch(), ConSanDependencyKind::ValuToSalu,
-                                           *wait->instruction))
-    return std::nullopt;
-  return wait->next_offset;
-}
-
-[[nodiscard]] bool contains_scalar_lane_restore(const FinalValidationEnvironment &environment,
-                                                uint64_t begin, uint64_t end,
-                                                const ConSanMoiEntryScalarBackup &backup) {
-  for (uint64_t cursor = begin; cursor < end;) {
-    if (validate_scalar_lane_transfers(environment, cursor, end, backup, /*restore=*/true))
-      return true;
-    const auto decoded = decode_validation_instruction(environment.replacement_text,
-                                                       *environment.decoder, cursor, end);
-    if (!decoded)
-      return false;
-    cursor = decoded->next_offset;
-  }
-  return false;
-}
-
 struct InventoryRange {
   ValidationByteRange bytes;
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
@@ -2851,10 +2729,8 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
                                             std::vector<std::string> &errors) {
   if (!environment.original_text.available || !environment.replacement_text.available)
     return;
-  if (!environment.require_target(
-          errors, "ConSan final validation found no target profile for entry scalar backup",
-          "ConSan final validation could not create an entry scalar backup decoder"))
-    return;
+  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
+  const rj_code_arch_t arch = environment.arch();
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (!patch.entry_scalar_backup)
@@ -2886,6 +2762,31 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
     const bool has_kernarg_preload =
         AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
 
+    std::vector<uint32_t> expected_save;
+    std::vector<uint32_t> expected_restore;
+    for (uint16_t index = 0; index < backup.sgpr_count; ++index) {
+      const uint16_t sgpr = static_cast<uint16_t>(backup.sgpr_base + index);
+      const auto save = instrumentation::build_v_writelane_b32(backup.vgpr, sgpr, index, arch);
+      const auto restore = instrumentation::build_v_readlane_b32(sgpr, backup.vgpr, index, arch);
+      if (!save || !restore) {
+        expected_save.clear();
+        expected_restore.clear();
+        break;
+      }
+      expected_save.insert(expected_save.end(), save->begin(), save->end());
+      expected_restore.insert(expected_restore.end(), restore->begin(), restore->end());
+    }
+    const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (restore_wait)
+      expected_restore.push_back(*restore_wait);
+    else
+      expected_restore.clear();
+    if (expected_save.empty() || expected_restore.empty()) {
+      errors.emplace_back(
+          "ConSan final validation could not encode entry scalar backup expectations");
+      continue;
+    }
+
     std::vector<uint64_t> body_offsets = {
         patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset)};
     if (has_kernarg_preload) {
@@ -2902,18 +2803,20 @@ void validate_entry_scalar_backup_semantics(const FinalValidationEnvironment &en
       const uint64_t body_offset = body_offsets[body_index];
       const uint64_t body_end =
           body_index + 1u < body_offsets.size() ? body_offsets[body_index + 1u] : patch_end;
+      const uint64_t save_bytes = expected_save.size() * sizeof(uint32_t);
       if (body_offset < patch.trampoline_offset || body_offset > body_end || body_end > patch_end ||
-          patch_end > environment.replacement_text.bytes.size()) {
+          patch_end > replacement_text.size() || save_bytes > body_end - body_offset ||
+          std::memcmp(replacement_text.data() + body_offset, expected_save.data(), save_bytes) !=
+              0) {
         errors.emplace_back("ConSan final validation found an invalid entry scalar backup save");
         continue;
       }
-      const std::optional<uint64_t> save_end = validate_scalar_lane_transfers(
-          environment, body_offset, body_end, backup, /*restore=*/false);
-      if (!save_end) {
-        errors.emplace_back("ConSan final validation found an invalid entry scalar backup save");
-        continue;
-      }
-      if (!contains_scalar_lane_restore(environment, *save_end, body_end, backup)) {
+      const auto body_words = std::span<const uint32_t>(
+          reinterpret_cast<const uint32_t *>(replacement_text.data() + body_offset),
+          static_cast<size_t>((body_end - body_offset) / sizeof(uint32_t)));
+      if (std::search(body_words.begin() + static_cast<ptrdiff_t>(expected_save.size()),
+                      body_words.end(), expected_restore.begin(),
+                      expected_restore.end()) == body_words.end()) {
         errors.emplace_back("ConSan final validation found an invalid entry scalar backup restore");
       }
     }
@@ -3640,7 +3543,9 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
     const bool compare_exchange = site && consan_atomic_is_compare_exchange(*site);
     const bool claimed_compare_exchange = compare_exchange && cas_positions.size() == 3u;
     const size_t publication_begin =
-        claimed_compare_exchange ? cas_positions[1] : cas_positions.front();
+        claimed_compare_exchange
+            ? cas_positions[1]
+            : (cas_positions.empty() ? std::numeric_limits<size_t>::max() : cas_positions.front());
     const size_t publisher_owner_count =
         cas_positions.size() >= 2u ? std::ranges::count_if(owner_positions,
                                                            [&](size_t position) {

@@ -8,7 +8,6 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
-#include "rocjitsu/isa/instruction.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
@@ -17,12 +16,6 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu::consan_validation_target_detail {
 
 namespace kd = rocr::llvm::amdhsa;
-
-bool validate_gfx9_cdna_dependency(ConSanDependencyKind, const Instruction &instruction) {
-  const Operand *operand =
-      instruction.num_src_operands() == 1 ? instruction.src_operand(0) : nullptr;
-  return instruction.mnemonic() == "s_nop" && operand && operand->encoding_value() == 0;
-}
 
 ConSanDescriptorResourceDeltaValidation
 validate_gfx9_cdna_descriptor_resource_delta(const ConSanTargetProfile &target,

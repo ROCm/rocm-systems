@@ -2,18 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan_validation_gfx11_target_ops.cpp
-/// @brief Independent gfx11 proofs for emitted synchronization semantics.
-
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
-
-#include "rocjitsu/isa/instruction.h"
-
-namespace rocjitsu::consan_validation_target_detail {
-
-bool validate_gfx11_dependency(ConSanDependencyKind, const Instruction &instruction) {
-  const Operand *operand =
-      instruction.num_src_operands() == 1 ? instruction.src_operand(0) : nullptr;
-  return instruction.mnemonic() == "s_delay_alu" && operand && operand->encoding_value() == 9;
-}
-
-} // namespace rocjitsu::consan_validation_target_detail
+/// @brief Reserved architecture-local validation owner.
+///
+/// The decoded-validation replacement that introduced this file was abandoned
+/// after failing its required deletion floor. The filename remains as an
+/// implementation-free tombstone because repository operations in this work
+/// session must never delete files.

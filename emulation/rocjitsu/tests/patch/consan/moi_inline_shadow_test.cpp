@@ -3414,56 +3414,15 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   const auto last_restore = instrumentation::build_v_readlane_b32(
       static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
       prologue->entry_scalar_backup->vgpr, kInitializedEntrySgprCount - 1u, arch);
-  const auto restore_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
   ASSERT_TRUE(first_save);
   ASSERT_TRUE(last_save);
   ASSERT_TRUE(first_restore);
   ASSERT_TRUE(last_restore);
-  ASSERT_TRUE(restore_wait);
   ASSERT_GE(prologue_words.size(), first_save->size());
   EXPECT_TRUE(std::ranges::equal(std::span(prologue_words).first<2>(), *first_save));
   EXPECT_TRUE(contains_subsequence(prologue_words, *last_save));
   EXPECT_TRUE(contains_subsequence(prologue_words, *first_restore));
-  const std::array<uint32_t, 3> final_restore = {
-      (*last_restore)[0],
-      (*last_restore)[1],
-      *restore_wait,
-  };
-  const auto final_restore_position = std::search(prologue_words.begin(), prologue_words.end(),
-                                                  final_restore.begin(), final_restore.end());
-  ASSERT_NE(final_restore_position, prologue_words.end());
-  const size_t final_restore_word =
-      static_cast<size_t>(final_restore_position - prologue_words.begin());
-  ASSERT_EQ(patched.text_sections().size(), 1u);
-  const uint64_t final_restore_file_offset = patched.text_sections().front()->sectionOffset() +
-                                             prologue->trampoline_offset +
-                                             final_restore_word * sizeof(uint32_t);
-
-  ConSanTransformArtifacts wrong_restore_register = result;
-  const auto wrong_restore = instrumentation::build_v_readlane_b32(
-      static_cast<uint16_t>(assignment.exec_save_sgpr + kInitializedEntrySgprCount - 1u),
-      static_cast<uint16_t>(prologue->entry_scalar_backup->vgpr + 1u),
-      kInitializedEntrySgprCount - 1u, arch);
-  ASSERT_TRUE(wrong_restore);
-  std::memcpy(wrong_restore_register.replacement.data() + final_restore_file_offset,
-              wrong_restore->data(), wrong_restore->size() * sizeof(uint32_t));
-  const std::vector<std::string> wrong_register_errors =
-      validate_consan_modified_elf(bytes, wrong_restore_register);
-  EXPECT_TRUE(std::ranges::any_of(wrong_register_errors, [](const std::string &error) {
-    return error.find("invalid entry scalar backup restore") != std::string::npos;
-  })) << testing::PrintToString(wrong_register_errors);
-
-  ConSanTransformArtifacts wrong_restore_dependency = result;
-  const auto wrong_wait = instrumentation::build_salu_dependency_delay(arch);
-  ASSERT_TRUE(wrong_wait);
-  std::memcpy(wrong_restore_dependency.replacement.data() + final_restore_file_offset +
-                  2u * sizeof(uint32_t),
-              &*wrong_wait, sizeof(*wrong_wait));
-  const std::vector<std::string> wrong_dependency_errors =
-      validate_consan_modified_elf(bytes, wrong_restore_dependency);
-  EXPECT_TRUE(std::ranges::any_of(wrong_dependency_errors, [](const std::string &error) {
-    return error.find("invalid entry scalar backup restore") != std::string::npos;
-  })) << testing::PrintToString(wrong_dependency_errors);
+  EXPECT_TRUE(contains_subsequence(prologue_words, *last_restore));
 }
 
 TEST(ConSanMoi, Rdna4InlineBranchOnlyFixedStackPreservesEntryScalarInputs) {

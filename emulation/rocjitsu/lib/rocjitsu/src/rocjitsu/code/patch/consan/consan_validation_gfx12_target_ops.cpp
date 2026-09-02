@@ -8,7 +8,6 @@
 
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
-#include "rocjitsu/isa/instruction.h"
 
 #include <array>
 #include <cstring>
@@ -57,17 +56,6 @@ namespace {
 }
 
 } // namespace
-
-bool validate_gfx12_dependency(ConSanDependencyKind kind, const Instruction &instruction) {
-  const Operand *operand =
-      instruction.num_src_operands() == 1 ? instruction.src_operand(0) : nullptr;
-  const std::optional<uint32_t> immediate =
-      operand ? std::optional<uint32_t>(static_cast<uint32_t>(operand->encoding_value()))
-              : std::nullopt;
-  if (kind == ConSanDependencyKind::SaluToSalu)
-    return instruction.mnemonic() == "s_delay_alu" && immediate == 9u;
-  return instruction.mnemonic() == "s_wait_alu" && immediate == 0xf19fu;
-}
 
 ConSanEncodedMutationValidation validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind,
                                                                 std::span<const uint8_t> before,
