@@ -265,6 +265,16 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     auto& queue_info_session = *_session;
 
+    // Emitted before the loop below, which returns pooled signals to the pool. Deferred
+    // waits are keyed by this submission's completion signal, and once that signal is
+    // released the pool can hand the same handle to another submission.
+    if(!queue_info_session.packet_data.empty())
+    {
+        hip::event::submission_complete(queue_info_session.queue,
+                                        queue_info_session.packet_data.back().completion_signal,
+                                        queue_info_session.enqueue_ts);
+    }
+
     for(auto& packet : queue_info_session.packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
@@ -344,136 +354,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
-    for(auto& pw : queue_info_session.pending_waits)
-    {
-        auto wait_time = hip::event::profiling_time{.status = HSA_STATUS_SUCCESS,
-                                                    .start  = queue_info_session.enqueue_ts,
-                                                    .end    = common::timestamp_ns()};
-
-        auto callback_record = rocprofiler_callback_tracing_hip_event_data_t{
-            sizeof(rocprofiler_callback_tracing_hip_event_data_t),
-            rocprofiler_timestamp_t{0},
-            rocprofiler_timestamp_t{0},
-            queue_info_session.queue.get_agent().get_rocp_agent()->id,
-            queue_info_session.queue.get_id(),
-            pw.hip_event_handle,
-            pw.source_info.queue_id};
-
-        hip::event::barrier_complete(pw.tracing_data,
-                                     pw.tid,
-                                     pw.internal_corr_id,
-                                     pw.ancestor_corr_id,
-                                     wait_time,
-                                     ROCPROFILER_HIP_EVENT_WAIT,
-                                     callback_record);
-        if(pw.corr_id_ref)
-        {
-            pw.corr_id_ref->sub_kern_count();
-            pw.corr_id_ref->sub_ref_count();
-        }
-    }
-
-    if(queue_info_session.pending_waits_pooled_signal)
-        Queue::release_signal(queue_info_session.pending_waits_pooled_signal);
-
     queue_info_session.queue.async_complete();
-
-    return false;
-}
-
-bool
-BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
-{
-    using session_info_t = std::shared_ptr<barrier_info_session_t>;
-
-    ROCP_FATAL_IF(!data) << "BarrierAsyncSignalHandler called with null data pointer";
-
-    auto* _session_ptr = static_cast<session_info_t*>(data);
-
-    if(registration::get_fini_status() > 0)
-    {
-        _session_ptr->reset();
-        delete _session_ptr;
-        return false;
-    }
-
-    auto _cleanup = common::scope_destructor{[&_session_ptr]() {
-        _session_ptr->reset();
-        delete _session_ptr;
-        _session_ptr = nullptr;
-    }};
-
-    auto _session = *_session_ptr;
-    ROCP_FATAL_IF(!_session.get()) << "nullptr to barrier session information";
-
-    auto& barrier_session = *_session;
-
-    for(auto& bdata : barrier_session.barrier_data)
-    {
-        auto barrier_time = hip::event::profiling_time{.status = HSA_STATUS_SUCCESS,
-                                                       .start  = barrier_session.enqueue_ts,
-                                                       .end    = common::timestamp_ns()};
-
-        auto* _corr_id          = barrier_session.correlation_id;
-        auto  _tid              = barrier_session.tid;
-        auto  _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
-        auto  _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
-
-        // Mark ahead of the callbacks below so that tool callback duration does not widen
-        // the window in which a wait can still be registered against a completed event.
-        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD)
-            hip::event::mark_event_completed(bdata.callback_record.hip_event_handle);
-
-        hip::event::barrier_complete(bdata.tracing_data,
-                                     _tid,
-                                     _internal_corr_id,
-                                     _ancestor_corr_id,
-                                     barrier_time,
-                                     bdata.operation,
-                                     bdata.callback_record);
-
-        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD && bdata.coalesce_group)
-        {
-            auto pending_entries =
-                common::container::small_vector<hip::event::coalesce_pending_t, 4>{};
-
-            bdata.coalesce_group->wlock([&](auto& grp) {
-                grp.barrier_time = barrier_time;
-                grp.completed    = true;
-                pending_entries  = std::move(grp.pending);
-                grp.pending.clear();
-            });
-
-            for(auto& p : pending_entries)
-            {
-                hip::event::barrier_complete(p.tracing_data,
-                                             p.tid,
-                                             p.internal_corr_id,
-                                             p.ancestor_corr_id,
-                                             barrier_time,
-                                             ROCPROFILER_HIP_EVENT_RECORD,
-                                             p.callback_record);
-                if(p.corr_id_ref)
-                {
-                    p.corr_id_ref->sub_kern_count();
-                    p.corr_id_ref->sub_ref_count();
-                }
-            }
-        }
-
-        if(bdata.pooled_signal)
-        {
-            Queue::release_signal(bdata.pooled_signal);
-        }
-
-        if(_corr_id)
-        {
-            _corr_id->sub_kern_count();
-            _corr_id->sub_ref_count();
-        }
-    }
-
-    barrier_session.queue.async_complete();
 
     return false;
 }
@@ -547,7 +428,6 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    const bool event_api_active    = (hip::event::get_active_event_context() != nullptr);
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
@@ -555,7 +435,7 @@ WriteInterceptor(const void* packets,
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
-                          !event_api_active && !hip::event::has_pending_waits()))
+                          !hip::event::is_active()))
     {
         writer(packets, pkt_count);
         return;
@@ -585,8 +465,7 @@ WriteInterceptor(const void* packets,
 #endif
     }
 
-    auto* active_event_ctx = hip::event::get_active_event_context();
-    if(num_dispatch_packets == 0 && !active_event_ctx && !hip::event::has_pending_waits())
+    if(num_dispatch_packets == 0 && !hip::event::is_active())
     {
         writer(packets, pkt_count);
         return;
@@ -622,8 +501,7 @@ WriteInterceptor(const void* packets,
     // it out of the snapshot window and registers it with async_started() so the agent-wide drain
     // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
     // graph summary is unaffected by which path runs.
-    if(graph_launch_active && no_real_consumers && !has_kernel_replay &&
-       !hip::event::has_pending_waits())
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
@@ -643,7 +521,7 @@ WriteInterceptor(const void* packets,
                                tracing_data_v);
 
     auto hip_event_tracing_data_v = tracing::tracing_data{};
-    if(hip::event::get_active_event_context() || hip::event::has_pending_waits())
+    if(hip::event::is_active())
     {
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
                                    ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
@@ -748,184 +626,20 @@ WriteInterceptor(const void* packets,
                     is_barrier = (vendor_hdr.AmdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
                 }
 
-                auto* event_ctx = hip::event::get_active_event_context();
+                auto plan = hip::event::plan_barrier(
+                    queue, _packets[i], is_barrier, hip_event_tracing_data_v, corr_id);
 
-                const bool has_completion_signal =
-                    is_barrier && (_packets[i].barrier_and.completion_signal.handle != 0);
-
-                if(has_completion_signal && event_ctx && !event_ctx->barrier_captured &&
-                   !hip_event_tracing_data_v.empty())
+                if(plan.intercepted)
                 {
-                    corr_id->add_ref_count();
-                    corr_id->add_kern_count();
-
-                    auto _barrier_data         = barrier_data_t{};
-                    _barrier_data.tracing_data = hip_event_tracing_data_v;
-                    _barrier_data.operation    = event_ctx->operation;
-
-                    tracing::populate_external_correlation_ids(
-                        _barrier_data.tracing_data.external_correlation_ids,
-                        thr_id,
-                        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT,
-                        event_ctx->operation,
-                        internal_corr_id);
-
-                    const auto& barrier_pkt_pre        = _packets[i].barrier_and;
-                    const auto  original_signal_handle = barrier_pkt_pre.completion_signal.handle;
-
-                    auto source_queue = queue.get_id();
-                    if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
-                    {
-                        hip::event::record_event_info(
-                            event_ctx->hip_event_handle,
-                            hip::event::event_record_info_t{queue.get_id(),
-                                                            queue.get_agent().get_rocp_agent()->id,
-                                                            original_signal_handle});
-                    }
-                    else if(event_ctx->operation == ROCPROFILER_HIP_EVENT_WAIT)
-                    {
-                        source_queue =
-                            hip::event::lookup_event_info(event_ctx->hip_event_handle).queue_id;
-                    }
-
-                    _barrier_data.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
-                        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
-                        rocprofiler_timestamp_t{0},
-                        rocprofiler_timestamp_t{0},
-                        queue.get_agent().get_rocp_agent()->id,
-                        queue.get_id(),
-                        event_ctx->hip_event_handle,
-                        source_queue};
-
-                    // ENTER/EXIT bracket the barrier enqueue moment (CPU-side, no GPU
-                    // timestamps yet). The PHASE_NONE completion callback fires later
-                    // from BarrierAsyncSignalHandler when the GPU signals completion.
-                    {
-                        auto tracer_data = _barrier_data.callback_record;
-                        tracing::execute_phase_enter_callbacks(
-                            _barrier_data.tracing_data.callback_contexts,
-                            thr_id,
-                            internal_corr_id,
-                            _barrier_data.tracing_data.external_correlation_ids,
-                            ancestor_corr_id,
-                            ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
-                            event_ctx->operation,
-                            tracer_data);
-                    }
-
-                    tracing::update_external_correlation_ids(
-                        _barrier_data.tracing_data.external_correlation_ids,
-                        thr_id,
-                        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT);
-
-                    const auto& barrier_pkt                = _packets[i].barrier_and;
-                    const auto  original_completion_signal = barrier_pkt.completion_signal;
-                    const bool  existing_completion_signal =
-                        (original_completion_signal.handle != 0);
-
-                    auto barrier_copy = _packets[i];
-                    _barrier_data.pooled_signal =
-                        queue.create_signal(0, &barrier_copy.barrier_and.completion_signal, true);
-
-                    _barrier_data.completion_signal = barrier_copy.barrier_and.completion_signal;
-
-                    get_core_table()->hsa_signal_store_screlease_fn(_barrier_data.completion_signal,
-                                                                    0);
-
-                    transformed_packets.emplace_back(barrier_copy);
-
-                    if(existing_completion_signal)
-                    {
-                        auto forwarding   = hsa_barrier_and_packet_t{};
-                        forwarding.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-                        forwarding.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-                        forwarding.completion_signal = original_completion_signal;
-                        transformed_packets.emplace_back(forwarding);
-                    }
-
-                    {
-                        // EXIT phase: GPU timestamps not yet available; PHASE_NONE fires from
-                        // BarrierAsyncSignalHandler
-                        auto tracer_data = _barrier_data.callback_record;
-                        tracing::execute_phase_exit_callbacks(
-                            _barrier_data.tracing_data.callback_contexts,
-                            _barrier_data.tracing_data.external_correlation_ids,
-                            ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
-                            event_ctx->operation,
-                            tracer_data);
-                    }
-
-                    event_ctx->barrier_captured = true;
-
-                    if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
-                    {
-                        auto group =
-                            std::make_shared<common::Synchronized<hip::event::coalesce_group_t>>();
-                        hip::event::store_coalesce_group(event_ctx->hip_event_handle, group);
-                        _barrier_data.coalesce_group = group;
-                    }
-
-                    auto barrier_session_data = barrier_info_session_t::barrier_data_array_t{};
-                    barrier_session_data.emplace_back(std::move(_barrier_data));
-
-                    auto barrier_session =
-                        barrier_info_session_t{.queue          = queue,
-                                               .tid            = thr_id,
-                                               .enqueue_ts     = common::timestamp_ns(),
-                                               .correlation_id = corr_id,
-                                               .barrier_data   = std::move(barrier_session_data)};
-
-                    auto shared =
-                        std::make_shared<barrier_info_session_t>(std::move(barrier_session));
-
-                    const auto raw_signal = shared->barrier_data.back().pooled_signal->get().value;
-
-                    queue.async_started();
-
-                    auto status = hsa::get_amd_ext_table()->hsa_amd_signal_async_handler_fn(
-                        raw_signal,
-                        HSA_SIGNAL_CONDITION_EQ,
-                        -1,
-                        BarrierAsyncSignalHandler,
-                        new std::shared_ptr<barrier_info_session_t>(shared));
-
-                    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-                        << fmt::format("Error: hsa_amd_signal_async_handler for barrier "
-                                       "(signal={{.handle={}}}) failed with error code {}",
-                                       raw_signal.handle,
-                                       static_cast<int>(status));
+                    transformed_packets.emplace_back(plan.barrier);
+                    if(plan.has_forwarding) transformed_packets.emplace_back(plan.forwarding);
                 }
                 else
                 {
                     transformed_packets.emplace_back(_packets[i]);
                 }
 
-                // Scan dep_signals for deferred hipStreamWaitEvent dependencies. Skip
-                // barriers that were directly intercepted as event barriers (barrier_captured
-                // is true): those are handled by BarrierAsyncSignalHandler, not here.
-                if(is_barrier && !(event_ctx && event_ctx->barrier_captured))
-                {
-                    auto consume_if_pending = [&](uint64_t handle) {
-                        if(handle == 0) return;
-                        auto pw = hip::event::consume_pending_wait(handle);
-                        if(pw.corr_id_ref) _info_session.pending_waits.emplace_back(std::move(pw));
-                    };
-
-                    if(packet_type == HSA_PACKET_TYPE_BARRIER_AND)
-                    {
-                        for(const auto& dep : _packets[i].barrier_and.dep_signal)
-                        {
-                            if(dep.handle == 0) break;
-                            consume_if_pending(dep.handle);
-                        }
-                    }
-                    else
-                    {
-                        const auto& vpkt =
-                            reinterpret_cast<const hsa_amd_barrier_value_packet_t&>(_packets[i]);
-                        consume_if_pending(vpkt.signal.handle);
-                    }
-                }
+                hip::event::claim_deferred_waits(_packets[i], packet_type, is_barrier);
 
                 continue;
             }
@@ -1221,8 +935,7 @@ WriteInterceptor(const void* packets,
                 const auto dep = _packets[i].ext_kernel_dispatch.dep_signal;
                 if(dep.handle != 0)
                 {
-                    auto pw = hip::event::consume_pending_wait(dep.handle);
-                    if(pw.corr_id_ref) _info_session.pending_waits.emplace_back(std::move(pw));
+                    hip::event::claim_deferred_wait(dep.handle);
                 }
             }
 #endif
@@ -1232,47 +945,30 @@ WriteInterceptor(const void* packets,
 
         using info_session_t = queue_info_session_t;
 
-        // packet_data and pending_waits are NOT mutually exclusive: a batch can contain
-        // both kernel dispatch packets and barrier packets carrying event dep_signals.
-        // When packet_data is non-empty, pending_waits are carried into the async handler
-        // and emitted as WAIT records after the final kernel completes. When packet_data
-        // is empty but pending_waits is non-empty (barrier-only batch with deferred waits),
-        // append a synthetic barrier carrying a pooled signal so the async handler still
-        // fires and emits the WAIT records.
+        // A batch can contain both kernel dispatch packets and barrier packets carrying
+        // event dep_signals. When there are kernel packets, deferred waits ride on the
+        // last one's completion signal and are emitted after it retires. When there are
+        // none, event tracing supplies its own barrier so the waits still get a
+        // completion to hang off of.
         if(!_info_session.packet_data.empty())
         {
             auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
             auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
 
+            hip::event::bind_staged_waits(last_completion_signal);
+
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
             // async_started is called here (rather than per-packet) because signal_async_handler
-            // fires when the LAST kernel completes; pending_waits are emitted at the same time.
+            // fires when the LAST kernel completes; deferred waits are emitted at the same time.
             queue.async_started();
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
         }
-        else if(!_info_session.pending_waits.empty())
+        else if(auto barrier = hip::event::flush_staged_waits(queue, _info_session.enqueue_ts))
         {
-            hsa_signal_t pooled_sig{.handle = 0};
-            auto*        pooled = queue.create_signal(0, &pooled_sig, true);
-
-            // Reset to 0 so the GPU barrier decrements it to -1, matching the
-            // HSA_SIGNAL_CONDITION_EQ -1 condition in signal_async_handler.
-            get_core_table()->hsa_signal_store_screlease_fn(pooled_sig, 0);
-
-            auto barrier   = hsa_barrier_and_packet_t{};
-            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-            barrier.completion_signal = pooled_sig;
-            transformed_packets.emplace_back(barrier);
-
-            _info_session.pending_waits_pooled_signal = pooled;
-            auto shared = std::make_shared<info_session_t>(std::move(_info_session));
-            queue.async_started();
-            queue.signal_async_handler(
-                pooled, pooled_sig, new std::shared_ptr<info_session_t>(shared));
+            transformed_packets.emplace_back(*barrier);
         }
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",

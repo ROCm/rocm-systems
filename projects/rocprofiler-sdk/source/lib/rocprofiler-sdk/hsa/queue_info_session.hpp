@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,6 @@
 #include "lib/common/container/pool_object.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
@@ -73,40 +72,12 @@ struct queue_info_session_t
     using external_corr_id_map_t = user_data_map_t;
     using context_array_t        = common::container::small_vector<const context_t*>;
     using packet_data_array_t    = common::container::small_vector<packet_data_t, 8>;
-    using pending_wait_array_t   = common::container::small_vector<hip::event::pending_wait_t, 4>;
-
-    Queue&                          queue;
-    rocprofiler_thread_id_t         tid                         = common::get_tid();
-    rocprofiler_timestamp_t         enqueue_ts                  = 0;
-    context::correlation_id*        correlation_id              = nullptr;
-    packet_data_array_t             packet_data                 = {};
-    pending_wait_array_t            pending_waits               = {};
-    packet_data_t::pooled_signal_t* pending_waits_pooled_signal = nullptr;
-};
-
-struct barrier_data_t
-{
-    using callback_record_t    = rocprofiler_callback_tracing_hip_event_data_t;
-    using pooled_signal_t      = common::container::pool_object<signal_t>;
-    using coalesce_group_ptr_t = hip::event::coalesce_group_ptr_t;
-
-    tracing::tracing_data             tracing_data      = {};
-    hsa_signal_t                      completion_signal = {.handle = 0};
-    callback_record_t                 callback_record   = {};
-    pooled_signal_t*                  pooled_signal     = nullptr;
-    rocprofiler_hip_event_operation_t operation         = ROCPROFILER_HIP_EVENT_NONE;
-    coalesce_group_ptr_t              coalesce_group    = {};
-};
-
-struct barrier_info_session_t
-{
-    using barrier_data_array_t = common::container::small_vector<barrier_data_t, 4>;
 
     Queue&                   queue;
     rocprofiler_thread_id_t  tid            = common::get_tid();
     rocprofiler_timestamp_t  enqueue_ts     = 0;
     context::correlation_id* correlation_id = nullptr;
-    barrier_data_array_t     barrier_data   = {};
+    packet_data_array_t      packet_data    = {};
 };
 }  // namespace hsa
 }  // namespace rocprofiler
