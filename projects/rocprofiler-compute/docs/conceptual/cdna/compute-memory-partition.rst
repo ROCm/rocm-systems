@@ -145,12 +145,12 @@ for supported combinations.
 Example: CPX on MI300X
 ======================
 
-**Question:** *Is CPX supported, and do I multiply metrics by eight to get
-full-GPU numbers?*
+.. note::
 
-**Answer:** CPX is fully supported. Metrics are reported for the **logical GPU**
-(one XCD) you profiled. Do not multiply by eight unless you are deliberately
-extrapolating outside what the tool reports.
+   CPX is fully supported. Metrics are reported for the **logical GPU**
+   (one XCD) you profiled. Do not multiply by eight to obtain full-package
+   numbers unless you are deliberately extrapolating outside what the tool
+   reports.
 
 **Setup:**
 
