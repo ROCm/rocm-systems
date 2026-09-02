@@ -840,6 +840,14 @@ if(NOT _moi_barrier_planning MATCHES
         "planned shared barriers must retain exactly one typed mode body"
     )
 endif()
+if(NOT _moi_barrier_planning MATCHES "moi_barrier_body_indirect_jump" OR
+   NOT _moi_barrier_planning MATCHES "uses_scalar_epoch[(][)] const" OR
+   _moi_barrier_planning MATCHES
+       "MoiInlineBarrierCandidateRoutePlan|plan_inline_barrier_candidate_route|bool[ \t]+uses_scalar_epoch[ \t]*=|PlannedInlineEpochBarrier[^}]*std::vector<uint64_t>[ \t]+owner_descriptor_file_offsets")
+    message(FATAL_ERROR
+        "planned barriers must derive routing, scalar-epoch, and owner facts from their retained products"
+    )
+endif()
 file(READ "${_consan_dir}/consan_moi_inline_shadow_private_barrier.inc"
      _inline_private_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"

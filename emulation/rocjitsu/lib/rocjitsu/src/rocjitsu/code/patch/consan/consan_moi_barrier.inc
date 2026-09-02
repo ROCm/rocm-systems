@@ -221,18 +221,9 @@ using MoiBarrierBodyPlan =
     std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan,
                  MoiInlinePrivateEpochBarrierEmissionPlan>;
 
-struct MoiInlineBarrierCandidateRoutePlan {
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
-  bool branch_only_spill = false;
-};
-
-[[nodiscard]] MoiInlineBarrierCandidateRoutePlan
-plan_inline_barrier_candidate_route(const MoiScalarAbiPlan &scalar_abi,
-                                    const ConSanMoiOperatingPoint &point) {
-  return {
-      .indirect_jump = scalar_abi.indirect_jump,
-      .branch_only_spill = point.moi_branch_only_spill.has_value(),
-  };
+[[nodiscard]] std::optional<ConSanIndirectJumpSgprs>
+moi_barrier_body_indirect_jump(const MoiBarrierBodyPlan &body) {
+  return std::visit([](const auto &plan) { return plan.indirect_jump; }, body);
 }
 
 [[nodiscard]] ConSanPatchAbiEffects
@@ -680,14 +671,17 @@ void try_apply_inline_shadow_barrier_epoch_patch(
 
   struct PlannedInlineEpochBarrier {
     MoiBarrierEvidenceSitePlan candidate;
-    std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<MoiWorkitemOwnerDerivationPlan> derived_owner;
     MoiBarrierBodyPlan body;
-    MoiInlineBarrierCandidateRoutePlan route;
-    bool uses_scalar_epoch = false;
+    bool branch_only_spill = false;
     std::optional<VgprSpillSequence> spill;
     std::optional<SgprSpillSequence> scalar_spill;
     ConSanPatchAbiEffects patch_abi;
+
+    [[nodiscard]] bool uses_scalar_epoch() const {
+      const auto *inline_epoch = std::get_if<MoiInlineBarrierEpochEmissionPlan>(&body);
+      return inline_epoch != nullptr && inline_epoch->persistent_epoch_sgpr.has_value();
+    }
   };
   std::vector<PlannedInlineEpochBarrier> planned_candidates;
   MoiDescriptorPrivateRequirements private_requirements;
@@ -803,11 +797,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
                                           spill ? &*spill : nullptr, required_private_bytes);
         planned_candidates.push_back(PlannedInlineEpochBarrier{
             .candidate = candidate,
-            .owner_descriptor_file_offsets = owners,
             .derived_owner = derived_owner,
             .body = *record_emission,
-            .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
-            .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
+            .branch_only_spill = candidate_point.moi_branch_only_spill.has_value(),
             .spill = std::move(spill),
             .scalar_spill = std::move(scalar_spill),
             .patch_abi = std::move(patch_abi),
@@ -845,7 +837,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(
           plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(owner_point));
       planned_candidates.push_back(PlannedInlineEpochBarrier{
           .candidate = candidate,
-          .owner_descriptor_file_offsets = owners,
           .derived_owner = std::nullopt,
           .body =
               MoiInlinePrivateEpochBarrierEmissionPlan{
@@ -853,8 +844,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
                   .epoch_offset = private_state_layout.epoch_offset,
                   .indirect_jump = scalar_abi.indirect_jump,
               },
-          .route = plan_inline_barrier_candidate_route(scalar_abi, owner_point),
-          .uses_scalar_epoch = false,
+          .branch_only_spill = owner_point.moi_branch_only_spill.has_value(),
           .spill = std::move(spill),
           .scalar_spill = std::nullopt,
           .patch_abi = std::move(patch_abi),
@@ -1007,11 +997,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         owners, scratch_vgpr, std::nullopt, spill ? &*spill : nullptr, required_private_bytes);
     planned_candidates.push_back(PlannedInlineEpochBarrier{
         .candidate = candidate,
-        .owner_descriptor_file_offsets = std::move(owners),
         .derived_owner = std::nullopt,
         .body = std::move(*body),
-        .route = plan_inline_barrier_candidate_route(scalar_abi, candidate_point),
-        .uses_scalar_epoch = candidate_point.moi_persistent_sgprs.epoch().has_value(),
+        .branch_only_spill = candidate_point.moi_branch_only_spill.has_value(),
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
         .patch_abi = std::move(patch_abi),
@@ -1087,6 +1075,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     const PlannedInlineEpochBarrier &planned = planned_candidates[planned_index];
     const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
+    const auto indirect_jump = moi_barrier_body_indirect_jump(planned.body);
     uint32_t original_barrier_word = 0;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
@@ -1102,7 +1091,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     // private-epoch form is larger and continues to use the general appended
     // placement below.
     if (!std::holds_alternative<MoiInlinePrivateEpochBarrierEmissionPlan>(planned.body) &&
-        !planned.uses_scalar_epoch) {
+        !planned.uses_scalar_epoch()) {
       if (const auto local_body_offset =
               local_indirect_allocator.claim_reachable(site.text_offset)) {
         const uint64_t return_text_offset = site.text_offset + site.size;
@@ -1129,8 +1118,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
           info.original_size = site.size;
           info.trampoline_size = static_cast<uint32_t>(local_words->size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset =
-              *local_body_offset + (planned.uses_scalar_epoch ? sizeof(uint32_t) : 0u);
-          info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
+              *local_body_offset + (planned.uses_scalar_epoch() ? sizeof(uint32_t) : 0u);
+          info.owner_descriptor_file_offsets = planned.patch_abi.owner_descriptor_file_offsets;
           if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors, candidate,
                                                info, "barrier epoch patch", lowering_commits))
             return;
@@ -1155,10 +1144,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     // malformed requested encodings as errors, whereas lack of a route for
     // one otherwise-supported site must not abort the whole code object.
     if (cave_text_offset >= return_text_offset &&
-        !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) &&
-        !planned.route.indirect_jump) {
+        !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) && !indirect_jump) {
       result.warnings.emplace_back(
-          planned.route.branch_only_spill
+          planned.branch_only_spill
               ? "ConSan MOI branch-only scalar-spill barrier has no encodable far return in " +
                     candidate.container_name
               : "ConSan MOI inline-shadow barrier has no encodable far return in " +
@@ -1190,8 +1178,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(
             (consan_is_capability_arch(arch) &&
              ((updates_exact_epoch && !consan_uses_gfx11_encoding(arch)) ||
               (emits_barrier_record && semantics.dense_barrier_router)));
-        if (has_dense_router && planned.route.indirect_jump &&
-            !planned.owner_descriptor_file_offsets.empty()) {
+        if (has_dense_router && indirect_jump &&
+            !planned.patch_abi.owner_descriptor_file_offsets.empty()) {
           dense_fallback_indices.push_back(planned_index);
         } else {
           result.warnings.emplace_back(
@@ -1236,11 +1224,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     }
     if (island_offset) {
       std::vector<uint32_t> island_words;
-      if (!planned.route.indirect_jump ||
-          !append_moi_scc_preserving_indirect_jump(
-              island_words, *island_offset, placement->body_offset,
-              planned.route.indirect_jump->pc_sgpr, planned.route.indirect_jump->scc_save_sgpr,
-              /*capture_scc=*/true, arch) ||
+      if (!indirect_jump ||
+          !append_moi_scc_preserving_indirect_jump(island_words, *island_offset,
+                                                   placement->body_offset, indirect_jump->pc_sgpr,
+                                                   indirect_jump->scc_save_sgpr,
+                                                   /*capture_scc=*/true, arch) ||
           island_words.size() != kIndirectIslandWords ||
           *island_offset + indirect_island_bytes > new_text.size()) {
         result.errors.emplace_back(
@@ -1253,7 +1241,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       island_info.anchor_offset = site.text_offset;
       island_info.trampoline_offset = *island_offset;
       island_info.trampoline_size = static_cast<uint32_t>(indirect_island_bytes);
-      island_info.owner_descriptor_file_offsets = planned.owner_descriptor_file_offsets;
+      island_info.owner_descriptor_file_offsets = planned.patch_abi.owner_descriptor_file_offsets;
       patches.push_back(std::move(island_info));
     }
     append_words_bytes(new_text, *cave_words);
@@ -1266,7 +1254,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     note_relocated_barrier_instruction(info, *cave_words, original_barrier_word, cave_text_offset,
                                        cave_text_offset +
-                                           (planned.uses_scalar_epoch ? sizeof(uint32_t) : 0u),
+                                           (planned.uses_scalar_epoch() ? sizeof(uint32_t) : 0u),
                                        emits_barrier_record);
     static_cast<ConSanPatchAbiEffects &>(info) = planned.patch_abi;
     if (!append_moi_sync_lowering_commit(result.observation_plan(), result.errors, candidate, info,
@@ -1485,10 +1473,10 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         info.trampoline_offset = body_offset;
         info.original_size = site.size;
         info.trampoline_size = static_cast<uint32_t>(body_words->size() * sizeof(uint32_t));
-        note_relocated_barrier_instruction(info, *body_words, original_barrier_word, body_offset,
-                                           body_offset +
-                                               (planned.uses_scalar_epoch ? sizeof(uint32_t) : 0u),
-                                           emits_barrier_record);
+        note_relocated_barrier_instruction(
+            info, *body_words, original_barrier_word, body_offset,
+            body_offset + (planned.uses_scalar_epoch() ? sizeof(uint32_t) : 0u),
+            emits_barrier_record);
         static_cast<ConSanPatchAbiEffects &>(info) = planned.patch_abi;
         staged_barriers.push_back({.planned_index = index,
                                    .site_offset = site.text_offset,
@@ -1534,9 +1522,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(
       const uint64_t owner_end = owner_begin + first_candidate.container_code_size;
       const std::string &owner_name = first_candidate.container_name;
       const std::vector<uint64_t> &group_owner =
-          planned_candidates[indices.front()].owner_descriptor_file_offsets;
+          planned_candidates[indices.front()].patch_abi.owner_descriptor_file_offsets;
       if (group_owner.empty() || std::ranges::any_of(indices, [&](size_t index) {
-            return planned_candidates[index].owner_descriptor_file_offsets != group_owner;
+            return planned_candidates[index].patch_abi.owner_descriptor_file_offsets != group_owner;
           })) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay has inconsistent dispatch ownership");
@@ -1655,7 +1643,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(
         bodies.push_back({.planned_index = index,
                           .offset = body_offset,
                           .relocated_guest_instruction_offset =
-                              body_offset + (planned.uses_scalar_epoch ? sizeof(uint32_t) : 0u),
+                              body_offset + (planned.uses_scalar_epoch() ? sizeof(uint32_t) : 0u),
                           .words = std::move(*body_words)});
       }
 
