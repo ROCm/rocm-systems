@@ -2356,6 +2356,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // (globalRmaProxySupport) has no all-P2P symmetric window, and enqueue.cc has a
   // dedicated non-symmetric hostRma path for it.
   comm->hostRmaSupport = (isOneLsaTeams || comm->globalRmaProxySupport);
+  // Every input to the two derivations above, so a run that ends up without GIN
+  // or without the RMA proxy names the flag responsible instead of leaving it to
+  // be inferred. NIC fusion in particular is otherwise invisible at this level.
+  INFO(NCCL_INIT | NCCL_NET,
+       "GIN/RMA support: ginConnection %d hostRma %d (ginTypeMatch %d mloPart %d nicFused %d crossNic %d "
+       "rmaPlugin %d cuMemGdr %d oneLsaTeam %d)",
+       comm->globalGinSupport, comm->hostRmaSupport, globalGinSupport, comm->hasMloPart, globalNicFused,
+       globalCrossNicSupport, globalRmaPluginSupport, globalCuMemGdrSupport, isOneLsaTeams);
   if (!comm->symmetricSupport) {
     INFO(NCCL_INIT,
          "Symmetric memory is not supported. cuMemEnable %d, "
