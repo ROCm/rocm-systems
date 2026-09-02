@@ -323,7 +323,7 @@ thesis, structural result, gross and net size change, validation evidence,
 unexpected bugs and regression tests, and the whole-codebase evidence used to
 select the next macro-slice.
 
-### 10.1 Macro-slice 1 (active): one MOI access transaction
+### 10.1 Macro-slice 1 (abandoned): one MOI access transaction
 
 The bounded candidate comparison rejected two tempting file-size arguments.
 SuperCollider LDS and FLAT lowering share mismatch reporting and low-level
@@ -382,3 +382,66 @@ VGPR-bank paths, lowering/runtime mapping publication, and the architecture
 boundary. The cutover gate covers the complete nonphysical ConSan/RocJitsu
 matrix, including all five emulated targets. Any behavioral discrepancy found
 during convergence receives a regression test before the macro-slice closes.
+
+The attempt was stopped at its first buildable comparative checkpoint. Moving
+the descriptor, dense-route, relay, commit, and publication lifecycle behind
+one typed transaction removed only 77 lines from the three mode bodies while
+requiring 101 lines of shared template and 126 lines of mode adapters. The
+remaining large regions were the intentionally different probe-body, entry-
+gate, return-ABI, and evidence policies. Extending the transaction into those
+regions would have required a union-shaped callback protocol rather than
+making implementation disappear. The experiment was reverted in full; no
+production wrapper or alternate path remains. This is the deletion thesis's
+abort condition working as intended, and evidence against revisiting access
+orchestration without a materially different representation.
+
+### 10.2 Macro-slice 2 (active): transactional instruction construction
+
+The next bounded comparison found a wider replacement opportunity inside MOI
+emission. The largest emitters still manually stage optional encoded
+instructions, test each collection of optionals, and then append each word or
+word range one at a time. They also manually calculate and patch many local
+branch placeholders. This is not target or mode policy: it is a repeated,
+fallible implementation of one instruction-stream transaction. The existing
+`InstructionSequence` contract already expresses atomic `emit_all`, typed
+labels, branch fixups, and rollback, but adoption is partial.
+
+The surveyed emission files contain roughly 1,000 local `const auto`
+temporaries, 490 checked optional-instruction appends, and 485 repeated failure
+checks. Not every temporary is redundant, but the repeated construction
+protocol spans InlineShadow, synchronization, Record/Replay access, Sampled
+access/synchronization, record events, prologues, and shared helpers. That is a
+single common mechanism repeated across mode-local algorithms, rather than a
+request to merge those algorithms.
+
+The deletion thesis is:
+
+- make `InstructionSequence` the one transaction for composing instruction
+  words and local branches from existing target builders;
+- replace manual optional staging/check/append regions and hand-maintained
+  local branch fixups with direct `emit_all` and typed labels;
+- retain named intermediate instructions when their values are inspected,
+  reused, or carry useful semantic meaning, and retain all mode algorithms and
+  target builders in their current owners;
+- avoid inventing a bytecode, table-driven mini-language, macro layer, or
+  generated representation merely to reduce the line count; and
+- harvest obsolete helper lambdas, temporary vectors, offset bookkeeping,
+  checks, and includes as consumers converge.
+
+The initial cut is the complete InlineShadow instruction emitter, followed by
+the other large emitters only while the same representation continues to
+remove real protocol. The conservative macro-slice target is at least 800 net
+production implementation lines, with a 500-line abort floor. New common code
+must remain small: the intended replacement is adoption of the existing typed
+transaction, not a second emission framework. The attempt stops if direct
+sequences obscure instruction semantics, change builder evaluation or
+rollback behavior, require mode/architecture switches, or fail to clear the
+floor after the high-density consumers are converted.
+
+Focused validation compares exact emitted bytes and error behavior for the
+converted owners, then exercises InlineShadow, Record/Replay, Sampled,
+synchronization, spill, branch-fixup, and architecture-boundary tests across
+all five emulated targets. The cutover gate is the complete nonphysical
+ConSan/RocJitsu matrix. A behavioral discrepancy receives a regression test;
+mere representational convergence with identical covered behavior does not
+require duplicating existing exact-byte tests.
