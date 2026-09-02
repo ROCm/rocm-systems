@@ -45,8 +45,18 @@ __device__ __forceinline__ T blitLoad(const T* p) {
 }
 
 // TH_STORE_NT_RT is not reachable from __builtin_nontemporal_store, which only
-// ever emits plain TH_NT. It means non-temporal in the near cache but regular
-// in the far cache: do not pollute L2, but stay resident for a later consumer.
+// ever emits plain TH_NT, so the only way to measure it is to write the
+// instruction by hand.
+//
+// In the two-part TH names the first part applies to the near caches and the
+// second to the last level, so NT_RT is non-temporal in L0/GL1 and *regular in
+// GL2* - the line still lands in GL2 and stays there for a later consumer. That
+// is the opposite of what the shipped change does, and it is why this variant
+// shows no cache benefit once the codegen control is subtracted: it never
+// stopped polluting GL2 in the first place.
+//
+// (An earlier version of this comment said NT_RT avoids polluting L2. It does
+// not, and the measurement agrees: -0.29% against asm-plain-128, i.e. nothing.)
 __device__ __forceinline__ void storeB128NtRt(u64x2* p, u64x2 v) {
   asm volatile("global_store_b128 %0, %1, off th:TH_STORE_NT_RT" : : "v"(p), "v"(v) : "memory");
 }
