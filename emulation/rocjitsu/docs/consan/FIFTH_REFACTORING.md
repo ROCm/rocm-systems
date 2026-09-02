@@ -12011,3 +12011,48 @@ it, but once mode-owned demand became the sole authority, retaining the flag
 would make adding a mode harder and permit two answers to drift.  The
 refactoring contract favors the one executable authority, not the historical
 shape of an earlier slice.
+
+### 16.182 Convergence checkpoint 181: mode-owned private capture support
+
+The surviving shared `make_exact_workgroup_capture_demand` helper still
+contained one mode peephole.  It accepted the complete request and runtime
+resources so it could call Record/Replay's automatic-banked-capture predicate.
+Sampled therefore reached through a supposedly shared lifetime rule into a
+Record/Replay strategy merely to receive the constant answer that private
+exact coordinates are supported.
+
+The shared helper now answers only the genuinely common question: whether an
+admitted access, atomic, barrier, or fence lacks an exact entry tuple.  It
+accepts only the operating point and persistent-state facts.  Record/Replay's
+demand planner combines that result with its automatic-banked-capture policy;
+Sampled's demand planner declares private tuple support directly.  The now
+unused runtime-resources name also disappears from the Sampled planner.
+
+The architecture gate extracts the common helper and forbids requests,
+runtime resources, engine identity, or either mode's policy vocabulary.  It
+also requires both participating mode owners to publish their own
+`private_workgroup_tuple_supported` decision.
+
+| Signal | Checkpoint 181 | Cumulative change | Slice change from checkpoint 180 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,139 | **-2,837** | **-5** |
+| Nonblank production lines | 95,732 | **-3,352** | **-5** |
+| Production implementation lines | 87,998 | **-3,452** | **-5** |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **113 / 46** | **-163 / -11** | 0 / 0 |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Shared capture-demand mode-policy dependencies | **0 / 1** | n/a | **-1** |
+| Test inventory | **5,424** | **+79** | 0 |
+
+The implementation is committed as `c26ed0b1a8d`.  Validation includes a
+successful full `-j16` build and **883/883** nonphysical MOI host and
+architecture-boundary tests.  All invocations used `-LE physical`; no physical
+GPU test was run.
+
+The entry-capture component is now layered end to end: shared facts determine
+whether coordinates are missing; each mode decides which storage strategies
+it supports; placement realizes that typed demand; and emission accepts only
+the resolved exact-entry source.  Adding a mode no longer requires knowing a
+Record/Replay predicate to participate in the shared mechanism.
