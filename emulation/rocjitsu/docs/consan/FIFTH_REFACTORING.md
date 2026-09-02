@@ -11233,3 +11233,51 @@ whether the ordinary and private planner seams expose one honest common
 operation or merely force disjoint mode requirements through union-shaped
 signatures.  The next trace must answer that from both mode implementations
 before changing another interface.
+
+### 16.166 Convergence checkpoint 165: exact perturbation-planning outputs
+
+The broad-bus audit next separated planning from mutation in the
+SuperCollider perturbation component.  `build_perturbation_plan` received the
+entire mutable `ConSanTransformArtifacts` transaction, but a complete trace of
+both its fresh and carried-plan branches found only two outputs: the
+perturbation `ConSanMutationTally` and fatal diagnostics.  Byte replacement,
+inventory, existing patches, outcome transitions, and failure classification
+belong to the later application operation and were never planning inputs.
+
+The planning contract now accepts exactly its tally and diagnostic sink.
+Composition explicitly projects those outputs at both call sites; application
+continues to receive the transaction because it genuinely composes all of the
+mutation state.  The boundary gate requires the narrow planning signature and
+rejects returning the broad transaction to it.  This is a forward-product cut,
+not a type rename: the planner can no longer inspect unrelated lowerer state.
+
+| Signal | Checkpoint 165 | Cumulative change | Slice change from checkpoint 164 |
+| --- | ---: | ---: | ---: |
+| Production files | 309 | +80 | 0 |
+| Physical production lines | 102,641 | **-2,335** | +2 |
+| Nonblank production lines | 96,222 | **-2,862** | +2 |
+| Production implementation lines | 88,430 | **-3,020** | +2 |
+| `MoiOptions` references / files | **0 / 0** | **-87 / -25** | 0 / 0 |
+| `ConSanTransformArtifacts` references / files | **118 / 49** | **-158 / -8** | **-2 / 0** |
+| `ConSanPatchInfo` references / files | 210 / 32 | +10 / +4 | 0 / 0 |
+| `ConSanMoiOperatingPoint` references / files | **247 / 52** | **-43 / +1** | 0 / 0 |
+| Perturbation-planning broad-bus parameters | **0** | n/a | **-1** |
+| Test inventory | **5,425** | **+80** | 0 |
+
+The operating-point occurrence count shown as 246 in checkpoints 162 through
+164 was a one-occurrence transcription error; an exact recount at their base
+and at this checkpoint is 247.  No operating-point reference changed in this
+slice.
+
+The implementation is committed as `0ee8cf2b93b`.  Validation includes a
+successful full `-j16` build and **25/25** nonphysical perturbation,
+mutation-outcome, and architecture-boundary tests.  This follows the complete
+2,921-case nonphysical ConSan simulator-device matrix at checkpoint 162.  All
+tests used `-LE physical`; no test was removed, renamed, disabled, or replaced,
+and no physical GPU test was run.
+
+The two added implementation lines are call-site projection made visible by
+removing two broad-bus occurrences.  That small interface cost is not a
+code-size payoff; the next broad-bus slice must use the exposed transaction
+facets to delete at least this growth while removing another cross-component
+transaction dependency.
