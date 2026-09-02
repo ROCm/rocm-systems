@@ -10,7 +10,7 @@
 
 namespace {
 
-template <typename Wide> void expect_signed_128_arithmetic() {
+template <typename Wide> void expect_documented_signed_128_arithmetic() {
   const auto zero = Wide{};
   const auto max64 = static_cast<Wide>(std::numeric_limits<uint64_t>::max());
   const auto twice_max64 = max64 + max64;
@@ -26,11 +26,11 @@ template <typename Wide> void expect_signed_128_arithmetic() {
 }
 
 TEST(BigIntTest, Int128SupportsSignedWidenedArithmetic) {
-  expect_signed_128_arithmetic<util::int128_t>();
+  expect_documented_signed_128_arithmetic<util::int128_t>();
 }
 
 TEST(BigIntTest, FallbackInt128SupportsSignedWidenedArithmetic) {
-  expect_signed_128_arithmetic<util::detail::fallback_int128_t>();
+  expect_documented_signed_128_arithmetic<util::detail::fallback_int128_t>();
 }
 
 } // namespace

@@ -9946,29 +9946,11 @@ class CodeGenerator:
                                 and opnd.name in ('srsrc', 'ssamp')
                             ):
                                 operand_value = f'({operand_value} * 4)'
-                            # V_PK_LSHL_ADD_U64's 64-bit shift source uses
-                            # LLVM's VSrc_b64 class, whose selector set is a
-                            # strict instruction/width-specific refinement of
-                            # the generated OPR_SRC table. Its decode factory
-                            # applies the exact allowlist before construction.
-                            instruction_validated_selector = (
-                                inst_sem is not None
-                                and inst_sem.semantic_class == 'pk_lshl_add_u64'
-                                and opnd.name == 'src1'
-                                and opr_type == 'OPR_SRC'
+                            opnd_ctor_init.append(
+                                f'{opnd.name}({opnd_size_expr}, '
+                                f'OperandType::{opr_type}, '
+                                f'{operand_value}{packed_16bit_args})'
                             )
-                            if instruction_validated_selector:
-                                opnd_ctor_init.append(
-                                    f'{opnd.name}(Operand::make_after_selector_validation('
-                                    f'{opnd_size_expr}, OperandType::{opr_type}, '
-                                    f'{operand_value}))'
-                                )
-                            else:
-                                opnd_ctor_init.append(
-                                    f'{opnd.name}({opnd_size_expr}, '
-                                    f'OperandType::{opr_type}, '
-                                    f'{operand_value}{packed_16bit_args})'
-                                )
                             if _needs_atomic_return_view:
                                 private_members.append(
                                     cgen.Statement('Operand vdata_return')
@@ -10449,7 +10431,7 @@ class CodeGenerator:
                                         f'{raw_value} == 124u || {raw_value} == 126u || '
                                         f'({raw_value} >= 128u && {raw_value} <= 208u) || '
                                         f'{raw_value} == 230u || '
-                                        f'({raw_value} >= 235u && {raw_value} <= 238u) || '
+                                        f'({raw_value} >= 235u && {raw_value} <= 236u) || '
                                         f'({raw_value} >= 240u && {raw_value} <= 248u) || '
                                         f'{raw_value} == 253u || {raw_value} == 255u || '
                                         f'({raw_value} >= 256u && {raw_value} <= 510u && '
@@ -13843,11 +13825,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         uses_packed_16bit_sources = (
             self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
         )
-        uses_instruction_validated_selectors = self.semantics is not None and any(
-            sem.semantic_class == 'pk_lshl_add_u64'
-            for sem in self.semantics.instructions.values()
-        )
-
         switch_cases = []
         ref_switch_cases = []
         opnd_types_with_selectors = set()
@@ -14036,13 +14013,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
         )
-        validated_selector_decl = (
-            '  /// Construct after an instruction factory validates the exact selector class.\n'
-            '  static Operand make_after_selector_validation(\n'
-            '      int size_bits, OperandType opr_type, int encoding_value);\n'
-            if uses_instruction_validated_selectors
-            else ''
-        )
         literal64_decl = (
             '  std::optional<uint64_t> literal64_value() const override;\n'
             '  std::optional<uint64_t> const_value() const override;\n'
@@ -14167,7 +14137,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 'public:\n'
                 '  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
                 f'{operand_ctor_decl}'
-                f'{validated_selector_decl}'
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                 '          uint16_t literal16_display_value, bool has_literal16_display);\n'
                 '  Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);\n'
@@ -14260,18 +14229,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '  return literal64_value_;\n'
             '}'
         )
-        validated_selector_impl = []
-        if uses_instruction_validated_selectors:
-            validated_selector_impl.append(
-                cgen.Line(
-                    'Operand Operand::make_after_selector_validation(\n'
-                    '    int size_bits, OperandType opr_type, int encoding_value) {\n'
-                    '  Operand operand(size_bits, opr_type, encoding_value);\n'
-                    '  operand.accept_instruction_validated_selector();\n'
-                    '  return operand;\n'
-                    '}'
-                )
-            )
         # Wavefront-free constant value: the register-state-free subset of
         # read_scalar(). Registers are not constants and return nullopt, which
         # also keeps inline-const resolution from misreading a raw register
@@ -14300,7 +14257,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     '}'
                 ),
                 *packed_16bit_ctor_impl,
-                *validated_selector_impl,
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                     '                 uint16_t literal16_display_value, bool has_literal16_display)\n'

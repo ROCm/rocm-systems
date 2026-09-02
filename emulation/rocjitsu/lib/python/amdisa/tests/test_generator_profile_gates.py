@@ -5033,12 +5033,11 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'invalid src2 packed U64 source selector' in lshl
     assert 'src1 == 230u' in lshl
     assert 'src1 >= 235u' in lshl
-    assert 'src1 <= 238u' in lshl
+    assert 'src1 <= 236u' in lshl
     assert 'src1 == 253u' in lshl
     assert 'src1 == 231u' not in lshl
-    assert 'src1(Operand::make_after_selector_validation(' in lshl_constructor
-    assert '64, OperandType::OPR_SRC,' in lshl_constructor
-    assert lshl_constructor.count('Operand::make_after_selector_validation') == 1
+    assert 'src1(64, OperandType::OPR_SRC,' in lshl_constructor
+    assert 'make_after_selector_validation' not in lshl_constructor
 
 
 def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(

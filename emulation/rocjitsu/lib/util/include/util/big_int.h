@@ -55,6 +55,13 @@ private:
 
 } // namespace detail
 
+/// Signed 128-bit integer for widened addition, subtraction, and range checks.
+///
+/// Portable code may rely on construction from uint64_t, explicit conversion
+/// to uint64_t, unary negation, binary addition and subtraction, and less-than
+/// and greater-than comparisons. Native implementations may expose additional
+/// operators, but those are outside this interface so the fallback remains
+/// usable on toolchains without 128-bit integer support.
 #if defined(__SIZEOF_INT128__)
 using int128_t = __int128_t;
 #else

@@ -1616,8 +1616,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
     }
   }
 
-  constexpr std::array<uint16_t, 13> kInvalidB64Selectors{
-      107, 125, 127, 209, 229, 231, 232, 234, 239, 249, 251, 252, 254,
+  constexpr std::array<uint16_t, 15> kInvalidB64Selectors{
+      107, 125, 127, 209, 229, 231, 232, 234, 237, 238, 239, 249, 251, 252, 254,
   };
   for (const uint16_t selector : kInvalidB64Selectors) {
     SCOPED_TRACE(selector);
@@ -1654,8 +1654,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
     EXPECT_NE(decoded, nullptr);
   }
 
-  constexpr std::array<uint16_t, 14> kValidB64Selectors{
-      106, 124, 126, 128, 208, 230, 235, 236, 237, 238, 240, 248, 253, 255,
+  constexpr std::array<uint16_t, 12> kValidB64Selectors{
+      106, 124, 126, 128, 208, 230, 235, 236, 240, 248, 253, 255,
   };
   for (const uint16_t selector : kValidB64Selectors) {
     SCOPED_TRACE(selector);
@@ -1669,20 +1669,23 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
 
   // Raw words exercise the width-specific decoder contract independently of
   // the assembler's permissive operand spelling. VSrc_v2b64 rejects special
-  // scalar selectors, while VSrc_b64 admits the documented 64-bit sources.
-  constexpr std::array<std::array<uint32_t, 2>, 4> kInvalidRawWords{{
+  // scalar selectors, while VSrc_b64 admits only the 64-bit sources available
+  // when gfx1251 uses globally addressable scratch.
+  constexpr std::array<std::array<uint32_t, 2>, 6> kInvalidRawWords{{
       {0xcc4c4004u, 0x1a0218e7u}, // VSrc_v2b64 selector 231
       {0xcc4c4004u, 0x1a0218ebu}, // VSrc_v2b64 selector 235
       {0xcc4c4004u, 0x1a0218fdu}, // VSrc_v2b64 selector 253
       {0xcc7e4004u, 0x1c41cf08u}, // VSrc_b64 selector 231
+      {0xcc7e4004u, 0x1c41db08u}, // private_base
+      {0xcc7e4004u, 0x1c41dd08u}, // private_limit
   }};
   for (const auto &words : kInvalidRawWords)
     EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
 
   constexpr std::array<std::array<uint32_t, 2>, 3> kValidRawB64Words{{
       {0xcc7e4004u, 0x1c41cd08u}, // flat_scratch
-      {0xcc7e4004u, 0x1c41db08u}, // private_base
-      {0xcc7e4004u, 0x1c41dd08u}, // private_limit
+      {0xcc7e4004u, 0x1c41d708u}, // shared_base
+      {0xcc7e4004u, 0x1c41d908u}, // shared_limit
   }};
   for (const auto &words : kValidRawB64Words) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
