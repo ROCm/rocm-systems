@@ -55,11 +55,13 @@ public:
 
   /// @brief Return the number of event handlers this partition has run.
   ///
-  /// @details An entry with no handler, and one dropped as a stale wake, are
-  /// not counted: this measures work done, which is what a model asserting
-  /// that an idle component costs nothing needs. Readable from any thread, so
-  /// a test or a progress readout can sample it while the partition's own
-  /// worker is still processing.
+  /// @details Counts handlers that ran to completion: an entry with no handler
+  /// is not counted, and neither is one whose handler threw. This measures work
+  /// done, which is what a model asserting that an idle component costs nothing
+  /// needs. The engine's own max-ticks sentinel has a handler and so is counted
+  /// -- an engine configured with max_ticks reports one event it did not model.
+  /// Readable from any thread, so a test or a progress readout can sample it
+  /// while the partition's own worker is still processing.
   /// @returns Cumulative count since create().
   uint64_t events_processed() const { return events_processed_.load(std::memory_order_relaxed); }
 
@@ -188,7 +190,8 @@ public:
   /// simulation starts running, the topology is frozen and only const access is
   /// permitted (enforced by assertion in debug builds).
   Topology &topology() {
-    assert(!running_ && "topology is read-only while the simulation is running");
+    assert(!executing_.load(std::memory_order_relaxed) &&
+           "topology is read-only while the simulation is running");
     return topology_;
   }
   const Topology &topology() const { return topology_; }
@@ -211,10 +214,20 @@ public:
   ///
   /// Quiescence here means the partition's event queue is empty and no async
   /// event is waiting to be merged into it. It is deliberately not run()'s
-  /// termination contract: no primary-component check and no wall-clock
-  /// pacing. A caller that wants those wants run(). A configured max_ticks is
-  /// still honoured, because it is armed by the shared lazy startup and its
-  /// sentinel sets the same exit flag this loop stops on.
+  /// termination contract: no primary-component check, no quiescence exit, and
+  /// no wall-clock pacing or idle wait. A caller that wants those wants run().
+  /// Two consequences the caller owns, because nothing here will latch them:
+  /// an engine driven only this way never reaches check_termination(), so
+  /// "all primaries completed" is never recorded and is_done() stays false
+  /// however finished the model is -- a drive loop waiting on an external
+  /// stimulus must sleep on its own rather than spin on this; and last_exit()
+  /// stays default-constructed until max_ticks or a request_exit() sets it.
+  ///
+  /// A configured max_ticks is honoured, but note what it costs here: the
+  /// sentinel is an ordinary queued entry at max_ticks, so the queue is not
+  /// empty until then and "drain what is queued" becomes "run to the horizon".
+  /// A bounded run on a max_ticks engine returns max_ticks, not the tick its
+  /// own work finished at, and ends the shared simulation.
   ///
   /// Every other event in flight advances with it, which is the point: this is
   /// a bounded run of a shared simulation, not a private one per query.
@@ -231,7 +244,11 @@ public:
   /// through any entry point, throws.
   /// @param done Predicate polled between events; the caller flips it. Held by
   ///        reference and read repeatedly, so it must outlive the call and be
-  ///        something the handlers can actually change.
+  ///        something the handlers can actually change. Read without
+  ///        synchronization, so the writer must be a handler on this engine's
+  ///        own thread -- a foreign thread storing to it is a data race. Must
+  ///        not be a bit-field: it cannot bind to the deleted rvalue overload
+  ///        below, so it silently binds to a frozen copy instead.
   /// @returns The tick the engine reached.
   /// @throws std::logic_error if this engine is already executing.
   /// @throws std::invalid_argument if the engine has more than one partition.
@@ -449,7 +466,12 @@ public:
   /// @retval true A wake armed in this generation is still queued.
   /// @retval false Nothing is queued, or what is queued is from a dead
   ///         generation.
-  bool wake_pending(const Event &event) const { return event.wake_pending(epoch_); }
+  ///
+  /// @note created_ is part of the answer: shutdown() destroys the queues but
+  /// leaves epoch_ where it is, so without it a wake armed in the generation
+  /// just torn down would still read as pending against an engine that has no
+  /// queue to hold it.
+  bool wake_pending(const Event &event) const { return created_ && event.wake_pending(epoch_); }
 
 private:
   /// @brief Worker loop executed by each partition thread.
@@ -560,18 +582,29 @@ private:
 
   /// @brief The partition context that owns @p event's target component.
   /// @param event Event being scheduled; must have a target component.
-  /// @param caller Name of the calling entry point, for assertion messages.
   /// @returns The owning partition's context.
-  PartitionContext &partition_for(Event *event, const char *caller);
+  PartitionContext &partition_for(Event *event);
+
+  /// @brief Discard superseded wake entries from the front of @p ctx's queue.
+  ///
+  /// @details A superseded entry can never run, so anything that reads the
+  /// queue's next event time -- the multi-threaded LBTS, the termination
+  /// check, an emptiness test -- must not see one. process_event() drops them
+  /// too, but only once they surface, which is after the LBTS has already been
+  /// computed from their timestamp.
+  /// @param ctx Partition whose queue front is to be cleaned.
+  void drop_stale_wakes(PartitionContext &ctx);
 
   /// @brief Start components and arm the max-ticks sentinel, once per create().
   ///
   /// @details Shared by run(), step(), and run_bounded(), so that whichever
   /// reaches the engine first starts it and the others find it started. It is
-  /// keyed on a flag separate from running_, because running_ means "executing
-  /// right now" and run() clears it on return -- a shared startup keyed on it
-  /// would start every component a second time for `run_until_idle(); run();`,
-  /// double-scheduling their first events and double-registering primaries.
+  /// keyed on startup_complete_, not on "executing right now": run() clears the
+  /// latter on return, and a shared startup keyed on it would start every
+  /// component a second time for `run_until_idle(); run();`, double-scheduling
+  /// their first events and double-registering primaries. A second bool beside
+  /// startup_complete_ could only drift from it, and would miss the thread-death
+  /// backstop (latch_startup_if_unlatched).
   /// @param propagate_failure Whether to rethrow a component's startup()
   ///        exception. True for the foreground entry points; false for run(),
   ///        which may be on a background thread whose lambda has no catch and
@@ -621,8 +654,6 @@ private:
   std::atomic<bool> has_primaries_{false}; ///< Set on first register_as_primary().
   ExitStatus exit_status_;                 ///< Exit information from the last run/step.
   bool created_ = false; ///< Whether create() has completed (components initialized).
-  bool running_ = false; ///< True while an execution loop is in progress.
-  bool started_ = false; ///< True once this create() generation has started components.
   /// @brief Which create() generation this is.
   ///
   /// @details Stamped into every armed wake. Events are owned by components
@@ -636,8 +667,11 @@ private:
   /// inside a handler -- has the inner loop popping from the very queue the
   /// outer process_event() frame is iterating and rewriting the partition tick
   /// underneath it. That corrupts a run rather than merely misbehaving, and a
-  /// release build would do it in silence. Atomic because run()'s worker
-  /// threads clear it from whichever thread returns last.
+  /// release build would do it in silence. Atomic because the entry points can
+  /// be called from different threads: a host polling step() while run() drives
+  /// the engine on a background thread is exactly the collision this refuses.
+  /// It is also the flag topology() asserts on, so "an execution loop is in
+  /// progress" has one definition that every entry point restores on unwind.
   std::atomic<bool> executing_{false};
   /// @brief Latched true once startup() has run for every component (or thrown);
   /// reset by create(). Read by wait_until_started() from an embedding thread.

@@ -196,8 +196,19 @@ public:
   /// @returns Service duration in cycles, at least one.
   static uint64_t service_cycles(uint64_t units, double units_per_cycle) {
     constexpr uint64_t kMaxCycles = std::numeric_limits<uint64_t>::max();
+    // NaN lands here too, deliberately: it is not a rate.
     if (!(units_per_cycle > 0.0))
       return units == 0 ? 1 : units;
+    // A whole-number rate is done in integers: static_cast<double>(units) drops
+    // the low bits above 2^53, so the double path under-charges a large request
+    // and makes a rate of 1.0 disagree with the rate of 0.0 handled above.
+    if (units_per_cycle <= 9007199254740992.0 && units_per_cycle == std::floor(units_per_cycle)) {
+      if (units == 0)
+        return 1;
+      const uint64_t rate = static_cast<uint64_t>(units_per_cycle);
+      const uint64_t whole = units / rate + (units % rate != 0 ? 1 : 0);
+      return whole == 0 ? 1 : whole;
+    }
     const double cycles = std::ceil(static_cast<double>(units) / units_per_cycle);
     if (!(cycles > 1.0))
       return 1;
