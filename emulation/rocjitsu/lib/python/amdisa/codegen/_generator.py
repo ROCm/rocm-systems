@@ -6156,7 +6156,7 @@ class CodeGenerator:
                         (
                             cls == 'vector_binop'
                             and op in ('add', 'sub', 'subrev', 'rsub')
-                            and dtype in ('i16', 'u16', 'i32', 'u32')
+                            and dtype in ('i16', 'u16', 'i32', 'u32', 'u64')
                         )
                         or (cls == 'vector_add_co' and dtype == 'u32')
                     )

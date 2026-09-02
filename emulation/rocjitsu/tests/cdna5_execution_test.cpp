@@ -228,6 +228,68 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerClampSaturatesBeforeNarrowing) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, Vop3U64ClampSaturatesNormalAndDppPaths) {
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 2;
+  constexpr uint32_t kDst = 4;
+
+  auto run_case = [](uint16_t opcode, uint64_t lhs, uint64_t rhs, uint64_t expected, bool dpp) {
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1u);
+    const uint32_t base = wf->vgpr_alloc().base;
+    auto write_vgpr64 = [&](uint32_t reg, uint64_t value) {
+      cu->write_vgpr(base + reg, 0, static_cast<uint32_t>(value));
+      cu->write_vgpr(base + reg + 1, 0, static_cast<uint32_t>(value >> 32));
+    };
+    auto read_vgpr64 = [&](uint32_t reg) {
+      return static_cast<uint64_t>(cu->read_vgpr(base + reg, 0)) |
+             (static_cast<uint64_t>(cu->read_vgpr(base + reg + 1, 0)) << 32);
+    };
+    write_vgpr64(kSrc0, lhs);
+    write_vgpr64(kSrc1, rhs);
+    write_vgpr64(kDst, 0u);
+
+    if (!dpp) {
+      const auto words = cdna5::build_vop3(
+          opcode, {.vdst = kDst, .clamp = 1, .src0 = 256 + kSrc0, .src1 = 256 + kSrc1});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      inst->execute(*inst, wf);
+    } else {
+      cdna5::Vop3VopDpp16MachineInst raw{};
+      raw.vdst = kDst;
+      raw.clamp = 1;
+      raw.src0 = amdgpu::SRC_DPP;
+      raw.src1 = 256 + kSrc1;
+      raw.vsrc0 = kSrc0;
+      raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE;
+      raw.bound_ctrl = 1;
+      raw.bank_mask = 0xF;
+      raw.row_mask = 0xF;
+      if (opcode == cdna5::kVAddNcU64Vop3) {
+        cdna5::VAddNcU64Vop3 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+        inst.execute_impl(*wf);
+      } else {
+        ASSERT_EQ(opcode, cdna5::kVSubNcU64Vop3);
+        cdna5::VSubNcU64Vop3 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+        inst.execute_impl(*wf);
+      }
+    }
+
+    EXPECT_EQ(read_vgpr64(kDst), expected) << "dpp " << dpp;
+  };
+
+  for (bool dpp : {false, true}) {
+    run_case(cdna5::kVAddNcU64Vop3, UINT64_MAX, 1u, UINT64_MAX, dpp);
+    run_case(cdna5::kVSubNcU64Vop3, 0u, 1u, 0u, dpp);
+  }
+}
+
 TEST(Gfx1250ExecutionTest, Vop3PackedIntegerClampSaturatesSelectedHalves) {
   ForceScalarGuard guard;
   struct TestCase {

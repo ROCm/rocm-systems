@@ -4033,8 +4033,10 @@ void VAddNcU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane64<false>(
         *this, wf, vdst, lane,
-        (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)) +
-         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane))));
+        amdgpu::vop3_integer_add<uint64_t>(
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)),
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane)),
+            inst_.clamp));
   }
 }
 
@@ -4058,8 +4060,10 @@ RJ_NOINLINE void VAddNcU64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane64<false>(
         *this, wf, vdst, lane,
-        (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)) +
-         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane))));
+        amdgpu::vop3_integer_add<uint64_t>(
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)),
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane)),
+            inst_.clamp));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -4075,8 +4079,10 @@ void VSubNcU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane64<false>(
         *this, wf, vdst, lane,
-        (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)) -
-         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane))));
+        amdgpu::vop3_integer_sub<uint64_t>(
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)),
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane)),
+            inst_.clamp));
   }
 }
 
@@ -4100,8 +4106,10 @@ RJ_NOINLINE void VSubNcU64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane64<false>(
         *this, wf, vdst, lane,
-        (static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)) -
-         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane))));
+        amdgpu::vop3_integer_sub<uint64_t>(
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)),
+            static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane)),
+            inst_.clamp));
   }
   dpp_write_mask_scope_.restore();
 }

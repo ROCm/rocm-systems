@@ -4106,6 +4106,14 @@ def test_gfx1250_generator_wires_integer_clamp_only_from_encoded_vop3_field():
     assert subrev.index('read_lane(src1, lane)') < subrev.index('read_lane(src0, lane)')
     assert 'inst_.clamp' in subrev
 
+    add_u64 = generated_body('V_ADD_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint64_t>' in add_u64
+    assert 'inst_.clamp' in add_u64
+
+    sub_u64 = generated_body('V_SUB_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint64_t>' in sub_u64
+    assert 'inst_.clamp' in sub_u64
+
     vop2 = generated_body('V_ADD_NC_U32', 'ENC_VOP2')
     assert 'vop3_integer_add' not in vop2
     assert 'inst_.clamp' not in vop2

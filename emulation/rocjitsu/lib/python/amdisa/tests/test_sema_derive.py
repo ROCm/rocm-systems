@@ -1589,6 +1589,8 @@ class TestDeriveVectorBinop:
             ('sub', 'i32', 'vop3_integer_sub<int32_t>'),
             ('add', 'u16', 'vop3_integer_add<uint16_t>'),
             ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
+            ('add', 'u64', 'vop3_integer_add<uint64_t>'),
+            ('sub', 'u64', 'vop3_integer_sub<uint64_t>'),
         ],
     )
     def test_vop3_integer_clamp_saturates_before_narrowing(self, op, dtype, expected):

@@ -96,44 +96,49 @@ template <typename T> inline T clamp_floating_result(T value, const Wavefront &w
 }
 
 /// @brief Execute VOP3 integer addition, saturating when CLAMP is set.
-template <typename T> inline uint32_t vop3_integer_add(uint32_t lhs, uint32_t rhs, bool clamp) {
-  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4));
+template <typename T>
+inline std::make_unsigned_t<T> vop3_integer_add(std::make_unsigned_t<T> lhs,
+                                                std::make_unsigned_t<T> rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
   using U = std::make_unsigned_t<T>;
-  const U lhs_bits = static_cast<U>(lhs);
-  const U rhs_bits = static_cast<U>(rhs);
+  const U lhs_bits = lhs;
+  const U rhs_bits = rhs;
   if (!clamp)
-    return static_cast<uint32_t>(static_cast<U>(lhs_bits + rhs_bits));
+    return static_cast<U>(lhs_bits + rhs_bits);
   if constexpr (std::is_signed_v<T>) {
+    static_assert(sizeof(T) <= 4, "signed 64-bit VOP3 saturation is not implemented");
     using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
     const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) +
                       static_cast<Wide>(std::bit_cast<T>(rhs_bits));
     const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
                                       static_cast<Wide>(std::numeric_limits<T>::max()));
-    return static_cast<uint32_t>(static_cast<U>(saturated));
+    return static_cast<U>(saturated);
   } else {
-    using Wide = std::conditional_t<sizeof(T) == 2, uint32_t, uint64_t>;
-    const Wide wide = static_cast<Wide>(lhs_bits) + static_cast<Wide>(rhs_bits);
-    return static_cast<uint32_t>(std::min(wide, static_cast<Wide>(std::numeric_limits<T>::max())));
+    const U max = std::numeric_limits<U>::max();
+    return rhs_bits > max - lhs_bits ? max : static_cast<U>(lhs_bits + rhs_bits);
   }
 }
 
 /// @brief Execute VOP3 integer subtraction, saturating when CLAMP is set.
-template <typename T> inline uint32_t vop3_integer_sub(uint32_t lhs, uint32_t rhs, bool clamp) {
-  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4));
+template <typename T>
+inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
+                                                std::make_unsigned_t<T> rhs, bool clamp) {
+  static_assert(std::is_integral_v<T> && (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8));
   using U = std::make_unsigned_t<T>;
-  const U lhs_bits = static_cast<U>(lhs);
-  const U rhs_bits = static_cast<U>(rhs);
+  const U lhs_bits = lhs;
+  const U rhs_bits = rhs;
   if (!clamp)
-    return static_cast<uint32_t>(static_cast<U>(lhs_bits - rhs_bits));
+    return static_cast<U>(lhs_bits - rhs_bits);
   if constexpr (std::is_signed_v<T>) {
+    static_assert(sizeof(T) <= 4, "signed 64-bit VOP3 saturation is not implemented");
     using Wide = std::conditional_t<sizeof(T) == 2, int32_t, int64_t>;
     const Wide wide = static_cast<Wide>(std::bit_cast<T>(lhs_bits)) -
                       static_cast<Wide>(std::bit_cast<T>(rhs_bits));
     const Wide saturated = std::clamp(wide, static_cast<Wide>(std::numeric_limits<T>::min()),
                                       static_cast<Wide>(std::numeric_limits<T>::max()));
-    return static_cast<uint32_t>(static_cast<U>(saturated));
+    return static_cast<U>(saturated);
   } else {
-    return lhs_bits < rhs_bits ? 0u : static_cast<uint32_t>(lhs_bits - rhs_bits);
+    return lhs_bits < rhs_bits ? U{0} : static_cast<U>(lhs_bits - rhs_bits);
   }
 }
 

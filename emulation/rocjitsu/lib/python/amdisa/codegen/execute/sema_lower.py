@@ -737,7 +737,7 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
 def _lower_saturating_integer_binary(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower VOP3 integer add/sub with optional CLAMP saturation."""
     dtype = ctx.integer_saturation_dtype
-    if dtype not in ('i16', 'u16', 'i32', 'u32'):
+    if dtype not in ('i16', 'u16', 'i32', 'u32', 'u64'):
         raise ValueError(f'Unsupported integer saturation type: {dtype}')
 
     lhs = _lower_expr(node.children[0], replace(ctx, integer_saturation_dtype=None))
