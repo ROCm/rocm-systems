@@ -25,7 +25,12 @@ target_include_directories(
 )
 target_link_libraries(rocjitsu_consan_report_snapshot PRIVATE util)
 
-add_library(rocjitsu_consan_report_decoder STATIC rj_hsa_dbi_moi_report_decoder.cpp)
+add_library(
+    rocjitsu_consan_report_decoder
+    STATIC
+        rj_hsa_dbi_moi_record_replay_report_decoder.cpp
+        rj_hsa_dbi_moi_report_decoder.cpp
+)
 set_target_properties(
     rocjitsu_consan_report_decoder
     PROPERTIES POSITION_INDEPENDENT_CODE ON

@@ -2219,6 +2219,7 @@ set(
     rj_hsa_dbi_moi_inline_shadow_report_decoder.h
     rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
     rj_hsa_dbi_moi_record_replay_report_analyzer.h
+    rj_hsa_dbi_moi_record_replay_report_decoder.cpp
     rj_hsa_dbi_moi_record_replay_report_decoder.h
     rj_hsa_dbi_moi_report_decoder.cpp
     rj_hsa_dbi_moi_report_decoder.h
@@ -2317,6 +2318,11 @@ foreach(
         )
     endif()
 endforeach()
+if(NOT _runtime_analysis_build MATCHES "rj_hsa_dbi_moi_record_replay_report_decoder[.]cpp")
+    message(FATAL_ERROR
+        "ConSan Record/Replay report decoder lost its physical build owner"
+    )
+endif()
 foreach(_decoder_contract IN ITEMS rj_hsa_dbi_moi_report_decoder.cpp rj_hsa_dbi_moi_report_decoder.h)
     _consan_assert_no_match(
         "${_hook_dir}/${_decoder_contract}"
@@ -2348,10 +2354,22 @@ foreach(
         )
     endif()
 endforeach()
+foreach(
+    _record_replay_decoder
+    IN ITEMS
+        rj_hsa_dbi_moi_record_replay_report_decoder.cpp
+        rj_hsa_dbi_moi_record_replay_report_decoder.h
+)
+    _consan_assert_no_match(
+        "${_hook_dir}/${_record_replay_decoder}"
+        "InlineShadow|Sampled"
+        "Record/Replay decoded evidence must not expose another mode"
+    )
+endforeach()
 _consan_assert_no_match(
-    "${_hook_dir}/rj_hsa_dbi_moi_record_replay_report_decoder.h"
-    "InlineShadow|Sampled"
-    "Record/Replay decoded evidence must not expose another mode"
+    "${_hook_dir}/rj_hsa_dbi_moi_report_decoder.cpp"
+    "CompactRecordReplayAccessRecords compact_record_replay_access_records"
+    "common report decoding must not reimplement Record/Replay compaction"
 )
 _consan_assert_no_match(
     "${_hook_dir}/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
