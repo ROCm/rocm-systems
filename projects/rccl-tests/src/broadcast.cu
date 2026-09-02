@@ -11,11 +11,9 @@
 #include "gin_sdma_devtime.h"  // shared device-side (wall_clock64) timing scaffold
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
+// ncclGinAnvilSdmaGPUContext: read by BroadcastGetSdmaThreshold to pick up the
+// backend's NCCL_GIN_ANVIL_SDMA_THRESHOLD when no per-collective override is set.
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
-// signalPeer/remoteSignalAddr: standalone IPC/LSA peer-signal (atomic add, no SDMA
-// queue) used by the point-to-point ring so hops signal only their successor
-// instead of rendezvousing all CTAs at a per-step LSA barrier.
-#include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
 // v4u / v4u_gptr / RCCL_SYSTEM_SYNCSCOPE / RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS for
 // nontemporal system-scope b128 peer stores (the store path LL/host use over xGMI).
 #include "nccl_device/rccl_ptr.h"
@@ -48,9 +46,16 @@
 // via NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=<bytes> (0 = disable, unset = default
 // BROADCAST_LL_DEFAULT_MAX_BYTES); the value is clamped to BROADCAST_LL_MAX_BYTES
 // and the pre-sized slot count makes it the effective cutoff.
-static size_t g_bcastLLMaxBytes = 0;  // resolved from env at requirements time
-static ncclLLA2AHandle g_bcastLLHandle = {};
-static ncclDevResourceRequirements g_bcastLLReq = {};
+//
+// thread_local, not plain static: with -t N each host thread runs its own
+// requirements/DevCommCreate/runColl sequence, and g_bcastLLReq is linked into
+// that thread's ncclDevCommRequirements list (`req.next = reqs->...list`). One
+// shared node spliced into N different lists corrupts them; one node per thread
+// does not. bufHandle itself is a device-independent uint32 resource index, so a
+// thread's single handle stays valid for every device it drives under -g N.
+thread_local size_t g_bcastLLMaxBytes = 0;  // resolved from env at requirements time
+thread_local ncclLLA2AHandle g_bcastLLHandle = {};
+thread_local ncclDevResourceRequirements g_bcastLLReq = {};
 #endif
 
 // ---------------------------------------------------------------------------
@@ -98,33 +103,24 @@ static inline size_t testResolveSdmaThreshold(const char* collVar, size_t collDe
 // ALL callers. The test therefore issues plain gin.put() calls and exercises the
 // same path a real application would; see gin_anvil_sdma_put_policy.h.
 
-// Like common.h's testLaunchDeviceKernel but threads a per-collective LSA<->GIN
-// threshold override as the last kernel argument (the flat/SAG GIN kernels).
-template <typename F>
-testResult_t testLaunchDeviceKernelThreshold(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t sdmaThresholdOverride) {
-  if (kernel == nullptr) return testNotImplemented;
-  ncclDevComm* devComm = (ncclDevComm*)comm;
-  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
-  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, sdmaThresholdOverride);
-  return testSuccess;
-}
-
-// Like ...Threshold, but the caller picks the grid (CTA count) instead of the
-// global deviceCtaCount (-V). Used by the SM ring kernels, whose pipelined
-// throughput is CTA-bound: they launch their own power-of-2 count (~128 to
-// saturate all xGMI links) decoupled from -V. The requested grid must be <= the
+// Like common.h's testLaunchDeviceKernel but threads one extra per-collective
+// size_t through to the kernel, and lets the caller pick the grid (CTA count)
+// instead of the global deviceCtaCount (-V).
+//
+// The trailing size_t is deliberately named `kernelArg` rather than after any one
+// use: the flat/LL tier passes an LSA<->GIN threshold override, while the ring
+// tier passes its pipeline depth (nChunks). The requested grid must be <= the
 // lsaBarrier count registered in BroadcastGetDevCommRequirements (sized to
 // max(deviceCtaCount, ring CTAs)); the kernels index devComm.lsaBarrier by
 // blockIdx.x, so over-launching would corrupt/hang.
 template <typename F>
-testResult_t testLaunchDeviceKernelThresholdCtas(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t sdmaThresholdOverride, int gridCtas) {
+testResult_t testLaunchDeviceKernelThresholdCtas(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t kernelArg, int gridCtas) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
-  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, sdmaThresholdOverride);
+  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, kernelArg);
   return testSuccess;
 }
 
@@ -133,13 +129,13 @@ testResult_t testLaunchDeviceKernelThresholdCtas(F kernel, void* sendbuff, size_
 // fast path; the handle is a small POD ({bufHandle, nSlots}) assigned during
 // ncclDevCommCreate.
 template <typename F>
-testResult_t testLaunchDeviceKernelThresholdLL(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle, int gridCtas) {
+testResult_t testLaunchDeviceKernelThresholdLL(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle, size_t llMaxBytes, int gridCtas) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
-  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, sdmaThresholdOverride, llHandle);
+  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, sdmaThresholdOverride, llHandle, llMaxBytes);
   return testSuccess;
 }
 
@@ -256,12 +252,15 @@ void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, do
 // barriers so the launched grid never exceeds the allocated lsaBarrier count
 // (kernels index devComm.lsaBarrier by blockIdx.x, so over-launching would
 // corrupt/hang).
-static inline int bcastRingCtas() {
+static inline int bcastRingCtasUncached() {
   int pref = 128;
   const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_CTAS");
-  if (e && e[0]) {
-    long p = strtol(e, nullptr, 0);
-    if (p >= 1) pref = (int)p;
+  // Base 10 and a full-string check, matching BroadcastParseCtasEnv: the old
+  // strtol(e, nullptr, 0) accepted "64foo" as 64 and read "010" as octal 8.
+  if (e != nullptr && e[0] != '\0' && e[0] != '-') {
+    char* end = nullptr;
+    long p = strtol(e, &end, 10);
+    if (end != e && *end == '\0' && p >= 1) pref = (int)p;
   }
   int v = pref;                           // ring's own count, independent of -V
   if (v < 1) v = 1;
@@ -269,6 +268,17 @@ static inline int bcastRingCtas() {
   int p2 = 1;
   while ((p2 << 1) <= v) p2 <<= 1;        // largest power of 2 <= v
   return p2;
+}
+
+// Cached: BroadcastGetDevCommRequirements uses this to size lsaBarrierCount and
+// BroadcastRunColl uses it to pick the launched grid. Re-reading getenv at each
+// call site made those two independent reads of a mutable environment, and the
+// comment above is explicit that a grid larger than the barrier pool corrupts or
+// hangs. One function-local static (thread-safe initialization since C++11) makes
+// the launched grid provably the same value the pool was sized from.
+static inline int bcastRingCtas() {
+  static const int v = bcastRingCtasUncached();
+  return v;
 }
 
 // Parse NCCL_GIN_ANVIL_BCAST_CTAS (diagnostic pin) into a size_t, returning the
@@ -310,7 +320,7 @@ testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         reqs->barrierCount = barCtas;
         reqs->lsaBarrierCount = barCtas;
       }
-      // >=2 so the scatter+allgather large tier (§4.8) can use two independent
+      // >=2 so the scatter+allgather large tier can use two independent
       // signal indices (scatter=0, gather=1); the flat/LSA paths use only 0.
       reqs->ginSignalCount = gin_sdma::bcastSignalCount(deviceCtaCount);
       // LL scratch for the tiny-message fast path (single CTA => nBlocks=1),
@@ -353,8 +363,14 @@ bool BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
       int barCtas = gin_sdma::bcastPoolCtas(deviceCtaCount, bcastRingCtas());
       reqs->barrierCount = barCtas;
       reqs->lsaBarrierCount = barCtas;
-      // >=2 for the scatter+allgather large tier's two signal indices (§4.8).
+      // >=2 for the scatter+allgather large tier's two signal indices.
       reqs->ginSignalCount = gin_sdma::bcastSignalCount(deviceCtaCount);
+      // No LL resource is provisioned on this older two-argument requirements
+      // ABI, unlike the >=2.29 arm above. The LL branch still compiles here
+      // (BC_HAVE_LL follows from ENABLE_DEVICE_API && >=2.28), but
+      // g_bcastLLHandle.nSlots stays 0, so bcastLLEligible is false and every
+      // message takes the LSA/GIN tiers. Wiring LL up on 2.28.x needs a build of
+      // that line to validate against, which this work has not been tested on.
       return true;
     }
 #endif
@@ -503,7 +519,7 @@ __device__ void BroadcastLLImpl(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 // on by default up to BROADCAST_LL_DEFAULT_MAX_BYTES (disable with
 // NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=0, which leaves llHandle.nSlots==0).
 template <typename T>
-__global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle) {
+__global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t sdmaThresholdOverride, ncclLLA2AHandle llHandle, size_t llMaxBytes) {
   const size_t msgBytes = count * sizeof(T);
   const size_t sdmaThreshold = (sdmaThresholdOverride != TEST_SDMA_THRESHOLD_UNSET)
                                    ? sdmaThresholdOverride
@@ -511,13 +527,25 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   const int nthreads = blockDim.x * gridDim.x;
 
-  if (msgBytes <= sdmaThreshold) {
+  // Switch on the shared tier function rather than re-deriving the ladder here,
+  // so the decision the host unit tests assert is literally the one that runs.
+  // llMaxBytes is the env-RESOLVED cap the host used to size the slot pool and to
+  // pick this grid, not gin_sdma::kBroadcastLLMaxBytes (the 64 KiB compile
+  // ceiling). Passing the resolved value keeps both sides on the same bound: the
+  // two used to agree only because bcastLLEligible's second test (msgBytes/8 <=
+  // nSlots) re-imposed the cap via the slot count, so any future rounding-up in
+  // ncclLLA2ACalcSlots would have let the device take LL above a cap the host had
+  // already sized the grid for LSA against.
+  const gin_sdma::BcastTier tier =
+      gin_sdma::bcastKernelTier(msgBytes, sdmaThreshold, llHandle.nSlots, llMaxBytes);
+
+  if (tier != gin_sdma::BcastTier::Flat) {
     ncclTeam lsa = ncclTeamLsa(devComm);
 
     // Tiny messages: LL packed data+flag path (single CTA), barrier-free and
     // memset-race-immune. Used when LL is configured (nSlots>0), the message is
     // 8-byte aligned, and it fits the pre-sized slot count.
-    if (gin_sdma::bcastLLEligible(msgBytes, llHandle.nSlots, gin_sdma::kBroadcastLLMaxBytes)) {
+    if (tier == gin_sdma::BcastTier::LL) {
       if (blockIdx.x != 0) return;  // single CTA
       const size_t chunkU64 = msgBytes / 8;
       BroadcastLLImpl(sendwin, sendoffset, recvwin, recvoffset, chunkU64, root, devComm, lsa, llHandle);
@@ -574,8 +602,7 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
   }
 }
 
-// Large-message Broadcast via scatter + in-place allgather (van de Geijn). See
-// gin-anvil-sdma-broadcast-design-plan.md §4.8.
+// Large-message Broadcast via scatter + in-place allgather (van de Geijn).
 //
 // The flat fan-out (GinHybridBroadcastKernel large path) is latency-optimal
 // (1 hop) but its bandwidth is capped by *root egress*: the root alone pushes
@@ -684,107 +711,29 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
 // serial, root-only scatter phase -- ~M bytes leaving one GPU on one SDMA channel
 // -- that stops being hidden as M grows, so SAG plateaus (~229 GB/s @>=256 MiB)
 // while the host ring keeps climbing (~322 GB/s @2 GiB). The ring removes that
-// hotspot entirely:
+// hotspot entirely: the message is split into `nChunks` chunks streamed around a
+// Hamiltonian cycle, so at steady state every ring link carries a DIFFERENT chunk
+// concurrently and every GPU drives its own egress (unlike SAG's scatter, where
+// one root engine drives all N-1 puts). Deep pipelining across chunks hides the
+// (N-1)-hop fill latency.
 //
-//   The message is split into `nChunks` chunks streamed around the ring
-//   root -> root+1 -> ... -> root+(N-1). Every rank forwards each chunk it
-//   receives to its single successor, so at steady state all N-1 ring links
-//   carry DIFFERENT chunks concurrently, each driven by a different rank's SDMA
-//   engine (unlike SAG's scatter, where one root engine drives all N-1 puts).
-//   Deep pipelining across chunks hides the (N-1)-hop fill latency.
+// Forwarding uses direct xGMI peer stores issued by the whole CTA
+// (ncclGetLsaPointer + vectorized 16-byte stores -- the same SM-copy mechanism
+// BroadcastLsaDirect uses). Two alternatives were implemented and measured on
+// 8x MI355X, and both lost, so neither ships here:
+//   * SDMA-put ring (one descriptor per hop issued by tid 0, gated on a
+//     completion signal): latency-bound, plateaus ~13 GB/s regardless of N.
+//   * Per-hop point-to-point signaling instead of the per-step LSA barrier
+//     (2026-08-04, @2 GiB): 191 GB/s vs 232 for the barrier. The barrier bundles
+//     the cross-GPU release fence with the sync, whereas P2P pays a
+//     __threadfence_system per chunk/hop and loses lock-step pipelining.
 //
-// Ring position is root-relative: pos = (rank - root + N) % N. pos 0 = root
-// (source; sends only, receives none), pos N-1 = tail (receives only, forwards
-// none), interior ranks receive then forward. A single signal index counts
-// arrivals: the per-source SDMA queue is in-order, so chunk c has landed once my
-// signal reaches base + c + 1; an interior rank waits that value before
-// forwarding chunk c. The wait graph is the linear chain pos0->..->pos(N-1) and
-// the root never waits, so it cannot deadlock.
-//
-// A single CTA drives the pipeline: the puts are SDMA-offloaded (tid 0 enqueues
-// the descriptor; the DMA engine performs the copy), so one CTA saturates the
-// link and the per-chunk ordering stays trivially sequential on tid 0's queue.
-// Only the entry barrier is kept (recvbuff quiescent before the predecessor
-// writes -- the initData memset race, as in the flat/SAG paths).
-//
-// nChunks is host-resolved (gin_sdma::bcastRingChunks; env
-// NCCL_GIN_ANVIL_BCAST_RING_CHUNKS) and passed via the threshold launcher.
-template <typename T>
-__global__ void GinRingBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t nChunksArg) {
-  if (blockIdx.x != 0) return;                 // single CTA drives the ring
-  const int N = devComm.nRanks;
-  const int rank = devComm.rank;
-  const int tid = threadIdx.x;
-  const int nthreads = blockDim.x;
-
-  const int pos = (rank - root + N) % N;
-  const bool isRoot = (pos == 0);
-  const bool isTail = (pos == N - 1);
-  const int nextRank = (rank + 1) % N;         // ring successor
-
-  // Effective pipeline depth: never more chunks than elements (keeps every chunk
-  // non-empty); uniform across ranks since count/nChunksArg are identical.
-  int C = (int)((size_t)nChunksArg < count ? (size_t)nChunksArg : count);
-  if (C < 1) C = 1;
-
-  ncclGin gin { devComm, /*context=*/0 };
-  const unsigned int sig = 0;
-  const uint64_t base = gin.readSignal(sig);
-
-  // Entry barrier: every rank's recvbuff quiescent before its predecessor writes.
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, /*block=*/0 };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-
-  // Root fills its own recvbuff from the source (OOP only; no-op in-place). It is
-  // never written by a peer, and its puts read the stable sendwin, so this local
-  // copy is independent of the forwarding loop below.
-  if (isRoot) {
-    T* lsrc = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-    T* ldst = (T*)ncclGetLocalPointer(recvwin, recvoffset);
-    if (lsrc != ldst) BroadcastLocalCopy<T>(ldst, lsrc, count, tid, nthreads);
-  }
-
-  // Pipeline: receive chunk c (interior/tail) then forward it (root/interior).
-  for (int c = 0; c < C; c++) {
-    const gin_sdma::Chunk ck = gin_sdma::sagChunk(count, C, c);
-    const size_t offBytes = ck.eltOffset * sizeof(T);
-    const size_t cBytes   = ck.count * sizeof(T);
-
-    if (!isRoot) {
-      // Chunk c has landed once my signal reaches base + c + 1 (in-order queue).
-      gin.waitSignal(ncclCoopCta(), sig, base + (uint64_t)(c + 1));
-    }
-    if (!isTail && tid == 0) {
-      // Root forwards from its stable sendwin; interior ranks forward the chunk
-      // they just received into their recvwin.
-      ncclWindow_t srcWin = isRoot ? sendwin : recvwin;
-      const size_t srcOff = (isRoot ? sendoffset : recvoffset) + offBytes;
-      gin.put(ncclTeamWorld(devComm), nextRank,
-          recvwin, recvoffset + offBytes,
-          srcWin, srcOff,
-          cBytes, ncclGin_SignalInc{sig});
-    }
-  }
-
-  gin.flush(ncclCoopCta());
-}
-
-// ---------------------------------------------------------------------------
-// SM-driven pipelined ring broadcast (attack (a): replace the single-queue SDMA
-// put with direct xGMI peer stores by the whole CTA). Where GinRingBroadcastKernel
-// forwards each chunk with one SDMA descriptor issued by tid==0 (a latency-bound,
-// completion-signal-gated hop that plateaus ~13 GB/s regardless of N), this kernel
-// forwards with all `blockDim.x` threads issuing vectorized 16-byte stores straight
-// into the successor's recvbuff via ncclGetLsaPointer -- the same SM-copy mechanism
-// the LSA fan-out (BroadcastLsaDirect) uses, but distributed around the ring so
-// every GPU drives only its one successor link and all N-1 links run in parallel.
-//
-// Parallelism / correctness model:
+// Parallelism / correctness model, shared by both kernels below:
 //  * Each CTA owns a contiguous stripe [sBase,sEnd) of the buffer and runs an
-//    INDEPENDENT ring pipeline on it, so multiple CTAs (deviceCtaCount, one LSA
-//    barrier line each) stripe the message for aggregate xGMI bandwidth. Block i
-//    only ever touches block i's stripe on every rank, so a per-block-index LSA
-//    barrier is a sufficient team sync (no grid-wide sync needed).
+//    INDEPENDENT ring pipeline on it, so multiple CTAs stripe the message for
+//    aggregate xGMI bandwidth. Block i only ever touches block i's stripe on
+//    every rank, so a per-block-index LSA barrier is a sufficient team sync (no
+//    grid-wide sync needed).
 //  * The stripe is split into C chunks. At pipeline step s the rank at ring
 //    position p forwards chunk c = s-p to its successor (0<=c<C, p<N-1). A rank
 //    reads chunk c from its OWN recvbuff (written by its predecessor at step s-1)
@@ -794,79 +743,25 @@ __global__ void GinRingBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, 
 //    own recvbuff chunk so it ends with the full result. The tail (p==N-1) never
 //    forwards -- it only receives. Total steps = C + N - 2, identical on every
 //    rank (count/gridDim/C/N match), so all ranks issue the same barrier sequence.
-template <typename T>
-__global__ void GinRingSmBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t nChunksArg) {
-  const int N = devComm.nRanks;
-  const int rank = devComm.rank;
-  const int tid = threadIdx.x;
-  const int nthreads = blockDim.x;
-
-  const int pos = (rank - root + N) % N;
-  const bool isRoot = (pos == 0);
-  const int nextRank = (rank + 1) % N;          // ring successor (global rank == LSA index, single node)
-
-  ncclTeam lsa = ncclTeamLsa(devComm);
-
-  // This CTA's contiguous stripe of the buffer (balanced split over gridDim.x).
-  const size_t sBase  = (count * (size_t)blockIdx.x) / gridDim.x;
-  const size_t sEnd   = (count * (size_t)(blockIdx.x + 1)) / gridDim.x;
-  const size_t sCount = sEnd - sBase;
-
-  // Pipeline depth for this stripe: never more chunks than elements.
-  int C = (int)((size_t)nChunksArg < sCount ? (size_t)nChunksArg : sCount);
-  if (C < 1) C = 1;
-
-  // Peer/local base pointers (element typed) at the collective offset.
-  T* myRecv  = (T*)ncclGetLocalPointer(recvwin, recvoffset);
-  T* mySend  = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  T* peerRecv = (T*)ncclGetLsaPointer(recvwin, recvoffset, nextRank);
-  const bool inPlace = (mySend == myRecv);
-  // Root forwards from its stable source; interior ranks forward what they received.
-  T* fwdSrc = isRoot ? (inPlace ? myRecv : mySend) : myRecv;
-
-  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
-
-  // Entry barrier: every rank's recvbuff quiescent (post-memset, rank present)
-  // before any predecessor writes into it.
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-
-  int totalSteps = C + (N - 1) - 1;             // C + N - 2
-  if (totalSteps < 1) totalSteps = 1;
-
-  for (int s = 0; s < totalSteps; s++) {
-    const int c = s - pos;
-    const bool active = (pos < N - 1) && (c >= 0) && (c < C);
-    if (active) {
-      const size_t cStart = sBase + (sCount * (size_t)c) / C;
-      const size_t cEnd   = sBase + (sCount * (size_t)(c + 1)) / C;
-      const size_t cCount = cEnd - cStart;
-      // Push chunk c into the successor's recvbuff with the whole CTA.
-      BroadcastLocalCopy<T>(peerRecv + cStart, fwdSrc + cStart, cCount, tid, nthreads);
-      // Root out-of-place: also materialize its own recvbuff chunk.
-      if (isRoot && !inPlace) {
-        BroadcastLocalCopy<T>(myRecv + cStart, mySend + cStart, cCount, tid, nthreads);
-      }
-    }
-    // Publish this step's peer writes before any successor reads them next step.
-    bar.sync(ncclCoopCta(), cuda::memory_order_release);
-  }
-}
-
+//  * The stripe and chunk splits come from gin_sdma::ringStripe/ringChunk so the
+//    exact tiling both kernels use is the one the host unit tests assert.
+//
+// Two ring geometries ship, differing only in how each rank picks its successor:
+//   GinRingSmTableBroadcastKernel (default) walks a host-computed edge-disjoint
+//     decomposition covering all N-1 links, and
+//   GinRingSmMultiBroadcastKernel (immediately below) is the coprime-stride
+//     fallback for the rank counts where that decomposition does not exist
+//     (Tillson: N=4 and N=6).
+//
 // ---------------------------------------------------------------------------
-// MULTI-RING SM broadcast (attack (a), fixed): the single-orientation SM ring
-// above tops out at ~one xGMI link's rate (~58 GB/s @8 GPUs) because every CTA
-// forwards to the SAME successor (rank+1), so all CTAs on a GPU pile onto ONE
-// outgoing link. The host ring hits ~320 GB/s by running many channels over
-// DIFFERENT ring permutations so each GPU drives all its links at once (verified:
-// RCCL builds nChannels=28 rings with rotated orderings). This kernel does the
-// same: it uses every stride s coprime to N (gcd(s,N)=1) as an independent
-// Hamiltonian ring (order root, root+s, root+2s, ...), and assigns CTA b the
-// stride strides[b % nStrides]. Successor = (rank+s)%N differs per stride, so
-// across CTAs each GPU forwards on nStrides distinct links in parallel. Each CTA
-// still owns a contiguous buffer stripe and runs the same pipelined SM-store ring
-// (per-block LSA barrier line); stripes partition the buffer, so every element is
-// broadcast exactly once via whichever ring its CTA uses. N=8 => strides {1,3,5,7}
-// (4 links); N=4 => {1,3} (2 links).
+// COPRIME-STRIDE MULTI-RING fallback. Every stride s with gcd(s,N)=1 is an
+// independent Hamiltonian ring (order root, root+s, root+2s, ...), and CTA b is
+// assigned strides[b % nStrides]. Successor = (rank+s)%N differs per stride, so
+// across CTAs each GPU forwards on nStrides distinct links in parallel. Stripes
+// partition the buffer, so every element is broadcast exactly once via whichever
+// ring its CTA uses. This reaches only the odd offsets (N=8 => {1,3,5,7}, i.e. 4
+// of each GPU's 7 links; N=4 => {1,3}), which is why the table kernel below is
+// preferred wherever the full decomposition exists.
 template <typename T>
 __global__ void GinRingSmMultiBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t nChunksArg) {
   const int N = devComm.nRanks;
@@ -892,9 +787,9 @@ __global__ void GinRingSmMultiBroadcastKernel(ncclWindow_t sendwin, size_t sendo
   const bool isRoot = (pos == 0);
   const int nextRank = (rank + s) % N;                   // this ring's successor
 
-  const size_t sBase  = (count * (size_t)blockIdx.x) / gridDim.x;
-  const size_t sEnd   = (count * (size_t)(blockIdx.x + 1)) / gridDim.x;
-  const size_t sCount = sEnd - sBase;
+  const gin_sdma::Chunk stripe = gin_sdma::ringStripe(count, (int)blockIdx.x, (int)gridDim.x);
+  const size_t sBase  = stripe.eltOffset;
+  const size_t sCount = stripe.count;
 
   int C = (int)((size_t)nChunksArg < sCount ? (size_t)nChunksArg : sCount);
   if (C < 1) C = 1;
@@ -916,9 +811,9 @@ __global__ void GinRingSmMultiBroadcastKernel(ncclWindow_t sendwin, size_t sendo
     const int c = step - pos;
     const bool active = (pos < N - 1) && (c >= 0) && (c < C);
     if (active) {
-      const size_t cStart = sBase + (sCount * (size_t)c) / C;
-      const size_t cEnd   = sBase + (sCount * (size_t)(c + 1)) / C;
-      const size_t cCount = cEnd - cStart;
+      const gin_sdma::Chunk ck = gin_sdma::ringChunk(sBase, sCount, c, C);
+      const size_t cStart = ck.eltOffset;
+      const size_t cCount = ck.count;
       BroadcastLocalCopy<T>(peerRecv + cStart, fwdSrc + cStart, cCount, tid, nthreads);
       if (isRoot && !inPlace) {
         BroadcastLocalCopy<T>(myRecv + cStart, mySend + cStart, cCount, tid, nthreads);
@@ -945,11 +840,30 @@ __constant__ int c_bcastRingSucc[BCAST_RING_MAXR * BCAST_RING_MAXN];  // [ring*N
 __constant__ int c_bcastRingPos[BCAST_RING_MAXR * BCAST_RING_MAXN];   // [ring*N + rank] -> position in cycle
 __constant__ int c_bcastStream;  // 1 => peer writes use nontemporal system-scope b128 stores
 
-// Set by BroadcastRunColl once the edge-disjoint ring decomposition for the current
-// rank count is built + uploaded to constant memory; read by BroadcastDeviceTime to
-// gate whether in-kernel timing can run the ring body (needs the tables present).
-static int g_bcastBuiltN = -1;
-static int g_bcastBuiltNRings = 0;
+// Per-device record of the ring decomposition uploaded to the __constant__ tables
+// above. Written by BroadcastRunColl once the decomposition for the current rank
+// count is built + uploaded; read by BroadcastDeviceTime to gate whether in-kernel
+// timing can run the ring body (needs the tables present on THIS device).
+//
+// Keyed by device ordinal because __constant__ memory is per device: a -g N run
+// drives N devices from one process, and a single process-wide flag would record
+// device 0's upload as covering all of them.
+struct BcastRingState {
+  int builtN = -1;
+  int builtNRings = 0;
+};
+#define BCAST_MAX_DEVICES 64
+static BcastRingState g_bcastRingState[BCAST_MAX_DEVICES];
+
+// startColl() calls cudaSetDevice(args->gpus[i]) immediately before runColl on the
+// device-API path, so the current device identifies the state slot. Out-of-range
+// ordinals fall back to slot 0 rather than scribbling past the array; that only
+// costs the (untested, >64 GPU) case the same sharing bug we are fixing here.
+static inline BcastRingState& bcastRingState() {
+  int dev = 0;
+  if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= BCAST_MAX_DEVICES) dev = 0;
+  return g_bcastRingState[dev];
+}
 
 // Body extracted so the device-timing kernel below can run it skip+loop times
 // under one persistent launch. Each call re-creates its LSA barrier session and
@@ -969,9 +883,9 @@ __device__ void ginRingSmTableBroadcastBody(ncclWindow_t sendwin, size_t sendoff
   const int pos = (posCur - posRoot + N) % N;   // hops from root along this ring
   const bool isRoot = (pos == 0);
 
-  const size_t sBase  = (count * (size_t)blockIdx.x) / gridDim.x;
-  const size_t sEnd   = (count * (size_t)(blockIdx.x + 1)) / gridDim.x;
-  const size_t sCount = sEnd - sBase;
+  const gin_sdma::Chunk stripe = gin_sdma::ringStripe(count, (int)blockIdx.x, (int)gridDim.x);
+  const size_t sBase  = stripe.eltOffset;
+  const size_t sCount = stripe.count;
 
   int C = (int)((size_t)nChunksArg < sCount ? (size_t)nChunksArg : sCount);
   if (C < 1) C = 1;
@@ -993,9 +907,9 @@ __device__ void ginRingSmTableBroadcastBody(ncclWindow_t sendwin, size_t sendoff
     const int c = step - pos;
     const bool active = (pos < N - 1) && (c >= 0) && (c < C);
     if (active) {
-      const size_t cStart = sBase + (sCount * (size_t)c) / C;
-      const size_t cEnd   = sBase + (sCount * (size_t)(c + 1)) / C;
-      const size_t cCount = cEnd - cStart;
+      const gin_sdma::Chunk ck = gin_sdma::ringChunk(sBase, sCount, c, C);
+      const size_t cStart = ck.eltOffset;
+      const size_t cCount = ck.count;
       // Streaming (nontemporal system-scope b128) peer stores vs cached uint4 is an
       // A/B knob (c_bcastStream); the local root self-copy stays cached.
       if (c_bcastStream) {
@@ -1033,86 +947,6 @@ __global__ void GinRingSmTableBroadcastTimedKernel(ncclWindow_t sendwin, size_t 
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 #endif
-
-// ---------------------------------------------------------------------------
-// POINT-TO-POINT edge-disjoint ring broadcast: same 7-ring decomposition as the
-// table kernel, but the per-step grid-wide LSA barrier is replaced by lightweight
-// per-hop successor signaling. Each hop SM-copies chunk c into the successor's
-// recvbuff, then bumps ONLY the successor's per-CTA GIN signal (signalPeer: an
-// IPC/LSA atomic-add, no SDMA queue); the successor waits on its OWN signal before
-// forwarding. So the N-1 rings pipeline fully independently -- a straggler on one
-// ring no longer stalls the others at a shared barrier -- which is where the host
-// generic ring (per-channel signaling, no grid-wide sync) beat the barrier kernel.
-// Per-CTA signal `sig=blockIdx.x` (ginSignalCount=deviceCtaCount) has exactly ONE
-// writer (the predecessor's CTA b) so the atomic count is race-free; base is re-read
-// per launch so it accumulates across perf iters. Only the ENTRY LSA barrier is kept
-// (recvbuff quiescent before the predecessor writes -- the initData memset race).
-// Wait graph is the linear chain pos0->..->pos(N-1) per ring; root never waits, tail
-// never forwards, so no deadlock.
-template <typename T>
-__global__ void GinRingSmP2PBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, size_t nChunksArg) {
-  const int N = devComm.nRanks;
-  const int rank = devComm.rank;
-  const int tid = threadIdx.x;
-  const int nthreads = blockDim.x;
-
-  const int nRings = c_bcastNRings;
-  const int ring = (int)(blockIdx.x % (unsigned)nRings);
-  const int nextRank = c_bcastRingSucc[ring * N + rank];
-  const int posCur   = c_bcastRingPos[ring * N + rank];
-  const int posRoot  = c_bcastRingPos[ring * N + root];
-  const int pos = (posCur - posRoot + N) % N;
-  const bool isRoot = (pos == 0);
-  const bool isTail = (pos == N - 1);
-
-  const size_t sBase  = (count * (size_t)blockIdx.x) / gridDim.x;
-  const size_t sEnd   = (count * (size_t)(blockIdx.x + 1)) / gridDim.x;
-  const size_t sCount = sEnd - sBase;
-
-  int C = (int)((size_t)nChunksArg < sCount ? (size_t)nChunksArg : sCount);
-  if (C < 1) C = 1;
-
-  T* myRecv   = (T*)ncclGetLocalPointer(recvwin, recvoffset);
-  T* mySend   = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  T* peerRecv = (T*)ncclGetLsaPointer(recvwin, recvoffset, nextRank);
-  const bool inPlace = (mySend == myRecv);
-  T* fwdSrc = isRoot ? (inPlace ? myRecv : mySend) : myRecv;
-
-  ncclGin gin { devComm, /*context=*/0 };
-  const unsigned int sig = (unsigned int)blockIdx.x;
-  const uint64_t sigBase = gin.readSignal(sig);
-  ncclGinAnvilSdmaGPUContext* rsCtx = (ncclGinAnvilSdmaGPUContext*)devComm.ginHandles[0];
-
-  // Entry barrier only: recvbuff quiescent before the predecessor writes.
-  ncclTeam lsa = ncclTeamLsa(devComm);
-  ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-
-  // Root out-of-place: materialize its own recvbuff stripe (never peer-written).
-  if (isRoot && !inPlace) {
-    BroadcastLocalCopy<T>(myRecv + sBase, mySend + sBase, sCount, tid, nthreads);
-  }
-
-  for (int c = 0; c < C; c++) {
-    const size_t cStart = sBase + (sCount * (size_t)c) / C;
-    const size_t cEnd   = sBase + (sCount * (size_t)(c + 1)) / C;
-    const size_t cCount = cEnd - cStart;
-
-    // Interior/tail: chunk c has landed once my per-CTA signal reaches base+c+1.
-    if (!isRoot) {
-      gin.waitSignal(ncclCoopCta(), sig, sigBase + (uint64_t)(c + 1));
-    }
-    // Forward chunk c into the successor's recvbuff, then signal ONLY it.
-    if (!isTail) {
-      BroadcastLocalCopy<T>(peerRecv + cStart, fwdSrc + cStart, cCount, tid, nthreads);
-      __syncthreads();               // all CTA stores issued
-      __threadfence_system();        // ...and visible on the successor GPU
-      if (tid == 0) {
-        nccl::gin::anvil::detail::signalPeer(rsCtx, nextRank, sig, (uint64_t)1);
-      }
-    }
-  }
-}
 
 // Host-side decomposition of K_N* into (N-1) arc-disjoint directed Hamiltonian
 // cycles by verified backtracking (Tillson guarantees existence for N!=4,6; the
@@ -1154,7 +988,9 @@ struct BcastRingDecomp {
 
 static int buildBcastRingDecomp(int N, int* succ, int* pos) {
   if (N < 2 || N > BCAST_RING_MAXN || (N - 1) > BCAST_RING_MAXR) return 0;
-  static BcastRingDecomp d;                               // large; keep off-stack
+  // thread_local, not plain static: -t N host threads call this concurrently for
+  // their own devices and would otherwise share one backtracking scratch object.
+  thread_local static BcastRingDecomp d;                  // large; keep off-stack
   d.N = N;
   for (int i = 0; i < N; i++) for (int j = 0; j < N; j++) d.used[i][j] = false;
   d.budget = 20000000L;                                   // ample for N<=8; else fall back
@@ -1213,7 +1049,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         // NCCL_GIN_ANVIL_SDMA_THRESHOLD.
         static const size_t bcastThr = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
 
-        // Large-message tier (§4.8): scatter + in-place allgather. Distributes
+        // Large-message tier: scatter + in-place allgather. Distributes
         // egress across all ranks to beat the flat fan-out's root-egress ceiling
         // (busBw = B_root_egress / N). Gated to large messages via
         // NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES (bytes, optional K/M/G
@@ -1225,7 +1061,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
           size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
           return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastScatterAgMinDefault : v;
         }();
-        // Pipelined-ring large tier (§ ring kernel): distributes forwarding across
+        // Pipelined-ring large tier: distributes forwarding across
         // all ranks with no serial root-scatter phase, to beat the SAG plateau at
         // very large messages. Opt-in via NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES
         // (0 = disabled, default) until a warm A/B vs SAG sets a default; the
@@ -1236,30 +1072,6 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         }();
         static const size_t bcastRingChunksEnv =
             testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_CHUNKS");
-        // Ring forwarding backend: SM peer stores (default, attack (a)) vs the
-        // original single-queue SDMA put. NCCL_GIN_ANVIL_BCAST_RING_SM=0 selects
-        // the SDMA ring for A/B; anything else (unset/1) uses the SM-store ring.
-        static const int bcastRingSm = []() {
-          const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_SM");
-          return (e && e[0] == '0') ? 0 : 1;
-        }();
-        // Multi-ring (rotated stride orderings so each GPU drives all its xGMI
-        // links) vs single-orientation SM ring. Default multi; set
-        // NCCL_GIN_ANVIL_BCAST_RING_MULTI=0 for the single-orientation A/B.
-        static const int bcastRingMulti = []() {
-          const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_MULTI");
-          return (e && e[0] == '0') ? 0 : 1;
-        }();
-        // Point-to-point per-hop signaling vs the per-step grid-wide LSA barrier
-        // table kernel. A/B (8x MI355X, 2026-08-04, @2 GiB) found the barrier table
-        // kernel FASTER (232 vs P2P 191 GB/s): the barrier bundles the cross-GPU
-        // release fence with the sync, whereas P2P pays a __threadfence_system per
-        // chunk/hop and loses lock-step pipelining. So P2P is OFF by default (opt in
-        // with NCCL_GIN_ANVIL_BCAST_RING_P2P=1 to reproduce the A/B).
-        static const int bcastRingP2P = []() {
-          const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_P2P");
-          return (e && e[0] == '1') ? 1 : 0;
-        }();
         // In the -D 3 path `comm` is the ncclDevComm handle (testLaunchDeviceKernel*
         // casts it), NOT a real ncclComm_t -- so read nRanks from the devComm
         // struct rather than ncclCommCount (which would fault on a corrupted comm).
@@ -1267,62 +1079,72 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         const size_t msgBytes = count * wordSize(type);
         static const size_t bcastCtasEnv = BroadcastParseCtasEnv();
         const int hybridPool = gin_sdma::bcastHybridPoolCtas(deviceCtaCount);
-        if (gin_sdma::bcastUseRing(msgBytes, count, sagRanks, bcastRingMin)) {
-          const size_t nChunks = (size_t)gin_sdma::bcastRingChunks(msgBytes, bcastRingCtas(), bcastRingChunksEnv);
-          // Full edge-disjoint decomposition (all N-1 links) built + uploaded
-          // once per N; falls back to the coprime-stride kernel if unavailable.
-          // File-scope so BroadcastDeviceTime can see whether the tables exist.
-          int& builtN = g_bcastBuiltN;
-          int& builtNRings = g_bcastBuiltNRings;
-          if (bcastRingSm && bcastRingMulti && builtN != sagRanks) {
-            static int h_succ[BCAST_RING_MAXR * BCAST_RING_MAXN];
-            static int h_pos[BCAST_RING_MAXR * BCAST_RING_MAXN];
-            builtNRings = buildBcastRingDecomp(sagRanks, h_succ, h_pos);
-            if (builtNRings > 0) {
+        // One tier decision, not two independent predicates: under the shipped
+        // defaults both the ring (>=32 MiB) and SAG (>=2 MiB) gates are true for
+        // every large message, so what runs is set by the precedence inside
+        // bcastLargeTier, where the host tests can assert it.
+        const gin_sdma::BcastLargeTier largeTier =
+            gin_sdma::bcastLargeTier(msgBytes, count, sagRanks, bcastRingMin, bcastSagMin);
+        if (largeTier == gin_sdma::BcastLargeTier::Ring) {
+          const int ringCtas = bcastRingCtas();
+          const size_t nChunks = (size_t)gin_sdma::bcastRingChunks(msgBytes, ringCtas, bcastRingChunksEnv);
+          // The decomposition is uploaded to __constant__ memory, which exists once
+          // per DEVICE, so the "already built" gate has to be per device as well.
+          // With -g N a single process drives N devices through this same code: a
+          // process-wide flag would let device 0 upload, then let devices 1..N-1
+          // skip their upload and run the ring against a zero-filled table
+          // (nRings==0 => modulo by zero, and every rank reading pos 0 => every
+          // rank believes it is the root). Distinct host threads own distinct
+          // devices, so keying on the device also keeps -t N off a shared slot.
+          BcastRingState& rs = bcastRingState();
+          if (rs.builtN != sagRanks) {
+            // thread_local staging: -t N threads can be here concurrently for
+            // different devices and must not share the buffers they hand to
+            // buildBcastRingDecomp / cudaMemcpyToSymbol.
+            thread_local int h_succ[BCAST_RING_MAXR * BCAST_RING_MAXN];
+            thread_local int h_pos[BCAST_RING_MAXR * BCAST_RING_MAXN];
+            rs.builtNRings = buildBcastRingDecomp(sagRanks, h_succ, h_pos);
+            if (rs.builtNRings > 0) {
               // Streaming (nontemporal system-scope b128) peer stores default ON;
               // NCCL_GIN_ANVIL_BCAST_RING_STREAM=0 reverts to cached uint4 stores.
-              int streamStores = []() {
+              static const int streamStores = []() {
                 const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_STREAM");
                 return (e && e[0] == '0') ? 0 : 1;
               }();
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastNRings, &builtNRings, sizeof(int)));
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * builtNRings));
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * builtNRings));
+              CUDACHECK(cudaMemcpyToSymbol(c_bcastNRings, &rs.builtNRings, sizeof(int)));
+              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings));
+              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings));
               CUDACHECK(cudaMemcpyToSymbol(c_bcastStream, &streamStores, sizeof(int)));
             }
-            builtN = sagRanks;
+            rs.builtN = sagRanks;
           }
           // The SM ring kernels launch their own power-of-2 CTA count (bcastRingCtas,
           // default 128) instead of -V/deviceCtaCount: the pipeline is CTA-bound and
-          // needs ~128 CTAs to saturate all xGMI links (238 -> 350 GB/s @2 GiB). The
-          // P2P variant keeps deviceCtaCount (its per-CTA GIN signals are sized to it).
-          const int ringCtas = bcastRingCtas();
-          if (bcastRingSm && bcastRingMulti && builtNRings > 0 && bcastRingP2P) {
-            TESTCHECK(testLaunchDeviceKernelThreshold(SPECIALIZE_KERNEL(GinRingSmP2PBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks));
-          } else if (bcastRingSm && bcastRingMulti && builtNRings > 0) {
+          // needs ~128 CTAs to saturate all xGMI links (238 -> 350 GB/s @2 GiB).
+          if (rs.builtNRings > 0) {
             TESTCHECK(testLaunchDeviceKernelThresholdCtas(SPECIALIZE_KERNEL(GinRingSmTableBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks, ringCtas));
-          } else if (bcastRingSm && bcastRingMulti) {
-            TESTCHECK(testLaunchDeviceKernelThresholdCtas(SPECIALIZE_KERNEL(GinRingSmMultiBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks, ringCtas));
-          } else if (bcastRingSm) {
-            TESTCHECK(testLaunchDeviceKernelThresholdCtas(SPECIALIZE_KERNEL(GinRingSmBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks, ringCtas));
           } else {
-            TESTCHECK(testLaunchDeviceKernelThreshold(SPECIALIZE_KERNEL(GinRingBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks));
+            // No edge-disjoint decomposition exists for N=4 or N=6 (Tillson), and
+            // the backtracking search can also run out of budget; both land here.
+            TESTCHECK(testLaunchDeviceKernelThresholdCtas(SPECIALIZE_KERNEL(GinRingSmMultiBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, nChunks, ringCtas));
           }
           return testSuccess;
         }
-        if (gin_sdma::bcastUseScatterAllgather(msgBytes, count, sagRanks, bcastSagMin)) {
+        if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
           const int sagGrid = gin_sdma::bcastSagCtas(msgBytes, sagRanks, bcastThr, bcastCtasEnv, hybridPool);
           TESTCHECK(testLaunchDeviceKernelCtas(SPECIALIZE_KERNEL(GinScatterAllgatherBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, sagGrid));
           return testSuccess;
         }
         {
+          // BC_HAVE_LL is implied here: its condition is a superset of this
+          // block's (ENABLE_DEVICE_API && >= 2.28.0), so the LL launcher is the
+          // only reachable arm and the previous #else was dead. When LL is not
+          // provisioned -- either NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=0, or a
+          // 2.28.x build whose requirements arm cannot create the LL resource --
+          // nSlots stays 0, bcastLLEligible is false, and the kernel takes LSA.
           const int llSlots = g_bcastLLHandle.nSlots;
           const int hybridGrid = gin_sdma::bcastHybridCtas(msgBytes, bcastThr, llSlots, g_bcastLLMaxBytes, bcastCtasEnv, hybridPool);
-#if defined(BC_HAVE_LL)
-          TESTCHECK(testLaunchDeviceKernelThresholdLL(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, g_bcastLLHandle, hybridGrid));
-#else
-          TESTCHECK(testLaunchDeviceKernelThresholdCtas(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, hybridGrid));
-#endif
+          TESTCHECK(testLaunchDeviceKernelThresholdLL(SPECIALIZE_KERNEL(GinHybridBroadcastKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream, bcastThr, g_bcastLLHandle, g_bcastLLMaxBytes, hybridGrid));
         }
         return testSuccess;
       }
@@ -1372,9 +1194,13 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
     return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
   }();
   const int nRanks = (int)(args->devComms[0].nRanks);
-  // Only device-time the ring when it is the active tier and its tables are built.
+  // Only device-time the ring when it is the active tier and its tables are built
+  // on this device. builtNRings > 0 is exactly the condition under which
+  // BroadcastRunColl launches the table kernel, so the timed kernel below always
+  // matches the kernel that actually ran (N=4/6 fall back to the coprime-stride
+  // kernel, which has no timed variant, and are skipped here).
   if (!gin_sdma::bcastUseRing(msgBytes, count, nRanks, bcastRingMin)) return testSuccess;
-  if (g_bcastBuiltNRings <= 0) return testSuccess;
+  if (bcastRingState().builtNRings <= 0) return testSuccess;
 
   auto kernel = SPECIALIZE_KERNEL(GinRingSmTableBroadcastTimedKernel, type, op);
   if (kernel == nullptr) return testSuccess;
