@@ -443,37 +443,9 @@ if(BUILD_TESTS)
   endif()
   endif()
 
-  # rccl-UnitTestsDevRuntime: self-contained host micro-test that #includes the
-  # hipified src/dev_runtime.cc directly to reach its file-static symMemory*
-  # helpers. Links no librccl.so; dependencies come from DevRuntimeTestsStubs.cc.
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
-    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
-
-    add_executable(rccl-UnitTestsDevRuntime
-      DevRuntimeTests.cpp
-      DevRuntimeTestsStubs.cc
-      common/main_fixtures.cpp
-      common/EnvVars.cpp
-      common/TestChecks.cpp
-      common/ProcessIsolatedTestRunner.cpp
-    )
-
-    target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
-      ${PROJECT_BINARY_DIR}/hipify/src
-      ${PROJECT_BINARY_DIR}/hipify/src/include
-      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
-      ${PROJECT_BINARY_DIR}/hipify/src/device
-    )
-
-    set_source_files_properties(DevRuntimeTests.cpp PROPERTIES
-      COMPILE_DEFINITIONS
-        "DEV_RUNTIME_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc\"")
-
-    # The included source and its headers live in the hipify-staged tree.
-    add_dependencies(rccl-UnitTestsDevRuntime
-      hipify_all copy_nccl_device_headers
-      net_ib_header_symlinks rma_header_symlinks)
-  endif()
+  # The dev_runtime micro-test lives in test/host now, alongside the other
+  # host-only micro-test binaries (AICOMRCCL-1934) -- see
+  # rccl-UnitTestsMicroDevRuntime in test/host/CMakeLists.txt.
 
   # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the
   # segment-math header (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) is
@@ -829,8 +801,7 @@ if(BUILD_TESTS)
     # ENABLE_ROCSHMEM_GIN=ON but ENABLE_ROCSHMEM=OFF, librccl.so carries unresolved
     # rocSHMEM symbols (e.g. rocshmem::envvar::log_flags) that would fail at load
     # time for any executable linking it.
-    if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin" OR
-       test_executable STREQUAL "rccl-UnitTestsDevRuntime")
+    if(test_executable STREQUAL "rccl-UnitTestsGinAnvilPlugin")
       # Intentionally no rccl link; needed symbols come from the compiled-in
       # source(s) + stubs and RCCL_COMMON_LINK_LIBS (hip/hsa/gtest/dl).
     elseif(BUILD_SHARED_LIBS)
