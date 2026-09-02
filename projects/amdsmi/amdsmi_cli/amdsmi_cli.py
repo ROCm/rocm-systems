@@ -56,6 +56,14 @@ except ImportError:
         sys.exit(1)
 
 
+def _error_text(exc, logger):
+    # JSON consumers parse stdout, so the class-name prefix would corrupt the document.
+    message = str(exc)
+    if logger.format == logger.LoggerFormat.json.value:
+        return message
+    return f"{type(exc).__module__}.{type(exc).__name__}: {message}"
+
+
 def _print_error(e, destination):
     if destination in ["stdout", "json", "csv"]:
         print(e)
@@ -233,26 +241,17 @@ if __name__ == "__main__":
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
     except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(
-            f"{type(e).__module__}.{type(e).__name__}: {str(e)}",
-            amd_smi_commands.logger.destination,
-        )
+        _print_error(_error_text(e, amd_smi_commands.logger), amd_smi_commands.logger.destination)
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
             amd_smi_commands.logger.format, e.get_error_code()
         )
-        _print_error(
-            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-            amd_smi_commands.logger.destination,
-        )
+        _print_error(_error_text(exc, amd_smi_commands.logger), amd_smi_commands.logger.destination)
         sys.exit(abs(exc.value))
     except PermissionError as e:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         outputformat = amd_smi_commands.logger.format
         exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
-        _print_error(
-            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-            amd_smi_commands.logger.destination,
-        )
+        _print_error(_error_text(exc, amd_smi_commands.logger), amd_smi_commands.logger.destination)
         sys.exit(abs(exc.value))

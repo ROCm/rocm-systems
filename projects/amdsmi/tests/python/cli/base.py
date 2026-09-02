@@ -251,6 +251,9 @@ class TestCliBase(unittest.TestCase):
                     item_index = 0
 
                 sub_found = False
+                # An uppercase token after the flag is an argparse metavar, so the
+                # flag needs a value and must never be emitted on its own.
+                requires_value = False
                 if item_index >= 0:
                     if items[item_index][-1:] == ",":
                         items[item_index] = items[item_index][:-1]
@@ -289,6 +292,7 @@ class TestCliBase(unittest.TestCase):
                         if items[item_index + 1][0:1] == self.openBracket:
                             items[item_index + 1] = items[item_index + 1][1:]
                         sub_arg = items[item_index + 1]
+                        requires_value = sub_arg.isupper()
                         # Expand out sub_args
                         if sub_arg.isupper() and sub_arg in self.sub_args:
                             sub_found = True
@@ -368,6 +372,11 @@ class TestCliBase(unittest.TestCase):
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
                             pass
+                        elif requires_value:
+                            print(
+                                f"TODO: no value expansion for {items[item_index]} "
+                                f"sub_arg={sub_arg}  match_str={match_str}"
+                            )
                         else:
                             options.append(items[item_index])
             if match_str in line:

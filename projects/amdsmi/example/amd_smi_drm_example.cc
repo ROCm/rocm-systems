@@ -604,9 +604,14 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config{};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
+        // An unsupported query leaves num_profiles unset, which would drive the loop below
+        // past the end of the profiles array.
+        if (ret != AMDSMI_STATUS_SUCCESS) {
+          profile_config.num_profiles = 0;
+        }
         for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
           amdsmi_accelerator_partition_type_t updatePartition =
               profile_config.profiles[profile_idx].profile_type;

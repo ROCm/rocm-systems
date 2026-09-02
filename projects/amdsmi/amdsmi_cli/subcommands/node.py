@@ -172,7 +172,7 @@ class NodeCommands:
                     node_output.append(
                         f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
                     )
-            if args.tray and tray_dict:
+            if args.tray:
                 node_output.append("    TRAY:")
                 node_output.append(
                     f"        MAX_ACC_PER_TRAY: {tray_dict.get('max_acc_per_tray', 'N/A')}"
@@ -194,7 +194,7 @@ class NodeCommands:
                     if "pending_size_gb" in gtt_dict:
                         csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
                         csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
-                if args.tray and tray_dict:
+                if args.tray:
                     csv_dict["max_acc_per_tray"] = tray_dict.get("max_acc_per_tray", "N/A")
                     csv_dict["tray_type"] = tray_dict.get("tray_type", "N/A")
                 self.logger.output = csv_dict
@@ -213,8 +213,11 @@ class NodeCommands:
                     node_output["base_board"] = {"temperature": base_board_temp_dict}
                 if args.gtt and gtt_dict:
                     node_output["gtt"] = gtt_dict
-                if args.tray and tray_dict:
-                    node_output["tray"] = tray_dict
+                if args.tray:
+                    node_output["tray"] = {
+                        "max_acc_per_tray": tray_dict.get("max_acc_per_tray", "N/A"),
+                        "tray_type": tray_dict.get("tray_type", "N/A"),
+                    }
                 self.logger.output = {"node": node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()
