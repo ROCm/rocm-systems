@@ -265,6 +265,14 @@ amdsmi_status_t PopulateCarveoutInfo(const BiosSetting& setting, amdsmi_uma_carv
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Validate a requested write against a resolved carveout setting (pure; no D-Bus).
+amdsmi_status_t ValidateCarveoutWrite(const BiosSetting& setting, uint32_t option_index) {
+  if (setting.read_only) return AMDSMI_STATUS_NO_PERM;
+  if (option_index >= setting.values.size()) return AMDSMI_STATUS_INVAL;
+  if (setting.name.empty()) return AMDSMI_STATUS_NOT_SUPPORTED;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 }  // namespace detail
 
 amdsmi_status_t fwupd_get_carveout_info(amdsmi_uma_carveout_info_t* info) {
@@ -300,20 +308,13 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
     CloseBus(*d, conn);
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  if (c->read_only) {
+  const amdsmi_status_t valid = detail::ValidateCarveoutWrite(*c, option_index);
+  if (valid != AMDSMI_STATUS_SUCCESS) {
     CloseBus(*d, conn);
-    return AMDSMI_STATUS_NO_PERM;
-  }
-  if (option_index >= c->values.size()) {
-    CloseBus(*d, conn);
-    return AMDSMI_STATUS_INVAL;
+    return valid;
   }
   const std::string name = c->name;
   const std::string value = c->values[option_index];
-  if (name.empty()) {
-    CloseBus(*d, conn);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
   if (DryRun()) {
     CloseBus(*d, conn);
     return AMDSMI_STATUS_SUCCESS;
@@ -351,8 +352,10 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
   if (d->error_is_set(&err)) {
     const std::string ename = err.name ? err.name : "";
     const std::string emsg = err.message ? err.message : "";
-    // fwupd returns NothingToDo when the value already matches: an idempotent
-    // success for our purposes.
+    // Classify by the canonical D-Bus error name first (stable across fwupd
+    // versions and locales); the human-readable message substrings are only a
+    // best-effort fallback. fwupd returns NothingToDo when the value already
+    // matches -- an idempotent success for our purposes.
     if (ename.find("NothingToDo") != std::string::npos ||
         emsg.find("already set") != std::string::npos ||
         emsg.find("no BIOS settings needed") != std::string::npos) {

@@ -37,6 +37,13 @@ const BiosSetting* FindCarveout(const std::vector<BiosSetting>& settings);
 // Returns AMDSMI_STATUS_NOT_SUPPORTED when the setting exposes no options.
 amdsmi_status_t PopulateCarveoutInfo(const BiosSetting& setting, amdsmi_uma_carveout_info_t* info);
 
+// Validate a requested write against a resolved carveout setting (pure; no
+// D-Bus). Returns AMDSMI_STATUS_NO_PERM when the setting is read-only,
+// AMDSMI_STATUS_INVAL when option_index is out of range, and
+// AMDSMI_STATUS_NOT_SUPPORTED when the setting has no usable name; otherwise
+// AMDSMI_STATUS_SUCCESS.
+amdsmi_status_t ValidateCarveoutWrite(const BiosSetting& setting, uint32_t option_index);
+
 }  // namespace detail
 }  // namespace smi
 }  // namespace amd

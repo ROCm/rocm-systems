@@ -27,6 +27,7 @@
 using amd::smi::detail::BiosSetting;
 using amd::smi::detail::FindCarveout;
 using amd::smi::detail::PopulateCarveoutInfo;
+using amd::smi::detail::ValidateCarveoutWrite;
 
 namespace {
 
@@ -136,4 +137,27 @@ TEST(GpuUnit, FwupdCarveoutPopulateTruncatesLongDescription) {
   EXPECT_EQ(std::string(info.options[0].description).size(),
             static_cast<size_t>(AMDSMI_MAX_STRING_LENGTH - 1));
   EXPECT_EQ(info.options[0].description[AMDSMI_MAX_STRING_LENGTH - 1], '\0');
+}
+
+TEST(GpuUnit, FwupdCarveoutValidateRejectsReadOnly) {
+  BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "(1 GB)", {"(1 GB)", "(2 GB)"});
+  s.read_only = true;
+  EXPECT_EQ(ValidateCarveoutWrite(s, 0), AMDSMI_STATUS_NO_PERM);
+}
+
+TEST(GpuUnit, FwupdCarveoutValidateRejectsOutOfRangeIndex) {
+  const BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "", {"a", "b"});
+  EXPECT_EQ(ValidateCarveoutWrite(s, 2), AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(ValidateCarveoutWrite(s, 99u), AMDSMI_STATUS_INVAL);
+}
+
+TEST(GpuUnit, FwupdCarveoutValidateRejectsEmptyName) {
+  BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "", {"a"});
+  s.name = "";
+  EXPECT_EQ(ValidateCarveoutWrite(s, 0), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, FwupdCarveoutValidateAcceptsWritableInRange) {
+  const BiosSetting s = MakeCarveout("com.amd-gpu.uma_carveout", "(1 GB)", {"(1 GB)", "(2 GB)"});
+  EXPECT_EQ(ValidateCarveoutWrite(s, 1), AMDSMI_STATUS_SUCCESS);
 }
