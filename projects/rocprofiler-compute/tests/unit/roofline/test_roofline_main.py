@@ -341,6 +341,38 @@ def test_the_figure_opens_on_the_machine_frame(
     assert math.log10(y_hi / y_lo) < FRAME_MAX_DECADES
 
 
+def title_lines(figure: go.Figure) -> tuple[str, str]:
+    """The figure's heading and the frame subtitle drawn under it."""
+    heading, _, subtitle = figure.layout.title.text.partition("<br>")
+    return heading, subtitle
+
+
+def test_the_title_spells_out_the_frame_the_figure_was_drawn_on(
+    benchmarked_roofline,
+) -> None:
+    """Two runs are compared by looking at two pictures, so the axes have to be
+    readable in the picture itself, not only in the HTML behind it."""
+    roofline, figure = stacked_figure(benchmarked_roofline, ["FP64"])
+
+    heading, subtitle = title_lines(figure)
+    assert heading == "Empirical Roofline Analysis (FP64)"
+    for bound in roofline._Roofline__frame_bounds:
+        assert f"1e{int(math.log10(bound))}" in subtitle
+
+
+def test_stacking_a_datatype_leaves_the_frame_subtitle_alone(
+    benchmarked_roofline,
+) -> None:
+    """Only the heading names datatypes. The frame is the same for all of them,
+    so stacking must not rewrite the line that reports it."""
+    _, figure = stacked_figure(benchmarked_roofline, ["FP64", "BF16"])
+
+    heading, subtitle = title_lines(figure)
+    assert heading == "Empirical Roofline Analysis (FP64, BF16)"
+    assert "AI 1e-2 to 1e2" in subtitle
+    assert "performance 1e0 to 1e5" in subtitle
+
+
 def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
     """The knee the model ships has to be the knee that figure really draws:
     capped at its tallest ceiling, including the ceilings a stacked datatype
