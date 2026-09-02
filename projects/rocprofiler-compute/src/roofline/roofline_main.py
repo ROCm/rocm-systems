@@ -564,6 +564,7 @@ class Roofline:
             roofline_traces=list(source_model.roofline_traces),
             compute_traces=list(source_model.compute_traces),
             compute_overlay_traces=list(source_model.compute_overlay_traces),
+            frame=source_model.frame,
         )
 
         if source_key == "FLOP" and ops_figure is not None:
@@ -690,6 +691,8 @@ class Roofline:
                 or DEFAULT_AXIS_BOUNDS
             )
         x_lo, x_hi, y_lo, y_hi = self.__frame_bounds
+        # The client opens on the same frame the figure was laid out on.
+        self.__view_models[ops_flops].frame = {"x": [x_lo, x_hi], "y": [y_lo, y_hi]}
         # Roofs are densely sampled across so they stay hoverable
         # throughout the visible range.
         roof_dense_lo = x_lo / ROOF_DENSE_PAD_FACTOR

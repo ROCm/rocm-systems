@@ -19,12 +19,13 @@
   var ALL_PEAKS_VALUE = model.allPeaksValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
   var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
-  var FRAME_PAD = model.framePad;
-  var FRAME_MIN_DECADES = model.frameMinDecades;
-  var FRAME_SLOPE_SKEW = model.frameSlopeSkew;
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
+  // How far a roof drawn at 45 degrees in data space may lean on screen before
+  // the canonical frame is padded out to bring it back. Presentation only: it
+  // can widen an axis, never narrow one below the frame the server sent.
+  var PLOT_SLOPE_SKEW = 2.0;
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
   var RUNTIME_EPSILON = 1e-6;
@@ -87,7 +88,6 @@
   var computeOverlayTraces = model.computeOverlayTraces;
   var precisions = model.precisions || [];
   var peakColors = model.peakColors;
-  var initialRange = null;
 
   function kernelHasRuntime(kernel) {
     return kernel.pctRuntime != null && isFinite(kernel.pctRuntime);
@@ -440,48 +440,23 @@
     }
   }
 
-  function frameAnchors() {
-    var xs = [];
-    var ys = [];
-    kernels.forEach(function (kernel) {
-      if (!kernelIsDrawn(kernel)) {
-        return;
-      }
-      pointsForCurrentPeak(kernel).forEach(function (point) {
-        if (point.ai > 0 && point.perf > 0) {
-          xs.push(point.ai);
-          ys.push(point.perf);
-        }
-      });
-    });
-    if (!xs.length) {
+  // The canonical frame, in log10 units for Plotly's log axes. Derived on the
+  // server from the machine ceilings alone, so it never moves with the kernels,
+  // the filters, or the window.
+  function canonicalFrame() {
+    var frame = model.frame;
+    if (!frame || !frame.x || !frame.y) {
       return null;
     }
-    rooflineTraces.forEach(function (roof) {
-      if (roof.kneeAi > 0 && roof.kneePerf > 0) {
-        xs.push(roof.kneeAi);
-        ys.push(roof.kneePerf);
-      }
-    });
-    computeTraces.forEach(function (ceiling) {
-      if (ceiling.peakPerf > 0) {
-        ys.push(ceiling.peakPerf);
-      }
-    });
-    var perfLo = Math.min.apply(null, ys);
-    rooflineTraces.forEach(function (roof) {
-      if (roof.bandwidth > 0) {
-        xs.push(perfLo / roof.bandwidth);
-      }
-    });
-    return { xs: xs, ys: ys };
-  }
-
-  function paddedLogSpan(lo, hi) {
-    return [
-      Math.log10(lo) - Math.log10(FRAME_PAD),
-      Math.log10(hi) + Math.log10(FRAME_PAD),
-    ];
+    var logged = {
+      x: [Math.log10(frame.x[0]), Math.log10(frame.x[1])],
+      y: [Math.log10(frame.y[0]), Math.log10(frame.y[1])],
+    };
+    var finite = logged.x.concat(logged.y).every(isFinite);
+    if (!finite || logged.x[1] <= logged.x[0] || logged.y[1] <= logged.y[0]) {
+      return null;
+    }
+    return logged;
   }
 
   function widenTo(range, decades) {
@@ -503,6 +478,8 @@
     return { width: width, height: height };
   }
 
+  // Pad-only shaping: widenTo can only grow a span, so the canonical frame is
+  // always still fully inside whatever this returns.
   function shapeToPlotArea(frame) {
     var area = plotAreaPixels();
     if (!area) {
@@ -514,20 +491,20 @@
       return frame;
     }
     var screenSlope = (area.height * xSpan) / (area.width * ySpan);
-    if (screenSlope > FRAME_SLOPE_SKEW) {
+    if (screenSlope > PLOT_SLOPE_SKEW) {
       return {
         x: frame.x.slice(),
         y: widenTo(
           frame.y,
-          (area.height * xSpan) / (area.width * FRAME_SLOPE_SKEW)
+          (area.height * xSpan) / (area.width * PLOT_SLOPE_SKEW)
         ),
       };
     }
-    if (screenSlope < 1 / FRAME_SLOPE_SKEW) {
+    if (screenSlope < 1 / PLOT_SLOPE_SKEW) {
       return {
         x: widenTo(
           frame.x,
-          (area.width * ySpan) / (FRAME_SLOPE_SKEW * area.height)
+          (area.width * ySpan) / (PLOT_SLOPE_SKEW * area.height)
         ),
         y: frame.y.slice(),
       };
@@ -535,47 +512,12 @@
     return frame;
   }
 
-  function pinToSlopes(frame) {
-    var slopes = rooflineTraces
-      .map(function (roof) {
-        return Math.log10(roof.bandwidth);
-      })
-      .filter(function (slope) {
-        return isFinite(slope);
-      });
-    if (!slopes.length) {
-      return frame;
-    }
-    var xLo = Math.min(frame.x[0], frame.y[0] - Math.max.apply(null, slopes));
-    var area = plotAreaPixels();
-    var y = frame.y.slice();
-    if (area) {
-      var roomForSlope =
-        (area.height * (frame.x[1] - xLo)) / (area.width * FRAME_SLOPE_SKEW);
-      if (roomForSlope > y[1] - y[0]) {
-        y = [y[0], y[0] + roomForSlope];
-      }
-    }
-    return { x: [xLo, frame.x[1]], y: y };
-  }
-
   function currentFrame() {
-    var anchors = frameAnchors();
-    if (!anchors) {
+    var frame = canonicalFrame();
+    if (!frame) {
       return null;
     }
-    var frame = {
-      x: paddedLogSpan(
-        Math.min.apply(null, anchors.xs),
-        Math.max.apply(null, anchors.xs)
-      ),
-      y: paddedLogSpan(
-        Math.min.apply(null, anchors.ys),
-        Math.max.apply(null, anchors.ys)
-      ),
-    };
-    frame.x = widenTo(frame.x, FRAME_MIN_DECADES);
-    return pinToSlopes(shapeToPlotArea(frame));
+    return shapeToPlotArea(frame);
   }
 
   function applyFrame(frame) {
@@ -599,7 +541,7 @@
     if (!plotlyReady()) {
       return;
     }
-    var frame = currentFrame() || initialRange;
+    var frame = currentFrame();
     if (!frame) {
       return;
     }
@@ -1467,17 +1409,6 @@
     }
   }
 
-  function captureInitialRange() {
-    if (!gd || !gd.layout || !gd.layout.xaxis || !gd.layout.yaxis) {
-      return;
-    }
-    var xr = gd.layout.xaxis.range;
-    var yr = gd.layout.yaxis.range;
-    if (xr && yr) {
-      initialRange = { x: xr.slice(), y: yr.slice() };
-    }
-  }
-
   function updateRuntimeLabel() {
     if (runtimeValueEl) {
       runtimeValueEl.textContent = state.runtimeThreshold.toFixed(3) + "%";
@@ -1514,7 +1445,6 @@
     syncThemeToggle();
     watchSystemTheme();
     whenPlotReady(function () {
-      captureInitialRange();
       wireEvents();
       observePlotContainer();
       resizePlot();

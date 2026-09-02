@@ -14,11 +14,6 @@ from typing import Any, Dict, List, Optional
 
 import plotly.graph_objects as go
 
-from roofline.roofline_frame import (
-    FRAME_MIN_DECADES,
-    FRAME_PAD,
-    FRAME_SLOPE_SKEW,
-)
 from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
 
 ALL_PEAKS_VALUE = "all"
@@ -59,6 +54,9 @@ class RooflineViewModel:
     compute_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: List[Dict[str, Any]] = field(default_factory=list)
     precisions: List[str] = field(default_factory=list)
+    # Canonical axis frame in data coordinates: {"x": [lo, hi], "y": [lo, hi]}.
+    # The single source of truth for the axes the page opens on.
+    frame: Optional[Dict[str, List[float]]] = None
 
     def to_json(self) -> str:
         """Serialize the model for embedding in a <script> tag."""
@@ -75,9 +73,7 @@ class RooflineViewModel:
             "precisions": self.precisions,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
-            "framePad": FRAME_PAD,
-            "frameMinDecades": FRAME_MIN_DECADES,
-            "frameSlopeSkew": FRAME_SLOPE_SKEW,
+            "frame": self.frame,
             "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
         return json.dumps(_json_safe(payload), allow_nan=False).replace("</", "<\\/")

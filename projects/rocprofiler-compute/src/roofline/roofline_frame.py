@@ -8,11 +8,6 @@ from typing import List, Optional, Tuple
 
 FRAME_X_MIN = 1e-2
 
-# Kept until the browser framing recipe is removed in Phase 2.
-FRAME_PAD = 1.6
-FRAME_MIN_DECADES = 2.5
-FRAME_SLOPE_SKEW = 2.0
-
 
 def canonical_frame(
     bandwidths: List[float], peaks: List[float]
