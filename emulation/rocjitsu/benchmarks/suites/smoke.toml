@@ -1,0 +1,6 @@
+name = "smoke"
+targets = ["gfx950"]
+cases = ["hip.launch_noop"]
+warmups = 1
+samples = 3
+timeout_seconds = 60

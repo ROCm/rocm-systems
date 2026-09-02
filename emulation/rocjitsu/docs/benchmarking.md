@@ -584,6 +584,16 @@ manifest; repeated `--target` and `--case` flags select a development subset.
 `--list` prints the selected matrix without running it. The runner refuses to
 overwrite an existing output directory.
 
+For a quick end-to-end check, `smoke.toml` runs only the native launch-overhead
+case on `gfx950` with one warmup and three samples:
+
+```bash
+"$python" -m benchmarks.runner \
+  --manifest benchmarks/suites/smoke.toml \
+  --build-dir "$build" \
+  --output /path/to/results/smoke
+```
+
 Each cell has a 300-second default timeout. A cell failure is recorded and does
 not discard results from other cells. The command returns failure when any
 selected cell fails.
