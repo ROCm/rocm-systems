@@ -22,7 +22,7 @@ using consan_detail::MoiWorkitemOwnerDerivationPlan;
 struct MoiScalarAbiPlan;
 
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
+    const ConSanRequest &request, MoiOwnerAssignments assignments,
     std::span<const uint64_t> owner_descriptor_offsets);
 
 /// Restore an owner-local persistent assignment when placement could not use a
@@ -31,7 +31,7 @@ struct MoiScalarAbiPlan;
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets,
+    MoiOwnerAssignments assignments, std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout = nullptr);
 
 void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,

@@ -199,7 +199,7 @@ using MoiBarrierBodyPlan =
 using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
     const ConSanOptions &, ConSanMoiOperatingPoint &, const MoiScalarAbiPlan &,
     std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t,
-    const ConSanMoiOperatingPoint &, std::vector<std::string> &, std::vector<std::string> &);
+    MoiOwnerAssignments, std::vector<std::string> &, std::vector<std::string> &);
 
 struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
@@ -226,7 +226,7 @@ struct MoiPrivateBarrierPlanningContext {
   MoiSpillManagers &spill_managers;
   rj_code_arch_t arch;
   const ProgramInventory &inventory;
-  const ConSanMoiOperatingPoint &accepted_point;
+  MoiOwnerAssignments assignments;
   std::vector<std::string> &warnings;
 };
 
@@ -451,7 +451,7 @@ void try_apply_shared_barrier_patch(
           .spill_managers = visible_evidence_spill_managers,
           .arch = arch,
           .inventory = result.program_inventory,
-          .accepted_point = result.moi_operating_point,
+          .assignments = result.moi_operating_point,
           .warnings = result.warnings,
       });
       if (planned) {

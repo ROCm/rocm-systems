@@ -989,6 +989,20 @@ if(_moi_barrier_planning MATCHES
         "mode-owned barrier planners must consume exact planning facts, not transform artifacts"
     )
 endif()
+if(NOT _moi_placement_contract MATCHES
+       "struct MoiOwnerAssignments[^}]*persistent_vgprs[^}]*transient_sgprs" OR
+   NOT _moi_barrier_planning MATCHES
+       "struct MoiPrivateBarrierPlanningContext[^}]*MoiOwnerAssignments" OR
+   _moi_barrier_planning MATCHES
+       "using MoiBarrierBodyPlanner[^;]*const ConSanMoiOperatingPoint[^;]*std::vector<std::string>" OR
+   _moi_placement_contract MATCHES
+       "resolve_moi_scratch_plan[^;]*const ConSanMoiOperatingPoint &allocation" OR
+   _moi_placement_contract MATCHES
+       "apply_moi_(transient_sgpr|persistent_vgpr)_assignment[^;]*const ConSanMoiOperatingPoint &allocation")
+    message(FATAL_ERROR
+        "owner-local allocation consumers must use the exact owner-assignment projection"
+    )
+endif()
 if(NOT _record_replay_barrier_owner MATCHES
        "try_apply_record_replay_barrier_patch[^}]*moi_track_barriers" OR
    NOT _inline_barrier_owner MATCHES

@@ -68,6 +68,18 @@ using MoiDescriptorPrivateRequirements = ConSanDescriptorMemoryRequirements;
 using MoiDescriptorLdsRequirements = ConSanDescriptorMemoryRequirements;
 using MoiSpillManagers = std::unordered_map<uint64_t, SpillManager>;
 
+/// Exact owner-local assignments published by register allocation.  The
+/// converting constructor lets callers project an accepted operating point at
+/// an assignment-consuming boundary without exposing its unrelated policy.
+struct MoiOwnerAssignments {
+  std::span<const ConSanMoiPersistentVgprAssignment> persistent_vgprs;
+  std::span<const ConSanMoiTransientSgprAssignment> transient_sgprs;
+
+  MoiOwnerAssignments(const ConSanMoiOperatingPoint &point)
+      : persistent_vgprs(point.owner_persistent_vgprs),
+        transient_sgprs(point.owner_transient_sgprs) {}
+};
+
 /// Owner-complete scratch allocation consumed by shared MOI lowering.
 struct ResolvedMoiScratchPlan {
   uint16_t base = 0;
@@ -359,7 +371,7 @@ resource_plan_for_candidate(std::span<const ConSanCandidateResourcePlan> plans,
                             const ConSanMoiCandidate &candidate);
 
 [[nodiscard]] bool
-moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
+moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
                                              std::span<const uint64_t> owner_descriptor_offsets);
 
 [[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
@@ -487,7 +499,7 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
-                         const ConSanMoiOperatingPoint &allocation, uint16_t expected_count);
+                         MoiOwnerAssignments assignments, uint16_t expected_count);
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
@@ -499,11 +511,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state);
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments,
                                uint64_t descriptor_offset);
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+moi_transient_sgpr_assignment(MoiOwnerAssignments assignments,
                               uint64_t descriptor_offset);
 
 [[nodiscard]] std::vector<MoiSgprRange>
@@ -557,12 +569,12 @@ persistent_sgpr_range_overlaps_reserved_ordinary_range(uint16_t base, uint16_t w
 
 [[nodiscard]] bool
 apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-                                    const ConSanMoiOperatingPoint &allocation,
+                                    MoiOwnerAssignments assignments,
                                     std::span<const uint64_t> owner_descriptor_offsets);
 
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
-                                     const ConSanMoiOperatingPoint &allocation,
+                                     MoiOwnerAssignments assignments,
                                      std::span<const uint64_t> owner_descriptor_offsets);
 
 void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,

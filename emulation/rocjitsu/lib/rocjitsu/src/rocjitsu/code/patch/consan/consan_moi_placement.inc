@@ -463,21 +463,21 @@ struct MoiKernelResourceContext {
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments,
                                uint64_t descriptor_offset) {
   const auto assignment =
-      std::ranges::find(allocation.owner_persistent_vgprs, descriptor_offset,
+      std::ranges::find(assignments.persistent_vgprs, descriptor_offset,
                         &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  return assignment == allocation.owner_persistent_vgprs.end() ? nullptr : &*assignment;
+  return assignment == assignments.persistent_vgprs.end() ? nullptr : &*assignment;
 }
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
+moi_transient_sgpr_assignment(MoiOwnerAssignments assignments,
                               uint64_t descriptor_offset) {
   const auto assignment =
-      std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
+      std::ranges::find(assignments.transient_sgprs, descriptor_offset,
                         &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  return assignment == allocation.owner_transient_sgprs.end() ? nullptr : &*assignment;
+  return assignment == assignments.transient_sgprs.end() ? nullptr : &*assignment;
 }
 
 /// Returns true when automatic scalar spilling selected after the initial
@@ -512,14 +512,14 @@ moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
 /// same assignment or keep the code-object-wide fallback.
 [[nodiscard]] bool
 apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-                                    const ConSanMoiOperatingPoint &allocation,
+                                    MoiOwnerAssignments assignments,
                                     std::span<const uint64_t> owner_descriptor_offsets) {
   const ConSanMoiScalarSpillLayout spill_layout =
       moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout;
   const ConSanMoiTransientSgprAssignment *selected = nullptr;
   bool saw_unassigned_owner = false;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
-    const auto *assignment = moi_transient_sgpr_assignment(allocation, descriptor_offset);
+    const auto *assignment = moi_transient_sgpr_assignment(assignments, descriptor_offset);
     if (!assignment) {
       saw_unassigned_owner = true;
       continue;
@@ -565,28 +565,28 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
 }
 
 [[nodiscard]] bool
-moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
+moi_transient_sgpr_assignment_is_branch_only(MoiOwnerAssignments assignments,
                                              std::span<const uint64_t> owner_descriptor_offsets) {
   return !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
            const ConSanMoiTransientSgprAssignment *assignment =
-               moi_transient_sgpr_assignment(allocation, descriptor_offset);
+               moi_transient_sgpr_assignment(assignments, descriptor_offset);
            return assignment != nullptr && assignment->branch_only_spill;
          });
 }
 
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanMoiOperatingPoint &point,
-                                     const ConSanMoiOperatingPoint &allocation,
+                                     MoiOwnerAssignments assignments,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
-  if (allocation.owner_persistent_vgprs.empty()) {
+  if (assignments.persistent_vgprs.empty()) {
     return point.moi_owner_epoch_vgprs.owner().has_value() ||
            point.moi_persistent_sgprs.complete() || point.automatic_moi_private_epoch;
   }
   const ConSanMoiPersistentVgprAssignment *selected = nullptr;
   size_t assigned_owner_count = 0u;
   for (uint64_t descriptor_offset : owner_descriptor_offsets) {
-    const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+    const auto *assignment = moi_persistent_vgpr_assignment(assignments, descriptor_offset);
     if (!assignment)
       continue;
     ++assigned_owner_count;
@@ -2920,7 +2920,7 @@ private:
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
                          const ConSanMoiOperatingPoint &site_point,
-                         const ConSanMoiOperatingPoint &allocation, uint16_t expected_count) {
+                         MoiOwnerAssignments assignments, uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
        plan.source == ConSanRegisterAllocationSource::LivenessDead ||
@@ -2941,7 +2941,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
     };
     moi_persistent_vgpr_state_view(site_point).for_each_range(include_in_required_count);
     for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-      const auto *assignment = moi_persistent_vgpr_assignment(allocation, descriptor_offset);
+      const auto *assignment = moi_persistent_vgpr_assignment(assignments, descriptor_offset);
       if (!assignment)
         continue;
       moi_persistent_vgpr_state_view(*assignment).for_each_range(include_in_required_count);

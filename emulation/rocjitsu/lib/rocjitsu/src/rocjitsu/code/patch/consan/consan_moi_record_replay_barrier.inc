@@ -633,10 +633,10 @@ void try_apply_record_replay_barrier_record_patch(
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
-         arch, inventory, accepted_point, warnings] = context;
+         arch, inventory, assignments, warnings] = context;
   const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
   const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
-  const auto resources = resolve_moi_scratch_plan(resource_plan, point, accepted_point,
+  const auto resources = resolve_moi_scratch_plan(resource_plan, point, assignments,
                                                   /*expected_count=*/6u);
   if (!resources || !private_state_layout.record_replay_workgroup_offsets.complete()) {
     warnings.emplace_back(
@@ -644,8 +644,8 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
         candidate.container_name);
     return std::nullopt;
   }
-  if (!apply_moi_transient_sgpr_assignment(options, point, accepted_point, owners) ||
-      !apply_record_replay_entry_workgroup_assignment(options, point, accepted_point,
+  if (!apply_moi_transient_sgpr_assignment(options, point, assignments, owners) ||
+      !apply_record_replay_entry_workgroup_assignment(options, point, assignments,
                                                       owners, &private_state_layout)) {
     warnings.emplace_back(
         "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
@@ -710,14 +710,14 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
     const ConSanOptions &options, ConSanMoiOperatingPoint &point,
     const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
     std::span<const uint64_t> owners, rj_code_arch_t arch,
-    const ConSanMoiOperatingPoint &accepted_point, std::vector<std::string> &warnings,
+    MoiOwnerAssignments assignments, std::vector<std::string> &warnings,
     std::vector<std::string> &) {
   if (!scratch_vgpr) {
     warnings.emplace_back(
         "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
     return std::nullopt;
   }
-  if (!apply_record_replay_entry_workgroup_assignment(options, point, accepted_point, owners)) {
+  if (!apply_record_replay_entry_workgroup_assignment(options, point, assignments, owners)) {
     warnings.emplace_back(
         "ConSan MOI Record/Replay dense barrier fallback lost its entry workgroup assignment");
     return std::nullopt;

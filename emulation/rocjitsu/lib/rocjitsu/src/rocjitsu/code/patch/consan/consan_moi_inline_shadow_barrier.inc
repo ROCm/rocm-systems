@@ -185,7 +185,7 @@ append_inline_barrier_return(std::vector<uint32_t> &words, uint64_t cave_text_of
 [[nodiscard]] std::optional<PlannedBarrierLowering>
 plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
   auto &[bytes, options, point, candidate, resource_plan, access_patch, semantics, spill_managers,
-         arch, inventory, accepted_point, warnings] = context;
+         arch, inventory, assignments, warnings] = context;
   const std::vector<uint64_t> &owners = resource_plan.owner_descriptor_file_offsets;
   const ConSanMoiPrivateStateLayout &private_state_layout = *access_patch.private_state_layout;
   const uint32_t ephemeral_base = private_state_layout.ephemeral_base;
@@ -203,7 +203,7 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
         "ConSan MOI private epoch barrier could not preserve its temporary VGPR");
     return std::nullopt;
   }
-  if (!apply_moi_transient_sgpr_assignment(options, point, accepted_point, owners)) {
+  if (!apply_moi_transient_sgpr_assignment(options, point, assignments, owners)) {
     warnings.emplace_back(
         "ConSan MOI private epoch barrier lost its transient scalar assignment");
     return std::nullopt;
@@ -232,7 +232,7 @@ plan_inline_shadow_private_barrier(MoiPrivateBarrierPlanningContext context) {
 [[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_inline_shadow_barrier_body(
     const ConSanOptions &options, ConSanMoiOperatingPoint &point,
     const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
-    std::span<const uint64_t>, rj_code_arch_t arch, const ConSanMoiOperatingPoint &,
+    std::span<const uint64_t>, rj_code_arch_t arch, MoiOwnerAssignments,
     std::vector<std::string> &, std::vector<std::string> &errors) {
   auto plan = plan_inline_shadow_barrier_epoch_emission(options, point, scalar_abi, scratch_vgpr,
                                                         arch, errors);

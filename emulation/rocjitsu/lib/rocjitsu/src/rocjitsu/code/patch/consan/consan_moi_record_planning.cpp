@@ -19,14 +19,14 @@ namespace rocjitsu::consan_moi_impl {
 using consan_moi_detail::moi_bound_dispatch_id_sources;
 
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanRequest &request, const ConSanMoiOperatingPoint &allocation,
+    const ConSanRequest &request, MoiOwnerAssignments assignments,
     std::span<const uint64_t> owner_descriptor_offsets) {
   return request.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
            const auto assignment =
-               std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
+               std::ranges::find(assignments.transient_sgprs, descriptor_offset,
                                  &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-           return assignment != allocation.owner_transient_sgprs.end() &&
+           return assignment != assignments.transient_sgprs.end() &&
                   assignment->branch_only_spill && assignment->scalar_router &&
                   !assignment->scalar_router->call;
          });
@@ -34,7 +34,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
 
 [[nodiscard]] bool apply_record_replay_entry_workgroup_assignment(
     const ConSanRequest &request, ConSanMoiOperatingPoint &point,
-    const ConSanMoiOperatingPoint &allocation, std::span<const uint64_t> owner_descriptor_offsets,
+    MoiOwnerAssignments assignments, std::span<const uint64_t> owner_descriptor_offsets,
     const ConSanMoiPrivateStateLayout *private_layout) {
   const ConSanMoiPersistentWorkgroupPrivateOffsets *private_offsets =
       private_layout ? &private_layout->record_replay_workgroup_offsets : nullptr;
@@ -45,7 +45,7 @@ using consan_moi_detail::moi_bound_dispatch_id_sources;
       consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets)) {
     return true;
   }
-  return apply_moi_persistent_vgpr_assignment(point, allocation, owner_descriptor_offsets) &&
+  return apply_moi_persistent_vgpr_assignment(point, assignments, owner_descriptor_offsets) &&
          consan_moi_detail::record_replay_has_entry_workgroup_capture(point, private_offsets) &&
          consan_moi_detail::record_replay_entry_workgroup_capture_is_unambiguous(point,
                                                                                  private_offsets);
