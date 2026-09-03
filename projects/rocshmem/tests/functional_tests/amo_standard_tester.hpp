@@ -36,6 +36,8 @@ class AMOStandardTester : public Tester {
   explicit AMOStandardTester(TesterArguments args);
   virtual ~AMOStandardTester();
 
+  std::string typeName() const override { return type_name<T>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 

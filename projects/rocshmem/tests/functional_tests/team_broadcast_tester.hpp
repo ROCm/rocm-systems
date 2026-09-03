@@ -41,6 +41,8 @@ class TeamBroadcastTester : public Tester {
   explicit TeamBroadcastTester(TesterArguments args);
   virtual ~TeamBroadcastTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 
