@@ -71,7 +71,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # ships, append it here and add the corresponding validate assertions in validate.py. Add
 # appropriate changes to make_db.py to insert dummy data into a fake DB to simulate the
 # new schema changes.
-set(ROCPD_COMPAT_TESTED_SCHEMAS "3.0.0" "3.0.1" "3.0.2" "3.0.3")
+set(ROCPD_COMPAT_TESTED_SCHEMAS "3.0.0" "3.0.1" "3.0.2" "3.0.3" "3.0.4")
 
 # Derive old schemas (all except the latest) and the latest schema.
 list(LENGTH ROCPD_COMPAT_TESTED_SCHEMAS _num_schemas)
