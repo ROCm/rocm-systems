@@ -78,6 +78,68 @@ def require_jpeg_data(rocprof_config) -> None:
         )
 
 
+
+@pytest.fixture
+def require_rocjpeg_support(rocprof_config) -> None:
+    """Skip if the rocJPEG VA-API decoder cannot be initialized on this system.
+
+    rocJPEG uses VA-API for hardware JPEG decoding. On some GPUs (e.g.
+    gfx1036 with certain TheRock builds) the VA-API driver is present and
+    exports an __vaDriverInit_* symbol, yet rocJpegCreate() still returns
+    ROCJPEG_STATUS_NOT_INITIALIZED because the driver does not expose JPEG
+    decode support for that GPU architecture. When the binary is run under
+    rocprofiler-systems sampling (LD_PRELOAD) in this state, the partial
+    VA surface initialisation causes a SIGSEGV in vlVaHandleSurfaceAllocate.
+
+    To detect this early, probe by running the jpegdecode binary without
+    LD_PRELOAD against a single-image temporary directory. An empty directory
+    triggers a division-by-zero (SIGFPE) in batch setup before rocJpegCreate
+    is reached, so at least one image must be present. The probe completes in
+    well under a second on both supported and unsupported systems.
+    """
+    import subprocess
+    import os
+    import shutil
+    import tempfile
+
+    jpegdecode_bin = rocprof_config.rocprofsys_examples_dir / "jpegdecode"
+    if not jpegdecode_bin.exists():
+        return  # Binary missing; let the test fail naturally
+
+    # Strip LD_PRELOAD so we get a clean initialization check without
+    # rocprofiler-systems interference.
+    env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+
+    # The probe needs at least one image: with an empty directory the binary
+    # crashes with SIGFPE (division by zero in batch setup) before ever
+    # reaching the rocJpegCreate() call that would print NOT_INITIALIZED.
+    images_dir = rocprof_config.rocprofsys_examples_dir / "images"
+    first_jpg = next(images_dir.glob("*.jpg"), None) if images_dir.is_dir() else None
+    if first_jpg is None:
+        return  # No images available; require_jpeg_data will skip
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        shutil.copy2(str(first_jpg), tmpdir)
+        try:
+            result = subprocess.run(
+                [str(jpegdecode_bin), "-i", tmpdir, "-b", "1"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return  # Initialization is hanging; let the test surface that
+
+    combined = result.stdout + result.stderr
+    if "NOT_INITIALIZED" in combined:
+        pytest.skip(
+            "rocJPEG VA-API decoder returned ROCJPEG_STATUS_NOT_INITIALIZED; "
+            "JPEG decode is not supported by the current VA-API driver for this GPU. "
+            f"(probe exit code: {result.returncode})"
+        )
+
+
 # =============================================================================
 # JPEG decode tests
 # =============================================================================
@@ -101,6 +163,7 @@ class TestJPEGDecode(RocprofsysTest):
         get_run_args,
         gpu_info,
         require_jpeg_data,
+        require_rocjpeg_support,
     ):
         result = self.run_test(
             mode,
