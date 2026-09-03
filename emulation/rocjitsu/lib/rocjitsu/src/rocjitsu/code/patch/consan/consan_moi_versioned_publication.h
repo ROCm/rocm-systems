@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
@@ -57,5 +58,41 @@ private:
   uint16_t narrow_save_ = 0;
   rj_code_arch_t arch_{};
 };
+
+/// Emit one odd/even version transition through a device-scope compare-swap.
+///
+/// `desired_vgpr` and `expected_vgpr` are the adjacent data pair required by
+/// the native B32 compare-swap encoding. The returned old value overwrites
+/// `desired_vgpr`; successful lanes remain in EXEC. A delta of zero is an
+/// explicit restoration of `base_version_vgpr`, allowing the same operation
+/// to claim, commit, or roll back a slot without bespoke CAS sequences.
+[[nodiscard]] inline bool append_moi_version_transition(
+    std::vector<uint32_t> &words, InstructionSequence &sequence, MoiPublicationExec &exec,
+    uint16_t slot_address_vgpr, uint16_t base_version_vgpr, uint16_t desired_vgpr,
+    uint16_t expected_vgpr, uint32_t desired_delta, uint32_t expected_delta,
+    rj_code_arch_t arch) {
+  if (expected_vgpr != static_cast<uint16_t>(desired_vgpr + 1u))
+    return false;
+  const auto materialize = [&](uint16_t destination, uint32_t delta) {
+    return delta == 0u
+               ? std::optional<std::vector<uint32_t>>{{build_v_mov_b32_e32(
+                     destination, vector_source_vgpr(base_version_vgpr), arch)}}
+               : instrumentation::build_v_add_u32(destination,
+                                                  scalar_positive_inline_u32(delta),
+                                                  base_version_vgpr, arch);
+  };
+  const auto desired = materialize(desired_vgpr, desired_delta);
+  const auto expected = materialize(expected_vgpr, expected_delta);
+  if (!desired || !expected ||
+      !sequence.emit_all(*desired, *expected,
+                         instrumentation::build_flat_atomic_cmpswap_b32(
+                             slot_address_vgpr, desired_vgpr, desired_vgpr,
+                             /*return_old_value=*/true, kAmdGpuScopeDevice, arch)) ||
+      !append_moi_global_atomic_wait(words, arch)) {
+    return false;
+  }
+  return exec.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+      vector_source_vgpr(expected_vgpr), desired_vgpr, arch));
+}
 
 } // namespace rocjitsu::consan_moi_impl

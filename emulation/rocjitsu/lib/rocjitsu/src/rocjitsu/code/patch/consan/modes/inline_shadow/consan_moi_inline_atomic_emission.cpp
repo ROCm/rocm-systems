@@ -1622,19 +1622,11 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_add_literal_field(words, slot_address,
                                 offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
                                 arch) ||
-      !sequence.emit_all(
-          instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch),
-          instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(1), prior_version,
-                                           arch)))
-    return false;
-  words.push_back(build_v_mov_b32_e32(cas_expected, vector_source_vgpr(prior_version), arch));
-  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
-    return false;
-  if (!append_moi_global_atomic_wait(words, arch))
-    return false;
-  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected),
-                                                                 cas_new, arch)) ||
+      !sequence.emit(instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec,
+                                                       arch)) ||
+      !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
+                                     cas_new, cas_expected, /*desired_delta=*/1u,
+                                     /*expected_delta=*/0u, arch) ||
       !save_exec(claimed_exec))
     return false;
 
@@ -1747,28 +1739,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
       words.push_back(build_v_mov_b32_e32(
           prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
-      words.push_back(build_v_mov_b32_e32(cas_new, vector_source_vgpr(prior_version), arch));
-      const auto restore_expected = instrumentation::build_v_add_u32(
-          cas_expected, scalar_positive_inline_u32(1), prior_version, arch);
-      if (!restore_expected ||
-          !append_add_literal_field(words, slot_address,
+      if (!append_add_literal_field(words, slot_address,
                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                    arch))
-        return false;
-      words.insert(words.end(), restore_expected->begin(), restore_expected->end());
-      const auto restore_prior = instrumentation::build_flat_atomic_cmpswap_b32(
-          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
-      if (!restore_prior)
-        return false;
-      words.insert(words.end(), restore_prior->begin(), restore_prior->end());
-      if (!append_moi_global_atomic_wait(words, arch))
-        return false;
-      const auto restored =
-          instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
-      if (!restored)
-        return false;
-      words.push_back(*restored);
-      if (!narrow_vcc() || !save_exec(committed_exec))
+                                    arch) ||
+          !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
+                                         cas_new, cas_expected, /*desired_delta=*/0u,
+                                         /*expected_delta=*/1u, arch) ||
+          !save_exec(committed_exec))
         return false;
       const auto restore_failed =
           instrumentation::build_s_andn2_b64(kAmdGpuExecLo, ready_exec, committed_exec, arch);
@@ -1820,28 +1797,13 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // with detector state just before the final restore.
     if (!restore_exec(claimed_exec))
       return false;
-    words.push_back(build_v_mov_b32_e32(cas_new, vector_source_vgpr(prior_version), arch));
-    const auto unlock_expected = instrumentation::build_v_add_u32(
-        cas_expected, scalar_positive_inline_u32(1), prior_version, arch);
-    if (!unlock_expected ||
-        !append_add_literal_field(words, slot_address,
+    if (!append_add_literal_field(words, slot_address,
                                   offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                  arch))
-      return false;
-    words.insert(words.end(), unlock_expected->begin(), unlock_expected->end());
-    const auto unlock = instrumentation::build_flat_atomic_cmpswap_b32(
-        slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
-    if (!unlock)
-      return false;
-    words.insert(words.end(), unlock->begin(), unlock->end());
-    if (!append_moi_global_atomic_wait(words, arch))
-      return false;
-    const auto unlock_won =
-        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected), cas_new, arch);
-    if (!unlock_won)
-      return false;
-    words.push_back(*unlock_won);
-    if (!narrow_vcc() || !save_exec(committed_exec))
+                                  arch) ||
+        !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
+                                       cas_new, cas_expected, /*desired_delta=*/0u,
+                                       /*expected_delta=*/1u, arch) ||
+        !save_exec(committed_exec))
       return false;
     const auto failed =
         instrumentation::build_s_andn2_b64(kAmdGpuExecLo, original_exec, committed_exec, arch);
@@ -1977,18 +1939,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_add_literal_field(words, slot_address,
                                 offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
                                 arch) ||
-      !sequence.emit_all(instrumentation::build_v_add_u32(cas_new, scalar_positive_inline_u32(2),
-                                                          prior_version, arch),
-                         instrumentation::build_v_add_u32(
-                             cas_expected, scalar_positive_inline_u32(1), prior_version, arch)))
-    return false;
-  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-          slot_address, cas_new, cas_new, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
-    return false;
-  if (!append_moi_global_atomic_wait(words, arch))
-    return false;
-  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected),
-                                                                 cas_new, arch)) ||
+      !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
+                                     cas_new, cas_expected, /*desired_delta=*/2u,
+                                     /*expected_delta=*/1u, arch) ||
       !save_exec(committed_exec))
     return false;
   if (!sequence.emit(

@@ -1043,26 +1043,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
 
   failure.stage = "reservation";
-  const uint32_t claim_expected =
-      build_v_mov_b32_e32(cas_expected_vgpr, vector_source_vgpr(ready_version_vgpr), arch);
   if (!append_add_literal_field(words, address_lo_vgpr,
                                 offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
                                 arch) ||
-      !sequence.emit_all(instrumentation::build_v_add_u32(
-                             cas_new_vgpr, scalar_positive_inline_u32(1), ready_version_vgpr, arch),
-                         claim_expected)) {
+      !append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
+                                     ready_version_vgpr, cas_new_vgpr, cas_expected_vgpr,
+                                     /*desired_delta=*/1u, /*expected_delta=*/0u, arch)) {
     return false;
   }
-  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-          address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true,
-          kAmdGpuScopeDevice, arch)))
-    return false;
-  if (!append_moi_global_atomic_wait(words, arch))
-    return false;
-  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
-                                                             cas_new_vgpr, arch)) ||
-      !exec_masks.narrow_vcc())
-    return false;
   if (retry_contention) {
     failure.stage = "contention retry";
     const auto restore_claimed =
@@ -1170,23 +1158,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   if (!append_add_literal_field(words, address_lo_vgpr,
                                 offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
                                 arch) ||
-      !sequence.emit_all(
-          instrumentation::build_v_add_u32(cas_new_vgpr, scalar_positive_inline_u32(2),
-                                           ready_version_vgpr, arch),
-          instrumentation::build_v_add_u32(cas_expected_vgpr, scalar_positive_inline_u32(1),
-                                           ready_version_vgpr, arch))) {
+      !append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
+                                     ready_version_vgpr, cas_new_vgpr, cas_expected_vgpr,
+                                     /*desired_delta=*/2u, /*expected_delta=*/1u, arch)) {
     return false;
   }
-  if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-          address_lo_vgpr, cas_new_vgpr, cas_new_vgpr, /*return_old_value=*/true,
-          kAmdGpuScopeDevice, arch)))
-    return false;
-  if (!append_moi_global_atomic_wait(words, arch))
-    return false;
-  if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
-                                                             cas_new_vgpr, arch)) ||
-      !exec_masks.narrow_vcc() ||
-      !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
+  if (!sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
 
   // Count successful publications before excluding cross-dispatch priors from
