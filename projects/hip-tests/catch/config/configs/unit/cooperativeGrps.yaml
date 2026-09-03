@@ -103,6 +103,9 @@ cooperativeGrps:
   Unit_hipLaunchCooperativeKernel_Basic:
     <<: *level_2
     tags: [cooperative, launch]
+  Unit_hipLaunchCooperativeKernel_QueueReclaim:
+    <<: *level_2
+    tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
     # Kernel uses runtime sized shared memory which is not adjusted to handle ASAN extra memory requirements

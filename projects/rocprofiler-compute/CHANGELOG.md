@@ -3,6 +3,54 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
+## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
+
+### Added
+
+* Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
+
+* Added per-kernel PC sampling analysis.
+  * `rocprof-compute analyze --output-format csv` writes each kernel's disassembly under `per_kernel_pc_sampling/`, with the sample and stall counts on every instruction and the source it was compiled from.
+  * The analysis database records the same per-instruction data, so `--output-format db` can be queried for it.
+
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
+
+* Redesigned the standalone roofline HTML to improve user experience and interactivity.
+
+* Added a profile-mode warning reporting the active compute and memory partition
+  modes on partition-capable accelerators, noting that analysis derives logical
+  XCD, L2 channel, and HBM channel counts from them.
+
+### Changed
+
+* Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
+
+* ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
+
+### Removed
+
+* Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
+  * Removed the `--join-type` profile mode option, which only affected the CSV output format.
+
+* Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+### Optimized
+
+* Reduced profile-mode peak memory when writing counter data on large workloads.
+
+* Profile mode now gzip-compresses large counter CSV artifacts to reduce workload directory size.
+
+### Resolved issues
+
+* Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
+
+### Upcoming changes
+
+### Known issues
+
 ## ROCm Compute Profiler 3.8.0 for ROCm 10.0.0
 
 ### Added

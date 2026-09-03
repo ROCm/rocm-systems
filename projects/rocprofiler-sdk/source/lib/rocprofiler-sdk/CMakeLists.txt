@@ -60,6 +60,7 @@ add_subdirectory(thread_trace)
 add_subdirectory(spm)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
+add_subdirectory(kernel_replay)
 add_subdirectory(kfd)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
@@ -79,7 +80,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile
             rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-dw)
+            rocprofiler-sdk::rocprofiler-sdk-dw
+            rocprofiler-sdk::rocprofiler-sdk-rocprof-trace-decoder)
 
 target_compile_definitions(
     rocprofiler-sdk-object-library

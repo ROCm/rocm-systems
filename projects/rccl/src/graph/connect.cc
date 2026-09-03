@@ -1183,7 +1183,8 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   // Also skip when the user explicitly raised NCCL_MAX_NCHANNELS past 64 — the
   // request is then taken as an opt-in to the extended upper bound.
   // Otherwise retain the 64-channel cap for gfx1250 multi-node non-MNNVL (NET
-  // path) and all other arches.
+  // path) and all other arches. The NET path stays capped until there is
+  // multi-node MI450 data showing more than 64 channels is correct and a win.
   {
     int userMax = (int)ncclParamMaxNchannels();
     bool userOptedHigher = (userMax != -2 && userMax > 64);

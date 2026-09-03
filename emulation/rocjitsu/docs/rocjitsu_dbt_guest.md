@@ -200,16 +200,27 @@ rocjitsu goes through the patched table and is covered.
   without registered memory bytes fail rather than retrying an incompatible
   original ELF.
 - `librocjitsu_hooks.so` and the gfx1250 B0/A0 hotswap hook
-  (`libhsa_hotswap_rocjitsu.so`) are mutually exclusive in `HSA_TOOLS_LIB`.
-  Both patch the same four code-object entries of the HSA core API table
+  (`libhsa_hotswap_rocjitsu.so`) should not both be active. They overlap on five
+  code-object entries of the HSA core API table
   (`hsa_code_object_reader_create_from_file`,
-  `hsa_code_object_reader_create_from_memory`, `hsa_executable_destroy`,
-  `hsa_executable_load_agent_code_object`), so whichever tool ROCR loads
-  second wraps the first one's wrappers. Nothing enforces or detects that
-  order: it follows only the order of names in `HSA_TOOLS_LIB`, and neither
-  library exports `HSA_AMD_TOOL_PRIORITY` to pin its slot. Load exactly one
-  of them. The supported launch path does this for you — `rocjitsu` *sets*
-  `HSA_TOOLS_LIB` to the DBT hook rather than appending to it.
+  `hsa_code_object_reader_create_from_memory`,
+  `hsa_code_object_reader_destroy`, `hsa_executable_destroy`,
+  `hsa_executable_load_agent_code_object`), so whichever ROCR loads second wraps
+  the first one's wrappers.
+
+  Note that `HSA_TOOLS_LIB` does not decide this. ROCR loads the hotswap hook
+  itself from `Runtime::LoadHotswapTool()`, before it reads `HSA_TOOLS_LIB` at
+  all, whenever a gfx1250 A0 agent is present and `HSA_HOTSWAP_DISABLE` is not
+  set. So on such a machine the hotswap hook is always first and the DBT hook
+  always wraps it, whatever `HSA_TOOLS_LIB` says — and merely leaving the hotswap
+  hook out of that variable does not keep it out of the process. To run the DBT
+  hook there, set `HSA_HOTSWAP_DISABLE`.
+
+  Everywhere else the hotswap hook never loads, `HSA_TOOLS_LIB` is the only
+  thing naming a tool, and the supported launch path keeps it to one: `rocjitsu`
+  *sets* `HSA_TOOLS_LIB` to the DBT hook rather than appending to it. Neither
+  library exports `HSA_AMD_TOOL_PRIORITY`, so nothing pins a slot among tools
+  that do come from that variable.
 - `HSA_TOOLS_DISABLE_REGISTER=1` is a workaround. The better design is a
   rocprofiler-register API-table interposer that applies the same shadowing
   before rocprofiler validates HSA agents.

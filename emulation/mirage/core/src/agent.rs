@@ -9,6 +9,11 @@
 //! Agents live on disk at `<MIRAGE_CONFIG>/agent/<name>.json`. The
 //! system-level layout that arranges agents into racks/nodes lives
 //! in [`crate::topology`].
+//!
+//! Every type here rejects unknown fields; see [`crate::profile`] for
+//! why. It bites hardest on an agent, where the fields are the emulated
+//! device's identity — a mistyped `l2_size_kb` that silently defaulted to
+//! zero produced a GPU the workload could see and could not explain.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +23,7 @@ fn one() -> u32 {
 
 /// Key-value pair for component configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigEntry {
     pub key: String,
 
@@ -27,6 +33,7 @@ pub struct ConfigEntry {
 
 /// Port definition for dynamic ports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct PortDef {
     pub name: String,
 
@@ -39,8 +46,9 @@ pub struct PortDef {
 
 /// Component definition (recursive for hierarchy).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ComponentDef {
-    /// Name or range pattern like "xcd[0:7]".
+    /// Name or range pattern like `"xcd[0:7]"`.
     pub name: String,
 
     /// Registry type: "compute_unit", "l2_cache", etc.
@@ -62,6 +70,7 @@ pub struct ComponentDef {
 
 /// Range variable for link pattern expansion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ForRange {
     /// Variable name: "i", "j", "k".
     pub var_name: String,
@@ -75,6 +84,7 @@ pub struct ForRange {
 
 /// Link definition (direct or pattern-based).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LinkDef {
     /// Direct source: "soc.xcd0.l2.hbm_out".
     #[serde(default)]
@@ -84,7 +94,7 @@ pub struct LinkDef {
     #[serde(default)]
     pub dst: String,
 
-    /// Pattern: "soc.xcd[i].l2 -> soc.iod[i/4].msc".
+    /// Pattern: `"soc.xcd[i].l2 -> soc.iod[i/4].msc"`.
     #[serde(default)]
     pub pattern: String,
 
@@ -122,6 +132,7 @@ impl Default for LinkDef {
 /// Mirrors the flatbuffer `TopologyDef` in
 /// `rocjitsu/schemas/simulation_config.fbs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AgentTopologyDef {
     pub root: ComponentDef,
 
@@ -132,6 +143,7 @@ pub struct AgentTopologyDef {
 /// KFD device identity and topology properties for sysfs generation.
 /// Mirrors `KfdDeviceInfo` in the rocjitsu flatbuffer schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct KfdDeviceInfo {
     #[serde(default)]
     pub gpu_id: u32,
@@ -197,6 +209,7 @@ pub struct KfdDeviceInfo {
 
 /// AMDGPU memory configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct GpuMemoryConfig {
     #[serde(default)]
     pub size_mb: u32,
@@ -206,6 +219,7 @@ pub struct GpuMemoryConfig {
 
 /// AMDGPU top-level configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AmdgpuConfig {
     #[serde(default)]
     pub num_xcds: u32,
@@ -229,6 +243,7 @@ pub struct AmdgpuConfig {
 /// in the rocjitsu flatbuffer schema. `programs` is intentionally
 /// omitted: it's runtime workload configuration, not hardware.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct VirtualMachineConfig {
     #[serde(default)]
     pub arch: String,
@@ -238,6 +253,7 @@ pub struct VirtualMachineConfig {
 
 /// Top-level agent (single-device hardware) definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AgentDef {
     pub vm: VirtualMachineConfig,
     pub topology: AgentTopologyDef,
@@ -249,9 +265,15 @@ pub struct AgentDef {
 /// (e.g. rocjitsu's `cdna3`/`cdna4` flatbuffer configs). `get()`
 /// will fail to parse those as [`AgentDef`]; callers that need raw
 /// access should read the file at [`crate::paths::agent_path`].
+///
+/// [`crate::store::agent_get`] is where a `MaybeRef::Ref` on a topology is
+/// followed, so it is
+/// also where that reference is checked, and where one that resolves to
+/// nothing is reported — see [`crate::topology::store`].
 pub mod store {
     use super::AgentDef;
     use crate::error::{MirageError, Result};
+    use crate::store::{DocKind, Referrer, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all agent files on disk.
@@ -278,14 +300,50 @@ pub mod store {
         Ok(out)
     }
 
-    /// Read an agent by name.
+    /// Read an agent by name, for a caller that cannot say which
+    /// topology sent it.
+    ///
+    /// Prefer [`get_referred_by`] wherever the referring topology is in
+    /// scope; see [`crate::topology::store::get`] for why the name of the
+    /// referring document is the half that makes the error actionable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component, if
+    /// there is no such agent — reported as the dangling reference it is,
+    /// since a topology is what brought the name here — or if the
+    /// document is malformed.
     pub fn get(name: &str) -> Result<AgentDef> {
+        get_referred_by(Referrer::anonymous(DocKind::Topology), name)
+    }
+
+    /// Read an agent by name on behalf of the document that named it.
+    ///
+    /// The referrer may be a topology or the profile that carries one
+    /// inline, which is why it is a value rather than the constant it
+    /// used to be.
+    ///
+    /// # Errors
+    ///
+    /// As [`get`], with the referring document named in a dangling
+    /// reference.
+    pub fn get_referred_by(referrer: Referrer<'_>, name: &str) -> Result<AgentDef> {
+        validate_name(DocKind::Agent, name)?;
         let p = crate::paths::agent_path(name);
+        if !p.exists() {
+            return Err(dangling_ref(referrer, DocKind::Agent, name));
+        }
         crate::state::read_json(&p)
     }
 
     /// Write an agent to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component or the
+    /// document cannot be written.
     pub fn put(name: &str, agent: &AgentDef) -> Result<PathBuf> {
+        validate_name(DocKind::Agent, name)?;
         let p = crate::paths::agent_path(name);
         crate::state::write_json(&p, agent)?;
         Ok(p)

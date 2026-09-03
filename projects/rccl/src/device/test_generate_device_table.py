@@ -33,6 +33,12 @@ GENERATE_PY = os.path.join(HERE, "generate.py")
 # (see ll128_reg_variant_colls), so they carry a "_1"/"_2" reg suffix while every
 # other kernel omits the reg field -- the pure-RDC dispatcher must call each by
 # its exact declared name (regression: #ll128-reg-split).
+#
+# SendRecv is emitted as TWO latency-protocol kernel variants (reg_values_of):
+#   reg=0 -> legacy LL send/recv kernel, built unguarded on every arch (the default)
+#   reg=1 -> LL128 send/recv kernel, arch-guarded to gfx942/gfx950 + ENABLE_LL128
+#            and only for the base unrolls (the gfx1250-only unrolls 8/16/32 are
+#            excluded by func_validate). See tests_sendrecv_* below.
 ONLY_FUNCS = "AllReduce RING SIMPLE Sum f32|AllReduce RING LL128 Sum f32|SendRecv"
 
 
@@ -124,6 +130,75 @@ class DeviceTableGenerationTest(unittest.TestCase):
         # Arch-guarded-out slots must fail fast (matching the old nullptr table
         # entries), not silently no-op.
         self.assertIn("__builtin_trap();", self.header)
+
+    # ---- SendRecv LL / LL128 reg-variant codegen (ll128-p2p-send-recv) --------
+    # These pin the two-kernel split so a regression in reg_values_of /
+    # get_arch_guard / func_validate for SendRecv fails here instead of only at
+    # device link or at runtime.
+
+    def _sendrecv_decls(self):
+        # All forward-declared SendRecv device-function symbols.
+        return set(
+            re.findall(r"__device__ void (ncclDevFunc_SendRecv\w*)\(\);", self.header)
+        )
+
+    def test_sendrecv_emits_ll_and_ll128_reg_variants(self):
+        # Both kernels must be generated: the legacy LL kernel (reg=0, no reg
+        # suffix) and the LL128 kernel (reg=1, trailing "_1"). If reg_values_of
+        # regressed to ["0"] only the LL kernel would exist.
+        decls = self._sendrecv_decls()
+        self.assertTrue(decls, "no SendRecv forward declarations generated")
+        ll = [s for s in decls if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+", s)]
+        ll128 = [s for s in decls if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+_1", s)]
+        self.assertTrue(ll, "legacy LL SendRecv kernel (reg=0) missing")
+        self.assertTrue(ll128, "LL128 SendRecv kernel (reg=1, '_1' suffix) missing")
+
+    def test_sendrecv_ll128_is_arch_guarded_and_ll_is_not(self):
+        # Every reg=1 (LL128) SendRecv declaration must sit inside the
+        # gfx942/gfx950 + ENABLE_LL128 guard...
+        guarded = re.findall(
+            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\)\) && defined\(ENABLE_LL128\)\n"
+            r"__device__ void (ncclDevFunc_SendRecv\w*_1)\(\);\n#endif",
+            self.header,
+        )
+        self.assertTrue(guarded, "LL128 SendRecv (reg=1) declaration is not arch-guarded")
+        # ...and every emitted reg=1 SendRecv symbol is one of those guarded ones
+        # (none leaks out unguarded onto the default-built archs). A reg=1 symbol
+        # has FOUR trailing numeric fields (acc, pipeline, unroll, reg); a bare
+        # endswith("_1") would also catch the reg=0 unroll=1 kernel (..._0_0_1).
+        ll128 = {
+            s
+            for s in self._sendrecv_decls()
+            if re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+_1", s)
+        }
+        self.assertEqual(
+            set(),
+            ll128 - set(guarded),
+            "LL128 SendRecv kernels emitted without the gfx942/gfx950 guard: %s"
+            % sorted(ll128 - set(guarded)),
+        )
+        # The legacy LL kernel must stay unguarded (built on every arch): its
+        # bare declaration line has no surrounding #if.
+        self.assertRegex(
+            self.header,
+            r"\n__device__ void ncclDevFunc_SendRecv_\w+?_\d+_\d+_\d+\(\);\n",
+            "legacy LL SendRecv (reg=0) declaration should be unguarded",
+        )
+
+    def test_sendrecv_ll128_excludes_gfx1250_only_unrolls(self):
+        # func_validate drops SendRecv reg=1 for the gfx1250-only unrolls
+        # (8/16/32) since LL128 send/recv targets gfx942/gfx950. Emitting them
+        # would reference symbols that are never compiled (undefined at link).
+        decls = self._sendrecv_decls()
+        bad = sorted(s for s in decls if re.search(r"_(?:8|16|32)_1$", s))
+        self.assertEqual(
+            [], bad, "LL128 SendRecv (reg=1) must not be generated for unrolls 8/16/32: %s" % bad
+        )
+        # The legacy LL kernel (reg=0) still covers those unrolls.
+        self.assertTrue(
+            any(re.fullmatch(r"ncclDevFunc_SendRecv_\w+?_\d+_\d+_(?:8|16|32)", s) for s in decls),
+            "legacy LL SendRecv (reg=0) missing for unrolls 8/16/32",
+        )
 
     def test_no_obsolete_table_omit_macro(self):
         # RCCL_DEVICE_TABLE_OMIT was retired by the static-table change.

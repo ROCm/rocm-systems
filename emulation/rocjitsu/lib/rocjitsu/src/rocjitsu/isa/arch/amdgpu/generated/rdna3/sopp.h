@@ -280,7 +280,6 @@ public:
   STtracedataImmSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
-  Operand m0;
 };
 
 class SIcacheInvSopp : public Sopp {

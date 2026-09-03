@@ -1,8 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk.hpp"
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -17,13 +19,14 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/sdk/tracing-config-deps.hpp"
+#include "core/sdk/tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
-#include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
@@ -62,8 +65,8 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
@@ -89,6 +92,13 @@ namespace rocprofiler_sdk
 {
 namespace
 {
+// Per-name imports (not a merged alias) for the production tracing_config<Wrapper,
+// Externals> instantiation used below: keeps both template arguments visible at each call
+// site instead of collapsing them behind an opaque name.
+using rocprofiler_sdk::default_externals;
+using rocprofiler_sdk::tracing_config;
+using rocprofiler_sdk::wrapper;
+
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
@@ -708,7 +718,7 @@ tool_tracing_callback_stop(
 {
     auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
 
-    std::uint64_t begin_ts = user_data->value;
+    const std::uint64_t begin_ts = user_data->value;
 
     if(get_use_timemory())
     {
@@ -793,14 +803,14 @@ tool_tracing_callback_stop(
     rocprofiler_iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 2, &args);
 
-    auto          call_stack = get_backtrace(_bt_data);
-    std::uint64_t _beg_ts    = begin_ts;
-    std::uint64_t _end_ts    = ts;
+    auto                call_stack = get_backtrace(_bt_data);
+    const std::uint64_t _beg_ts    = begin_ts;
+    const std::uint64_t _end_ts    = ts;
 
     {
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
-        std::string args_str = get_args_string(args);
+        const std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
                      trait::name<CategoryT>::value, _name);
     }
@@ -1181,7 +1191,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
                             rocprofiler_timestamp_t ts)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1226,7 +1236,7 @@ ompt_tracing_callback_stop(
     rocprofiler_timestamp_t               ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1339,13 +1349,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             case ROCPROFILER_OMPT_ID_implicit_task:
             {
-                int flag = payload_data->args.implicit_task.flags;
+                const int flag = payload_data->args.implicit_task.flags;
                 if(flag & ompt_task_initial) return;  // Skips both the start and end
                 break;
             }
             case ROCPROFILER_OMPT_ID_thread_begin:
             {
-                ompt_thread_t thread_type = payload_data->args.thread_begin.thread_type;
+                const ompt_thread_t thread_type =
+                    payload_data->args.thread_begin.thread_type;
                 if(thread_type == ompt_thread_initial) return;
                 break;
             }
@@ -2079,7 +2090,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                         header->payload);
 
-                std::uint64_t _stream_id = get_stream_id(record).handle;
+                const std::uint64_t _stream_id = get_stream_id(record).handle;
                 {
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);
@@ -2087,7 +2098,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
-#if(ROCPROFILER_VERSION >= 10000)
+#if(ROCPROFILER_VERSION >= 10202)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
             {
                 auto* record =
@@ -2470,11 +2481,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains = rocprofiler_sdk::get_callback_domains();
-    auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
-    auto _counter_events   = rocprofiler_sdk::get_rocm_events();
-    auto _version          = rocprofiler_sdk::get_version();
-    if(_version.formatted == 0)
+    using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
+    using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
+
+    sdk_backend_t::check_version_compatibility();
+
+    auto _callback_domains = tracing_config_t::get_callback_domains();
+    auto _buffered_domain  = tracing_config_t::get_buffered_domains();
+    auto _counter_events   = config::get_rocm_counter_events();
+    auto _version          = tracing_config_t::get_version();
+    if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -2538,9 +2554,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = rocprofiler_sdk::get_operations(itr);
+            auto _ops = tracing_config_t::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr, rocprofiler_sdk::get_backtrace_operations(itr));
+                itr, tracing_config_t::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));
@@ -2613,14 +2629,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->primary_ctx, buffer_size, watermark,
             ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
             &_data->memory_alloc_buffer));
+
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
             LOG_CRITICAL("Failed to create memory allocation buffer");
             ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
-        auto _ops =
-            rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
@@ -2628,7 +2643,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10000)
+#if(ROCPROFILER_VERSION >= 10202)
     // Initialize KFD event metadata
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
        _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||

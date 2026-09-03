@@ -3,9 +3,9 @@
 
 #include "rocjitsu/code/relocation_function_table.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -18,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -263,7 +264,259 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
                        std::vector<RelocationTableDispatch> *dispatches,
                        std::vector<PcRelativeAddressBuilder> *address_builders);
 
+/// @brief Whether @p vaddr falls inside a section the loader maps.
+///
+/// @details `SHT_NOBITS` still counts: `.bss` occupies no file bytes but is allocated and
+/// writable at run time, so a relocation destined there is a real stored pointer.
+[[nodiscard]] bool vaddr_in_allocated_section(std::span<const Elf64_Shdr> sections,
+                                              uint64_t vaddr) {
+  for (const Elf64_Shdr &section : sections) {
+    if ((section.sh_flags & SHF_ALLOC) == 0 || section.sh_size == 0)
+      continue;
+    if (vaddr >= section.sh_addr && vaddr - section.sh_addr < section.sh_size)
+      return true;
+  }
+  return false;
+}
+
+/// @brief Section-header index of the code object's single `.text`.
+///
+/// @details Symbol values are only interpretable against the section a symbol belongs to, so every
+/// symbol walk here needs the index to compare `st_shndx` against. The section header table is the
+/// authority: match the header whose file offset, address and size are all the ones the parsed
+/// `.text` reports.
+[[nodiscard]] std::optional<size_t> text_section_index(std::span<const Elf64_Shdr> sections,
+                                                       const Section &text) {
+  for (size_t index = 0; index < sections.size(); ++index) {
+    const Elf64_Shdr &section = sections[index];
+    if (section.sh_offset == text.sectionOffset() && section.sh_addr == text.vaddr() &&
+        section.sh_size == text.size())
+      return index;
+  }
+  return std::nullopt;
+}
+
 } // namespace
+
+bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
+  // The suffix AMDHSA gives a kernel's descriptor object, matching amdgpu_code_object.cpp and
+  // kernel_symbol.cpp rather than restating the contract in a third place.
+  constexpr std::string_view kKernelDescriptorSymbolSuffix = ".kd";
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return false;
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return false;
+  const Section &text = *object.text_sections().front();
+  const auto text_index = text_section_index(sections, text);
+  if (!text_index)
+    return false;
+
+  // One symbol's name, bounded at the end of its string table so an unterminated string cannot
+  // run past it.
+  const auto name_at = [&](const Elf64_Shdr &strtab, uint32_t offset) -> std::string_view {
+    if (strtab.sh_type != SHT_STRTAB || !range_in_image(image, strtab.sh_offset, strtab.sh_size) ||
+        offset >= strtab.sh_size)
+      return {};
+    const char *first = reinterpret_cast<const char *>(image.data() + strtab.sh_offset + offset);
+    const size_t bound = static_cast<size_t>(strtab.sh_size - offset);
+    return std::string_view(first, ::strnlen(first, bound));
+  };
+
+  // The two tables have different string tables, so gather every descriptor name across both
+  // before asking whether a function has one: a function is a kernel if a descriptor for it
+  // exists anywhere in the object, not merely in the table that happens to name the function.
+  std::unordered_set<std::string_view> descriptor_names;
+  std::vector<std::string_view> function_names;
+  bool saw_symbol_table = false;
+  for (const Elf64_Shdr &symtab : sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+      continue;
+    if (symtab.sh_link >= sections.size())
+      return false;
+    const Elf64_Shdr &strtab = sections[symtab.sh_link];
+    saw_symbol_table = true;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
+        return false;
+      const std::string_view name = name_at(strtab, symbol.st_name);
+      if (name.empty())
+        continue;
+      if (name.ends_with(kKernelDescriptorSymbolSuffix)) {
+        descriptor_names.insert(name.substr(0, name.size() - kKernelDescriptorSymbolSuffix.size()));
+        continue;
+      }
+      if (elf_symbol_type(symbol.st_info) == kElfSymbolTypeFunc && symbol.st_size != 0 &&
+          symbol.st_shndx == *text_index) {
+        function_names.push_back(name);
+      }
+    }
+  }
+  if (!saw_symbol_table)
+    return false;
+
+  return std::ranges::all_of(
+      function_names, [&](std::string_view name) { return descriptor_names.contains(name); });
+}
+
+static std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
+                                                                   bool externally_resolvable_only);
+
+std::vector<uint64_t>
+discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object) {
+  std::vector<uint64_t> offsets;
+  for (uint64_t offset :
+       discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/true))
+    offsets.push_back(offset);
+  return offsets;
+}
+
+std::vector<uint64_t> discover_text_function_symbol_offsets(const AmdGpuCodeObject &object) {
+  return discover_text_function_symbol_offsets(object, /*externally_resolvable_only=*/false);
+}
+
+static std::vector<uint64_t>
+discover_text_function_symbol_offsets(const AmdGpuCodeObject &object,
+                                      bool externally_resolvable_only) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return {};
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return {};
+  const Section &text = *object.text_sections().front();
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+  // Without the section index a symbol value cannot be interpreted. Refuse to guess: returning
+  // nothing costs the caller its extra split points, while guessing would invent them.
+  const auto text_index = text_section_index(sections, text);
+  if (!text_index)
+    return {};
+
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &symtab : sections) {
+    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
+        symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+      continue;
+    const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Sym symbol{};
+      if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol))
+        continue;
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0)
+        continue;
+      if (externally_resolvable_only &&
+          !elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other))
+        continue;
+      // The symbol has to belong to `.text` before its value means anything here. This is what
+      // makes the ET_REL branch below safe: st_value is section-relative there, so a sized
+      // function in some other section would otherwise be read as an offset near the start of
+      // `.text` and split a real block. SHN_UNDEF and the other reserved indices are excluded by
+      // the same test, since none of them equal the text index.
+      if (symbol.st_shndx != *text_index)
+        continue;
+      // ET_REL symbol values are already section-relative; every other kind is a virtual address.
+      uint64_t offset = symbol.st_value;
+      if (ehdr.e_type != ET_REL) {
+        if (symbol.st_value < text_vaddr)
+          continue;
+        offset = symbol.st_value - text_vaddr;
+      }
+      if (offset >= text_size || (offset % sizeof(uint32_t)) != 0)
+        continue;
+      offsets.push_back(offset);
+    }
+  }
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+std::vector<uint64_t>
+discover_relative_text_addend_targets(const AmdGpuCodeObject &object,
+                                      std::span<const uint64_t> function_entry_offsets) {
+  const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
+  const std::span<const uint8_t> image(bytes, object.image_size());
+  Elf64_Ehdr ehdr{};
+  if (!read_object(image, 0, ehdr) || ehdr.e_type != ET_DYN ||
+      ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_in_image(image, ehdr.e_shoff,
+                      static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
+    return {};
+
+  std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+
+  if (object.text_sections().size() != 1)
+    return {};
+  const Section &text = *object.text_sections().front();
+  const uint64_t text_vaddr = text.vaddr();
+  const uint64_t text_size = text.size();
+
+  std::vector<uint64_t> targets;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !range_in_image(image, relocs.sh_offset, relocs.sh_size))
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela rela{};
+      if (!read_object(image, relocs.sh_offset + index * sizeof(Elf64_Rela), rela))
+        continue;
+      // RELATIVE64 is the symbol-less form: the loader stores load_bias + r_addend, so a nonzero
+      // symbol index means some other relocation kind that reuses the type number, not a stored
+      // pointer whose value this pass can predict.
+      if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || elf_reloc_sym(rela.r_info) != 0 ||
+          rela.r_addend < 0)
+        continue;
+      // The destination has to be memory the loader actually writes. A relocation carried only by
+      // non-loaded metadata never produces a runtime code pointer, so admitting it would let the
+      // code-address audit believe a dynamic transfer is accounted for when nothing holds its
+      // target -- exactly the claim that permits an otherwise unresolved indirect branch.
+      if (!vaddr_in_allocated_section(sections, rela.r_offset))
+        continue;
+      const auto addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < text_vaddr)
+        continue;
+      const uint64_t offset = addend - text_vaddr;
+      if (offset >= text_size || (offset % sizeof(uint32_t)) != 0)
+        continue;
+      // Only a function entry may be reported. Callers turn each target into a block leader and an
+      // adopted root, and an adopted root is seeded with the ABI's architectural entry state --
+      // both of which are claims about a function boundary, and neither of which is true of a
+      // mid-function label a pointer happens to name. A target with no sized STT_FUNC symbol at
+      // exactly that offset is therefore left out rather than guessed at, which keeps it
+      // unadopted; relocate_relative_text_addends() then finds no placement for its addend and
+      // refuses the object, which is the conservative outcome.
+      if (!std::ranges::binary_search(function_entry_offsets, offset))
+        continue;
+      targets.push_back(offset);
+    }
+  }
+  std::ranges::sort(targets);
+  targets.erase(std::ranges::unique(targets).begin(), targets.end());
+  return targets;
+}
 
 std::vector<RelocationFunctionTable>
 discover_relocation_function_tables(const AmdGpuCodeObject &object) {
@@ -320,6 +573,8 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
     for (size_t index = 0; index < count; ++index) {
       Elf64_Rela rela{};
       if (!read_object(image, relocations.sh_offset + index * sizeof(Elf64_Rela), rela))
+        continue;
+      if (!elf_relocation_place_is_allocated(ehdr, sections, relocations, rela.r_offset))
         continue;
       const uint32_t type = elf_reloc_type(rela.r_info);
       if (type == R_AMDGPU_RELATIVE64) {

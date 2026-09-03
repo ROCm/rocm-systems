@@ -12,7 +12,7 @@
 #include "common/path.hpp"
 #include "core/demangler.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <link.h>
@@ -568,7 +568,7 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
     {
         if(!obj) continue;
 
-        std::string binary_path = obj->pathName();
+        const std::string binary_path = obj->pathName();
         // Open Symtab directly for comprehensive symbol access
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))
@@ -609,7 +609,7 @@ is_text_file(const std::string& filename)
     char             buffer[buffer_size];
     while(_file.read(buffer, sizeof(buffer)))
     {
-        for(char itr : buffer)
+        for(const char itr : buffer)
         {
             if(itr == '\0') return false;
         }

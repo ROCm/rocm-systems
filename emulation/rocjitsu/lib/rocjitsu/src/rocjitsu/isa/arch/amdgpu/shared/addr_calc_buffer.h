@@ -11,6 +11,7 @@
 /// type so they work with any ISA family whose encoding struct exposes the
 /// required field names.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -46,25 +47,33 @@ constexpr uint64_t buffer_total_offset(uint32_t index, uint32_t stride, uint32_t
 ///           inst.offset.
 template <typename MubufInst>
 void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
-  auto &cu = wf.cu();
+  RegisterAccess regs(wf);
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
-  uint32_t sb = wf.sgpr_alloc().base + inst.srsrc * 4;
-  uint32_t srd0 = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  uint32_t srd1 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 1);
-  uint32_t srd2 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 2);
-  uint32_t srd3 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 3);
+  const uint32_t sb_sel = inst.srsrc * 4;
+  if (!amdgpu::scalar_selector_range_is_backed(wf, sb_sel, 4)) {
+    reject_vector_memory_access(d);
+    return;
+  }
+  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
+  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
+  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
   // soffset field: 0-105 = SGPR index, 128 (0x80) = inline constant 0.
-  uint32_t soffset_val =
-      (inst.soffset == 0x80)
-          ? 0u
-          : amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+  uint32_t soffset_val = 0;
+  if (inst.soffset != 0x80) {
+    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
+    if (!soffset) {
+      reject_vector_memory_access(d);
+      return;
+    }
+    soffset_val = *soffset;
+  }
   // GFX9 buffer bounds checking: OOB loads return 0, OOB stores are dropped.
   // Per ISA spec (structured mode, stride=0): num_records is the buffer size
   // in bytes. The OOB check uses voffset + inst_offset only — soffset is NOT
@@ -96,7 +105,6 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   bool oob_raw = (srd3 >> 31) & 1;
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  RegisterAccess regs(cu);
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.idxen || inst.offen) {
     uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
@@ -158,29 +166,36 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
 ///           inst.offset.
 template <typename MtbufInst>
 void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
-  auto &cu = wf.cu();
+  RegisterAccess regs(wf);
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
-  uint32_t sb = wf.sgpr_alloc().base + inst.srsrc * 4;
-  uint32_t srd0 = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  uint32_t srd1 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 1);
-  uint32_t srd2 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 2);
-  uint32_t srd3 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 3);
+  const uint32_t sb_sel = inst.srsrc * 4;
+  if (!amdgpu::scalar_selector_range_is_backed(wf, sb_sel, 4)) {
+    reject_vector_memory_access(d);
+    return;
+  }
+  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
+  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
+  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
-  uint32_t soffset_val =
-      (inst.soffset == 0x80)
-          ? 0u
-          : amdgpu::RegisterAccess(cu).read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+  uint32_t soffset_val = 0;
+  if (inst.soffset != 0x80) {
+    auto soffset = amdgpu::try_read_scalar_selector(wf, inst.soffset);
+    if (!soffset) {
+      reject_vector_memory_access(d);
+      return;
+    }
+    soffset_val = *soffset;
+  }
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
   bool oob_raw = (srd3 >> 31) & 1;
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  RegisterAccess regs(cu);
   std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.idxen || inst.offen) {
     uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;

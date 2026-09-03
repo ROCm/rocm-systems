@@ -15,6 +15,7 @@
 /// The wide MAD cases also compare the explicit SGPR-pair carry/overflow mask.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -151,7 +152,7 @@ void check_revshift(const char *name, uint32_t op, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3_encode(op, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -187,7 +188,7 @@ void check_lshl_add(uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
     vop3_encode(/*op=*/520, kDstVgpr, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_lshl_add_u64 decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -269,7 +270,7 @@ void check_mad64(const char *name, uint32_t op, bool is_signed, uint64_t exec) {
     EXPECT_EQ(sb % 2u, 0u) << name << ": sgpr_alloc base not pair-aligned";
     uint32_t words[2] = {0u, 0u};
     vop3_sdstenc_encode(op, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     uint32_t vb = fx.wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {

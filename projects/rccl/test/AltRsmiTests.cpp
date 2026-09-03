@@ -454,6 +454,73 @@ TEST(AltRsmiTest, ARSMIInitDefault) {
   );
 }
 
+TEST(AltRsmiTest, ARSMIInitCalledTwiceIsShortCircuited) {
+  RUN_ISOLATED_TEST(
+    "ARSMIInitCalledTwiceIsShortCircuited",
+    []() {
+      setupTestEnvironment();
+
+      ASSERT_EQ(ARSMI_init(), 0);
+      uint32_t num_devices = 0;
+      ASSERT_EQ(ARSMI_get_num_devices(&num_devices), 0);
+      ASSERT_EQ(num_devices, 2);
+
+      // Add a third node behind ARSMI's back before calling init again.
+      // Without this the test cannot fail: ARSMI_allSystemNodes is a local
+      // rebuilt from scratch on every call, so a re-scan of an unchanged
+      // directory writes the same ARSMI_num_devices and is indistinguishable
+      // from the early return. Changing the directory is what makes "did not
+      // re-scan" observable -- a re-scan would report 3 devices here.
+      createDirectory("2");
+      createFile("2/gpu_id", "4098\n");
+      createFile("2/properties",
+                 "unique_id 16336014475442738427\n"
+                 "location_id 23554\n"
+                 "domain 0\n"
+                 "vendor_id 4098\n");
+
+      // Second call must hit the "already initialized" early return
+      // (ARSMI_num_devices > 0) without re-scanning the KFD nodes directory.
+      const int secondInit = ARSMI_init();
+      const int getRc = ARSMI_get_num_devices(&num_devices);
+
+      // Drop the extra node before asserting. kTestKFDPath is shared, not
+      // PID-scoped, and a failed ASSERT returns without reaching
+      // cleanupTestEnvironment -- leaving a third node behind would make every
+      // later test that expects 2 devices fail for an unrelated reason.
+      removeDirectoryImpl(std::string(kTestKFDPath) + "/2");
+
+      ASSERT_EQ(secondInit, 0);
+      ASSERT_EQ(getRc, 0);
+      ASSERT_EQ(num_devices, 2);
+
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, ARSMIInitBadKfdPathFailsToOpenDir) {
+  RUN_ISOLATED_TEST(
+    "ARSMIInitBadKfdPathFailsToOpenDir",
+    []() {
+      AltRsmiTestUtils::ResetState();
+
+      // PID-scoped like kTestDrmBasePath, and via temp_directory_path() rather
+      // than a hardcoded /tmp: the path must be guaranteed absent, including
+      // when several CI jobs share a node.
+      const std::string missingPath =
+          std::filesystem::temp_directory_path().string() +
+          "/rccl_alt_rsmi_missing_" + std::to_string(getpid());
+      ASSERT_FALSE(std::filesystem::exists(missingPath));
+      AltRsmiTestUtils::SetNodesPath(missingPath);
+
+      EXPECT_EQ(ARSMI_init(), 1);
+
+      AltRsmiTestUtils::ResetState();
+    }
+  );
+}
+
 TEST(AltRsmiTest, ARSMIInitMissingIoLinksPropertiesFile) {
   RUN_ISOLATED_TEST(
     "ARSMIInitMissingIoLinksPropertiesFile",
@@ -1680,6 +1747,52 @@ TEST(AltRsmiTest, FabricInfo_AddrModeUnknown) {
       int result = ARSMI_get_fabric_info(0, &info);
       ASSERT_EQ(result, 0);
       ASSERT_EQ(info.addr_mode, ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, FabricInfo_FakePciFunctionFallsBackToFn0) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_FakePciFunctionFallsBackToFn0",
+    []() {
+      setupTestEnvironment();
+      // KFD location_id 23553 = 0x5C01 → bus 0x5c, device 0, function 1.
+      // DPX/XCP HIP names this as a GPU BDF, but the only DRM PCI slot is .0.
+      createDirectory("2");
+      createFile("2/gpu_id", "8192\n");
+      createFile("2/properties",
+                 "unique_id 99\n"
+                 "location_id 23553\n"
+                 "domain 0\n"
+                 "vendor_id 4098\n");
+      createDirectory("2/io_links");
+      AltRsmiTestUtils::ResetState();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ASSERT_EQ(ARSMI_init(), 0);
+      setupDrmCard(0, "0000:5c:00.0");
+      setupUalink(0, "UALoE", "active", 3, 1000, 10, 1, 0, 2, "source-aliasing", "");
+
+      uint32_t n = 0;
+      ASSERT_EQ(ARSMI_get_num_devices(&n), 0);
+      uint32_t fakeFn = n;
+      for (uint32_t i = 0; i < n; i++) {
+        uint64_t bdf = 0;
+        ASSERT_EQ(ARSMI_dev_pci_id_get(i, &bdf), 0);
+        if ((bdf & 0x7) == 1) {
+          fakeFn = i;
+          break;
+        }
+      }
+      ASSERT_LT(fakeFn, n);
+
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(fakeFn, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.supported, 1);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UALOE);
       removeDrmSandbox();
       cleanupTestEnvironment();
     }

@@ -131,12 +131,19 @@ To use ``rocprofv3`` for application tracing, run:
     rocprofv3 <tracing_option> -- <application_path>
 
 
-.. note::
+.. warning::
 
-  All the tracing examples below use the ``--output-format csv`` option to generate output in CSV format.
-  However, the default output format is ``rocpd`` (SQLite3 database). You can simply omit the ``--output-format`` option to generate output in the default format.
-  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module.
-  To understand how to convert ``rocpd`` output to other formats, see :ref:`using-rocpd-output-format`.
+  The tracing examples below use ``--output-format csv`` to demonstrate the CSV data layout.
+  Direct CSV, PFTrace (Perfetto), and OTF2 output from ``rocprofv3`` is deprecated and might omit data for some tracing features, including hipFILE and rocSHMEM tracing.
+  Use the default ``rocpd`` format for data collection, then use ``rocpd convert`` when CSV output is needed:
+
+  .. code-block:: bash
+
+     rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
+     rocpd convert -i <output-file>_results.db --output-format csv
+
+  You can omit ``--output-format rocpd`` because ``rocpd`` is the default.
+  For more conversion options, see :ref:`using-rocpd-output-format`.
 
 HIP trace
 +++++++++++
@@ -612,9 +619,11 @@ hipFILE trace
 
 .. code-block:: shell
 
-    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
+    rocprofv3 --hipfile-trace -- <application_path>
+    rocpd convert -i <output-file>_results.db --output-format csv
 
-The above command stores hipFILE API records in the JSON results file and the rocpd database file.
+The first command stores hipFILE API records in the default rocpd database.
+hipFILE is emitted directly only to the JSON and ``rocpd`` formats; use ``rocpd convert`` to produce CSV, Perfetto, or OTF2 output from the database.
 
 The hipFILE records include API arguments. Pointers are not dereferenced unless argument
 iteration is configured to do so.
@@ -1140,6 +1149,41 @@ In multi-pass counter collection, each pass generates its output in a separate `
 
    - Each pass runs the application from start to finish.
 
+Kernel replay (beta)
+++++++++++++++++++++
+
+By default, multiple ``--pmc`` groups are collected using *application replay*: the application is re-run from start to finish once per counter group (as described in the preceding section). ``--replay-mode kernel --kernel-replay-beta-enabled`` switches to *kernel replay* instead, collecting all ``--pmc`` groups within a **single** application run. Each kernel dispatch is replayed once per counter group in-process. Before replay, rocprofv3 snapshots every tracked coarse-grained device allocation owned by that agent, plus discovered module-scope device variables, and restores that snapshot between passes so every group observes identical captured inputs.
+
+This is useful when re-running the whole application per group is expensive or non-deterministic. Without ``--replay-mode kernel``, multiple ``--pmc`` groups use application replay as usual.
+
+Because capture is per-agent rather than per-kernel -- replay makes no attempt to determine which allocations a kernel actually reaches -- host memory use during a replayed dispatch is proportional to the agent's entire tracked device footprint, and both the initial snapshot and every restore between passes scale with it.
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
+
+The preceding command collects both counter groups in a single run of ``<application_path>``, replaying each dispatch once per group instead of running the application twice.
+
+.. note::
+
+   - ``--replay-mode kernel`` requires ``--pmc`` and ``--kernel-replay-beta-enabled``.
+
+   - ``--replay-mode kernel`` collects counters only. It cannot be combined with ``--att``, PC sampling, or ``--spm``, and rocprofv3 rejects those combinations. Counter groups are the only thing that changes from one pass to the next, so any other service would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
+
+   - This feature is in beta. The flags, the SDK API, and the output schema may change.
+
+   - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent.
+
+   - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
+
+   - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+
+   - HIP graph launches are not replayed (warn once, run once).
+
+   - Only single-packet, single-dispatch submissions are replayed. A multi-packet submission runs once without replay and warns once.
+
+For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay-rocprofv3`. Tool authors should see :ref:`using-kernel-replay` and :ref:`kernel-replay-sdk-api`.
+
 .. _extra-counters:
 
 Extra counters
@@ -1491,27 +1535,38 @@ Output formats
 ----------------
 
 - rocpd (SQLite3 Database (Default))
-- CSV
+- CSV (direct output is deprecated)
 - JSON (Custom format for programmatic analysis only)
-- PFTrace (Perfetto trace for visualization with Perfetto)
-- OTF2 (Open Trace Format for visualization with compatible third-party tools)
+- PFTrace (Perfetto trace; direct output is deprecated)
+- OTF2 (Open Trace Format; direct output is deprecated)
 
 
-The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
+The default and recommended output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
 To specify the particular output format, use the ``--output-format`` option followed by the desired format.
 
-.. code-block::
+.. warning::
+
+   Direct CSV, PFTrace, and OTF2 generation by ``rocprofv3`` is deprecated.
+   These direct generators might not produce output for every tracing feature, including hipFILE and rocSHMEM tracing.
+   Collect to rocpd and convert the database instead:
+
+   .. code-block:: bash
+
+      rocprofv3 <tracing_option> --output-format rocpd -- <application_path>
+      rocpd convert -i <output-file>_results.db --output-format csv
+
+.. code-block:: bash
 
    rocprofv3 -i input.txt --output-format json -- <application_path>
 
-Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2, rocpd`` enables all four output formats for the run.
+Format selection is case-insensitive and multiple output formats are supported. For example, ``--output-format json rocpd`` enables both JSON and rocpd output for the run.
 
-For PFTrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+For PFTrace trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format pftrace`` and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
 
-For OTF2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
+For OTF2 trace visualization, convert the rocpd database using ``rocpd convert -i <output-file>_results.db --output-format otf2`` and open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
 
 .. note::
-  For large trace files (> 10GB), it's recommended to use OTF2 format.
+  For large converted trace files (> 10GB), it's recommended to use OTF2 format.
 
 JSON output schema
 ++++++++++++++++++++

@@ -40,7 +40,7 @@ to_lower(std::string_view s)
 {
     std::string result;
     result.reserve(s.size());
-    for(char c : s)
+    for(const char c : s)
     {
         result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
@@ -163,7 +163,7 @@ public:
             return *state().instance_ptr;
         }
 
-        std::lock_guard<std::mutex> lock(state().init_mutex);
+        const std::lock_guard<std::mutex> lock(state().init_mutex);
         if(!state().initialized.load(std::memory_order_relaxed))
         {
             state().instance_ptr = create_logger(state().log_lock);
@@ -255,7 +255,7 @@ private:
         // process sampler repeatedly reach into the non-thread-safe TZ/environ path.
         ::tzset();
 
-        logger_settings_t logger_settings;
+        const logger_settings_t logger_settings;
 
         std::vector<spdlog::sink_ptr> sinks;
 

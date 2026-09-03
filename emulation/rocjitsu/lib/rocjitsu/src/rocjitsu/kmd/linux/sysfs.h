@@ -71,8 +71,9 @@ public:
     uint32_t l2_assoc = 16;
 
     // Engines and queues
-    uint32_t num_sdma_engines = 2;
+    uint32_t num_sdma_engines = 0;
     uint32_t num_sdma_xgmi_engines = 0;
+    uint32_t num_sdma_queues_per_engine = 0;
     uint32_t num_cp_queues = 128;
     uint32_t max_engine_clk_fcompute = 2100; // MHz
 
@@ -109,9 +110,8 @@ public:
     /// recovers NumShaderBanks as array_count / simd_arrays_per_engine and
     /// rocdbgapi recovers the engine count as
     /// array_count * num_xcc / simd_arrays_per_engine, so both invert this
-    /// product to get num_shader_engines back. Deriving it here keeps the
-    /// configs stating the geometry they model -- an MI350X XCD has four
-    /// shader engines of two arrays, so num_shader_engines is 4, not 8.
+    /// product to get num_shader_engines back. Deriving the array count from
+    /// the configured geometry keeps these representations consistent.
     uint32_t array_count_per_xcc() const {
       return num_shader_engines * effective_arrays_per_engine();
     }
@@ -148,9 +148,6 @@ public:
 
   /// @brief Remove the generated directories.
   void cleanup();
-
-  /// @brief Drop ownership of inherited paths without removing them.
-  void release_after_fork();
 
 private:
   std::string topology_dir_;

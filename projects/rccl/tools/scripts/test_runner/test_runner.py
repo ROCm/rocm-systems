@@ -90,21 +90,31 @@ def main():
 
             # Print skip messages for disabled or filtered-out test suites upfront.
             # --suite-name uses gtest-style glob filtering (see glob_filter_matches).
+            # --scope smoke restricts the run to suites marked "smoke": true in
+            # the config; 'all' (the default) or 'nightly' run all enabled suites.
+            smoke_only = args.scope == 'smoke'
+
             print()
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
                 enabled = suite["suite_details"].get("enabled", True)
+                is_smoke = suite["suite_details"].get("smoke", False)
                 if not enabled:
                     print(f"SKIP: Test suite '{suite_name}' is disabled")
+                elif smoke_only and not is_smoke:
+                    print(f"SKIP: Test suite '{suite_name}' (not in --scope smoke)")
                 elif args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
                     print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
-            # Run only enabled (and name-matched) test suites
+            # Run only enabled (scope- and name-matched) test suites
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
                 enabled = suite["suite_details"].get("enabled", True)
+                is_smoke = suite["suite_details"].get("smoke", False)
                 if not enabled:
+                    continue
+                if smoke_only and not is_smoke:
                     continue
                 if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
                     continue

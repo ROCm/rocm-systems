@@ -135,8 +135,10 @@ get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 {
     auto _uuid = core::perfetto::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
-    std::lock_guard<std::mutex> _lk{ core::perfetto::get_perfetto_track_uuids_mutex() };
-    auto&                       _track_uuids = core::perfetto::get_perfetto_track_uuids();
+    const std::lock_guard<std::mutex> _lk{
+        core::perfetto::get_perfetto_track_uuids_mutex()
+    };
+    auto& _track_uuids = core::perfetto::get_perfetto_track_uuids();
 
     const auto _parent = core::perfetto::get_active_process_track();
     if(_track_uuids.find(_uuid) == _track_uuids.end())
@@ -857,7 +859,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
         return false;
     };
 
-    bool dispatched =
+    const bool dispatched =
         (try_category(category::host{}) || try_category(category::user{}) ||
          try_category(category::python{}) || try_category(category::mpi{}) ||
          try_category(category::pthread{}) || try_category(category::kokkos{}) ||

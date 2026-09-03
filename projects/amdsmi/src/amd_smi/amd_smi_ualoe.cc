@@ -1,27 +1,12 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
+#include "amd_smi/impl/amd_smi_ualoe.h"
+
+#include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
+#include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -38,6 +23,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <limits>
 #include <unordered_map>
 
 /**
@@ -604,6 +590,19 @@ static amdsmi_status_t convert_errno_to_amdsmi_status(int errno_val) {
   }
 }
 
+// The reinterpret_cast in amdsmi_alloc_fabric_telemetry() below aliases the UALoE
+// telemetry allocation onto the amdsmi structs. These guards fail the build if a
+// UALoE re-sync diverges the element layouts or drops below amd-smi's category count.
+static_assert(static_cast<int>(AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX) <=
+                  static_cast<int>(UALOE_TELEMETRY_CATEGORY_MAX),
+              "amdsmi fabric telemetry categories must not exceed UALoE categories");
+static_assert(sizeof(amdsmi_fabric_telemetry_item_t) == sizeof(ualoe_telemetry_item_t),
+              "amdsmi/UALoE telemetry item layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_instance_t) == sizeof(ualoe_telemetry_instance_t),
+              "amdsmi/UALoE telemetry instance layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_dataset_t) == sizeof(ualoe_telemetry_dataset_t),
+              "amdsmi/UALoE telemetry dataset layout diverged");
+
 amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                               uint32_t category_mask,
                                               amdsmi_fabric_telemetry_t** telemetry) {
@@ -615,6 +614,12 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->AllocFabricTelemetry(category_mask, telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -635,7 +640,9 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
     return convert_errno_to_amdsmi_status(ret);
   }
 
-  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
+  // Element layouts match (see the static_asserts above) and UALoE owns the
+  // allocation; amd-smi reads only categories [0, AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX),
+  // so aliasing the larger UALoE struct onto the amdsmi struct is safe.
   *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -651,6 +658,12 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetFabricTelemetryData(telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -684,6 +697,12 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->FreeFabricTelemetry(telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -731,6 +750,12 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
   outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle(): " << device;
   LOG_DEBUG(outstream);
 
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetGpuFabricInfo(info);
+  }
+#endif
+
   // Serialize with other per-GPU UALoE/fabric paths; fabric info is 'sysfs-only'
   // and does not require a successful ualoe_open() netlink session (telemetry does)
   // ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
@@ -738,4 +763,115 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
   status_code = device->get_fabric_info_from_ualoe(*info);
 
   return status_code;
+}
+
+// ualoe HELIOS_P=0/HELIOS_R=1/TITAN=2 do NOT numerically match
+// amdsmi UNKNOWN=0/HELIOS_P=1/HELIOS_R=2/TITAN=3 (UNKNOWN sentinel shifts by +1).
+// These static_asserts catch either enum being renumbered without updating the
+// switch below.
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_P == 0, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_R == 1, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_TITAN == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN == 0, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P == 1, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_TITAN == 3, "map_ualoe_tray_type assumes this value");
+
+static amdsmi_compute_tray_type_t map_ualoe_tray_type(uint32_t raw_tray_type) {
+  switch (static_cast<ualoe_compute_tray_type_e>(raw_tray_type)) {
+    case UALOE_COMPUTE_TRAY_TYPE_HELIOS_P:
+      return AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P;
+    case UALOE_COMPUTE_TRAY_TYPE_HELIOS_R:
+      return AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R;
+    case UALOE_COMPUTE_TRAY_TYPE_TITAN:
+      return AMDSMI_COMPUTE_TRAY_TYPE_TITAN;
+    default:
+      return AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+  }
+}
+
+static amdsmi_status_t get_gpu_identity_via_ualoe(amd::smi::AMDSmiGPUDevice* device,
+                                                  uint32_t& phys_id,
+                                                  amdsmi_tray_info_t& tray_info) {
+  if (device == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  phys_id = std::numeric_limits<uint32_t>::max();
+  tray_info.max_acc_per_tray = std::numeric_limits<uint32_t>::max();
+  tray_info.tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+
+  // Trigger the lazy IFoE/UALoE session open (see get_ualoe_handle()).
+  ualoe_handle_t handle = device->get_ualoe_handle();
+  if (handle == -1) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  ualoe_gpu_identity_t identity{};
+  int ret = ualoe_get_gpu_identity(handle, &identity);
+  if (ret == ENOTSUP || ret == EOPNOTSUPP) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != 0) {
+    return convert_errno_to_amdsmi_status(ret);
+  }
+
+  phys_id = identity.phys_id;
+  tray_info.max_acc_per_tray = identity.num_gpus;
+  tray_info.tray_type = map_ualoe_tray_type(static_cast<uint32_t>(identity.tray_type));
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t get_physical_acc_id_from_ualoe(amd::smi::AMDSmiGPUDevice* device,
+                                               uint32_t* phys_id) {
+  if (device == nullptr || phys_id == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amdsmi_tray_info_t unused_tray_info{};
+  return get_gpu_identity_via_ualoe(device, *phys_id, unused_tray_info);
+}
+
+// Isolates the per-device mutex guard so a busy device only drops out of the
+// amdsmi_get_tray_info() scan below, instead of the embedded `return
+// AMDSMI_STATUS_BUSY;` in SMIGPUDEVICE_MUTEX aborting the whole multi-GPU scan.
+static amdsmi_status_t get_gpu_identity_via_ualoe_locked(amd::smi::AMDSmiGPUDevice* device,
+                                                         uint32_t& phys_id,
+                                                         amdsmi_tray_info_t& tray_info) {
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (device->backend()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  return get_gpu_identity_via_ualoe(device, phys_id, tray_info);
+}
+
+amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  // node_handle is reserved for future use and must be NULL.
+  if (node_handle != nullptr || info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  memset(info, 0, sizeof(*info));
+  info->max_acc_per_tray = std::numeric_limits<uint32_t>::max();
+  info->tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+
+  for (auto* socket : amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
+    for (auto* processor : socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_GPU)) {
+      auto* device = static_cast<amd::smi::AMDSmiGPUDevice*>(processor);
+
+      uint32_t phys_id = 0;
+      amdsmi_status_t status = get_gpu_identity_via_ualoe_locked(device, phys_id, *info);
+      if (status == AMDSMI_STATUS_SUCCESS) {
+        return AMDSMI_STATUS_SUCCESS;
+      }
+    }
+  }
+
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }

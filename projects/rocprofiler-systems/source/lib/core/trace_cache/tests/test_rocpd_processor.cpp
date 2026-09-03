@@ -690,7 +690,8 @@ TEST_F(rocpd_write_read_test, pmc_event_value_persisted)
     register_base_metadata();
     register_gpu_agent();
 
-    profiler_hub::writer_types::agent_unique_id_t agent_uid = make_agent_uid(gpu_agent());
+    const profiler_hub::writer_types::agent_unique_id_t agent_uid =
+        make_agent_uid(gpu_agent());
 
     profiler_hub::writer_types::pmc_info_t pmc_desc{};
     pmc_desc.unique_id.name     = "gfx_activity";

@@ -118,6 +118,7 @@ class LoweringContext:
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
+    mask_result_writer: str | None = None
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
@@ -269,15 +270,17 @@ def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
     """Return the C++ statement to write back the vcc local variable."""
+    if ctx.mask_result_writer:
+        return f'{ctx.mask_result_writer}(vcc);'
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
         return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
-        return 'wf.set_vcc(vcc);'
+        return 'wf.set_vcc_mask(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
             return _write_vcc_mask_to_explicit_dst(dst.name)
-    return 'wf.set_vcc(vcc);'
+    return 'wf.set_vcc_mask(vcc);'
 
 
 def _indent(ctx: LoweringContext) -> str:
@@ -350,6 +353,12 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     # Expression used as statement (e.g., standalone .call)
     expr = _lower_expr(node, ctx)
     return [f'{_indent(ctx)}{expr};']
+
+
+def _contains_call(node: SemaNode, call_name: str) -> bool:
+    return (node.kind == SemaNodeKind.CALL and node.call_name == call_name) or any(
+        _contains_call(child, call_name) for child in node.children
+    )
 
 
 def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
@@ -992,11 +1001,23 @@ def _lower_dst_write(
             rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
         else:
             rhs = f'util::f32_to_f16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_f16({rhs}, '
+                'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
         # Explicit data-conversion generators use the mode-aware BF16 helpers.
         # Generic BF16 semantic writes cover arithmetic forms where current ISA
         # prose does not define FP16_OVFL clamping.
         rhs = f'util::f32_to_bf16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_bf16({rhs}, '
+                'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
         cpp = lhs_ty.cpp_type
         rhs = (
@@ -1203,7 +1224,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
-    ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
+    ' return a == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
     ' return static_cast<uint32_t>(exp); }}()',
@@ -1506,8 +1528,8 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t ab = (a >> (i*8)) & 0xFF;'
     ' uint8_t bb = (b >> (i*8)) & 0xFF;'
-    ' uint8_t cb = (c >> (i*8)) & 0xFF;'
-    ' r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i*8);'
+    ' uint8_t round_up = (c >> (i*8)) & 1;'
+    ' r |= static_cast<uint32_t>((ab + bb + round_up) >> 1) << (i*8);'
     ' }} return r; }}()',
     'add3': '({0} + {1} + {2})',
     'or3': '({0} | {1} | {2})',
@@ -1566,17 +1588,21 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'msad_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = c;'
     ' for (int i = 0; i < 4; ++i) {{'
-    ' uint8_t rb = (a >> (i*8)) & 0xFF;'
-    ' if (rb != 0) {{'
-    ' uint8_t sb = (b >> (i*8)) & 0xFF;'
-    ' r += (rb > sb) ? (rb - sb) : (sb - rb);'
+    ' uint8_t value = (a >> (i*8)) & 0xFF;'
+    ' uint8_t reference = (b >> (i*8)) & 0xFF;'
+    ' if (reference != 0) {{'
+    ' r += (value > reference) ? (value - reference) : (reference - value);'
     ' }}}} return r; }}()',
     'perm': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0; uint64_t src = (static_cast<uint64_t>(a) << 32) | b;'
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t sel = (c >> (i*8)) & 0xFF;'
-    ' uint8_t byte = (sel < 8) ? static_cast<uint8_t>((src >> (sel*8)) & 0xFF)'
-    ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
+    ' uint8_t byte = 0;'
+    ' if (sel < 8) byte = static_cast<uint8_t>((src >> (sel*8)) & 0xFF);'
+    ' else if (sel < 12) {{'
+    ' uint8_t sign_byte = static_cast<uint8_t>((src >> (((sel - 8) * 2 + 1) * 8)) & 0xFF);'
+    ' byte = (sign_byte & 0x80) ? 0xFFu : 0u;'
+    ' }} else if (sel >= 13) byte = 0xFFu;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
     'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
@@ -1851,11 +1877,33 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
+    if is_f64:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    elif node.ty == SemaType.F16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
+        )
+    elif node.ty == SemaType.BF16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    else:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
+        )
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.omod == 1) v *= 2.0{suffix};'
-        f' else if (inst_.omod == 2) v *= 4.0{suffix};'
-        f' else if (inst_.omod == 3) v *= 0.5{suffix};'
+        f' const uint32_t effective_omod = {omod_expr};'
+        f' if (effective_omod == 1) v *= 2.0{suffix};'
+        f' else if (effective_omod == 2) v *= 4.0{suffix};'
+        f' else if (effective_omod == 3) v *= 0.5{suffix};'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 
@@ -1874,9 +1922,8 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
-    suffix = '' if is_f64 else 'f'
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.clamp) v = std::clamp(v, 0.0{suffix}, 1.0{suffix});'
+        ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'
         f' return v; }}()'
     )

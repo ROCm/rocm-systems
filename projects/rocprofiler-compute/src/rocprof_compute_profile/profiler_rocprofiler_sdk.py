@@ -10,8 +10,25 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
-from utils.utils_common import resolve_rocm_library_path
+from utils.utils_common import (
+    PROFILE_OUTPUT_FORMAT,
+    resolve_rocm_library_path,
+)
 from utils.utils_profile import pc_sampling_unit
+
+
+def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
+    """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
+
+    src/lib/roctx_recordfn links it in CMake, but framework runtimes load the
+    legacy libroctx64 first and win the symbol lookup.
+    """
+    return resolve_rocm_library_path(
+        str(
+            Path(rocprofiler_sdk_tool_path).parent.parent
+            / "librocprofiler-sdk-roctx.so"
+        )
+    )
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -36,6 +53,12 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
+        if getattr(self, "_selected_frameworks", set()):
+            # Without this the marker tier's ROCTX calls bind to legacy
+            # libroctx64, which rocprofiler-sdk does not trace.
+            ld_preload_parts.append(
+                _resolve_sdk_roctx_library(args.rocprofiler_sdk_tool_path)
+            )
         # Filter out None and empty string values and join with ':'
         ld_preload_value = ":".join(part for part in ld_preload_parts if part)
 
@@ -51,7 +74,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         options.update({
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
+            "ROCPROF_OUTPUT_FORMAT": PROFILE_OUTPUT_FORMAT,
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
@@ -152,7 +175,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "json",
             "ROCPROF_OUTPUT_PATH": args.output_directory,
-            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
+            "ROCPROF_OUTPUT_FILE_NAME": "%pid%_ps_file",
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
             "ROCPROF_PC_SAMPLING_UNIT": pc_sampling_unit(method),
             "ROCPROF_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),

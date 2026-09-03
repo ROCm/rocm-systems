@@ -60,6 +60,14 @@
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
+        {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
+        {"name": "GroupCall.MultiRootBroadcast_Enabled", "description": "Multi-root broadcast with AllGatherV fusion enabled", "test_filter": "GroupCall.MultiRootBroadcast", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.SingleRootBroadcastDowngrade", "description": "Single-root broadcast BcastPeers==1 downgrade", "test_filter": "GroupCall.SingleRootBroadcastDowngrade"},
+        {"name": "GroupCall.SingleRootBroadcastDowngrade_Enabled", "description": "Single-root broadcast downgrade with AllGatherV enabled", "test_filter": "GroupCall.SingleRootBroadcastDowngrade", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MultiRootBroadcastConsecutive_Enabled", "description": "Consecutive AllGatherV group calls validates reclaimPlannerState reset", "test_filter": "GroupCall.MultiRootBroadcastConsecutive", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MixedBroadcastAndAllReduce_Enabled", "description": "Broadcast + AllReduce in same group call with AllGatherV enabled", "test_filter": "GroupCall.MixedBroadcastAndAllReduce", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MultiRootBroadcastChannelCounts_Enabled", "description": "AllGatherV fusion across pinned channel counts", "test_filter": "GroupCall.MultiRootBroadcastChannelCounts", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}, "timeout": 180},
+        {"name": "GroupCall.MultiRootBroadcastUnalignedSizes_Enabled", "description": "AllGatherV fusion with unaligned buffer sizes", "test_filter": "GroupCall.MultiRootBroadcastUnalignedSizes", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
         {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
         {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
         {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
@@ -120,6 +128,50 @@
       "tests": [
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
       ]
+    },
+    "unit_tests_micro": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "P2pMicrotests", "description": "Host-only p2p.cc microtests (no GPU, no HIP/RCCL runtime); contributes p2p.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotests", "description": "Host-only init.cc microtests (no GPU, no HIP/RCCL runtime); contributes init.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init_uncached": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-uncached",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_enqueue": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroEnqueue",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -139,6 +191,30 @@
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - p2p.cc",
+      "description": "rccl-UnitTestsMicro (host-only p2p.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc",
+      "description": "rccl-UnitTestsMicroInit (host-only init.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_init",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (uncached)",
+      "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
+      "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue.cc",
+      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_enqueue",
       "enabled": true
     }
   ]

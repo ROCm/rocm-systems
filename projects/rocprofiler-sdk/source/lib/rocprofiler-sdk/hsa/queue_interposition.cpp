@@ -44,6 +44,10 @@
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -59,6 +63,9 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <functional>
+#include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -71,6 +78,18 @@ namespace queue_interposition
 namespace
 {
 auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
+
+// Makes the inline pool's construct-and-submit region mutually exclusive with
+// interposition_sync()'s join. Submitters hold it SHARED; the sync takes it
+// EXCLUSIVE, so a submitter mid-construction cannot slip a task past a sync that
+// already read "not constructed". A leaf lock: it nests inside g_submit_gate
+// (shared) on the hand_off_proven() path, never the reverse.
+std::shared_mutex g_handler_gate;
+
+// Set with release right after the inline pool's static initializer completes, so
+// interposition_sync() can tell "constructed, must join" from "never constructed"
+// without itself constructing the pool. Acquire-loaded by the exists-check.
+std::atomic<bool> g_async_handler_constructed{false};
 
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
@@ -133,7 +152,14 @@ lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
     // if create_if_missing is true, create a new state. this is for dynamic discovery of queues.
     if(!_state && create_if_missing)
     {
-        return create_queue_state(queue, true);
+        auto _created = create_queue_state(queue, true);
+        // F29: a queue discovered dynamically (never seen at hsa_queue_create) was
+        // never windowed, so first_owner can no longer be trusted anywhere -- the
+        // documented "owner we never windowed" invariant. Disable signal-less
+        // process-wide. Called with no hub/registry lock held (create returned).
+        if(_created && kfd::signal_less_feature_enabled() && !kfd::signal_less_child_stale())
+            kfd::signal_less_disable_permanently();
+        return _created;
     }
 
     return _state;
@@ -303,10 +329,13 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
     }
 }
 
-auto
+bool
 async_signal_handler_exists()
 {
-    return common::static_object<internal_threading::task_group_t>::get();
+    // Acquire pairs with the release store in get_async_signal_handler(): a true
+    // read means the pool is fully constructed. Never reads the raw m_object
+    // pointer, which a concurrent constructor may be publishing (TSan race).
+    return g_async_handler_constructed.load(std::memory_order_acquire);
 }
 }  // namespace
 
@@ -350,7 +379,36 @@ get_async_signal_handler()
             static_cast<create_task_group_fn_t>(&internal_threading::create_task_group),
             get_async_signal_handler_thread_count());
 
+    // Release-store unconditionally on every call, AFTER the static initializer:
+    // the constructing thread's store is ordered after the constructor, and any
+    // other thread reached here only by acquiring the same static guard, so it
+    // carries the construction in its happens-before chain too. Must NOT go in
+    // construct_via_function's call_once, which runs before the object exists.
+    g_async_handler_constructed.store(true, std::memory_order_release);
+
     return _v;
+}
+
+// The ONLY caller of get_async_signal_handler()->async(). Makes the
+// construct-and-submit region mutually exclusive with interposition_sync() so a
+// task can never be queued on a pool the sync already decided not to join.
+// Consumes `task` only on the path that returns true: every false return happens
+// before the std::move, so a rejected task is destroyed intact by the caller.
+bool
+submit_inline_async(std::function<void()>&& task, bool refuse_during_fini)
+{
+    // 1. FIRST, before any lock: a child forked while a vanished parent thread
+    // held g_handler_gate can never acquire it, so testing staleness after taking
+    // the gate would deadlock the child instead of letting it defer/skip.
+    if(internal_threading::fork_stale()) return false;
+    // 2. construct+submit region, shared so concurrent submitters proceed together.
+    auto _g = std::shared_lock<std::shared_mutex>{g_handler_gate};
+    // 3. Inside the region: a submitter that read fini==0 then blocked on the gate
+    // must still be refused, or it would submit after the exclusive sync section.
+    if(refuse_during_fini && registration::get_fini_status() != 0) return false;
+    // 4. Constructs the pool on first real use (correct for signal-less work).
+    get_async_signal_handler()->async(std::move(task));
+    return true;
 }
 
 bool
@@ -461,6 +519,183 @@ async_signal_handler(hsa_signal_t                            completion_signal,
     }
 }
 
+// The no-signal finalizer. Runs on a task-group worker, or on the thread
+// flushing the retry owner -- never on the reader thread or under a hub lock.
+//
+// There is deliberately no HSA fallback: a signal-less dispatch never had an SDK
+// signal and the app may already have destroyed its own, so a convert/sanity
+// failure emits no record but still retires the correlation id.
+void
+complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
+{
+    auto&       _payload    = proven.payload;
+    const auto* _rocp_agent = agent::get_agent(_payload.agent_id);
+    auto        _hsa_agent  = agent::get_hsa_agent(_rocp_agent);
+
+    auto _convert = [&_hsa_agent](uint64_t ticks, uint64_t* out) {
+        if(!_hsa_agent) return false;
+        const auto* _ext = get_amd_ext_table();
+        if(!_ext || !_ext->hsa_amd_profiling_convert_tick_to_system_domain_fn) return false;
+        return _ext->hsa_amd_profiling_convert_tick_to_system_domain_fn(*_hsa_agent, ticks, out) ==
+               HSA_STATUS_SUCCESS;
+    };
+
+    auto _emit = [&_payload](uint64_t start_ns, uint64_t end_ns) {
+        kernel_dispatch::emit_kernel_dispatch_record(_payload.tracing_data,
+                                                     _payload.callback_record,
+                                                     _payload.correlation_id,
+                                                     _payload.tid,
+                                                     start_ns,
+                                                     end_ns);
+    };
+
+    // Retires exactly once whatever the outcome, and even if a client callback
+    // throws (run_complete_signal_less_dispatch arms this from a scope destructor).
+    auto _retire = [&_payload]() {
+        auto* _corr_id = _payload.correlation_id;
+        if(!_corr_id) return;
+        ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
+            << "reference counter for correlation id " << _corr_id->internal
+            << " has no reference count";
+        _corr_id->sub_kern_count();
+        _corr_id->sub_ref_count();
+    };
+
+    const uint64_t _now = common::timestamp_ns();
+
+    auto       _detail  = kfd::finalize_detail{};
+    const auto _outcome = kfd::run_complete_signal_less_dispatch(proven.start_ticks,
+                                                                 proven.end_ticks,
+                                                                 _payload.enqueue_ts,
+                                                                 _now,
+                                                                 _convert,
+                                                                 _emit,
+                                                                 _retire,
+                                                                 &_detail);
+
+    if(_outcome == kfd::finalize_outcome::result_ready)
+    {
+        kfd::note_signal_less(kfd::signal_less_counter::finalizer_emitted);
+        return;
+    }
+
+    kfd::note_signal_less(kfd::signal_less_counter::finalizer_no_timing);
+
+    // Rate-limited: the first few are the diagnostic, a steady stream must not
+    // flood the log.
+    static auto _warned = std::atomic<int>{0};
+    if(_warned.fetch_add(1, std::memory_order_relaxed) < 10)
+    {
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: no timing for dispatch (reason={}, gpu={} slot={} idx={})",
+            kfd::finalize_reason_name(_detail.reason),
+            proven.key.gpu_id,
+            proven.key.doorbell_slot,
+            proven.key.dispatch_idx_low32);
+    }
+}
+
+bool
+submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
+{
+    // task_group_t::async takes a copy-constructible std::function but the payload
+    // is move-only, so it travels in a shared_ptr the wrapper keeps. On refusal
+    // (fork-stale or fini) the primitive returns before consuming the task, so the
+    // payload is restored intact and the caller defers it -- packaging it after a
+    // refusable call would strand a moved-from payload and never retire its id.
+    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+    if(!submit_inline_async([_held]() { complete_signal_less_dispatch(std::move(*_held)); },
+                            /*refuse_during_fini=*/true))
+    {
+        proven = std::move(*_held);
+        return false;
+    }
+    return true;
+}
+
+bool
+is_dispatch_packet(const rocprofiler_packet& pkt)
+{
+    auto _type = bit_extract(pkt.kernel_dispatch.header,
+                             HSA_PACKET_HEADER_TYPE,
+                             HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+    if(_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) return true;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    if(_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+        return pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+#endif
+    return false;
+}
+
+// Per-BATCH signal-less eligibility, decided ONCE before any packet is touched.
+// It must be final up front: a batch that has skipped its completion signals
+// cannot be moved back onto the signal path, so even "will the hub accept these
+// keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
+// path.
+//
+// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
+// hub validated here rather than re-deriving them from a second doorbell lookup
+// that could observe a different generation.
+bool
+signal_less_batch_eligible(Queue*                                            queue,
+                           const rocprofiler_packet*                         packets,
+                           uint64_t                                          num_packets,
+                           uint64_t                                          base_pkt_index,
+                           std::vector<std::optional<kfd::correlation_key>>* keys_out,
+                           kfd::window_ptr*                                  window_out)
+{
+    keys_out->clear();
+    if(window_out) *window_out = {};
+
+    // Cheapest gate first: with the feature off this is one relaxed load.
+    if(kfd::signal_less_child_stale()) return false;
+    if(!kfd::signal_less_feature_enabled()) return false;
+
+    const auto _gpu_id = queue->get_agent().get_rocp_agent()->gpu_id;
+    if(!kfd::ensure_reader_session(static_cast<uint32_t>(_gpu_id))) return false;
+    const auto _gpu = static_cast<uint32_t>(_gpu_id);
+
+    // Resolve the window open for this queue: rlock only, no clock, no bind.
+    // No window (SDMA, poisoned/overlapped slot, disabled) -> signal path.
+    auto _w = kfd::doorbell_map().resolve(_gpu, queue->get_id());
+    if(!_w) return false;
+    const uint32_t _slot = (*_w)->slot;
+
+    keys_out->assign(num_packets, std::nullopt);
+    auto _flat = std::vector<kfd::correlation_key>{};
+    for(uint64_t i = 0; i < num_packets; ++i)
+    {
+        if(!is_dispatch_packet(packets[i])) continue;
+        auto _key = kfd::correlation_key{
+            _slot, static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL), _gpu};
+        (*keys_out)[i] = _key;
+        _flat.emplace_back(_key);
+    }
+    if(_flat.empty())
+    {
+        keys_out->clear();
+        return false;
+    }
+
+    // The admission latch replaces the deleted is_closing() hub call: a
+    // plain bool read while this thread already holds gate_lock, via the
+    // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
+    auto*      _st       = get_doorbell_tls().state;
+    const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
+                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           !(_st != nullptr && _st->admission_closed);
+
+    if(_eligible)
+    {
+        if(window_out) *window_out = *_w;
+    }
+    else
+    {
+        keys_out->clear();
+    }
+    return _eligible;
+}
+
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
 // runs KERNEL_DISPATCH_ENQUEUE tracer hooks, and prepares a completion-signal
 // waiter for the async signal handler pool. Strict 1:1 packet forwarding; does
@@ -470,7 +705,8 @@ write_interceptor(Queue*                                queue,
                   const void*                           packets,
                   uint64_t                              pkt_count,
                   hsa_amd_queue_intercept_packet_writer writer,
-                  async_signal_task_vector_t*           deferred_async_tasks)
+                  async_signal_task_vector_t*           deferred_async_tasks,
+                  uint64_t                              base_pkt_index)
 {
     using callback_record_t = packet_data_t::callback_record_t;
     using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 512>;
@@ -568,6 +804,7 @@ write_interceptor(Queue*                                queue,
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v, deferred_async_tasks](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
+                                    uint64_t                  _base_pkt_index,
                                     const packet_writer_fn_t& _writer) {
         static constexpr auto null_signal = hsa_signal_t{.handle = 0};
 
@@ -584,6 +821,63 @@ write_interceptor(Queue*                                queue,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
+
+        // Decided once for the whole batch, before any packet is modified. All
+        // packets in a batch share one queue, hence one owner_window.
+        auto            _signal_less_keys   = std::vector<std::optional<kfd::correlation_key>>{};
+        kfd::window_ptr _signal_less_window = {};
+        // Non-const: D7 clears it on the register_batch refusal path so the post-loop
+        // signal-path block runs and builds the async waiter for the fallback.
+        bool _signal_less_batch = signal_less_batch_eligible(queue,
+                                                             _packets,
+                                                             _num_packets,
+                                                             _base_pkt_index,
+                                                             &_signal_less_keys,
+                                                             &_signal_less_window);
+        auto _signal_less_regs  = std::vector<kfd::signal_less_hub_t::registration>{};
+
+        // Parallel to _info_session.packet_data: for each dispatch packet, the index
+        // in transformed_packets of its SUBMITTED packet plus whether it is the ext
+        // form. transformed_packets also holds pass-through and barrier/interrupt
+        // packets, so packet_data[k] != transformed_packets[k]; the D7 fallback needs
+        // both to write the replayed signal into the right submitted packet field.
+        struct dispatch_pkt_ref
+        {
+            size_t transformed_index = 0;
+            bool   is_ext            = false;
+        };
+        auto _dispatch_pkt_index = std::vector<dispatch_pkt_ref>{};
+
+        auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
+            if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
+            {
+                auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
+                ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
+                ROCP_FATAL_IF(_signal.get().value == null_signal)
+                    << "Acquired signal from pool that has invalid handle";
+                *CHECK_NOTNULL(signal) = _signal.get().value;
+                return &_signal;
+            }
+            return nullptr;
+        };
+
+        // The three signal-path steps, factored so the normal !_signal_less_batch
+        // branch and the D7 refusal fallback cannot drift: borrow a pooled signal if
+        // the app supplied none, bump its value by 1, and record it on the packet.
+        // Returns the completion signal written into pd.kernel_packet.
+        auto apply_signal_path = [&create_signal](packet_data_t& pd, bool is_ext) -> hsa_signal_t {
+            (void) is_ext;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            auto& _cs = is_ext ? pd.kernel_packet.ext_kernel_dispatch.completion_signal
+                               : pd.kernel_packet.kernel_dispatch.completion_signal;
+#else
+            auto& _cs = pd.kernel_packet.kernel_dispatch.completion_signal;
+#endif
+            if(_cs == null_signal) pd.pooled_signal = create_signal(&_cs);
+            get_core_table()->hsa_signal_add_scacq_screl_fn(_cs, 1);
+            pd.completion_signal = _cs;
+            return _cs;
+        };
 
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -670,46 +964,19 @@ write_interceptor(Queue*                                queue,
                 }
             };
 
-            const auto     pkt_info = extract_packet_info(_packets[i], is_ext_kernel_dispatch);
-            const auto     original_completion_signal = pkt_info.completion_signal;
+            const auto     pkt_info  = extract_packet_info(_packets[i], is_ext_kernel_dispatch);
             const uint64_t kernel_id = code_object::get_kernel_id(pkt_info.kernel_object);
-            const auto     existing_completion_signal = (original_completion_signal != null_signal);
 
             // Copy kernel pkt, copy is to allow for signal to be modified
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-            auto& completion_signal =
-                is_ext_kernel_dispatch
-                    ? _packet_data.kernel_packet.ext_kernel_dispatch.completion_signal
-                    : _packet_data.kernel_packet.kernel_dispatch.completion_signal;
-#else
-            auto& completion_signal = _packet_data.kernel_packet.kernel_dispatch.completion_signal;
-#endif
 
-            auto create_signal = [](auto* signal) -> common::container::pool_object<signal_t>* {
-                if(auto* pool = get_signal_pool(); pool && signal->handle == 0)
-                {
-                    auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, 0);
-                    ROCP_FATAL_IF(!_signal.in_use())
-                        << "Acquired signal from pool that is not in use";
-                    ROCP_FATAL_IF(_signal.get().value == null_signal)
-                        << "Acquired signal from pool that has invalid handle";
-                    *CHECK_NOTNULL(signal) = _signal.get().value;
-                    return &_signal;
-                }
-                return nullptr;
-            };
-
-            // No barrier packet: borrow a pooled signal if needed, then bump value by 1.
-            if(!existing_completion_signal)
-                _packet_data.pooled_signal = create_signal(&completion_signal);
-
-            get_core_table()->hsa_signal_add_scacq_screl_fn(completion_signal, 1);
-
-            // set the completion signal to the kernel packet
-            _packet_data.completion_signal = completion_signal;
+            if(!_signal_less_batch)
+            {
+                // No barrier packet: borrow a pooled signal if needed, bump by 1, record it.
+                apply_signal_path(_packet_data, is_ext_kernel_dispatch);
+            }
 
             // computes the "size" based on the offset of reserved_padding field
             constexpr auto kernel_dispatch_info_rt_size =
@@ -755,11 +1022,34 @@ write_interceptor(Queue*                                queue,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
+            if(_signal_less_batch && _signal_less_keys[i].has_value())
+            {
+                auto _reg           = kfd::signal_less_hub_t::registration{};
+                _reg.key            = *_signal_less_keys[i];
+                _reg.correlation_id = internal_corr_id;
+                _reg.window         = _signal_less_window;
+
+                auto& _pl           = _reg.payload;
+                _pl.callback_record = _packet_data.callback_record;
+                _pl.tracing_data    = _packet_data.tracing_data;
+                // The reference this payload inherits was taken by the
+                // add_ref_count()/add_kern_count() above; the finalizer releases it.
+                _pl.correlation_id = corr_id;
+                _pl.tid            = thr_id;
+                _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
+                _pl.enqueue_ts     = _info_session.enqueue_ts;
+
+                _signal_less_regs.emplace_back(std::move(_reg));
+            }
+
             // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
             // along with an ID of the client we got the packet from (this will be returned via
             // completed_cb_t)
 
-            // emplace the kernel packet
+            // emplace the kernel packet; record its submitted index (and ext-ness) so
+            // the D7 fallback can write a replayed signal into the right submitted slot.
+            _dispatch_pkt_index.push_back(
+                dispatch_pkt_ref{transformed_packets.size(), is_ext_kernel_dispatch});
             transformed_packets.emplace_back(kernel_packet);
 
             ROCP_FATAL_IF(!is_kernel_dispatch && !is_ext_kernel_dispatch)
@@ -782,7 +1072,65 @@ write_interceptor(Queue*                                queue,
         auto current_signal_value   = hsa_signal_value_t{0};
         auto _shared_info_session   = std::shared_ptr<queue_info_session_t>{};
 
-        if(!_info_session.packet_data.empty())
+        // Register the whole batch BEFORE the writer publishes any packet, so a
+        // firmware record can never arrive for a dispatch the hub has not seen.
+        // Cap-evicted closed-window entries leave via _evicted, released here AFTER
+        // m_mu is dropped (the hub's no-destroy-under-lock contract).
+        const auto _signal_less_count = _signal_less_regs.size();
+        auto       _evicted           = std::vector<kfd::signal_less_hub_t::leaked>{};
+        if(_signal_less_batch &&
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs), _evicted))
+        {
+            // D7: reachable on a slot quarantined between eligibility and here, or the
+            // per-GPU cap exceeded with no eligible victim (D9). The batch skipped its
+            // signal instrumentation, so replay exactly the !_signal_less_batch signal
+            // path per dispatch and fall through to the normal signal-path completion.
+            // No id retirement here: register_batch did not consume _signal_less_regs on
+            // refusal, its payload correlation_id* is non-owning, and the signal path's
+            // completion handler performs the matching releases -- retiring here would
+            // double-release. Telemetry only.
+            kfd::note_signal_less(kfd::signal_less_counter::register_refused, _signal_less_count);
+            for(size_t k = 0; k < _info_session.packet_data.size(); ++k)
+            {
+                auto&      _pd  = _info_session.packet_data[k];
+                const auto _sig = apply_signal_path(_pd, _dispatch_pkt_index[k].is_ext);
+                // Mirror the replayed signal into the SUBMITTED packet, whose index in
+                // transformed_packets differs from k (pass-through/barrier packets).
+                auto& _tp = transformed_packets[_dispatch_pkt_index[k].transformed_index];
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+                if(_dispatch_pkt_index[k].is_ext)
+                    _tp.ext_kernel_dispatch.completion_signal = _sig;
+                else
+                    _tp.kernel_dispatch.completion_signal = _sig;
+#else
+                _tp.kernel_dispatch.completion_signal = _sig;
+#endif
+            }
+            // Clear BEFORE the post-loop block so it builds the async waiter unchanged.
+            _signal_less_batch = false;
+            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; falling "
+                            "back to the signal path for these dispatches";
+        }
+        else if(_signal_less_batch)
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
+        }
+
+        // Cap eviction is loud accepted coverage loss: count it, warn (rate-limited by
+        // the census cadence), and latch losses (INV-L1) before any finalize can see
+        // the ledgered ids. Off-lock; _evicted's payloads release at scope end.
+        if(!_evicted.empty())
+        {
+            kfd::note_signal_less(kfd::signal_less_counter::cap_evicted, _evicted.size());
+            kfd::note_signal_less_losses();
+            ROCP_WARNING << fmt::format(
+                "KFD dispatch-log: per-GPU hub cap evicted {} closed-window entry(ies); those "
+                "dispatches emit no record",
+                _evicted.size());
+        }
+
+        // A signal-less batch has no completion signal to wait on.
+        if(!_info_session.packet_data.empty() && !_signal_less_batch)
         {
             last_completion_signal = _info_session.packet_data.back().completion_signal;
 
@@ -815,18 +1163,88 @@ write_interceptor(Queue*                                queue,
             if(deferred_async_tasks)
                 deferred_async_tasks->emplace_back(std::move(_task));
             else
-                get_async_signal_handler()->async(std::move(_task));
+                // Signal path: refuse_during_fini=false. This task owns the
+                // queue_info_session and performs its correlation-id releases, so
+                // refusing during fini would strand those ids -- behaviour unchanged.
+                submit_inline_async(std::move(_task), /*refuse_during_fini=*/false);
         }
     };
 
     ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
         "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-    process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
-        writer(_packets.data(), _packets.size());
-    });
+    process_packet_batch(
+        packets_arr, pkt_count, base_pkt_index, [&writer](packet_vector_t&& _packets) {
+            writer(_packets.data(), _packets.size());
+        });
 }
 }  // namespace
+
+// Precondition (F1): caller holds state.drain_mu. gate_lock still orders the
+// admission_closed store against the publishing critical sections.
+uint64_t
+close_admission_and_snapshot_locked(QueueState& state)
+{
+    auto lk                = std::lock_guard<std::mutex>{state.gate_lock};
+    state.admission_closed = true;  // SW-2: no later batch can register
+    return state.next_submit_pos;   // snapshot, ordered by this same lock
+}
+
+// Precondition (F1): caller holds state.drain_mu, so real_rdid (which points into
+// the runtime's amd_queue_t) cannot be freed by a concurrent destroy under the load.
+bool
+wait_queue_hw_drained_locked(QueueState& state, uint64_t submit_pos, uint64_t deadline_ns)
+{
+    if(!state.real_rdid) return true;
+
+    while(!hw_queue_drained(__atomic_load_n(state.real_rdid, __ATOMIC_ACQUIRE), submit_pos))
+    {
+        if(kfd::steady_now_ns() >= deadline_ns) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
+}
+
+void
+fence_all_queue_gates()
+{
+    // Copy the states out from under the registry lock FIRST: taking a queue's
+    // gate_lock while holding it would invert the established order.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto lk = std::lock_guard<std::mutex>{_state->gate_lock};
+    }
+}
+
+void
+drain_all_queues_hw(uint64_t deadline_ns)
+{
+    // F1 teardown drain, race-free against concurrent hsa_queue_destroy. Snapshot
+    // the states under the registry lock, release it, then per state take drain_mu
+    // and skip any queue destroy already invalidated (rdid_valid==false) -- that
+    // queue ran its own drain. Lock order: registry lock -> (released) -> drain_mu.
+    auto _states = std::vector<queue_state_ptr_t>{};
+    get_queue_registry().rlock([&_states](const auto& map) {
+        _states.reserve(map.size());
+        for(const auto& itr : map)
+            if(itr.second) _states.emplace_back(itr.second);
+    });
+
+    for(const auto& _state : _states)
+    {
+        auto _lk = std::unique_lock<std::mutex>{_state->drain_mu};
+        if(!_state->rdid_valid) continue;  // destroyed under the same lock; skip
+        const uint64_t _P = close_admission_and_snapshot_locked(*_state);
+        wait_queue_hw_drained_locked(*_state, _P, deadline_ns);
+    }
+}
 
 void
 process_doorbell_impl(const queue_state_ptr_t& state,
@@ -933,7 +1351,8 @@ process_doorbell_impl(const queue_state_ptr_t& state,
                           source_snapshot,
                           pkt_count,
                           ring_buffer_writer,
-                          &deferred_async_tasks);
+                          &deferred_async_tasks,
+                          start_submit_pos);
     }
     else
     {
@@ -973,7 +1392,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     lock.unlock();
 
     for(auto& itr : deferred_async_tasks)
-        get_async_signal_handler()->async(std::move(itr));
+        submit_inline_async(std::move(itr), /*refuse_during_fini=*/false);
 }
 
 std::shared_ptr<QueueState>
@@ -1011,8 +1430,19 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
+    // Close the interlock's init end: set AFTER real_rdid, BEFORE publication, so no
+    // observer reaches a state with rdid_valid true but real_rdid null. The wlock
+    // release below orders this plain-bool write for every reader.
+    state->rdid_valid = true;
 
+    // Get-or-create UNDER the final wlock: the pre-check above is a separate rlock, so
+    // two concurrent dynamic-discovery lookups of the same queue could both miss and
+    // both publish, splitting D8's drain_mu across two live states (real_rdid UAF).
+    // Re-checking here keeps exactly one live QueueState per queue; a loser discards
+    // its just-built state harmlessly (refcount drops).
     return get_queue_registry().wlock([&](auto& map) {
+        auto it = map.find(queue);
+        if(it != map.end() && it->second) return it->second;
         map[queue] = state;
         return state;
     });
@@ -1199,14 +1629,27 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
 void
 interposition_sync()
 {
-    if(async_signal_handler_exists())  // query without constructing
+    // FIRST, before the gate: an inherited g_handler_gate held by a vanished parent
+    // thread is unacquirable, so a staleness check placed after it never runs. A
+    // fork child owns no inline workers, so there is nothing to join.
+    if(internal_threading::fork_stale()) return;
+
+    // Take the gate EXCLUSIVE to wait out every submitter already inside
+    // submit_inline_async(), then read the constructed flag: it is now either true
+    // with a fully constructed pool or false with provably no submitter in flight,
+    // closing the flag-alone ordering gap. Release BEFORE join(): joining under the
+    // exclusive lock would block every submitter for the join, which runs tasks
+    // that may re-enter. Precondition: callers have already closed their submission
+    // source (fini latch / D5 neutralization) or a later submitter escapes this.
+    bool _constructed = false;
     {
-        constexpr auto async_only = true;
-        if(auto* tg = get_async_signal_handler(); tg)
-        {
-            tg->join(async_only);
-        }
+        auto _g      = std::unique_lock<std::shared_mutex>{g_handler_gate};
+        _constructed = async_signal_handler_exists();
     }
+    if(!_constructed) return;
+
+    constexpr auto async_only = true;
+    if(auto* tg = get_async_signal_handler(); tg) tg->join(async_only);
 }
 
 void
@@ -1253,6 +1696,12 @@ interposition_init(CoreApiTable* core_table, bool enabled)
 
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
+
+    // Inline intercept is the only path that produces a KFD correlation key, so
+    // probe dispatch-log here (not in generic queue_init()). Master opt-in gate:
+    // the KFD dispatch-log feature does nothing unless signal-less is enabled.
+    // Best-effort.
+    if(kfd::signal_less_feature_enabled()) kfd::init_kfd_profiler();
 }
 
 void
@@ -1264,6 +1713,16 @@ interposition_fini()
     // disable active interception
     s_intercept_active.store(false, std::memory_order_release);
 
+    // A fork child that never exec'd still runs this at exit, and everything below
+    // it is unsafe there: the registry wlock and the signal pool's lock may have
+    // been held by a thread that did not survive the fork, so acquiring them hangs
+    // the child, and destroying inherited HSA signals reaches into a runtime the
+    // child does not own. The child abandoned all of this state (D6) and is on its
+    // way out, so skip it -- the same treatment interposition_sync() and
+    // submit_inline_async() already give the fork generation. The atomic stores
+    // above are kept: they are safe and make the child's interception inert.
+    if(internal_threading::fork_stale()) return;
+
     // wait for any in-flight signal handlers to complete and clean up the signal pool
     interposition_sync();
 
@@ -1274,4 +1733,40 @@ interposition_fini()
 }
 }  // namespace queue_interposition
 }  // namespace hsa
+
+// Bridge for the KFD layer (declared in kfd/signal_less.hpp). Defined here so
+// kfd never needs the HSA interposition headers, and called directly -- both
+// sides are in the same object library.
+namespace kfd
+{
+bool
+submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
+{
+    return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+void
+finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p)
+{
+    hsa::queue_interposition::complete_signal_less_dispatch(std::move(p));
+}
+
+void
+drain_signal_less_interceptor()
+{
+    hsa::queue_interposition::fence_all_queue_gates();
+}
+
+void
+drain_signal_less_queues_hw(uint64_t deadline_ns)
+{
+    hsa::queue_interposition::drain_all_queues_hw(deadline_ns);
+}
+
+void
+join_signal_less_tasks()
+{
+    hsa::queue_interposition::interposition_sync();
+}
+}  // namespace kfd
 }  // namespace rocprofiler

@@ -128,14 +128,14 @@ std::mutex vaapi_gotcha::s_mutex = {};
 void
 vaapi_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     vaapi_gotcha_t::set_ready(false);
 }
 
 void
 vaapi_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     vaapi_gotcha_t::set_ready(true);
 }
 

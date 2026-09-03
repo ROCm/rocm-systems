@@ -113,6 +113,34 @@ TEST(SparseMemoryTest, UnalignedBlockRoundTripCrossesPageBoundary) {
   EXPECT_EQ(memory.num_pages(), 2u);
 }
 
+TEST(SparseMemoryTest, HasPageSeesPagesWrittenThroughEveryStripe) {
+  simdojo::SparseMemory memory("memory");
+  constexpr uint64_t kPageSize = simdojo::SparseMemory::PAGE_SIZE;
+
+  // has_page() has to use the same key the storage does -- the aligned byte
+  // address, not the page number. Keying it on `addr >> PAGE_SHIFT` reported
+  // every page above the first as absent, which made GpuMemory::is_fetchable()
+  // deny instruction fetches that were backed only by sparse memory.
+  const uint64_t addr = 0x400000u + 37u;
+  EXPECT_FALSE(memory.has_page(addr));
+  memory.write8(addr, 0x5Au);
+  EXPECT_TRUE(memory.has_page(addr));
+
+  // Every offset within the page reports the same backing, and the neighbours
+  // stay absent.
+  EXPECT_TRUE(memory.has_page(addr & ~simdojo::SparseMemory::PAGE_MASK));
+  EXPECT_TRUE(memory.has_page((addr & ~simdojo::SparseMemory::PAGE_MASK) + kPageSize - 1));
+  EXPECT_FALSE(memory.has_page(addr + kPageSize));
+  EXPECT_FALSE(memory.has_page(addr - kPageSize));
+
+  // Spread across many pages so the answer cannot come from one lucky stripe:
+  // the old page-number key collided with the aligned key only at address 0.
+  for (uint64_t page = 0; page < 64; ++page)
+    memory.write8(page * kPageSize + 8u, static_cast<uint8_t>(page));
+  for (uint64_t page = 0; page < 64; ++page)
+    EXPECT_TRUE(memory.has_page(page * kPageSize + 8u)) << "page " << page;
+}
+
 TEST(SparseMemoryThreadingTest, ConcurrentOverlappingBlocksRemainAtomicPerPage) {
   simdojo::SparseMemory memory("memory");
 

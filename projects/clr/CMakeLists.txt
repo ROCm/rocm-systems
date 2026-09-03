@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.27)
 project(clr)
 
 ##########
@@ -17,13 +17,15 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(/MTd)
-        add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    if (AMD_COMPUTE_WIN)
+        # shared prebuilt libs are release, allows hip to be debug
+        add_compile_options(/MT)
+        add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     else()
-        if (AMD_COMPUTE_WIN)
-            add_compile_options(/MT)
-        endif()
+        add_compile_options("$<$<CONFIG:Debug>:/MTd>")
+        add_compile_options("$<$<NOT:$<CONFIG:Debug>>:/MT>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,

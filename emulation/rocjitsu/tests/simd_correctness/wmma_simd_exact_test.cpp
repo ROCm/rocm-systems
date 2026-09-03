@@ -35,7 +35,7 @@ using WmmaF16SpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, ui
                                uint32_t, bool);
 
 struct WmmaFixture : ExactFixture {
-  WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_GFX1250, WF) {}
+  WmmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF) {}
 };
 
 // Drive one (kernel, fmt) case across all trial modes and both accumulator

@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -92,22 +93,41 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
-  [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text,
-                                  std::span<const TextOffsetRelocation> text_relocations = {},
-                                  std::span<const PcRelativeDataRelocation> data_relocations = {},
-                                  std::span<const PcRelativeTextRelocation> code_relocations = {},
-                                  bool require_every_text_symbol_mapped = false);
+  [[nodiscard]] bool replace_text(
+      std::span<const uint8_t> new_text,
+      std::span<const TextOffsetRelocation> text_relocations = {},
+      std::span<const PcRelativeDataRelocation> data_relocations = {},
+      std::span<const PcRelativeTextRelocation> code_relocations = {},
+      bool require_every_text_symbol_mapped = false,
+      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
-  /// @brief True if any relocation's place (r_offset) falls inside .text.
+  /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
   ///
   /// @details DBT compacts/expands/moves instructions within .text but does not
   /// remap relocation places that land in .text — replace_text() only shifts
   /// relocation offsets for whole sections moved *after* .text. An in-.text
   /// relocation would therefore be applied to the wrong translated bytes.
+  /// R_AMDGPU_NONE performs no write at its relocation place. Runtime acceptance
+  /// of that record is checked separately by has_rocr_rejected_none_relocation().
   /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
   /// AMDHSA kernel code objects carry no such relocations, so this rejects only
   /// genuinely unsupported inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
+
+  /// @brief True if ROCr cannot resolve an ET_DYN SHT_RELA section target.
+  ///
+  /// @details ROCr accepts section zero as the target-less dynamic form and a
+  /// valid non-null section as an explicit target. A nonzero SHT_NULL target or
+  /// an out-of-range sh_info fails before relocation records are dispatched.
+  [[nodiscard]] bool has_malformed_rocr_relocation_section() const;
+
+  /// @brief True if ROCr rejects an R_AMDGPU_NONE record before DBT can rewrite the image.
+  ///
+  /// @details Target-less SHT_RELA sections in ET_DYN code objects are processed as
+  /// dynamic relocations, where ROCr has no R_AMDGPU_NONE case. Detect those records by
+  /// section mode and type alone, before consulting their place or symbol metadata.
+  /// Malformed section metadata is owned by has_malformed_rocr_relocation_section().
+  [[nodiscard]] bool has_rocr_rejected_none_relocation() const;
 
   /// @brief True if any relocation references .text in a form DBT cannot remap.
   ///
@@ -186,6 +206,7 @@ public:
 
 private:
   std::vector<uint8_t> image_;
+  std::optional<size_t> text_section_index_;
   uint64_t text_offset_;
   uint64_t text_size_;
   uint64_t text_vaddr_;

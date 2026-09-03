@@ -19,6 +19,25 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
 
+TEST(Gfx1250ExecutionTest, LdsAccessesRejectWrappedRanges) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto &lds = cu->lds();
+  constexpr uint32_t kWrappedAddress = UINT32_MAX - 3;
+  constexpr uint32_t kValue = 0x12345678u;
+
+  lds.write32(kWrappedAddress, kValue);
+  EXPECT_EQ(lds.read32(kWrappedAddress), 0u);
+
+  std::array<uint8_t, sizeof(kValue)> bytes{};
+  std::memcpy(bytes.data(), &kValue, sizeof(kValue));
+  lds.write(kWrappedAddress, bytes.data(), bytes.size());
+  bytes.fill(0xff);
+  const auto &const_lds = lds;
+  const_lds.read(kWrappedAddress, bytes.data(), bytes.size());
+  EXPECT_EQ(bytes, (std::array<uint8_t, sizeof(kValue)>{}));
+}
+
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};
@@ -261,6 +280,37 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(wf.sgpr(3), args[2]);
 }
 
+TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  std::array<uint32_t, 30> args{};
+  for (uint32_t i = 0; i < args.size(); ++i)
+    args[i] = 0x1000u + i;
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
+                         args.size() * sizeof(args[0]), kKernargAddr);
+  uint64_t kernel_object =
+      sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 32, false, false, false,
+                       kernel_code_properties, args.size() * sizeof(args[0]), args.size(), 0);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr64(0), kKernargAddr);
+  for (uint32_t i = 0; i < args.size(); ++i)
+    EXPECT_EQ(wf.sgpr(i + 2), args[i]);
+}
+
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   using namespace rocr::llvm::amdhsa;
 
@@ -312,9 +362,53 @@ TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
 
   const auto *target = sim.snapshot->by_wg_id(4);
   ASSERT_NE(target, nullptr);
-  // TTMP9 (s117) holds grid_wg_id_x; TTMP7 (s115) packs wg_id_y/z.
-  EXPECT_EQ(target->sgpr(117), 1u);
-  EXPECT_EQ(target->sgpr(115), 1u);
+  // TTMP9 holds grid_wg_id_x; TTMP7 packs wg_id_y/z; TTMP8 bit 30 is grid_yz_valid.
+  EXPECT_EQ(target->ttmp(9), 1u);
+  EXPECT_EQ(target->ttmp(7), 1u);
+  EXPECT_NE(target->ttmp(8) & (1u << 30), 0u);
+}
+
+TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 64, 64);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+  std::vector<uint32_t> ttmp8_values;
+  for (const auto &wf : sim.snapshot->snapshots())
+    ttmp8_values.push_back(wf.ttmp(8));
+  std::sort(ttmp8_values.begin(), ttmp8_values.end());
+  EXPECT_EQ(ttmp8_values, (std::vector<uint32_t>{0, 1u << 25}));
+}
+
+TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32);
+  queue.dispatch(kernel_object, 32, 32);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+  // Dispatch ids increase per packet but are not dense: each command processor
+  // mints them strided by the XCD count so ids from different XCDs cannot
+  // collide. Order the observations by id instead of indexing with it.
+  std::array<std::pair<uint32_t, uint32_t>, 2> by_dispatch{};
+  size_t i = 0;
+  for (const auto &wf : sim.snapshot->snapshots()) {
+    ASSERT_GE(wf.dispatch_id, 1u);
+    by_dispatch[i++] = {wf.dispatch_id, wf.ttmp(8) & 0x1FFFFFFu};
+  }
+  std::sort(by_dispatch.begin(), by_dispatch.end());
+  ASSERT_LT(by_dispatch[0].first, by_dispatch[1].first);
+  EXPECT_EQ(by_dispatch[0].second, 0u);
+  EXPECT_EQ(by_dispatch[1].second, 1u);
 }
 
 TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
@@ -344,6 +438,88 @@ TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
 
   for (uint32_t lane = 0; lane < 32; ++lane)
     EXPECT_EQ(sim.memory->read32(output_addr + lane * sizeof(uint32_t)), 1u) << "lane " << lane;
+}
+
+/// @brief A GLOBAL saddr access sign-extends its VGPR offset on gfx1250.
+/// @details LLVM gates this on hasSignedGVSOffset and hands a negative offset to
+/// the saddr form whenever an access walks backwards from its base, so the case
+/// arises from ordinary reversed iteration. Zero-extending -4 puts the access
+/// 4 GiB above the allocation rather than one dword below it, which lands on
+/// nothing and is dropped, making the symptom silently missing data rather than
+/// a fault.
+TEST(Gfx1250SimulationTest, GlobalStoreSignExtendsNegativeSaddrVgprOffset) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t base_addr = 0x2000;
+  constexpr uint32_t marker = 0xA5A5A5A5u;
+
+  const uint32_t code[] = {
+      0xBE8400FFu,    static_cast<uint32_t>(base_addr), // s_mov_b32 s4, base_addr
+      0xBE850080u,                                      // s_mov_b32 s5, 0
+      0x7E0002FFu,    0xFFFFFFFCu,                      // v_mov_b32_e32 v0, -4
+      0x7E0202FFu,    marker,                           // v_mov_b32_e32 v1, marker
+      0xEE068004u,    0x00800000u,
+      0x00000000u, // global_store_b32 v0, v1, s[4:5]
+      0xBFC10000u, // s_wait_storecnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
+  sim.memory->write32(base_addr - sizeof(uint32_t), 0);
+  sim.memory->write32(base_addr, 0);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32);
+  sim.engine->run();
+  sim.soc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(base_addr - sizeof(uint32_t)), marker);
+  EXPECT_EQ(sim.memory->read32(base_addr), 0u);
+}
+
+/// @brief The scaled form of a GLOBAL saddr offset scales it as a signed value.
+/// @details `scale_offset` multiplies the VGPR offset by the access size, and
+/// that multiply is a separate path from the unscaled one above. A -1 offset
+/// scaled by the four bytes of a b32 access reaches one dword below the base;
+/// scaling it unsigned reaches four bytes short of 16 GiB above it instead. The
+/// distinction is invisible to the unscaled test, which never multiplies, and to
+/// the existing scaled tests, whose offsets are all non-negative.
+TEST(Gfx1250SimulationTest, GlobalStoreScalesANegativeSaddrVgprOffsetSigned) {
+  constexpr uint64_t kernel_addr = 0x10000;
+  constexpr uint64_t base_addr = 0x2000;
+  constexpr uint32_t marker = 0x5A5A5A5Au;
+
+  const uint32_t code[] = {
+      0xBE8400FFu,
+      static_cast<uint32_t>(base_addr), // s_mov_b32 s4, base_addr
+      0xBE850080u,                      // s_mov_b32 s5, 0
+      0x7E0002FFu,
+      0xFFFFFFFFu, // v_mov_b32_e32 v0, -1
+      0x7E0202FFu,
+      marker, // v_mov_b32_e32 v1, marker
+      // global_store_b32 v0, v1, s[4:5] scale_offset -- bit 48 of the VGLOBAL
+      // encoding, which is bit 16 of the second dword, on top of the vsrc=1
+      // already there.
+      0xEE068004u,
+      0x00810000u,
+      0x00000000u,
+      0xBFC10000u, // s_wait_storecnt 0
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
+  sim.memory->write32(base_addr - sizeof(uint32_t), 0);
+  sim.memory->write32(base_addr, 0);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32);
+  sim.engine->run();
+  sim.soc->flush_all();
+
+  EXPECT_EQ(sim.memory->read32(base_addr - sizeof(uint32_t)), marker)
+      << "a -1 offset scaled by the b32 access size must land one dword below the base";
+  EXPECT_EQ(sim.memory->read32(base_addr), 0u);
 }
 
 TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {

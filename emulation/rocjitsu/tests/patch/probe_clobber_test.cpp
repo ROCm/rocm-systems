@@ -74,6 +74,14 @@ TEST(ProbeClobber, NopProbeSummaryIsEmpty) {
   EXPECT_FALSE(summary->uses_private_segment);
 }
 
+TEST(ProbeClobber, ReportsRejectedEncodingAndWordOffset) {
+  const auto callable = make_callable({0xffffffffu, kSSetpcS30S31});
+  std::string err;
+  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
+}
+
 // The summary is decode-derived, not declared: a body that writes s5 reports s5
 // (and only s5) as an ordinary clobber.
 TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {

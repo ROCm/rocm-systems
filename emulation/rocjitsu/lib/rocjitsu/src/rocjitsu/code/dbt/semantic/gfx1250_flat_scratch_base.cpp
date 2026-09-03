@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/gfx1250_flat_scratch_base.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -364,6 +364,30 @@ bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
   for (int i = 0; i < sources; ++i) {
     if (is_flat_scratch_base_64bit_source(inst, i, *layout, words))
+      return true;
+  }
+  return false;
+}
+
+bool gfx1250_flat_scratch_base_residual(const Instruction &inst) {
+  const uint32_t *raw = inst.raw_encoding();
+  if (raw == nullptr)
+    return false;
+  const std::optional<EncodingSourceFields> layout = source_fields(raw[0]);
+  if (!layout)
+    return instruction_names_selector_in_any_64bit_source(inst);
+
+  const size_t available =
+      inst.size() > 0 ? static_cast<size_t>(inst.size()) / sizeof(uint32_t) : 0;
+  const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
+  const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
+  for (int source_index = 0; source_index < sources; ++source_index) {
+    if (!is_flat_scratch_base_64bit_source(inst, source_index, *layout, words))
+      continue;
+    if (layout->vector)
+      return true;
+    const Operand *operand = inst.src_operand(source_index);
+    if (operand != nullptr && operand->encoding_value() == kFlatScratchBaseHi)
       return true;
   }
   return false;

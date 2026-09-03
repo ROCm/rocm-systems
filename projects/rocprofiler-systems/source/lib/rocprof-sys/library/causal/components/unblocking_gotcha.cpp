@@ -91,7 +91,7 @@ unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
 
         if constexpr(Idx == pthread_barrier_wait_idx)
         {
-            std::int64_t _delay_value =
+            const std::int64_t _delay_value =
                 (_active) ? causal::delay::get_global().load() : 0;
 
             causal::sampling::block_backtrace_samples();

@@ -4,9 +4,10 @@
 /// @file dpp_sdwa_ops.h
 /// @brief DPP (Data-Parallel Primitives) and SDWA (Sub-Dword Access) helpers.
 ///
-/// @details DPP modifies how VOP1/VOP2 instructions read src0 by applying a lane
-/// permutation before the ALU operation. The permutation is controlled by
-/// dpp_ctrl (9 bits), with row_mask/bank_mask disabling individual lanes.
+/// @details DPP permutes the field-bearing vector source of supported
+/// VOP1/VOP2/VOP3/VOP3P/VOPC forms before execution. Source validity and
+/// BOUND_CTRL govern source-derived writes, while row/bank masks independently
+/// filter destination commits; suppressed compare-result bits are zeroed.
 ///
 /// SDWA selects sub-dword portions of source operands and merges results
 /// into sub-dword positions of the destination. Available on GFX9 (CDNA)
@@ -20,13 +21,94 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 #include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace rocjitsu {
+
+/// @brief Allocation-free operand backed by instruction-local staged lane values.
+///
+/// @details DPP and SDWA construct this object only when staging is required.
+/// Its two inline VGPR-shaped buffers preserve native 32-bit and 64-bit SIMD
+/// source loads without adding storage to every decoded instruction or making
+/// a heap allocation on the execution path.
+class StagedOperand final : public Operand {
+public:
+  static constexpr int MAX_LANES = 64;
+
+  StagedOperand(const Operand &base, int lane_count)
+      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {}
+
+  StagedOperand(const Operand &base, const uint32_t *data, int lane_count)
+      : StagedOperand(base, lane_count) {
+    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane)
+      set_lane(lane, data[lane]);
+  }
+
+  StagedOperand(const Operand &base, const uint64_t *data, int lane_count)
+      : StagedOperand(base, lane_count) {
+    for (int lane = 0; lane < lane_count && lane < MAX_LANES; ++lane)
+      set_lane64(lane, data[lane]);
+  }
+
+  std::string name() const override { return "staged_src"; }
+  bool simd_capable() const override { return true; }
+
+  void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
+  void set_lane64(uint32_t lane, uint64_t value) {
+    lo_[lane] = static_cast<uint32_t>(value);
+    hi_[lane] = static_cast<uint32_t>(value >> 32);
+  }
+
+private:
+  uint32_t read_lane(const amdgpu::Wavefront &, uint32_t lane) const override {
+    return lane < static_cast<uint32_t>(lane_count_) ? lo_[lane] : 0;
+  }
+
+  uint64_t read_lane64(const amdgpu::Wavefront &, uint32_t lane) const override {
+    if (lane >= static_cast<uint32_t>(lane_count_))
+      return 0;
+    return uint64_t{lo_[lane]} | (uint64_t{hi_[lane]} << 32);
+  }
+
+  uint32_t read_scalar(const amdgpu::Wavefront &) const override { return lo_[0]; }
+  uint64_t read_scalar64(const amdgpu::Wavefront &) const override {
+    return uint64_t{lo_[0]} | (uint64_t{hi_[0]} << 32);
+  }
+
+  void read_lane_chunk(const amdgpu::Wavefront &, uint32_t lane_base, uint32_t count,
+                       uint32_t *out) const override {
+    const uint32_t lanes = static_cast<uint32_t>(lane_count_);
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint32_t lane = lane_base + i;
+      out[i] = lane < lanes ? lo_[lane] : 0u;
+    }
+  }
+
+  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &) const override {
+    return {reinterpret_cast<const uint32_t *>(&lo_), MAX_LANES};
+  }
+
+  amdgpu::ConstVgprStoragePair64
+  simd_vgpr_storage64_impl(const amdgpu::Wavefront &) const override {
+    return {{reinterpret_cast<const uint32_t *>(&lo_), MAX_LANES},
+            {reinterpret_cast<const uint32_t *>(&hi_), MAX_LANES}};
+  }
+
+  simdojo::VectorReg<MAX_LANES, uint32_t> lo_{};
+  simdojo::VectorReg<MAX_LANES, uint32_t> hi_{};
+  int lane_count_ = 0;
+};
+
+using DppOperand = StagedOperand;
+
 namespace amdgpu {
 
 namespace dpp {
@@ -194,56 +276,136 @@ inline bool dpp_lane_write_enabled(int lane, int wf_size, uint32_t dpp_ctrl, uin
   return !oob || bound_ctrl != 0;
 }
 
-/// @brief Compute the destination write mask for a DPP instruction.
+/// @brief Execution-local DPP source and destination analysis.
 ///
-/// Includes only lanes enabled by row_mask/bank_mask and, when the DPP
-/// permutation reads invalid shared data, only lanes whose BOUND_CTRL behavior
-/// still writes a zero source value.
-///
-/// @param wf_size Wavefront size in lanes.
-/// @param dpp_ctrl 9-bit DPP control value.
-/// @param row_mask 4-bit row mask.
-/// @param bank_mask 4-bit bank mask.
-/// @param bound_ctrl If 1, invalid shared data writes zero; if 0, write is disabled.
-/// @returns Bit mask with one bit per destination lane that should be written.
-inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                               uint32_t bank_mask, uint32_t bound_ctrl) {
+/// Keeping these masks separate is essential: row/bank masking is a
+/// destination rule, while BOUND_CTRL decides whether an invalid source writes
+/// a zero-derived result or suppresses the write.
+struct DppPlan {
+  static constexpr uint8_t INVALID_LANE = 0xFF;
+
+  std::array<uint8_t, 64> source_lanes{};
+  uint64_t physical_read_dest_mask = 0;
+  uint64_t zero_source_mask = 0;
+  uint64_t source_write_mask = 0;
+  uint64_t row_bank_mask = 0;
+};
+
+inline uint64_t dpp_row_bank_mask(uint32_t wf_size, uint32_t row_mask, uint32_t bank_mask) {
   uint64_t mask = 0;
-  for (uint32_t ln = 0; ln < wf_size; ++ln)
-    if (dpp_lane_write_enabled(static_cast<int>(ln), static_cast<int>(wf_size), dpp_ctrl, row_mask,
-                               bank_mask, bound_ctrl))
-      mask |= (1ULL << ln);
+  for (uint32_t lane = 0; lane < wf_size; ++lane)
+    if (!dpp_lane_masked(static_cast<int>(lane), row_mask, bank_mask))
+      mask |= uint64_t{1} << lane;
   return mask;
 }
 
-/// @brief Return destination lanes enabled by EXEC and instruction modifiers.
-///
-/// Applies DPP destination masking without changing architectural wave state.
-template <typename Inst>
-inline uint64_t execution_lane_mask(const Inst &inst, const amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  if constexpr (requires {
-                  inst.inst_.src0;
-                  inst.dpp_ctrl_;
-                  inst.dpp_row_mask_;
-                  inst.dpp_bank_mask_;
-                  inst.dpp_bound_ctrl_;
-                }) {
-    if (inst.inst_.src0 == amdgpu::SRC_DPP)
-      exec &= dpp_write_mask(wf.wf_size(), inst.dpp_ctrl_, inst.dpp_row_mask_, inst.dpp_bank_mask_,
-                             inst.dpp_bound_ctrl_);
+inline DppPlan make_dpp_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                             uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                             uint64_t exec_mask, bool inactive_uses_bound_ctrl) {
+  DppPlan plan;
+  plan.row_bank_mask = dpp_row_bank_mask(wf_size, row_mask, bank_mask);
+  plan.source_lanes.fill(DppPlan::INVALID_LANE);
+  for (uint32_t lane = 0; lane < wf_size; ++lane) {
+    bool out_of_bounds = false;
+    const int source_lane =
+        dpp_permute(dpp_ctrl, static_cast<int>(lane), static_cast<int>(wf_size), out_of_bounds);
+    // FI applies only to inactive in-range source lanes. Out-of-range sources
+    // are governed by BOUND_CTRL alone, irrespective of FI.
+    const bool inactive = !out_of_bounds && !fi && (exec_mask & (uint64_t{1} << source_lane)) == 0;
+    const uint64_t lane_bit = uint64_t{1} << lane;
+    if (!out_of_bounds)
+      plan.source_lanes[lane] = static_cast<uint8_t>(source_lane);
+    if (!out_of_bounds && !inactive)
+      plan.physical_read_dest_mask |= lane_bit;
+    else if (bound_ctrl || (inactive && !inactive_uses_bound_ctrl))
+      plan.zero_source_mask |= lane_bit;
+    if (bound_ctrl || (!out_of_bounds && !(inactive && inactive_uses_bound_ctrl)))
+      plan.source_write_mask |= lane_bit;
   }
-  return exec;
+  return plan;
 }
 
-/// @brief Complete lane-access plan for a DPP source permutation.
-struct DppAccessPlan {
-  static constexpr int8_t kNoSourceLane = -1;
+inline uint64_t dpp_physical_source_mask(const DppPlan &plan, uint64_t destination_mask,
+                                         uint32_t wf_size) {
+  uint64_t source_mask = 0;
+  const uint64_t read_destinations = destination_mask & plan.physical_read_dest_mask;
+  for (uint32_t lane = 0; lane < wf_size; ++lane)
+    if (read_destinations & (uint64_t{1} << lane))
+      source_mask |= uint64_t{1} << plan.source_lanes[lane];
+  return source_mask;
+}
 
-  uint64_t source_lane_mask = 0;
-  std::array<int8_t, 64> source_lane_for_destination{};
+inline uint64_t dpp_source_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t bound_ctrl,
+                                      uint32_t fi, uint64_t exec_mask,
+                                      bool inactive_uses_bound_ctrl) {
+  return make_dpp_plan(wf_size, dpp_ctrl, 0xF, 0xF, bound_ctrl, fi, exec_mask,
+                       inactive_uses_bound_ctrl)
+      .source_write_mask;
+}
 
-  DppAccessPlan() { source_lane_for_destination.fill(kNoSourceLane); }
+/// Legacy combined mask retained for architectures without the compare-specific rule.
+inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                               uint32_t bank_mask, uint32_t bound_ctrl) {
+  const DppPlan plan =
+      make_dpp_plan(wf_size, dpp_ctrl, row_mask, bank_mask, bound_ctrl, 1, ~0ULL, false);
+  return plan.row_bank_mask & plan.source_write_mask;
+}
+
+inline uint64_t dpp_compare_result(uint64_t new_result, uint64_t old_exec, uint64_t row_bank_mask,
+                                   uint64_t source_write_mask) {
+  return new_result & old_exec & row_bank_mask & source_write_mask;
+}
+
+/// Preserve an active scalar side-result lane when BOUND_CTRL suppresses its
+/// DPP source write. Row/bank masks are intentionally absent: they select the
+/// vector destination only, not VCC or another scalar side result.
+inline uint64_t dpp_source_suppressed_result(uint64_t new_result, uint64_t old_result,
+                                             uint64_t old_exec, uint64_t source_write_mask) {
+  const uint64_t preserve_mask = old_exec & ~source_write_mask;
+  return (new_result & ~preserve_mask) | (old_result & preserve_mask);
+}
+
+/// SIMD executes every active lane; architectural destination filtering occurs at commit.
+template <typename Inst>
+inline uint64_t execution_lane_mask(const Inst &, const amdgpu::Wavefront &wf) {
+  return wf.exec();
+}
+
+/// @brief Temporarily restrict architectural and observed VGPR writes.
+///
+/// @details bind() intersects the requested lanes with the wavefront's current
+/// write mask, so independently created scopes nest correctly. restore() puts
+/// back the mask that was active at bind time and is idempotent; destruction
+/// also restores it for exception-safe execution. Generated DPP code may commit
+/// scalar side results while this scope is bound: scalar writes do not consult
+/// vgpr_write_mask, whose row/bank and invalid-source filtering applies only to
+/// the vector destination.
+class ScopedVgprWriteMask {
+public:
+  ScopedVgprWriteMask() = default;
+  ScopedVgprWriteMask(const ScopedVgprWriteMask &) = delete;
+  ScopedVgprWriteMask &operator=(const ScopedVgprWriteMask &) = delete;
+  ~ScopedVgprWriteMask() { restore(); }
+
+  /// @brief Bind this scope to a wavefront and intersect its VGPR write mask.
+  void bind(amdgpu::Wavefront &wf, uint64_t mask) {
+    restore();
+    wf_ = &wf;
+    previous_ = wf.vgpr_write_mask();
+    wf.set_vgpr_write_mask(previous_ & mask);
+  }
+
+  /// @brief Restore the mask saved by bind(), if this scope is bound.
+  void restore() {
+    if (!wf_)
+      return;
+    wf_->set_vgpr_write_mask(previous_);
+    wf_ = nullptr;
+  }
+
+private:
+  amdgpu::Wavefront *wf_ = nullptr;
+  uint64_t previous_ = 0;
 };
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel);
@@ -253,68 +415,52 @@ inline uint8_t true16_source_byte_mask(uint32_t opsel, uint32_t source_index) {
                                         : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
 }
 
-inline DppAccessPlan make_dpp_access_plan(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
-                                          uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
-                                          uint64_t exec_mask) {
-  DppAccessPlan plan;
+inline DppPlan make_dpp8_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
+                              uint64_t exec_mask) {
+  DppPlan plan;
+  plan.source_lanes.fill(DppPlan::INVALID_LANE);
+  plan.row_bank_mask = ~0ULL;
   for (uint32_t lane = 0; lane < wf_size; ++lane) {
-    const uint64_t lane_bit = uint64_t{1} << lane;
-    if ((exec_mask & lane_bit) == 0 ||
-        !dpp_lane_write_enabled(static_cast<int>(lane), static_cast<int>(wf_size), dpp_ctrl,
-                                row_mask, bank_mask, bound_ctrl))
-      continue;
-
-    bool out_of_bounds = false;
-    const int source_lane =
-        dpp_permute(dpp_ctrl, static_cast<int>(lane), static_cast<int>(wf_size), out_of_bounds);
-    if (out_of_bounds || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
-      continue;
-    plan.source_lane_for_destination[lane] = static_cast<int8_t>(source_lane);
-    plan.source_lane_mask |= uint64_t{1} << source_lane;
-  }
-  return plan;
-}
-
-inline DppAccessPlan make_dpp8_access_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
-                                           uint64_t exec_mask) {
-  DppAccessPlan plan;
-  for (uint32_t lane = 0; lane < wf_size; ++lane) {
-    if ((exec_mask & (uint64_t{1} << lane)) == 0)
-      continue;
     const uint32_t source_lane = dpp8_src_lane(lane, lane_sel);
-    if (source_lane >= wf_size || (!fi && (exec_mask & (uint64_t{1} << source_lane)) == 0))
-      continue;
-    plan.source_lane_for_destination[lane] = static_cast<int8_t>(source_lane);
-    plan.source_lane_mask |= uint64_t{1} << source_lane;
+    const uint64_t lane_bit = uint64_t{1} << lane;
+    if (source_lane < wf_size)
+      plan.source_lanes[lane] = static_cast<uint8_t>(source_lane);
+    if (source_lane < wf_size && (fi || (exec_mask & (uint64_t{1} << source_lane))))
+      plan.physical_read_dest_mask |= lane_bit;
+    else
+      plan.zero_source_mask |= lane_bit;
+    plan.source_write_mask |= lane_bit;
   }
   return plan;
 }
 
-inline void stage_dpp_operand(Operand *source, const DppAccessPlan &plan,
-                              std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
-                              uint8_t source_byte_mask = 0) {
+inline void stage_dpp_operand(const Operand &source, const DppPlan &plan,
+                              uint64_t read_destinations, std::optional<StagedOperand> &storage,
+                              amdgpu::Wavefront &wf, uint8_t source_byte_mask = 0) {
   RegisterAccess regs(wf);
-  if (source->size_bits_ > 32) {
-    auto src_view = regs.read_operand64(*source, plan.source_lane_mask);
-    uint64_t result[64] = {};
+  const uint64_t source_lane_mask = dpp_physical_source_mask(plan, read_destinations, wf.wf_size());
+  storage.emplace(source, static_cast<int>(wf.wf_size()));
+  if (source.size_bits_ > 32) {
+    auto src_view = regs.read_operand64(source, source_lane_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      const int source_lane = plan.source_lane_for_destination[lane];
-      if (source_lane >= 0)
-        result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
+      const uint64_t lane_bit = uint64_t{1} << lane;
+      if (plan.physical_read_dest_mask & lane_bit)
+        storage->set_lane64(lane, src_view.lane(plan.source_lanes[lane]));
+      else if ((plan.zero_source_mask & lane_bit) == 0)
+        storage->set_lane64(lane, src_view.lane(lane));
     }
-    storage = std::make_unique<StagedOperand>(*source, result, static_cast<int>(wf.wf_size()));
   } else {
     if (source_byte_mask == 0)
-      source_byte_mask = source->size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
-                                                  : rocjitsu::ExecutionPlugin::kFullByteMask;
-    auto src_view = regs.read_operand(*source, plan.source_lane_mask, source_byte_mask);
-    uint32_t result[64] = {};
+      source_byte_mask = source.size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
+                                                 : rocjitsu::ExecutionPlugin::kFullByteMask;
+    auto src_view = regs.read_operand(source, source_lane_mask, source_byte_mask);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      const int source_lane = plan.source_lane_for_destination[lane];
-      if (source_lane >= 0)
-        result[lane] = src_view.lane(static_cast<uint32_t>(source_lane));
+      const uint64_t lane_bit = uint64_t{1} << lane;
+      if (plan.physical_read_dest_mask & lane_bit)
+        storage->set_lane(lane, src_view.lane(plan.source_lanes[lane]));
+      else if ((plan.zero_source_mask & lane_bit) == 0)
+        storage->set_lane(lane, src_view.lane(lane));
     }
-    storage = std::make_unique<StagedOperand>(*source, result, static_cast<int>(wf.wf_size()));
   }
 }
 
@@ -322,22 +468,19 @@ inline void stage_dpp_operand(Operand *source, const DppAccessPlan &plan,
 ///
 /// Reads all src0 VGPR lanes, applies the DPP permutation, creates a
 /// StagedOperand with the permuted data, and returns it through storage.
-/// Called from VOP1/VOP2 execute_impl() when src0 == 250.
+/// Called by generated VOP1, VOP2, VOPC, VOP3, and VOP3P modifier paths when
+/// src0 uses SRC_DPP.
 ///
-/// @param source Source operand to stage; the pointer is not retained or replaced.
-/// @param dpp_ctrl 9-bit DPP control value.
-/// @param row_mask 4-bit row mask.
-/// @param bank_mask 4-bit bank mask.
-/// @param bound_ctrl Bound control (1 = zero OOB, 0 = preserve).
-/// @param fi Fetch-inactive control (1 = read inactive source lanes, 0 = zero).
-/// @param[out] storage Owning pointer for the staged operand lifetime.
+/// @param source Source operand to stage; the reference is not retained or replaced.
+/// @param plan Precomputed source-lane and destination-write decisions.
+/// @param read_destinations Destination lanes whose permuted sources must be read.
+/// @param[out] storage Instruction-local staged operand storage.
 /// @param wf Wavefront providing register state.
-inline void apply_dpp(Operand *source, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
-                      uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<StagedOperand> &storage,
-                      amdgpu::Wavefront &wf, uint8_t source_byte_mask = 0) {
-  const DppAccessPlan plan =
-      make_dpp_access_plan(wf.wf_size(), dpp_ctrl, row_mask, bank_mask, bound_ctrl, fi, wf.exec());
-  stage_dpp_operand(source, plan, storage, wf, source_byte_mask);
+/// @param source_byte_mask Optional byte mask for a true16 source selection.
+inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_destinations,
+                      std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
+                      uint8_t source_byte_mask = 0) {
+  stage_dpp_operand(source, plan, read_destinations, storage, wf, source_byte_mask);
 }
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
@@ -345,11 +488,13 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
-inline void apply_dpp8(Operand *source, uint32_t lane_sel, uint32_t fi,
-                       std::unique_ptr<StagedOperand> &storage, amdgpu::Wavefront &wf,
+inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
+                       std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
-  const DppAccessPlan plan = make_dpp8_access_plan(wf.wf_size(), lane_sel, fi, wf.exec());
-  stage_dpp_operand(source, plan, storage, wf, source_byte_mask);
+  if (source.size_bits() > 32)
+    throw util::InvalidInst("DPP8 requires a source no wider than 32 bits", "");
+  const DppPlan plan = make_dpp8_plan(wf.wf_size(), lane_sel, fi, wf.exec());
+  stage_dpp_operand(source, plan, wf.exec(), storage, wf, source_byte_mask);
 }
 
 } // namespace dpp
@@ -393,17 +538,76 @@ inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
   return word_val;
 }
 
-/// @brief Floating-point representation used by SDWA source modifiers.
-///
-/// SDWA selection and sign extension apply to every source. Absolute-value and
-/// negate fields apply only to floating-point sources, and their sign bit
-/// depends on the semantic source type rather than the selector width.
-enum class SourceModifierFormat {
-  NONE,
-  F16,
-  BF16,
-  F32,
-};
+/// @brief Append an SDWA source, including modifiers encoded in the extension word.
+/// The semantic source format selects which modifier family is meaningful:
+/// integer-like sources use sign extension, while floating-point sources use
+/// negate and absolute-value modifiers.
+inline void append_source(std::string &out, const Operand &source, SourceModifierFormat format,
+                          bool sign_extend, bool negate, bool absolute) {
+  if (format == SourceModifierFormat::NONE && sign_extend)
+    out += "sext(";
+  if (format != SourceModifierFormat::NONE && negate)
+    out += '-';
+  if (format != SourceModifierFormat::NONE && absolute)
+    out += '|';
+  out += source.name();
+  if (format != SourceModifierFormat::NONE && absolute)
+    out += '|';
+  if (format == SourceModifierFormat::NONE && sign_extend)
+    out += ')';
+}
+
+inline std::string selection_name(uint32_t selection) {
+  constexpr std::array<std::string_view, 7> names = {"BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3",
+                                                     "WORD_0", "WORD_1", "DWORD"};
+  if (selection < names.size())
+    return std::string(names[selection]);
+  return "invalid(" + std::to_string(selection) + ")";
+}
+
+inline std::string destination_unused_name(uint32_t unused) {
+  constexpr std::array<std::string_view, 3> names = {"UNUSED_PAD", "UNUSED_SEXT",
+                                                     "UNUSED_PRESERVE"};
+  if (unused < names.size())
+    return std::string(names[unused]);
+  return "invalid(" + std::to_string(unused) + ")";
+}
+
+inline void append_source_attributes(std::string &out, uint32_t src0_selection, const Operand *src1,
+                                     uint32_t src1_selection) {
+  out += " src0_sel:";
+  out += selection_name(src0_selection);
+  if (src1) {
+    out += " src1_sel:";
+    out += selection_name(src1_selection);
+  }
+}
+
+inline void append_destination_attributes(std::string &out, bool clamp, uint32_t omod,
+                                          uint32_t destination_selection,
+                                          uint32_t destination_unused, uint32_t src0_selection,
+                                          const Operand *src1, uint32_t src1_selection) {
+  if (clamp)
+    out += " clamp";
+  switch (omod) {
+  case 1:
+    out += " mul:2";
+    break;
+  case 2:
+    out += " mul:4";
+    break;
+  case 3:
+    out += " div:2";
+    break;
+  default:
+    break;
+  }
+  out += " dst_sel:";
+  out += selection_name(destination_selection);
+  out += " dst_unused:";
+  out += destination_unused_name(destination_unused);
+  append_source_attributes(out, src0_selection, src1, src1_selection);
+}
 
 inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat format, bool negate,
                                        bool absolute) {
@@ -436,7 +640,7 @@ inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat form
 /// execution.
 inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, bool negate,
                          bool absolute, SourceModifierFormat modifier_format,
-                         std::unique_ptr<StagedOperand> &storage, Wavefront &wf) {
+                         std::optional<StagedOperand> &storage, Wavefront &wf) {
   storage.reset();
   const bool has_float_modifier =
       modifier_format != SourceModifierFormat::NONE && (absolute || negate);
@@ -446,16 +650,15 @@ inline void stage_source(Operand &source, uint32_t selection, bool sign_extend, 
   const uint64_t exec = wf.exec();
   const auto source_view =
       RegisterAccess(wf).read_operand(source, exec, sdwa_src_byte_mask(selection));
-  uint32_t staged[StagedOperand::MAX_LANES] = {};
+  storage.emplace(source, static_cast<int>(wf.wf_size()));
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if ((exec & (uint64_t{1} << lane)) == 0)
       continue;
 
     uint32_t value = sdwa_src_select(source_view.lane(lane), selection, sign_extend);
     value = apply_source_modifiers(value, modifier_format, negate, absolute);
-    staged[lane] = value;
+    storage->set_lane(lane, value);
   }
-  storage = std::make_unique<StagedOperand>(source, staged, static_cast<int>(wf.wf_size()));
 }
 
 /// @brief Merge an ALU result into a destination register per SDWA dst_sel.

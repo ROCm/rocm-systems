@@ -355,6 +355,9 @@ struct alignas(16) ncclDevWorkP2p {
   // Chunk size stored in 8 bits via u32fp8Encode/Decode.
   uint8_t sendChunkSize_u32fp8, recvChunkSize_u32fp8;
 
+  // Set when the send/recv is latency-bound and should use the LL-family latency
+  // protocol instead of SIMPLE. Which one (legacy LL or LL128) is fixed by the kernel
+  // variant selected on the host via ncclDevFuncId_P2p(useLL128).
   uint8_t sendProtoLL:1, recvProtoLL:1;
   uint8_t sendNetReg:1, recvNetReg:1;
   uint8_t sendIpcReg:1, recvIpcReg:1;
@@ -541,7 +544,13 @@ constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
 }
 
 __host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_CUDA_ARCH) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP has no __CUDA_ARCH__, so NCCL_CUDA_ARCH is 0 at device compile time and
+  // would return 1 KiB. All RCCL supported gfx targets can accommodate 16 KiB.
+  return (16 << 10);
+#else
   return cudaArch < 800 ? (1 << 10) : cudaArch < 900 ? (8 << 10) : (16 << 10);
+#endif
 }
 
 #define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
@@ -607,6 +616,7 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+  int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
@@ -835,8 +845,12 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda ||
-             coll == ncclFuncAlltoAllvGda) {
+  } else if (coll == ncclFuncSendRecv) {
+    // SendRecv has two latency-protocol kernel variants distinguished by reg
+    // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
+    key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+          ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
   } else {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
@@ -861,9 +875,15 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   return row;
 }
 
-inline int ncclDevFuncId_P2p() {
-  static int ncclDevFuncIdP2p = ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF);
-  return ncclDevFuncIdP2p;
+// Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
+// gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
+// reg_values_of("SendRecv") in the device codegen.
+inline int ncclDevFuncId_P2p(bool useLL128 = false) {
+  static int ncclDevFuncIdP2pLL =
+    ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/0);
+  static int ncclDevFuncIdP2pLL128 =
+    ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/1);
+  return useLL128 ? ncclDevFuncIdP2pLL128 : ncclDevFuncIdP2pLL;
 }
 
 #endif

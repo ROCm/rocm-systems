@@ -420,7 +420,7 @@ int hsakmt_drm_open_render(int minor)
 	}
 	char path[128];
 	snprintf(path, sizeof(path), "/dev/dri/renderD%d", minor);
-	return open(path, O_RDWR | O_CLOEXEC);
+	return hsakmt_open(path, O_RDWR | O_CLOEXEC);
 }
 
 void hsakmt_drm_close(int fd)

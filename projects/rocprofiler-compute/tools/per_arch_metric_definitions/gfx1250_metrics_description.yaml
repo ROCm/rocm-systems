@@ -64,13 +64,13 @@ System Speed-of-Light:
     rst: Achieved Int4 WMMA throughput.
     unit: GIOP/s
   Active WGPs:
-    plain: Average number of WGPs that had at least one active wavefront.
-    rst: Average number of WGPs that had at least one active wavefront.
-    unit: WGPs
+    plain: Average number of WGPs that had at least one active wavefront in a cycle.
+    rst: Average number of WGPs that had at least one active wavefront in a cycle.
+    unit: WGPs per Cycle
   IPC:
     plain: Average number of instructions per active WGP cycle.
     rst: Average number of instructions per active WGP cycle.
-    unit: Instr/cycle
+    unit: Instructions per Cycle
   Wavefront Occupancy:
     plain: Average number of wavefronts in flight on GPU.
     rst: Average number of wavefronts in flight on GPU.
@@ -86,11 +86,11 @@ System Speed-of-Light:
   LDS Bank Conflicts/Access:
     plain: Number of LDS bank conflicts per LDS access.
     rst: Number of LDS bank conflicts per LDS access.
-    unit: Conflicts/access
+    unit: Conflicts per Access
   GL0 Hit Rate:
     plain: GL0 cache hit rate.
     rst: GL0 cache hit rate.
-    unit: Pct
+    unit: Percent
   GL0 Cache BW:
     plain: Total GL0 cache data bandwidth combining load, store, and atomic traffic.
     rst: Total GL0 cache data bandwidth combining load, store, and atomic traffic.
@@ -98,11 +98,11 @@ System Speed-of-Light:
   GL1A Busy Rate:
     plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
     rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
-    unit: Pct
+    unit: Percent
   GL2 Cache Hit Rate:
     plain: GL2 cache hit rate.
     rst: GL2 cache hit rate.
-    unit: pct
+    unit: Percent
   GL2 Cache BW:
     plain: Total GL2 cache data bandwidth combining load, store, and atomic traffic.
     rst: Total GL2 cache data bandwidth combining load, store, and atomic traffic.
@@ -126,7 +126,7 @@ System Speed-of-Light:
   Scalar Data Cache Hit Rate:
     plain: Scalar Data Cache hit rate.
     rst: Scalar Data Cache hit rate.
-    unit: pct
+    unit: Percent
   Scalar Data Cache BW:
     plain: Total Scalar Data Cache data bandwidth.
     rst: Total Scalar Data Cache data bandwidth.
@@ -134,7 +134,7 @@ System Speed-of-Light:
   Instruction Cache Hit Rate:
     plain: Instruction Cache hit rate.
     rst: Instruction Cache hit rate.
-    unit: pct
+    unit: Percent
   Instruction Cache BW:
     plain: Total Instruction Cache data bandwidth.
     rst: Total Instruction Cache data bandwidth.
@@ -142,30 +142,6 @@ System Speed-of-Light:
   Instruction Cache Fetch Latency:
     plain: Average latency to fetch instruction from GL1 to Instruction Cache.
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.
-    unit: Cycles
-  L2 Cache Hit Rate:
-    plain: Percentage of GL2 (L2) cache requests satisfied from GL2 without HBM access. High hit rates keep HBM bandwidth demand low and reduce overall memory access latency. Low hit rates confirm the kernel's active working set exceeds GL2 capacity and the kernel is HBM-bandwidth bound -- tile data to fit within GL2.
-    rst: Percentage of GL2 (L2) cache requests satisfied from GL2 without HBM access. High hit rates keep HBM bandwidth demand low and reduce overall memory access latency. Low hit rates confirm the kernel's active working set exceeds GL2 capacity and the kernel is HBM-bandwidth bound -- tile data to fit within GL2.
-    unit: pct
-  L2 Cache BW:
-    plain: Total GL2 cache request bandwidth (GB/s) at the GL0-GL1 crossing (L2-level boundary). Near-peak values indicate the kernel generates significant GL0 miss traffic requiring GL1/GL2 service. Combine with L2 Cache Hit Rate to determine if GL2 is serving from cache or forwarding to HBM.
-    rst: Total GL2 cache request bandwidth (GB/s) at the GL0-GL1 crossing (L2-level boundary). Near-peak values indicate the kernel generates significant GL0 miss traffic requiring GL1/GL2 service. Combine with L2 Cache Hit Rate to determine if GL2 is serving from cache or forwarding to HBM.
-    unit: GB/s
-  L2-Fabric Read BW:
-    plain: 'How much data the GPU is reading from HBM per second (GB/s) to fill GL2 cache misses. When this is close to the HBM bandwidth ceiling, the kernel is bottlenecked on memory reads and will not get faster without better data reuse. Tip: try tiling or blocking the access pattern so more data is reused from GL2 before it is evicted, reducing the number of HBM fetches needed.'
-    rst: 'How much data the GPU is reading from HBM per second (GB/s) to fill GL2 cache misses. When this is close to the HBM bandwidth ceiling, the kernel is bottlenecked on memory reads and will not get faster without better data reuse. Tip: try tiling or blocking the access pattern so more data is reused from GL2 before it is evicted, reducing the number of HBM fetches needed.'
-    unit: GB/s
-  L2-Fabric Write BW:
-    plain: 'How much data the GPU is writing back to HBM per second (GB/s) -- covering dirty GL2 line evictions and write-through traffic. When this is high alongside L2-Fabric Read BW, the kernel is pushing HBM hard in both directions at the same time. Tip: buffer output data in LDS before writing to global memory, and check whether write accesses are coalesced to reduce the number of cache lines flushed to HBM.'
-    rst: 'How much data the GPU is writing back to HBM per second (GB/s) -- covering dirty GL2 line evictions and write-through traffic. When this is high alongside L2-Fabric Read BW, the kernel is pushing HBM hard in both directions at the same time. Tip: buffer output data in LDS before writing to global memory, and check whether write accesses are coalesced to reduce the number of cache lines flushed to HBM.'
-    unit: GB/s
-  L2-Fabric Read Latency:
-    plain: Average number of GPU clock cycles for a GL2 cache miss to fetch data from HBM and return it to the shader. Lower is better. If latency climbs together with L2-Fabric Read BW, HBM is close to saturation and requests are queuing. If latency is high but bandwidth is low, the cause is likely EA arbitration contention or a long chain of serialized outstanding requests -- check EA-SDP stall metrics for the specific back-pressure source.
-    rst: Average number of GPU clock cycles for a GL2 cache miss to fetch data from HBM and return it to the shader. Lower is better. If latency climbs together with L2-Fabric Read BW, HBM is close to saturation and requests are queuing. If latency is high but bandwidth is low, the cause is likely EA arbitration contention or a long chain of serialized outstanding requests -- check EA-SDP stall metrics for the specific back-pressure source.
-    unit: Cycles
-  L2-Fabric Write Latency:
-    plain: Average number of GPU clock cycles for a GL2 write to complete its round trip to HBM through the EA. High write latency combined with high L2-Fabric Write BW confirms the HBM write queue is full and writes are backing up -- check EA-SDP DRAM stall rates to confirm and consider reducing write pressure by buffering in LDS.
-    rst: Average number of GPU clock cycles for a GL2 write to complete its round trip to HBM through the EA. High write latency combined with high L2-Fabric Write BW confirms the HBM write queue is full and writes are backing up -- check EA-SDP DRAM stall rates to confirm and consider reducing write pressure by buffering in LDS.
     unit: Cycles
 Memory chart - Instruction Cache:
   ICache Requests:
@@ -541,8 +517,8 @@ Roofline Performance Rates:
     rst: Achieved Int8 WMMA throughput.
     unit: GIOP/s
   HBM Bandwidth:
-    plain: Total HBM bandwidth.
-    rst: Total HBM bandwidth.
+    plain: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    rst: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
     unit: GB/s
   GL2 Cache Bandwidth:
     plain: GL2 Cache bandwidth.
@@ -560,18 +536,6 @@ Roofline Performance Rates:
     plain: Achieved Int4 WMMA throughput.
     rst: Achieved Int4 WMMA throughput.
     unit: GIOP/s
-  L2 Cache Bandwidth:
-    plain: Achieved GL1-to-GL0 bandwidth (GB/s) representing traffic crossing the GL1 (L2-level) cache boundary. This is the L2 cache roof on the roofline chart. Below-peak values with high GL0 miss rate indicate GL1 is constraining the memory path; if near-peak but HBM bandwidth is low, GL1 is serving traffic from its own cache well.
-    rst: Achieved GL1-to-GL0 bandwidth (GB/s) representing traffic crossing the GL1 (L2-level) cache boundary. This is the L2 cache roof on the roofline chart. Below-peak values with high GL0 miss rate indicate GL1 is constraining the memory path; if near-peak but HBM bandwidth is low, GL1 is serving traffic from its own cache well.
-    unit: GB/s
-  L1 Cache Bandwidth:
-    plain: Achieved GL0 total request bandwidth (GB/s) at the L0 cache interface. This is the L1 (GL0) cache roof on the roofline chart, representing the total request rate from the GL0 cache controller. Near-peak L1 bandwidth with low L0 hit rate indicates L0 is generating many misses -- the effective arithmetic intensity is lower at the L2 and HBM levels.
-    rst: Achieved GL0 total request bandwidth (GB/s) at the L0 cache interface. This is the L1 (GL0) cache roof on the roofline chart, representing the total request rate from the GL0 cache controller. Near-peak L1 bandwidth with low L0 hit rate indicates L0 is generating many misses -- the effective arithmetic intensity is lower at the L2 and HBM levels.
-    unit: GB/s
-  L0 Cache Bandwidth:
-    plain: Achieved GL0 data delivery bandwidth (GB/s) combining load, store, and atomic data at the vector L0 (GL0) cache level. This is the L0 cache roof on the roofline chart -- the innermost memory boundary. Near-peak L0 bandwidth with good arithmetic throughput indicates the kernel is efficiently utilizing on-chip cache resources.
-    rst: Achieved GL0 data delivery bandwidth (GB/s) combining load, store, and atomic data at the vector L0 (GL0) cache level. This is the L0 cache roof on the roofline chart -- the innermost memory boundary. Near-peak L0 bandwidth with good arithmetic throughput indicates the kernel is efficiently utilizing on-chip cache resources.
-    unit: GB/s
 Roofline Plot Points:
   AI HBM:
     plain: Arithmetic intensity relative to HBM bandwidth.
@@ -589,18 +553,6 @@ Roofline Plot Points:
     plain: Total achieved compute throughput combining all VALU and WMMA FLOPs.
     rst: Total achieved compute throughput combining all VALU and WMMA FLOPs.
     unit: GFLOP/s
-  AI L2:
-    plain: 'Arithmetic intensity relative to L2 (GL1) bandwidth: total FLOPs / total L2 bytes moved. Position on the L2-bounded roofline chart. If AI L2 is much lower than AI HBM, the kernel has poor GL1 locality relative to HBM locality -- improve tiling so more data is reused within GL1.'
-    rst: 'Arithmetic intensity relative to L2 (GL1) bandwidth: total FLOPs / total L2 bytes moved. Position on the L2-bounded roofline chart. If AI L2 is much lower than AI HBM, the kernel has poor GL1 locality relative to HBM locality -- improve tiling so more data is reused within GL1.'
-    unit: FLOPs/Byte
-  AI L1:
-    plain: 'Arithmetic intensity relative to L1 (GL0) bandwidth: total FLOPs / total L0 bytes moved. Position on the L1 (GL0) bounded roofline chart. AI L1 is typically the lowest arithmetic intensity since GL0 handles the most raw traffic. Use AI L1 vs. AI L2 vs. AI HBM together to understand which cache level is the effective performance bottleneck.'
-    rst: 'Arithmetic intensity relative to L1 (GL0) bandwidth: total FLOPs / total L0 bytes moved. Position on the L1 (GL0) bounded roofline chart. AI L1 is typically the lowest arithmetic intensity since GL0 handles the most raw traffic. Use AI L1 vs. AI L2 vs. AI HBM together to understand which cache level is the effective performance bottleneck.'
-    unit: FLOPs/Byte
-  AI L0:
-    plain: 'Arithmetic intensity relative to L0 (vector GL0) data bandwidth: total FLOPs / total GL0 data bytes. Position on the L0-bounded roofline chart, representing the finest-grained arithmetic intensity measurement. Very low AI L0 with near-peak L0 bandwidth confirms the kernel is data-movement bound even at the on-chip level -- increase arithmetic density per cache access.'
-    rst: 'Arithmetic intensity relative to L0 (vector GL0) data bandwidth: total FLOPs / total GL0 data bytes. Position on the L0-bounded roofline chart, representing the finest-grained arithmetic intensity measurement. Very low AI L0 with near-peak L0 bandwidth confirms the kernel is data-movement bound even at the on-chip level -- increase arithmetic density per cache access.'
-    unit: FLOPs/Byte
 CPC Utilizations:
   CPC Utilization:
     plain: Percentage of GPU-active cycles the CPC is processing compute dispatch packets.
@@ -651,11 +603,11 @@ SPI Wave Dispatch:
   Wave Dispatch Rate:
     plain: Average wavefronts launched per busy cycle.
     rst: Average wavefronts launched per busy cycle.
-    unit: Waves/cycle
+    unit: Waves per Cycle
   Thread Dispatch Rate:
     plain: Average threads launched per busy cycle.
     rst: Average threads launched per busy cycle.
-    unit: Threads/cycle
+    unit: Threads per Cycle
   Per-SE Wave Occupancy:
     plain: Average wavefronts in-flight per Shader Engine.
     rst: Average wavefronts in-flight per Shader Engine.
@@ -744,9 +696,38 @@ WGP Utilization:
     rst: Total elapsed kernel clock cycles.
     unit: Cycles
   Active WGPs:
-    plain: Average number of WGPs with at least one active wavefront.
-    rst: Average number of WGPs with at least one active wavefront.
+    plain: Average number of WGPs with at least one active wavefront in a cycle.
+    rst: Average number of WGPs with at least one active wavefront in a cycle.
     unit: Count
+WGP Wavefront Launch Stats:
+  Grid Size:
+    plain: Total number of work-items in the dispatch grid.
+    rst: Total number of work-items in the dispatch grid.
+    unit: Work-items
+  Workgroup Size:
+    plain: Number of work-items per workgroup.
+    rst: Number of work-items per workgroup.
+    unit: Work-items
+  VGPRs:
+    plain: Number of architectural VGPRs allocated per wave.
+    rst: Number of architectural VGPRs allocated per wave.
+    unit: Registers
+  AGPRs:
+    plain: Number of accumulation VGPRs allocated per wave.
+    rst: Number of accumulation VGPRs allocated per wave.
+    unit: Registers
+  SGPRs:
+    plain: Number of SGPRs allocated per wave.
+    rst: Number of SGPRs allocated per wave.
+    unit: Registers
+  LDS Allocation:
+    plain: Bytes of LDS allocated per workgroup.
+    rst: Bytes of LDS allocated per workgroup.
+    unit: Bytes
+  Scratch Allocation:
+    plain: Bytes of scratch (private) memory allocated per work-item.
+    rst: Bytes of scratch (private) memory allocated per work-item.
+    unit: Bytes per Work-item
 WGP Wave Dispatch:
   Dispatched Waves:
     plain: Total wavefronts dispatched.
@@ -859,14 +840,6 @@ WGP VMEM Instruction Mix:
     plain: Number of Tensor Data Mover instructions issued.
     rst: Number of Tensor Data Mover instructions issued.
     unit: Count per Normalization Unit
-  Instructions - VMEM Load:
-    plain: Number of VMEM load instructions issued.
-    rst: Number of VMEM load instructions issued.
-    unit: Count + $normUnit
-  Instructions - VMEM Store:
-    plain: Number of VMEM store instructions issued.
-    rst: Number of VMEM store instructions issued.
-    unit: Count + $normUnit
 WGP LDS Instruction Mix:
   Total LDS Instructions:
     plain: Total LDS instructions issued.
@@ -920,6 +893,35 @@ WGP VALU Instruction Mix:
   VALU Instructions - WMMA:
     plain: Number of WMMA instructions issued.
     rst: Number of WMMA instructions issued.
+    unit: Count per Normalization Unit
+WGP VALU FLOPs and IOPs Counting:
+  VALU Integer Operations:
+    plain: Total integer operations executed by VALU.
+    rst: Total integer operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP16:
+    plain: Total FP16 operations executed by VALU.
+    rst: Total FP16 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP16 Trans:
+    plain: Total FP16 transcendental operations executed by VALU.
+    rst: Total FP16 transcendental operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP32:
+    plain: Total FP32 operations executed by VALU.
+    rst: Total FP32 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP32 Trans:
+    plain: Total FP32 transcendental operations executed by VALU.
+    rst: Total FP32 transcendental operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP64:
+    plain: Total FP64 operations executed by VALU.
+    rst: Total FP64 operations executed by VALU.
+    unit: Count per Normalization Unit
+  VALU FP Operations - FP64 Trans:
+    plain: Total FP64 transcendental operations executed by VALU.
+    rst: Total FP64 transcendental operations executed by VALU.
     unit: Count per Normalization Unit
 WGP WMMA Instruction FLOPs and IOPs Counting:
   WMMA FP Operations - FP32:
@@ -984,6 +986,11 @@ WGP Compute Pipeline Utilization:
     plain: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
     rst: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
     unit: Percent
+WGP Latencies:
+  LDS Access Latency:
+    plain: Average LDS access latency in cycles.
+    rst: Average LDS access latency in cycles.
+    unit: Cycles
 WGP-TXA Interface:
   WGP-GL0 Request Bus Util:
     plain: Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
@@ -1021,6 +1028,11 @@ WGP-TXA Interface:
     plain: Percentage of cycles the TXA request bus Row 1 is stalled.
     rst: Percentage of cycles the TXA request bus Row 1 is stalled.
     unit: Percent
+WGP-TXD Interface:
+  TXD Data Bus Utilization:
+    plain: Percentage of cycles the TXD data return bus is carrying valid return data.
+    rst: Percentage of cycles the TXD data return bus is carrying valid return data.
+    unit: Percent
 WGP Instruction Cache:
   Icache Hit Rate:
     plain: Instruction Cache hit rate.
@@ -1035,6 +1047,11 @@ WGP Scalar Data Cache:
     plain: Total Scalar Data Cache bandwidth.
     rst: Total Scalar Data Cache bandwidth.
     unit: Bytes per Normalization Unit
+WGP SQC-GL1 Interface:
+  Interface Stall Rate:
+    plain: Percentage of cycles the SQC-GL1 interface is stalled.
+    rst: Percentage of cycles the SQC-GL1 interface is stalled.
+    unit: Percent
 TXA Utilization:
   Utilization:
     plain: Percentage of cycles the TXA is processing memory requests.
@@ -1925,6 +1942,19 @@ GL2C-EA Interface - Host CPU Bandwidth:
     plain: Total host CPU atomic bandwidth between GL2 and EA.
     rst: Total host CPU atomic bandwidth between GL2 and EA.
     unit: GB/s
+GL2C-EA Interface - PCIe Bandwidth:
+  GL2-EA PCIE Bandwidth - Read:
+    plain: Total PCIe read bandwidth between GL2 and EA.
+    rst: Total PCIe read bandwidth between GL2 and EA.
+    unit: GB/s
+  GL2-EA PCIE Bandwidth - Write:
+    plain: Total PCIe write bandwidth between GL2 and EA.
+    rst: Total PCIe write bandwidth between GL2 and EA.
+    unit: GB/s
+  GL2-EA PCIE Bandwidth - Atomic:
+    plain: Total PCIe atomic bandwidth between GL2 and EA.
+    rst: Total PCIe atomic bandwidth between GL2 and EA.
+    unit: GB/s
 GL2C-EA Interface - Remote Node Bandwidth:
   GL2-EA Remote Node Bandwidth - Read:
     plain: Total remote node read bandwidth between GL2 and EA.
@@ -2216,4 +2246,38 @@ GRBM Metrics:
   CH Utilization:
     plain: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
     rst: Percentage of GPU-active cycles the Central Hub is handling traffic between shader engines and GL2.
+    unit: Percent
+Wavefront Launch Stats:
+  Grid Size:
+    plain: Total number of work-items in the dispatch grid.
+    rst: Total number of work-items in the dispatch grid.
+    unit: Work-items
+  Workgroup Size:
+    plain: Number of work-items per workgroup.
+    rst: Number of work-items per workgroup.
+    unit: Work-items
+  VGPRs:
+    plain: Number of architectural VGPRs allocated per wave.
+    rst: Number of architectural VGPRs allocated per wave.
+    unit: Registers
+  AGPRs:
+    plain: Number of accumulation VGPRs allocated per wave.
+    rst: Number of accumulation VGPRs allocated per wave.
+    unit: Registers
+  SGPRs:
+    plain: Number of SGPRs allocated per wave.
+    rst: Number of SGPRs allocated per wave.
+    unit: Registers
+  LDS Allocation:
+    plain: Bytes of LDS allocated per workgroup.
+    rst: Bytes of LDS allocated per workgroup.
+    unit: Bytes
+  Scratch Allocation:
+    plain: Bytes of scratch (private) memory allocated per work-item.
+    rst: Bytes of scratch (private) memory allocated per work-item.
+    unit: Bytes per Work-item
+SQC-GL1 Interface:
+  Interface Stall Rate:
+    plain: Percentage of WGP-busy cycles the SQC-GL1 interface is stalled.
+    rst: Percentage of WGP-busy cycles the SQC-GL1 interface is stalled.
     unit: Percent

@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/ds.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
@@ -29,6 +29,16 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU32Ds>(opcode);
+}
+} // namespace detail
+
 DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
     : Ds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubU32Ds)),
@@ -45,6 +55,16 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU32Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
     : Ds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -63,6 +83,16 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU32Ds>(opcode);
+}
+} // namespace detail
+
 DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
     : Ds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncU32Ds)),
@@ -79,6 +109,16 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU32Ds>(opcode);
+}
+} // namespace detail
 
 DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
     : Ds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -97,6 +137,16 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
     : Ds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinI32Ds)),
@@ -113,6 +163,16 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
     : Ds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -131,6 +191,16 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
     : Ds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinU32Ds)),
@@ -147,6 +217,16 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
     : Ds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -165,6 +245,16 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU32Ds>(opcode);
+}
+} // namespace detail
+
 DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
     : Ds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndB32Ds)),
@@ -181,6 +271,16 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB32Ds>(opcode);
+}
+} // namespace detail
 
 DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
     : Ds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -199,6 +299,16 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB32Ds>(opcode);
+}
+} // namespace detail
+
 DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
     : Ds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorB32Ds)),
@@ -215,6 +325,16 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB32Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
     : Ds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -235,6 +355,16 @@ DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_mskor_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB32Ds>(opcode);
+}
+} // namespace detail
+
 DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst)
     : Ds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStoreB32Ds)),
@@ -249,6 +379,16 @@ DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB32Ds>(opcode);
+}
+} // namespace detail
 
 DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst)
     : Ds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -267,6 +407,17 @@ DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStore2addrB32Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_2addr_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB32Ds>(opcode);
+}
+} // namespace detail
+
 DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst)
     : Ds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B32Ds)),
@@ -283,6 +434,17 @@ DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B32Ds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_2addr_stride64_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B32Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -303,6 +465,17 @@ DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreB32Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB32Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstoreF32Ds)),
@@ -322,6 +495,17 @@ DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreF32Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
     : Ds("ds_min_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinF32Ds)),
@@ -338,6 +522,16 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinF32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
     : Ds("ds_max_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -356,12 +550,32 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxF32Ds>(opcode);
+}
+} // namespace detail
+
 DsNopDs::DsNopDs(const MachineInst *inst)
     : Ds("ds_nop", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsNopDs)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsNopDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Ds::validate_encoding("ds_nop", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsNopDs>(opcode);
+}
+} // namespace detail
 
 DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
     : Ds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -380,12 +594,33 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddF32Ds>(opcode);
+}
+} // namespace detail
+
 DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst)
     : Ds("ds_gws_sema_release_all", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsGwsSemaReleaseAllDs)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsGwsSemaReleaseAllDs(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_sema_release_all", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsSemaReleaseAllDs>(opcode);
+}
+} // namespace detail
 
 DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
     : Ds("ds_gws_init", reinterpret_cast<const OpEncoding *>(inst),
@@ -396,12 +631,32 @@ DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+DecodeResult decodeDsGwsInitDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_init", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsInitDs>(opcode);
+}
+} // namespace detail
+
 DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
     : Ds("ds_gws_sema_v", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsGwsSemaVDs)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsGwsSemaVDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_sema_v", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsSemaVDs>(opcode);
+}
+} // namespace detail
 
 DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
     : Ds("ds_gws_sema_br", reinterpret_cast<const OpEncoding *>(inst),
@@ -412,12 +667,32 @@ DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+namespace detail {
+DecodeResult decodeDsGwsSemaBrDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_sema_br", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsSemaBrDs>(opcode);
+}
+} // namespace detail
+
 DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
     : Ds("ds_gws_sema_p", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsGwsSemaPDs)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsGwsSemaPDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_sema_p", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsSemaPDs>(opcode);
+}
+} // namespace detail
 
 DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
     : Ds("ds_gws_barrier", reinterpret_cast<const OpEncoding *>(inst),
@@ -427,6 +702,16 @@ DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsGwsBarrierDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_gws_barrier", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsGwsBarrierDs>(opcode);
+}
+} // namespace detail
 
 DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst)
     : Ds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -443,6 +728,16 @@ DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8Ds>(opcode);
+}
+} // namespace detail
+
 DsStoreB16Ds::DsStoreB16Ds(const MachineInst *inst)
     : Ds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStoreB16Ds)),
@@ -457,6 +752,16 @@ DsStoreB16Ds::DsStoreB16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16Ds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -477,6 +782,16 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
     : Ds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubRtnU32Ds)),
@@ -495,6 +810,16 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
     : Ds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -515,6 +840,16 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
     : Ds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncRtnU32Ds)),
@@ -533,6 +868,16 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
     : Ds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -553,6 +898,16 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnI32Ds)),
@@ -571,6 +926,16 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -591,6 +956,16 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_i32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnU32Ds)),
@@ -609,6 +984,16 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU32Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -629,6 +1014,16 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_u32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU32Ds>(opcode);
+}
+} // namespace detail
+
 DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
     : Ds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndRtnB32Ds)),
@@ -647,6 +1042,16 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
     : Ds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -667,6 +1072,16 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
     : Ds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorRtnB32Ds)),
@@ -685,6 +1100,16 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
     : Ds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -707,6 +1132,17 @@ DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorRtnB32Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_mskor_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
     : Ds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB32Ds)),
@@ -725,6 +1161,17 @@ DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB32Ds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_storexchg_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst)
     : Ds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -747,6 +1194,17 @@ DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB32Ds(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const MachineInst *inst)
     : Ds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB32Ds)),
@@ -767,6 +1225,18 @@ DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const Machine
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB32Ds(const MachineInst *opcode,
+                                                    const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Ds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b32",
+                            reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -789,6 +1259,17 @@ DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB32Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnF32Ds)),
@@ -810,6 +1291,17 @@ DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnF32Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnF32Ds)),
@@ -829,6 +1321,16 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMinRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxRtnF32Ds)),
@@ -847,6 +1349,16 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMaxRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnF32Ds>(opcode);
+}
+} // namespace detail
 
 DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrap_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -868,6 +1380,16 @@ DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeDsWrapRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_wrap_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsWrapRtnB32Ds>(opcode);
+}
+} // namespace detail
+
 DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
     : Ds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSwizzleB32Ds)),
@@ -878,6 +1400,16 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeDsSwizzleB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_swizzle_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSwizzleB32Ds>(opcode);
+}
+} // namespace detail
 
 DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
     : Ds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -894,6 +1426,16 @@ DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB32Ds>(opcode);
+}
+} // namespace detail
+
 DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
     : Ds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoad2addrB32Ds)),
@@ -908,6 +1450,17 @@ DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoad2addrB32Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_2addr_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB32Ds>(opcode);
+}
+} // namespace detail
 
 DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
     : Ds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -924,6 +1477,17 @@ DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B32Ds(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_2addr_stride64_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B32Ds>(opcode);
+}
+} // namespace detail
+
 DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst)
     : Ds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadI8Ds)),
@@ -938,6 +1502,16 @@ DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_i8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8Ds>(opcode);
+}
+} // namespace detail
 
 DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst)
     : Ds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -954,6 +1528,16 @@ DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u8", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8Ds>(opcode);
+}
+} // namespace detail
+
 DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst)
     : Ds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadI16Ds)),
@@ -968,6 +1552,16 @@ DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_i16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI16Ds>(opcode);
+}
+} // namespace detail
 
 DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst)
     : Ds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -984,6 +1578,16 @@ DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16Ds>(opcode);
+}
+} // namespace detail
+
 DsConsumeDs::DsConsumeDs(const MachineInst *inst)
     : Ds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsConsumeDs)),
@@ -999,6 +1603,16 @@ DsConsumeDs::DsConsumeDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsConsumeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_consume", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsConsumeDs>(opcode);
+}
+} // namespace detail
+
 DsAppendDs::DsAppendDs(const MachineInst *inst)
     : Ds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAppendDs)),
@@ -1013,6 +1627,16 @@ DsAppendDs::DsAppendDs(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAppendDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_append", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAppendDs>(opcode);
+}
+} // namespace detail
 
 DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
     : Ds("ds_ordered_count", reinterpret_cast<const OpEncoding *>(inst),
@@ -1033,6 +1657,17 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeDsOrderedCountDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_ordered_count", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrderedCountDs>(opcode);
+}
+} // namespace detail
+
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
     : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAddU64Ds)),
@@ -1049,6 +1684,16 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAddU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU64Ds>(opcode);
+}
+} // namespace detail
 
 DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
     : Ds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1067,6 +1712,16 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsSubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU64Ds>(opcode);
+}
+} // namespace detail
+
 DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
     : Ds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsRsubU64Ds)),
@@ -1083,6 +1738,16 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsRsubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU64Ds>(opcode);
+}
+} // namespace detail
 
 DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
     : Ds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1101,6 +1766,16 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsIncU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU64Ds>(opcode);
+}
+} // namespace detail
+
 DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
     : Ds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsDecU64Ds)),
@@ -1117,6 +1792,16 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsDecU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU64Ds>(opcode);
+}
+} // namespace detail
 
 DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
     : Ds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1135,6 +1820,16 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMinI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI64Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
     : Ds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxI64Ds)),
@@ -1151,6 +1846,16 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMaxI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI64Ds>(opcode);
+}
+} // namespace detail
 
 DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
     : Ds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1169,6 +1874,16 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMinU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU64Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
     : Ds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxU64Ds)),
@@ -1185,6 +1900,16 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMaxU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU64Ds>(opcode);
+}
+} // namespace detail
 
 DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
     : Ds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1203,6 +1928,16 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAndB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB64Ds>(opcode);
+}
+} // namespace detail
+
 DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
     : Ds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsOrB64Ds)),
@@ -1220,6 +1955,16 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB64Ds>(opcode);
+}
+} // namespace detail
+
 DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
     : Ds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorB64Ds)),
@@ -1236,6 +1981,16 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB64Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
     : Ds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1256,6 +2011,16 @@ DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_mskor_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB64Ds>(opcode);
+}
+} // namespace detail
+
 DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst)
     : Ds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStoreB64Ds)),
@@ -1270,6 +2035,16 @@ DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB64Ds>(opcode);
+}
+} // namespace detail
 
 DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst)
     : Ds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1288,6 +2063,17 @@ DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStore2addrB64Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_2addr_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB64Ds>(opcode);
+}
+} // namespace detail
+
 DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst)
     : Ds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B64Ds)),
@@ -1304,6 +2090,17 @@ DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B64Ds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_2addr_stride64_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B64Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1324,6 +2121,17 @@ DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreB64Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB64Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstoreF64Ds)),
@@ -1343,6 +2151,17 @@ DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreF64Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreF64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
     : Ds("ds_min_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinF64Ds)),
@@ -1360,6 +2179,16 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMinF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinF64Ds>(opcode);
+}
+} // namespace detail
+
 DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
     : Ds("ds_max_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMaxF64Ds)),
@@ -1376,6 +2205,16 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMaxF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxF64Ds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1396,6 +2235,16 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
     : Ds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubRtnU64Ds)),
@@ -1414,6 +2263,16 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
     : Ds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1434,6 +2293,16 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_rsub_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
     : Ds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsIncRtnU64Ds)),
@@ -1452,6 +2321,16 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_inc_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
     : Ds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1472,6 +2351,16 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_dec_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnI64Ds)),
@@ -1490,6 +2379,16 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1510,6 +2409,16 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_i64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnU64Ds)),
@@ -1528,6 +2437,16 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1548,6 +2467,16 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_u64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU64Ds>(opcode);
+}
+} // namespace detail
+
 DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
     : Ds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAndRtnB64Ds)),
@@ -1566,6 +2495,16 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_and_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
     : Ds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1586,6 +2525,16 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_or_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
     : Ds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsXorRtnB64Ds)),
@@ -1604,6 +2553,16 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_xor_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
     : Ds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1626,6 +2585,17 @@ DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorRtnB64Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_mskor_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
     : Ds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB64Ds)),
@@ -1644,6 +2614,17 @@ DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB64Ds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_storexchg_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst)
     : Ds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1666,6 +2647,17 @@ DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB64Ds(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const MachineInst *inst)
     : Ds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB64Ds)),
@@ -1686,6 +2678,18 @@ DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const Machine
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB64Ds(const MachineInst *opcode,
+                                                    const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Ds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b64",
+                            reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB64Ds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1708,6 +2712,17 @@ DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB64Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst)
     : Ds("ds_cmpstore_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnF64Ds)),
@@ -1729,6 +2744,17 @@ DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnF64Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_cmpstore_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnF64Ds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
     : Ds("ds_min_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsMinRtnF64Ds)),
@@ -1747,6 +2773,16 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_min_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnF64Ds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
     : Ds("ds_max_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1767,6 +2803,16 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_max_rtn_f64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnF64Ds>(opcode);
+}
+} // namespace detail
+
 DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst)
     : Ds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadB64Ds)),
@@ -1781,6 +2827,16 @@ DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB64Ds>(opcode);
+}
+} // namespace detail
 
 DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
     : Ds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1797,6 +2853,17 @@ DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoad2addrB64Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_2addr_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB64Ds>(opcode);
+}
+} // namespace detail
+
 DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
     : Ds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B64Ds)),
@@ -1811,6 +2878,17 @@ DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B64Ds(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_2addr_stride64_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B64Ds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1831,6 +2909,16 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_rtn_f32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnF32Ds>(opcode);
+}
+} // namespace detail
+
 DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst)
     : Ds("ds_add_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAddGsRegRtnDs)),
@@ -1842,6 +2930,17 @@ DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeDsAddGsRegRtnDs(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_add_gs_reg_rtn", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddGsRegRtnDs>(opcode);
+}
+} // namespace detail
+
 DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
     : Ds("ds_sub_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubGsRegRtnDs)),
@@ -1852,6 +2951,17 @@ DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeDsSubGsRegRtnDs(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_sub_gs_reg_rtn", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubGsRegRtnDs>(opcode);
+}
+} // namespace detail
 
 DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
     : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1872,6 +2982,17 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCondxchg32RtnB64Ds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_condxchg32_rtn_b64", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondxchg32RtnB64Ds>(opcode);
+}
+} // namespace detail
+
 DsStoreB8D16HiDs::DsStoreB8D16HiDs(const MachineInst *inst)
     : Ds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStoreB8D16HiDs)),
@@ -1886,6 +3007,17 @@ DsStoreB8D16HiDs::DsStoreB8D16HiDs(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB8D16HiDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8D16HiDs>(opcode);
+}
+} // namespace detail
 
 DsStoreB16D16HiDs::DsStoreB16D16HiDs(const MachineInst *inst)
     : Ds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -1902,6 +3034,17 @@ DsStoreB16D16HiDs::DsStoreB16D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB16D16HiDs(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b16_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16D16HiDs>(opcode);
+}
+} // namespace detail
+
 DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
     : Ds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadU8D16Ds)),
@@ -1916,6 +3059,16 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadU8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u8_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16Ds>(opcode);
+}
+} // namespace detail
 
 void DsLoadU8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -1938,6 +3091,17 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU8D16HiDs(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16HiDs>(opcode);
+}
+} // namespace detail
+
 void DsLoadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1958,6 +3122,16 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_i8_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16Ds>(opcode);
+}
+} // namespace detail
 
 void DsLoadI8D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -1980,6 +3154,17 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadI8D16HiDs(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_i8_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16HiDs>(opcode);
+}
+} // namespace detail
+
 void DsLoadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2000,6 +3185,16 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadU16D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u16_d16", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16Ds>(opcode);
+}
+} // namespace detail
 
 void DsLoadU16D16Ds::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
@@ -2022,6 +3217,17 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU16D16HiDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_u16_d16_hi", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16HiDs>(opcode);
+}
+} // namespace detail
+
 void DsLoadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
   Ds::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2037,17 +3243,27 @@ DsBvhStackRtnB32Ds::DsBvhStackRtnB32Ds(const MachineInst *inst)
       data1(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
   dst_operands_[1] = &addr;
-  src_operands_[1] = &data0;
-  src_operands_[2] = &data1;
+  src_operands_[0] = &data0;
+  src_operands_[1] = &data1;
   dst_operands_[2] = &dsmem;
-  src_operands_[3] = &dsmem_in;
-  num_src_ = 4;
+  src_operands_[2] = &dsmem_in;
+  num_src_ = 3;
   num_dst_ = 3;
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeDsBvhStackRtnB32Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_bvh_stack_rtn_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBvhStackRtnB32Ds>(opcode);
+}
+} // namespace detail
 
 DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2064,6 +3280,17 @@ DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreAddtidB32Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_addtid_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreAddtidB32Ds>(opcode);
+}
+} // namespace detail
+
 DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadAddtidB32Ds)),
@@ -2079,6 +3306,17 @@ DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadAddtidB32Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_addtid_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadAddtidB32Ds>(opcode);
+}
+} // namespace detail
+
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
     : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsPermuteB32Ds)),
@@ -2092,6 +3330,16 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeDsPermuteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_permute_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPermuteB32Ds>(opcode);
+}
+} // namespace detail
+
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
     : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsBpermuteB32Ds)),
@@ -2104,6 +3352,17 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeDsBpermuteB32Ds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_bpermute_b32", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBpermuteB32Ds>(opcode);
+}
+} // namespace detail
 
 DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst)
     : Ds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -2120,6 +3379,16 @@ DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b96", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB96Ds>(opcode);
+}
+} // namespace detail
+
 DsStoreB128Ds::DsStoreB128Ds(const MachineInst *inst)
     : Ds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsStoreB128Ds)),
@@ -2134,6 +3403,16 @@ DsStoreB128Ds::DsStoreB128Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_store_b128", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB128Ds>(opcode);
+}
+} // namespace detail
 
 DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst)
     : Ds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -2150,6 +3429,16 @@ DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_b96", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB96Ds>(opcode);
+}
+} // namespace detail
+
 DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst)
     : Ds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsLoadB128Ds)),
@@ -2164,6 +3453,16 @@ DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Ds::validate_encoding(
+      "ds_load_b128", reinterpret_cast<const Ds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB128Ds>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu

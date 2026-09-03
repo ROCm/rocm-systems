@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "ualoe_lib.h"
 
@@ -623,6 +604,30 @@ int ifoe_get_netport_list(ualoe_handle_t handle, unsigned desc_count, ifoe_netpo
 #endif /* UALOE_NETLINK */
 }
 
+int ifoe_get_netport_list_v2(ualoe_handle_t handle, unsigned* desc_count,
+                             ifoe_netport_desc_t descs[]) {
+  if (desc_count == NULL) {
+    ualoe_log_error("%s: desc_count cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+  if (*desc_count == 0) {
+    ualoe_log_error("%s: *desc_count must be greater than 0\n", __func__);
+    return EINVAL;
+  }
+
+  if (descs == NULL) {
+    ualoe_log_error("%s: descs cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ifoe_nl_get_netport_list_v2(handle, desc_count, descs);
+#else
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
 int ifoe_netport_ctrl(ualoe_handle_t handle, unsigned netport_idx, ifoe_netport_state_e state) {
   int rc;
 
@@ -704,6 +709,26 @@ int ifoe_netport_set_accelerator_addr_map(ualoe_handle_t handle, unsigned netpor
 #endif /* UALOE_NETLINK */
 }
 
+int ifoe_netport_get_accelerator_addr_map(ualoe_handle_t handle, unsigned netport_idx,
+                                          unsigned map_count, ifoe_accelerator_addr_map_t map[]) {
+  if (map_count == 0 || map_count > UALOE_MAX_ACCELERATORS) {
+    ualoe_log_error("%s: map_count (%u) must be in range [1, %u]\n", __func__, map_count,
+                    UALOE_MAX_ACCELERATORS);
+    return EINVAL;
+  }
+
+  if (map == NULL) {
+    ualoe_log_error("%s: map cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ifoe_nl_netport_get_accelerator_addr_map(handle, netport_idx, map_count, map);
+#else
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
 int ifoe_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
                            ifoe_netport_state_t* state) {
   if (state == NULL) {
@@ -715,6 +740,170 @@ int ifoe_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
   return ifoe_nl_netport_get_state(handle, netport_idx, state);
 #else
   return ifoe_cdev_netport_get_state(handle, netport_idx, state);
+#endif /* UALOE_NETLINK */
+}
+
+int ifoe_ifcp_netport_get_state(ualoe_handle_t handle, unsigned netport_idx,
+                                ifoe_ifcp_netport_state_t* state) {
+  if (state == NULL) {
+    ualoe_log_error("%s: state cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ifoe_nl_ifcp_netport_get_state(handle, netport_idx, state);
+#else
+  /* No cdev fallback for IFCP commands; available only over netlink */
+  (void)handle;
+  (void)netport_idx;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ifoe_ifcp_netport_get_stats(ualoe_handle_t handle, unsigned netport_idx,
+                                ifoe_ifcp_netport_stats_t* stats) {
+  if (stats == NULL) {
+    ualoe_log_error("%s: stats cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ifoe_nl_ifcp_netport_get_stats(handle, netport_idx, stats);
+#else
+  /* No cdev fallback for IFCP commands; available only over netlink */
+  (void)handle;
+  (void)netport_idx;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_get_scaleup_fabric_config(ualoe_handle_t handle, ualoe_scaleup_fabric_config_t* config) {
+  if (config == NULL) {
+    ualoe_log_error("%s: config cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+  memset(config, 0, sizeof(*config));
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_get_scaleup_fabric_config(handle, config);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_get_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                         ualoe_scaleup_fabric_vpod_config_t* config) {
+  if (config == NULL) {
+    ualoe_log_error("%s: config cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+  memset(config, 0, sizeof(*config));
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_get_scaleup_fabric_vpod_config(handle, config);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_get_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                          ualoe_scaleup_fabric_station_info_t* info) {
+  if (info == NULL) {
+    ualoe_log_error("%s: info cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+  memset(info, 0, sizeof(*info));
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_get_scaleup_fabric_station_info(handle, info);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_set_scaleup_fabric_config(ualoe_handle_t handle,
+                                    const ualoe_scaleup_fabric_config_t* config) {
+  if (config == NULL) {
+    ualoe_log_error("%s: config cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+  if (config->num_local_accelerators > UALOE_SCALEUP_FABRIC_MAX_LOCAL_ACCELERATORS) {
+    ualoe_log_error("%s: num_local_accelerators %u exceeds maximum %u\n", __func__,
+                    config->num_local_accelerators, UALOE_SCALEUP_FABRIC_MAX_LOCAL_ACCELERATORS);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_set_scaleup_fabric_config(handle, config);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_set_scaleup_fabric_vpod_config(ualoe_handle_t handle,
+                                         const ualoe_scaleup_fabric_vpod_config_t* config) {
+  if (config == NULL) {
+    ualoe_log_error("%s: config cannot be equal to NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_set_scaleup_fabric_vpod_config(handle, config);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_set_scaleup_fabric_station_info(ualoe_handle_t handle,
+                                          const ualoe_scaleup_fabric_station_info_t* info) {
+  if (info == NULL) {
+    ualoe_log_error("%s: info cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+  if (info->num_stations > UALOE_SCALEUP_FABRIC_MAX_STATIONS) {
+    ualoe_log_error("%s: num_stations %u exceeds maximum %u\n", __func__, info->num_stations,
+                    UALOE_SCALEUP_FABRIC_MAX_STATIONS);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_set_scaleup_fabric_station_info(handle, info);
+#else
+  /* No cdev fallback for scaleup fabric commands; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_get_gpu_identity(ualoe_handle_t handle, ualoe_gpu_identity_t* identity) {
+  if (identity == NULL) {
+    ualoe_log_error("%s: identity cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+  memset(identity, 0, sizeof(*identity));
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_get_gpu_identity(handle, identity);
+#else
+  /* No cdev fallback for GPU identity command; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
 #endif /* UALOE_NETLINK */
 }
 
@@ -760,6 +949,21 @@ int ualoe_telemetry_free(ualoe_handle_t handle, ualoe_telemetry_t* telemetry) {
   return ualoe_nl_telemetry_free(handle, telemetry);
 #else
   return ualoe_cdev_telemetry_free(handle, telemetry);
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_telemetry_get_category_mask(ualoe_handle_t handle, unsigned* category_mask) {
+  if (category_mask == NULL) {
+    ualoe_log_error("%s: category_mask cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
+#ifdef UALOE_NETLINK
+  return ualoe_nl_telemetry_get_category_mask(handle, category_mask);
+#else
+  /* No cdev fallback; netlink only */
+  (void)handle;
+  return EOPNOTSUPP;
 #endif /* UALOE_NETLINK */
 }
 
@@ -824,21 +1028,70 @@ int ualoe_diag_config_pma_lane(ualoe_handle_t handle, unsigned netport_idx, unsi
                                bool enable, ualoe_pma_rate_e pma_rate,
                                ualoe_netport_loopback_mode_e loopback_mode,
                                ualoe_pma_polarity_e tx_polarity, ualoe_pma_polarity_e rx_polarity) {
+#ifdef UALOE_NETLINK
+  return ualoe_nl_diag_config_pma_lane(handle, netport_idx, lane_idx, enable, pma_rate,
+                                       loopback_mode, tx_polarity, rx_polarity);
+#else
   return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
 }
 
 int ualoe_diag_config_prbs_tx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
                               bool enable, ualoe_prbs_pattern_e pattern, __uint128_t user_pattern) {
+#ifdef UALOE_NETLINK
+  return ualoe_nl_diag_config_prbs_tx(handle, netport_idx, lane_idx, enable, pattern, user_pattern);
+#else
   return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
 }
 
 int ualoe_diag_config_prbs_rx(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
                               bool enable, bool resync, ualoe_prbs_pattern_e pattern,
                               __uint128_t user_pattern) {
+#ifdef UALOE_NETLINK
+  return ualoe_nl_diag_config_prbs_rx(handle, netport_idx, lane_idx, enable, resync, pattern,
+                                      user_pattern);
+#else
   return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
 }
 
 int ualoe_diag_get_prbs_results(ualoe_handle_t handle, unsigned netport_idx, unsigned lane_idx,
                                 ualoe_prbs_results_t* results) {
+  if (results == NULL) {
+    ualoe_log_error("%s: results cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+#ifdef UALOE_NETLINK
+  return ualoe_nl_diag_get_prbs_results(handle, netport_idx, lane_idx, results);
+#else
+  return EOPNOTSUPP;
+#endif /* UALOE_NETLINK */
+}
+
+int ualoe_get_ifoe_cper_entries(ualoe_handle_t handle, uint32_t severity_mask, char* cper_data,
+                                uint64_t* buf_size, ualoe_cper_hdr_t** cper_hdrs,
+                                uint64_t* entry_count, uint64_t* cursor) {
+  if (cper_data == NULL) {
+    ualoe_log_error("%s: cper_data cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+  if (buf_size == NULL) {
+    ualoe_log_error("%s: buf_size cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+  if (cper_hdrs == NULL) {
+    ualoe_log_error("%s: cper_hdrs cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+  if (entry_count == NULL) {
+    ualoe_log_error("%s: entry_count cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+  if (cursor == NULL) {
+    ualoe_log_error("%s: cursor cannot be NULL\n", __func__);
+    return EINVAL;
+  }
+
   return EOPNOTSUPP;
 }

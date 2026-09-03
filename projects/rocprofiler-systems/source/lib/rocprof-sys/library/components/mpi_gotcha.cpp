@@ -182,7 +182,7 @@ void
 mpi_gotcha::subscribe_to_init_event(
     const std::function<void(int rank, int size)>& _callback)
 {
-    std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
     if(_callback)
     {
         s_on_init_callbacks.push_back(_callback);
@@ -200,14 +200,14 @@ std::mutex mpi_gotcha::s_mutex = {};
 void
 mpi_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     mpi_gotcha_t::set_ready(false);
 }
 
 void
 mpi_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     mpi_gotcha_t::set_ready(true);
 }
 
@@ -355,7 +355,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
         }
 
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(!mproc_comm_record.updated())
         {
             populate_rank_and_size();
@@ -367,7 +367,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             (_data.tool_id.find("MPI_Comm_") == 0 ||
              _data.tool_id.find("PMPI_Comm_") == 0))
     {
-        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        const auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(m_comm_val != null_comm())
         {
             auto& _comm_entry = mpi_comm_records[m_comm_val];
@@ -397,7 +397,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             if(_comm_entry.updated())
             {
                 static thread_local int _num_updates = 0;
-                static int              _disable_after =
+                static const int        _disable_after =
                     rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
                 if(_num_updates++ < _disable_after) update();
             }

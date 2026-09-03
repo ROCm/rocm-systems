@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
 
 #include <array>
 #include <cstdlib>
@@ -91,17 +90,14 @@ DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes) {
       words[word] |= static_cast<uint32_t>(bytes[word * sizeof(uint32_t) + byte]) << (byte * 8);
   }
 
-  std::unique_ptr<Instruction> inst;
-  try {
-    inst.reset(decoder.decode(words.data()));
-  } catch (const util::InvalidInst &error) {
+  util::StringDiagnostic rejection;
+  DecodeResult decoded = decoder.decode(words.data(), rejection.emitter());
+  if (decoded.failed()) {
     DecodeRecord record;
-    record.rejection = error.what();
+    record.rejection = rejection.message();
     return record;
   }
-
-  if (!inst)
-    fail_invariant("a successful decode returned null");
+  std::unique_ptr<Instruction> inst = std::move(decoded).value();
 
   const int size = inst->size();
   if (size != 4 && size != 8 && size != 12 && size != 16)
@@ -132,14 +128,26 @@ DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes) {
     fail_invariant("instruction disassembly is empty");
   const std::string_view mnemonic = inst->mnemonic();
   const size_t dual_separator = mnemonic.find(" :: ");
-  const bool mnemonic_matches =
+  bool mnemonic_matches =
       dual_separator == std::string_view::npos
           ? disassembly.starts_with(mnemonic)
           : disassembly.starts_with(mnemonic.substr(0, dual_separator)) &&
                 disassembly.find(mnemonic.substr(dual_separator)) != std::string::npos;
+  if (!mnemonic_matches && dual_separator == std::string_view::npos) {
+    const std::string_view rendered =
+        std::string_view(disassembly).substr(0, disassembly.find(' '));
+    const auto semantic_base =
+        mnemonic.ends_with("_e32") ? mnemonic.substr(0, mnemonic.size() - 4) : mnemonic;
+    auto rendered_base = rendered;
+    if (rendered_base.ends_with("_e64_dpp"))
+      rendered_base.remove_suffix(8);
+    else if (rendered_base.ends_with("_dpp"))
+      rendered_base.remove_suffix(4);
+    mnemonic_matches = rendered_base == semantic_base;
+  }
   if (!mnemonic_matches) {
     std::ostringstream message;
-    message << "disassembly does not start with mnemonic '" << inst->mnemonic() << "': '"
+    message << "disassembly mnemonic does not match semantic mnemonic '" << mnemonic << "': '"
             << disassembly << '\'';
     fail_invariant(message.str());
   }

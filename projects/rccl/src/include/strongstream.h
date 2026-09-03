@@ -99,6 +99,7 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, stru
 // Release of the strong stream.
 // `concurrent` indicates if other threads may be using the strong stream.
 ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent);
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, cudaEvent_t event, cudaStream_t stream);
 
 ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t scratchEvent);
 

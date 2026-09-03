@@ -3,7 +3,7 @@
 
 #include "core/config.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #if !defined(TIMEMORY_USE_BFD)
 #    error "BFD support not enabled"
@@ -212,9 +212,9 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 bool
 symbol::read_bfd_line_info(bfd_file& _bfd)
 {
-    auto*         _section = static_cast<asection*>(section);
-    bfd_vma       _vma     = bfd_section_vma(_section);
-    bfd_size_type _size    = bfd_section_size(_section);
+    auto*               _section = static_cast<asection*>(section);
+    const bfd_vma       _vma     = bfd_section_vma(_section);
+    const bfd_size_type _size    = bfd_section_size(_section);
 
     auto& _pc     = address.low;
     auto& _pc_end = address.high;

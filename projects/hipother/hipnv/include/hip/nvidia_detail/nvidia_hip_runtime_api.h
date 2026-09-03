@@ -925,6 +925,9 @@ typedef cudaSurfaceObject_t hipSurfaceObject_t;
 #define hipDeviceScheduleMask cudaDeviceScheduleMask
 #define hipDeviceMapHost cudaDeviceMapHost
 #define hipDeviceLmemResizeToMax cudaDeviceLmemResizeToMax
+#if CUDA_VERSION >= CUDA_12000
+#define hipInitDeviceFlagsAreValid cudaInitDeviceFlagsAreValid
+#endif
 
 #define hipCpuDeviceId cudaCpuDeviceId
 #define hipInvalidDeviceId cudaInvalidDeviceId
@@ -2044,6 +2047,12 @@ typedef void(HIPRT_CB* hipStreamCallback_t)(hipStream_t stream, hipError_t statu
 inline static hipError_t hipInit(unsigned int flags) {
   return hipCUResultTohipError(cuInit(flags));
 }
+
+#if CUDA_VERSION >= CUDA_12000
+inline static hipError_t hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaInitDevice(device, deviceFlags, flags));
+}
+#endif
 
 inline static hipError_t hipDeviceReset() { return hipCUDAErrorTohipError(cudaDeviceReset()); }
 
@@ -3795,6 +3804,16 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   }
   return err;
 }
+
+#if CUDA_VERSION >= CUDA_10000
+inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask,
+                                          hipDevice_t device) {
+  if (luid == NULL || deviceNodeMask == NULL) {
+    return hipErrorInvalidValue;
+  }
+  return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
+}
+#endif
 
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {

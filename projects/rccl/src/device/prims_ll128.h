@@ -22,9 +22,23 @@
 // the extra register pressure that the system-scope global_load/store_b128
 // builtins introduce in the LL128 reduce kernels. The cache-bypassing load128/
 // store128 remain in use for user buffers (loadRegsBegin/storeRegs).
+//
+// The uncached premise above holds only for the legacy IPC allocator. A cuMem/VMM
+// FIFO is cacheable to the reader, so the load needs system scope there. See
+// RCCL_LL_FIFO_SYS_SCOPE_LOAD in rccl_ptr.h.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
+#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)ptr, RCCL_SYSTEM_SYNCSCOPE);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
+#else
   v0 = __builtin_nontemporal_load((u64_gptr)ptr);
   v1 = __builtin_nontemporal_load((u64_gptr)ptr + 1);
+#endif
 }
 
 // Plain (cacheable) 128-bit store. This is the pre-cache-bypass February store
@@ -41,6 +55,9 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
 // leaving it to backend coalescing of two scalar stores (which two separate
 // `*u64` writes rely on, and which is especially fragile with gfx1250 ordering
 // still to be revisited). Emit the b128 vector store explicitly here.
+//
+// Stays plain on the cuMem path too. Only the reader's poll needs bypass, and a
+// system-scope store here measured no better than plain on gfx1250.
 inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   union {
     v4u v;
@@ -306,10 +323,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 0; g < WordPerThread / 2; g++) {
       int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
       if (!flagThread || g % 2 == 0) {
-        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN)
+        if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
           storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
-        else
+        } else {
           storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+        }
       }
     }
     __syncwarp();

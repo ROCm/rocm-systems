@@ -56,20 +56,6 @@ static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_16, true}, {(void*)ncclDevKernel_Generic_32, true}
 };
 
-static int rcclProtoGrainSize(int proto, ncclComm* comm) {
-  switch (proto) {
-  case NCCL_PROTO_LL:
-    return 16;
-  case NCCL_PROTO_LL128:
-    return comm->WarpSize * NCCL_LL128_SHMEM_ELEMS_PER_THREAD * comm->ll128DataElems * sizeof(uint64_t) /
-           comm->ll128LineElems;
-  case NCCL_PROTO_SIMPLE:
-    return 512;
-  default:
-    return -1;
-  }
-}
-
 /* Copy of ncclShmemScratchWarpSize */
 constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
   return (max_constexpr<int>(
@@ -98,6 +84,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 NCCL_PARAM(SymCeThreshold, "SYM_CE_THRESHOLD", 8 * 1024 * 1024);
+NCCL_PARAM(AllgathervEnable, "ALLGATHERV_ENABLE", 0);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
@@ -183,6 +170,27 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   }
 }
 
+// Reporting helper: the single-collective channel count scheduleCollTasksToPlan()
+// packs traffic into, so rcclGetCollImplInfo reports the channels that actually run
+// rather than the tuning cap. Mirrors the native-kernel packer (channelId=0,
+// currentTraffic=0): for one coll, 1+nMid+(cellsHi!=0) reduces to divUp(cells,cellsPerChannel).
+rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
+                                         int protocol, int nMaxChannels) {
+  if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
+  constexpr size_t MinTrafficPerChannel = 16 << 10;
+  size_t elementSize = ncclTypeSize(datatype);
+  int trafficPerByte = ncclFuncTrafficPerByte(func, comm->nRanks);
+  if (protocol == NCCL_PROTO_LL) trafficPerByte *= 4;
+  size_t trafficBytes = std::max(MinTrafficPerChannel, count * elementSize * (size_t)trafficPerByte);
+  size_t trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes / nMaxChannels, 16) * 16);
+  size_t cellSize = divUp(divUp(MinTrafficPerChannel, (size_t)trafficPerByte), 16) * 16;
+  size_t cells = divUp(count * elementSize, cellSize);
+  size_t trafficPerCell = cellSize * (size_t)trafficPerByte;
+  size_t cellsPerChannel = std::min(cells, divUp(trafficPerChannel, trafficPerCell));
+  if (cellsPerChannel == 0) return nMaxChannels;
+  return (int)std::min((size_t)nMaxChannels, divUp(cells, cellsPerChannel));
+}
+
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
@@ -215,7 +223,6 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // account for all extension batches being fused together which is why
     // wipBatch.workBytes and wipBatch.nP2ps aren't reset to 0 for a new extension
     // batch further down.
-    newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     if (workType == ncclDevWorkTypeP2p) {
       newBatch |= !chan->wipBatch.batchP2P;
       newBatch |= (comm->nNodes > 2 && batchP2P) ? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) :
@@ -227,6 +234,12 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
         newBatch |= (p2pRound / NCCL_MAX_DEV_WORK_P2P_PER_BATCH) !=
                     (chan->wipBatch.p2pRounds[i] / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
       }
+    }
+    if (workType == ncclDevWorkTypeBcast) {
+      int maxitem = ncclMaxDevWorkBatchBytes(comm->cudaArch) / sizeof(ncclDevWorkBcast);
+      newBatch |= chan->wipBatch.nBcasts == maxitem;
+    } else {
+      newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     }
   }
   // Conditions causing us to create an extension batch (prev->nextExtends=1)
@@ -254,9 +267,11 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
       // a new batch
       chan->wipBatch.workBytes = 0;
       chan->wipBatch.nP2ps = 0;
+      chan->wipBatch.nBcasts = 0;
       // We don't count extension batches since this is used to derive a proxyOpCount,
       // and we wan't all ops which are fused together to have the same value.
       chan->nWorkBatchesP2p += (workType == ncclDevWorkTypeP2p ? 1 : 0);
+      chan->nWorkBatchesBcast += (workType == ncclDevWorkTypeBcast ? 1 : 0);
     }
     plan->nWorkBatches += 1;
   }
@@ -270,6 +285,9 @@ static void addWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* pla
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
+  }
+  if (workType == ncclDevWorkTypeBcast) {
+    chan->wipBatch.nBcasts += 1;
   }
 }
 
@@ -478,19 +496,10 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     // known, select the matching device function index.
     if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
       int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
-      int regMode = ncclDevFuncLL128RegMode(devWork.regUsed, devWork.netRegUsed);
+      int regMode = (devWork.regUsed || devWork.netRegUsed) ? 1 : 2;
       int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
                              task->pipeline, regMode);
-      // reg=1/reg=2 are always generated as a pair, so id<0 is unreachable today.
-      // Fail loudly anyway (mirroring the ncclPrepareTasks path) rather than
-      // silently keeping the reg=2 placeholder, which would run a registered
-      // buffer through the non-registered kernel and lose cache-bypass.
-      if (id < 0) {
-        WARN("%s: no LL128 %s user-buffer kernel for %s. Please ensure it has been enabled in build.", __func__,
-             regMode == 1 ? "registered" : "non-registered", ncclFuncToString(task->func));
-        return ncclInvalidUsage;
-      }
-      task->devFuncId = id;
+      if (id >= 0) task->devFuncId = id;
     }
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
@@ -874,7 +883,8 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
           NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
         }
       }
-    } else { // not task->isCollnet
+    } else {
+      // not task->isCollnet
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
       if (task->protocol == NCCL_PROTO_LL) trafficPerByte *= 4;
       size_t cellSize = divUp(divUp(MinTrafficPerChannel, (size_t)trafficPerByte), 16) * 16;
@@ -901,7 +911,8 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
         cellsHi = cellsPerChannel;
         nMidChannels -= 1;
       }
-      if (cellsLo == 0) { // Least channel skipped. Make the next channel the new least.
+      if (cellsLo == 0) {
+        // Least channel skipped. Make the next channel the new least.
         channelId += 1;
         if (nMidChannels == 0) {
           cellsLo = cellsHi;
@@ -1058,28 +1069,6 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 #endif
     if (!plan->kernelSpecialized) {
       int kernelIndex = ncclGetKernelIndex(comm);
-      if (IsArchMatch(comm->archName, "gfx1250") && task->protocol == NCCL_PROTO_LL) {
-        if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
-          if (kernelIndex == NCCL_UNROLL_32) {
-            static bool warnedLlUnroll32 = false;
-            if (!warnedLlUnroll32) {
-              WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol on gfx1250; "
-                   "consider RCCL_UNROLL_FACTOR=3 (unroll 8) for LL protocol collectives.");
-              warnedLlUnroll32 = true;
-            }
-          }
-        } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
-          if (kernelIndex != NCCL_UNROLL_8) {
-            static bool loggedLlUnrollClamp = false;
-            if (!loggedLlUnrollClamp) {
-              INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
-                   (int)(pow(2.0, (double)kernelIndex)));
-              loggedLlUnrollClamp = true;
-            }
-          }
-          kernelIndex = NCCL_UNROLL_8;
-        }
-      }
       plan->kernelFn = ncclKerns[kernelIndex].kernelFn;
       plan->kernelSpecialized = ncclKerns[kernelIndex].specialized;
     }
@@ -1087,9 +1076,20 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     plan->groupApiEventHandle = task->groupApiEventHandle;
 
     if (comm->rank == 0) {
+      int chLo = devWork->channelLo, chHi = devWork->channelHi;
+      const char* algoStr = ncclAlgoToString(task->algorithm);
+#ifdef ENABLE_WARP_SPEED
+      // WarpSpeed packs task->nWarps logical channels per physical block; report it as
+      // "RING*" over the physical block count so this line matches rcclGetCollImplInfo.
+      if (task->useWarpSpeed && task->nWarps > 0) {
+        int phys = task->nMaxChannels / task->nWarps;
+        chLo = 0;
+        chHi = phys > 0 ? phys - 1 : 0;
+        algoStr = "RING*";
+      }
+#endif
       INFO(NCCL_TUNING, "%s: %ld Bytes -> Algo %s proto %s channel{Lo..Hi}={%d..%d}", ncclFuncToString(task->func),
-           task->count * ncclTypeSize(task->datatype), ncclAlgoToString(task->algorithm),
-           ncclProtoToString(task->protocol), devWork->channelLo, devWork->channelHi);
+           task->count * ncclTypeSize(task->datatype), algoStr, ncclProtoToString(task->protocol), chLo, chHi);
 
       if (task->isCollnet) {
         TRACE(NCCL_COLL,
@@ -1142,7 +1142,17 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   return ncclSuccess;
 }
 
-NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 8192);
+// Per-channel payload (in bytes) at/below which P2P send/recv uses the legacy LL protocol; above it
+// SIMPLE. Legacy LL carries one flag word per data word (~2x wire overhead), so it loses to SIMPLE
+// relatively early -- internode alltoall sweeps show it regressing past ~16-32 KiB/channel. Default
+// 4 KiB: the largest cutoff that avoids the legacy-LL mid-size regressions while keeping its win.
+NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
+// Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950 with
+// NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled). Default 16 KiB: internode alltoall/
+// scatter/gather sweeps (1-16 nodes) show LL128 beats SIMPLE for every per-peer size <= 16 KiB at
+// all scales; LL128's low (~1/8 gfx950, ~1/16 gfx1250) flag overhead keeps it beneficial well past
+// the legacy-LL crossover, so it warrants a higher threshold than legacy LL.
+NCCL_PARAM(P2pLL128Threshold, "P2P_LL128_THRESHOLD", 16384);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 
@@ -1178,7 +1188,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // recv: dir=0, send: dir=1
   void* addrs[2] = {recvAddr, sendAddr};
   ssize_t bytes[2] = {recvBytes, sendBytes};
-  bool protoLL[2] = {!selfSend, !selfSend};
+  // "Latency-bound" flag per dir: the op is small enough to use an LL-family protocol
+  // (legacy LL or LL128) instead of SIMPLE. The actual protocol is chosen below.
+  bool protoLatency[2] = {!selfSend, !selfSend};
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
@@ -1196,6 +1208,30 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, batchP2PEnableEnv);
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
+  // Latency-bound send/recv uses one of two separately-generated kernel variants:
+  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device codegen),
+  //     and only activated when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
+  //     (which is also what makes the LL128 staging buffer available on network connections).
+  //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
+  // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
+  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
+  // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
+  // LL128 send/recv requires ALL of:
+  //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
+  //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so
+  //     selecting it would dispatch to a null/trap device slot.
+  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE).
+  //     If LL128 is not enabled for this comm, P2P must not use it even with the opt-in flag set, so
+  //     send/recv stays consistent with the collective protocol choice.
+  //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
+  //     available on network connections.
+  //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
+#if defined(ENABLE_LL128)
+  bool useLL128SendRecv =
+    comm->allocP2pNetLLBuffers && comm->topo->ll128Enabled && (comm->cudaArch == 940 || comm->cudaArch == 950);
+#else
+  bool useLL128SendRecv = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
+#endif
   if (comm->p2pNet) {
     for (int dir = 0; dir <= 1; dir++) {
       if (bytes[dir] > rcclParamP2pNetThreshold()) connIndex[dir] = NCCL_CONN_IDX_P2P_NET;
@@ -1211,8 +1247,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-        protoLL[dir] &=
-          conn->conn.buffs[NCCL_PROTO_LL] != nullptr && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12");
+        // The latency path needs the staging buffer for the protocol its kernel variant uses:
+        // the LL128 buffer when the LL128 kernel is active, otherwise the legacy LL buffer. If the
+        // chosen buffer is absent on any connection the op drops straight to SIMPLE (not to the
+        // other LL-family protocol) -- once LL128 is opted in, the fallback is SIMPLE, never legacy
+        // LL. Intranode always allocates the LL128 buffer, so this only affects mixed setups.
+        int latencyProto = useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL;
+        protoLatency[dir] &= conn->conn.buffs[latencyProto] != nullptr;
         network[dir] |= conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         proxySameProcess[dir] &= conn->proxyConn.sameProcess;
       }
@@ -1254,9 +1295,19 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // Update number of channels propagated to the profiler
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
 
-    // Select protocol (LL vs SIMPLE) used based on payload per channel
-    if (bytes[dir] != -1) protoLL[dir] &= bytes[dir] <= nChannels[dir] * ncclParamP2pLLThreshold();
-    protocol[dir] = protoLL[dir] ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+    // Select protocol based on per-channel payload: at/below the latency threshold use the latency
+    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL), above
+    // it SIMPLE. LL128 and legacy LL use independent thresholds (P2P_LL128_THRESHOLD vs
+    // P2P_LL_THRESHOLD) because LL128's lower wire overhead stays beneficial to larger sizes.
+    ssize_t latencyThreshold = useLL128SendRecv ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
+    if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
+    protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
+
+    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=COLL) can confirm
+    // the latency protocol was actually chosen rather than silently falling back to SIMPLE.
+    if (bytes[dir] != -1)
+      INFO(NCCL_COLL, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d", ncclProtoStr[protocol[dir]],
+           dir ? "send" : "recv", (long)bytes[dir], nChannels[dir]);
 
     stepSize[dir] = comm->buffSizes[protocol[dir]] / NCCL_STEPS;
     if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = comm->p2pChunkSize;
@@ -1270,51 +1321,64 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
 
     chunkDataSize[dir] = chunkSize[dir];
-    if (protocol[dir] == NCCL_PROTO_LL) chunkDataSize[dir] /= 2;
+    // Convert wire chunk size to data (payload) chunk size. Legacy LL carries one flag word per
+    // data word (half the wire is payload); LL128 carries one flag word per line.
+    if (protocol[dir] == NCCL_PROTO_LL) {
+      chunkDataSize[dir] /= 2;
+    } else if (protocol[dir] == NCCL_PROTO_LL128) {
+      chunkDataSize[dir] = (chunkDataSize[dir] / comm->ll128LineElems) * comm->ll128DataElems;
+    }
     chunkDataSize_u32fp8[dir] = u32fp8Encode(chunkDataSize[dir]);
     chunkDataSize[dir] = u32fp8Decode(chunkDataSize_u32fp8[dir]);
     chunkSize[dir] = chunkDataSize[dir];
-    if (protocol[dir] == NCCL_PROTO_LL) chunkSize[dir] *= 2;
+    // Convert data chunk size back to wire chunk size (used for proxy chunk steps).
+    if (protocol[dir] == NCCL_PROTO_LL) {
+      chunkSize[dir] *= 2;
+    } else if (protocol[dir] == NCCL_PROTO_LL128) {
+      chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
+    }
 
-    if (network[dir]) {
-      bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
-      if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
+    if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
+      if (network[dir]) {
+        bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
+        if (bytes[dir] > 0 && proxySameProcess[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && (!pxnUsed)) {
+          int regFlag = 0;
+          NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
+          for (int part = 0; part < nChannelsMax; part++) {
+            int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
+                                                  comm->p2pChannelShiftSize);
+            struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
+            int peerRank = dir ? sendRank : recvRank;
+            struct ncclConnector* conn =
+              dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
+            if (conn->conn.flags & NCCL_DIRECT_NIC)
+              ncclRegisterP2pNetBuffer(comm, addrs[dir], bytes[dir], conn, &regFlag, &handles[dir][part],
+                                       &plan->cleanupQueue);
+            if (!regFlag) break;
+          }
+          netRegistered[dir] = regFlag ? true : false;
+        }
+      } else if (bytes[dir] > 0 && addrs[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend) {
+        int peerRank = dir ? sendRank : recvRank;
         int regFlag = 0;
-        NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
-        for (int part = 0; part < nChannelsMax; part++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes,
-                                                comm->p2pChannelShiftSize);
-          struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
-          int peerRank = dir ? sendRank : recvRank;
-          struct ncclConnector* conn =
-            dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-          if (conn->conn.flags & NCCL_DIRECT_NIC)
-            ncclRegisterP2pNetBuffer(comm, addrs[dir], bytes[dir], conn, &regFlag, &handles[dir][part],
-                                     &plan->cleanupQueue);
-          if (!regFlag) break;
+        int channelId =
+          ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
+        struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
+        struct ncclConnector* conn =
+          dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
+        void* regAddr = NULL;
+        if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
+          // We require users registering buffers on both sides
+          NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
+                                                 &plan->cleanupQueue),
+                        ret, cleanup);
+          if (regFlag) {
+            if (dir == 0 && (conn->conn.flags & NCCL_P2P_WRITE)) recvAddr = regAddr;
+            else if (dir == 1 && (conn->conn.flags & NCCL_P2P_READ)) sendAddr = regAddr;
+          }
         }
-        netRegistered[dir] = regFlag ? true : false;
+        ipcRegistered[dir] = regFlag ? true : false;
       }
-    } else if (bytes[dir] > 0 && addrs[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend) {
-      int peerRank = dir ? sendRank : recvRank;
-      int regFlag = 0;
-      int channelId =
-        ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
-      struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
-      struct ncclConnector* conn =
-        dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-      void* regAddr = NULL;
-      if (conn->conn.flags & (NCCL_P2P_WRITE | NCCL_P2P_READ)) {
-        // We require users registering buffers on both sides
-        NCCLCHECKGOTO(ncclRegisterP2pIpcBuffer(comm, addrs[dir], bytes[dir], peerRank, &regFlag, &regAddr,
-                                               &plan->cleanupQueue),
-                      ret, cleanup);
-        if (regFlag) {
-          if (dir == 0 && (conn->conn.flags & NCCL_P2P_WRITE)) recvAddr = regAddr;
-          else if (dir == 1 && (conn->conn.flags & NCCL_P2P_READ)) sendAddr = regAddr;
-        }
-      }
-      ipcRegistered[dir] = regFlag ? true : false;
     }
 
     if (bytes[dir] == -1) nChannels[dir] = 0;
@@ -1352,7 +1416,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   work->nP2pChannels = comm->p2pnChannels;
   work->channelBase = base;
   work->nSendChannels = nChannels[1];
-  work->sendProtoLL = protoLL[1];
+  work->sendProtoLL = protoLatency[1];
   work->sendNetReg = netRegistered[1];
   work->sendIpcReg = ipcRegistered[1];
   work->sendChunkSize_u32fp8 = chunkDataSize_u32fp8[1];
@@ -1362,7 +1426,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   work->sendConnIndex = connIndex[1];
   work->sendOpCount = sendOpCount;
   work->nRecvChannels = nChannels[0];
-  work->recvProtoLL = protoLL[0];
+  work->recvProtoLL = protoLatency[0];
   work->recvNetReg = netRegistered[0];
   work->recvIpcReg = ipcRegistered[0];
   work->recvChunkSize_u32fp8 = chunkDataSize_u32fp8[0];
@@ -1414,7 +1478,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
                                           comm->p2pChannelShiftSize);
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Add batch first.
-    int funcIdx = ncclDevFuncId_P2p();
+    int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
     addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
@@ -1449,8 +1513,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           proxyOps[dir].nbytes = std::min(partEnd - partBeg, chunkDataSize);
         }
         if (proxyOps[dir].protocol == NCCL_PROTO_LL) {
+          // Convert data bytes to wire bytes (legacy LL carries one flag word per data word).
           proxyOps[dir].nbytes *= 2;
           proxyOps[dir].nbytes = roundUp(proxyOps[dir].nbytes, sizeof(union ncclLLFifoLine));
+        } else if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
+          // Convert data bytes to wire bytes (LL128 data lines carry an extra flag word).
+          proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, comm->ll128DataElems * sizeof(uint64_t)) *
+                                 comm->ll128LineElems * sizeof(uint64_t);
         }
       }
 
@@ -1713,6 +1782,7 @@ static ncclResult_t uploadWork(struct ncclComm* comm, struct ncclKernelPlan* pla
                     result, fail);
 
       CUDACHECKGOTO(cudaMallocAsync(&fifoBufDev, workBytes, comm->memPool, deviceStream), result, fail);
+      INFO_LOC(NCCL_ALLOC, "Persistent cudaMallocAsync work buf Size %zu pointer %p", workBytes, fifoBufDev);
       plan->workBufPersistent = fifoBufDev;
       plan->kernelArgs->workBuf = fifoBufDev;
 
@@ -1785,7 +1855,8 @@ static ncclResult_t uploadProxyOps(struct ncclComm* comm, struct ncclKernelPlan*
     uint64_t oldId = op->opCount;
     // Ignoring the bottom tag bit, opCount's are zero-based within plan so
     // translate them to the tip of the comm's history.
-    if (oldId & 1) { // p2p
+    if (oldId & 1) {
+      // p2p
       // opCount is monotonic increasing within a plan's channel so just
       // remember last value to compute max.
       p2pOpBump[op->channelId] = (oldId >> 1) + 1; // +1 to ensure next plan doesn't collide
@@ -1883,7 +1954,9 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
     q = q1;
   }
   // Free RMA persistent descriptors (graph mode)
-  if (plan->isRma && plan->persistent) {
+  // Pure RMA plans always create persistent descs; CE plans only do so in the hierarchical
+  // (multi-node) path where ncclHierCeAllGather uses the RMA proxy.
+  if (plan->persistent && (plan->isRma || (plan->isCeColl && comm->nNodes > 1))) {
     NCCLCHECK(ncclRmaProxyReclaimPlan(comm, plan));
   }
   // Run other free callbacks
@@ -1910,6 +1983,11 @@ static void persistentDestructor(void* plans_) {
 }
 
 NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0);
+NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
+
+// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
+// sentinel. See ncclComm::lastStreamTag.
+static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
 namespace {
 enum ncclImplicitOrder {
@@ -1944,7 +2022,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
   struct ncclKernelPlanner* planner = &comm->planner;
   bool persistent = ncclCudaGraphValid(planner->capturingGraph);
   planner->persistent = persistent;
-  // Operations from different plans will not be batched together. A new batch will be created for each new plan that is used to schedule the ops (see ncclAddWorkBatchToPlan).
+  // Operations from different plans will not be batched together. A new batch will be created for each new plan that
+  // is used to schedule the ops (see ncclAddWorkBatchToPlan).
   // For p2p ops, we further guarantee that ops from different epochs will not be batched together (to avoid hangs).
   // The p2pEpoch value is incremented in scheduleP2pTasksToPlan and its value is carried over from one plan to another (even if not strictly required)
   int nPlans = 0, p2pEpoch = 0, p2pRound = 0;
@@ -2043,6 +2122,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
 
     cudaStream_t launchStream = planner->streams->stream;
     cudaStream_t deviceStream, launchOrder;
+    bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false,
                                           &deviceStream),
                   result, failure);
@@ -2055,19 +2135,14 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
       // userStream[0] waits on deviceStream
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
-      // Stream changed from last call. The new launchStream has no implicit edge to the
-      // previous kernel's completion; install a direct event-based dependency on doneEvent.
-      // Record lazily here on lastStream — HIP's per-stream FIFO guarantees the record
-      // sequences after the prior cuLaunchKernel — then wait on it from launchStream.
-      // Recording only on detected stream change (instead of after every ncclLaunchKernel)
-      // avoids a per-launch HIP runtime cost. Bypasses deviceStream, which the fast path
-      // leaves stale by skipping Finish-side advance.
-      CUDACHECKGOTO(hipEventRecord(comm->doneEvent, comm->lastStream), result, failure);
+    } else if (comm->lastStreamTag != 0 &&
+               comm->lastStreamTag != ncclStreamTag(launchStream)) {
+      // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
+      // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
+      // Don't record it here — that stream may already be destroyed (ROCM-29677).
       CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
-    bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     enum ncclImplicitOrder implicitOrder;
     cudaError_t status = cudaSuccess;
     NCCLCHECKGOTO(getImplicitOrder(&implicitOrder, capturing), result, failure);
@@ -2175,14 +2250,21 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // Sizes are work-items (grid*block), not blocks. Passing doneEvent as stopEvent fuses the record into the
+    // dispatch, so no separate hipEventRecord. Fast path only: graph capture never binds a fused stopEvent.
+    CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
+                                           block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
+                                           /*stopEvent=*/comm->doneEvent, /*flags=*/0),
+                  ret, do_return);
+#else
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                extra),
                 ret, do_return);
-    // doneEvent is recorded lazily by ncclLaunchPrepare on a detected stream change; no
-    // per-launch hipEventRecord is needed here. lastStream/lastStreamValid bookkeeping is
-    // still required so the next call's ncclLaunchPrepare can detect that change.
-    comm->lastStream = launchStream;
-    comm->lastStreamValid = true;
+    // Record while launchStream is guaranteed live; bookkeeping after, so a failed record leaves no false claim.
+    CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+    comm->lastStreamTag = ncclStreamTag(launchStream);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2272,10 +2354,14 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
               ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change.
-  // doneEvent is recorded lazily by ncclLaunchPrepare in the stream-change branch.
-  comm->lastStream = launchStream;
-  comm->lastStreamValid = true;
+  // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
+  // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#else
+  CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#endif
+  comm->lastStreamTag = ncclStreamTag(launchStream);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
@@ -2330,6 +2416,8 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       cb->base.event = finishedEvent;
       cb->base.fn = KernelFinishCallback_fn;
       cb->workFifoConsumed = comm->workFifoProduced;
+      // Record completion on launchStream so the FIFO-recycling callback fires only after kernels finish.
+      CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
       ncclIntruQueueEnqueue(&comm->eventCallbackQueue, &cb->base);
       // We just stole scratchEvent so must create a new one.
       CUDACHECK(cudaEventCreateWithFlags(&comm->sharedRes->scratchEvent, cudaEventDisableTiming));
@@ -2369,8 +2457,6 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       // Release launchOrder as acquired in ncclLaunchPrepare()
       NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->context->launchOrder, concurrent));
     }
-    // Release deviceStream as acquired in ncclLaunchPrepare()
-    NCCLCHECK(ncclStrongStreamRelease(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false));
   }
   return ncclSuccess;
 }
@@ -2750,10 +2836,14 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
 
   info->nMaxChannels = nMaxChannels == 0 ? info->nMaxChannels : nMaxChannels;
 
-  // Direct ReduceScatter only works with the RING kernel (its direct
-  // branch reads the pre-staged tempBuff and skips proxies). Force RING/SIMPLE
-  // in case the tuner picked another algo.
-  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter && info->algorithm != NCCL_ALGO_RING) {
+  // Direct ReduceScatter only works with the RING/Simple kernel (reduceCopy path
+  // is compiled only for ProtoSimple). Force RING/SIMPLE regardless of tuner choice.
+  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+    if (info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE) {
+      INFO(NCCL_TUNING, "%s: %ld Bytes -> Direct ReduceScatter overrides tuner Algo %s proto %s with Ring/Simple",
+           ncclFuncToString(info->func), (long)nBytes, ncclAlgoToString(info->algorithm),
+           ncclProtoToString(info->protocol));
+    }
     info->algorithm = NCCL_ALGO_RING;
     info->protocol = NCCL_PROTO_SIMPLE;
     info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
@@ -3217,7 +3307,8 @@ static ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct n
     planner->streamRecent = info->stream;
     struct ncclCudaStreamList* l = planner->streams;
     while (true) {
-      if (l == nullptr) { // Got to the end, this must be a new stream.
+      if (l == nullptr) {
+        // Got to the end, this must be a new stream.
         struct ncclCudaGraph graph;
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         if (planner->streams != nullptr && !ncclCudaGraphSame(planner->capturingGraph, graph)) {
@@ -3292,7 +3383,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
         int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                               comm->p2pChannelShiftSize);
         if (isSendNotRecv) {
-          if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) { // P2P uses only 1 connector
+          if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
+            // P2P uses only 1 connector
             // the send/recv connector is shared among split shared comms. We need to set hasSeen to
             // 1 in order to avoid duplicate connection setup if user group sendrecv ops with split
             // shared comms together.
@@ -3310,7 +3402,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
             ncclGroupCommPreconnect(comm);
           }
         } else {
-          if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) { // P2P uses only 1 connector
+          if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
+            // P2P uses only 1 connector
             comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
             comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
             // comm->connectRecv[peer] |= (1UL<<channelId);
@@ -3344,47 +3437,71 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
-  struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
-  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
-  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
-  // never sees garbage in eDescr->coll.nChannels.
-  t->nChannels = 0;
-  t->func = info->coll;
-  t->sendbuff = info->sendbuff;
-  t->recvbuff = info->recvbuff;
-  t->count = info->count;
-  t->root = info->root;
-  t->datatype = info->datatype;
+  if (info->coll == ncclFuncBroadcast && ncclParamAllgathervEnable() && !comm->ccEnable) {
+    // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
+    struct ncclTaskBcast* t =
+      ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
+    t->func = ncclFuncAllGatherV;
+    t->sendbuff = info->sendbuff;
+    t->recvbuff = info->recvbuff;
+    t->count = info->count * ncclTypeSize(info->datatype);
+    t->datatype = ncclInt8;
+    t->root = info->root;
+
+    // update bcast min/max peer
+    planner->bcast_info.minBcastPeer = std::min(planner->bcast_info.minBcastPeer, info->root);
+    planner->bcast_info.maxBcastPeer = std::max(planner->bcast_info.maxBcastPeer, info->root);
+    if (ncclIntruQueueEmpty(&planner->peers[info->root].bcastQueue)) {
+      planner->bcast_info.BcastPeers += 1;
+    }
+
+    // enqueue to peer's bcast queue instead of collSorter
+    ncclIntruQueueEnqueue(&planner->peers[info->root].bcastQueue, t);
+    planner->nTasksBcast += 1;
+    comm->opCount++;
+  } else {
+    struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+    // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+    // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+    // never sees garbage in eDescr->coll.nChannels.
+    t->nChannels = 0;
+    t->func = info->coll;
+    t->sendbuff = info->sendbuff;
+    t->recvbuff = info->recvbuff;
+    t->count = info->count;
+    t->root = info->root;
+    t->datatype = info->datatype;
 
 #ifdef ENABLE_ROCSHMEM
-  if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
-    size_t nSizes = 4 * comm->nRanks;
-    CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
-    ncclCommPushCudaFree(comm, t->sizes);
-    memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
-  }
+    if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
+      size_t nSizes = 4 * comm->nRanks;
+      CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
+      ncclCommPushCudaFree(comm, t->sizes);
+      memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
+    }
 #endif
 
-  size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot ||
-      t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
-    t->count *= elementSize;
-    t->datatype = ncclInt8;
-    elementSize = 1;
-  }
-  t->trafficBytes = t->count * elementSize * ncclFuncTrafficPerByte(t->func, comm->nRanks);
-  t->opHost = info->op;
-  t->opDev = opDev; // C++ struct assignment
-  t->chunkSteps = info->chunkSteps;
-  t->sliceSteps = info->sliceSteps;
-  t->eActivationMask = ncclProfilerApiState.eActivationMask;
-  t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
-  t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
-  t->opCount = comm->opCount;
-  t->acc = info->acc;
+    size_t elementSize = ncclTypeSize(t->datatype);
+    if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot ||
+        t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
+      t->count *= elementSize;
+      t->datatype = ncclInt8;
+      elementSize = 1;
+    }
+    t->trafficBytes = t->count * elementSize * ncclFuncTrafficPerByte(t->func, comm->nRanks);
+    t->opHost = info->op;
+    t->opDev = opDev; // C++ struct assignment
+    t->chunkSteps = info->chunkSteps;
+    t->sliceSteps = info->sliceSteps;
+    t->eActivationMask = ncclProfilerApiState.eActivationMask;
+    t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
+    t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
+    t->opCount = comm->opCount;
+    t->acc = info->acc;
 
-  planner->nTasksColl += 1;
-  ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
+    planner->nTasksColl += 1;
+    ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
+  }
   ncclProfilerStopCollApiEvent();
   return ncclSuccess;
 }
@@ -3723,10 +3840,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // while the stream is capturing and fall through to the graph-safe
       // DDA/symmetric/kernel paths.
       bool ceCapturing, ceArGraphAllowed;
-      if (info->ceGraphDecisionValid) {
-        // Already computed by ncclAllReduce_impl() for this call.
-        ceCapturing = info->ceCapturing;
-        ceArGraphAllowed = info->ceArGraphAllowed;
+      if (info->decisionValid) {
+        // Already computed by ncclAllReduce_impl() via rcclSelectAllReduce().
+        ceCapturing = info->decision.ceCapturing;
+        ceArGraphAllowed = info->decision.ceArGraphAllowed;
       } else {
         struct ncclCudaGraph ceGraph;
         NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, info->stream, comm->config.graphUsageMode));
@@ -3756,11 +3873,20 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclSymRegType_t winRegType;
       NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
       bool ceAvailable = !ceCapturing && ncclCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
+      // Hierarchical CE (sync feature) rides the same symmetric-window ceCollTaskAppend
+      // path; keep it graph-capture-safe by gating on !ceCapturing like ceAvailable.
+      bool hierCeAvailable =
+        !ceCapturing && ncclHierCeAvailable(comm, info->coll, info->op, info->datatype, winRegType);
       if (info->coll == ncclFuncAllReduce) {
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
-        if (!ceArGraphAllowed || !ceAllReduceOpSupported || (info->count % (size_t)comm->nRanks != 0) ||
-            !rcclParamCeAllReduce()) {
+        // The CE kernels never read the bias buffer, so every CE AllReduce sub-path below
+        // (registered-window ceAvailable path and the unregistered force-mode ceAllReduceFits
+        // path) must be closed off when a bias buffer is present, or ncclAllReduceWithBias would
+        // silently drop it. Checked once here rather than inside rcclUseCeAllReduce(), since this
+        // function no longer calls it for the AllReduce case.
+        if (info->acc != nullptr || !ceArGraphAllowed || !ceAllReduceOpSupported ||
+            (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
@@ -3782,7 +3908,25 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment) || ceArSymRegistered) {
+      if (info->coll == ncclFuncAllReduce && info->decisionValid) {
+        // AllReduce's backend was already chosen once by rcclSelectAllReduce();
+        // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
+        // step 5 reproduces develop's CE-registered condition exactly
+        // (!hasSysmemSegment && ceAvailable && ((CTAPolicy & ZERO) || force)), so
+        // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
+        if (info->decision.algo == RCCL_CE_REGISTERED) {
+          INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
+          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                     opDev));
+        } else {
+          INFO(NCCL_INIT, "Taking kernel-based collective path");
+          NCCLCHECK(collTaskAppend(comm, info, opDev));
+        }
+        // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
+        // AllReduce), so it never affects this AllReduce branch.
+      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
+                  !hasSysmemSegment) ||
+                 ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
@@ -3914,6 +4058,22 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     ret = ncclInvalidUsage;
     goto fail;
   }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: a collective must not be issued on a suspended communicator. The queues cover a suspend or resume still
+  // pending in this group, which the group drains before launching.
+  if (info->comm->memManager) {
+    bool commIsSuspended = ncclIntruQueueEmpty(&info->comm->resumeTaskQueue) &&
+                           (!ncclIntruQueueEmpty(&info->comm->suspendTaskQueue) ||
+                            __atomic_load_n(&info->comm->memManager->released, __ATOMIC_ACQUIRE));
+    if (commIsSuspended) {
+      WARN("%s: communicator %p is suspended; call ncclCommResume before issuing collectives", info->opName,
+           info->comm);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+  }
+#endif
 
   if (info->comm->checkMode != ncclCheckModeDefault) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);

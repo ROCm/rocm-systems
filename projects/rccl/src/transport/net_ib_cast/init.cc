@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "net_telemetry.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -192,6 +193,35 @@ fail:
   return ncclInternalError;
 }
 
+// NCCL_IB_PLANE_MAX_INDEX must be < 15 as we use int16_t for plane IDs
+// Typically 12 user-defined planes + 1 plane for undefined plane IDs
+#define NCCL_IB_PLANE_MAX_INDEX 14
+#define NCCL_IB_PLANE_VIRT_BIT (0x1 << NCCL_IB_PLANE_MAX_INDEX)
+static_assert(NCCL_IB_PLANE_MAX_INDEX < 15, "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
+
+static ncclResult_t IbCastGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
+  int16_t p = 0;
+  while (p < *count && planes[p] != devPlane) p++;
+  if (p == *count) {
+    if (p == (NCCL_IB_PLANE_MAX_INDEX - 1)) {
+      WARN("NCCL cannot use more than %d plane IDs.", NCCL_IB_PLANE_MAX_INDEX);
+      return ncclInvalidUsage;
+    }
+    if (devPlane != NCCL_NET_ID_UNDEF && (devPlane & NCCL_IB_PLANE_VIRT_BIT)) {
+      WARN("NCCL cannot use a plane ID that is %d.", devPlane);
+      return ncclInvalidUsage;
+    }
+    planes[(*count)++] = devPlane;
+  }
+  *idx = p;
+  return ncclSuccess;
+}
+
+extern "C" ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
+  if (!count || !planes || !idx) return ncclInvalidArgument;
+  return IbCastGetPlaneIndex(devPlane, count, planes, idx);
+}
+
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   // On AINIC, NIC fusion (cast) is disabled by default: each NIC runs independently.
   // User must explicitly set NCCL_IB_MERGE_NICS=1 to override.
@@ -223,6 +253,9 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   ncclIbMergedDev tmp;
   memset(&tmp, 0, sizeof(tmp));
   bool used[MAX_IB_DEVS] = {0};
+  tmp.railId = IbCastDevs[props->devs[0]].railId;
+  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
+  tmp.planeId = (props->ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : IbCastDevs[props->devs[0]].planeId;
 
   for (int i = 0; i < props->ndevs; i++) {
     if (props->devs[i] < 0 || props->devs[i] >= IbCastNDevs) {
@@ -234,6 +267,10 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
+    // rail ID of a fused device with different rails is undefined.
+    if (dev->railId == NCCL_NET_ID_UNDEF || tmp.railId != dev->railId) tmp.railId = NCCL_NET_ID_UNDEF;
+    // Only set the bit if multiple devs are merged, otherwise keep the initial value
+    if (props->ndevs > 1) tmp.planeId |= (0x1 << dev->planeIdx);
     // Each successive time, copy the name '+' new name
     if (tmp.vProps.ndevs > 1) {
       size_t off = strlen(tmp.devName);
@@ -296,8 +333,8 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
 
   IbCastMergedDevs[IbCastNMergedDevs] = tmp;
   *d = IbCastNMergedDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed,
-       tmp.vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d rail=%d plane=%d", *d, tmp.devName,
+       tmp.speed, tmp.vProps.ndevs, tmp.railId, tmp.planeId);
   return ncclSuccess;
 }
 
@@ -319,12 +356,18 @@ const char* ibCastProviderName[] = {
 };
 
 ncclResult_t IbCastFinalizeDevices(void) {
-  netRefCount--;
+  // No telemetry flush here: netRefCount reaching 0 is not process exit, and
+  // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
+  --netRefCount;
   return ncclSuccess;
 }
 
 extern int64_t IbCastArThreshold;
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
+  if (rcclTelemetryInit() != 0) {
+    INFO(NCCL_NET, "NET/IB-CAST: telemetry was requested but could not start; continuing without it");
+  }
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   IbCastProfilerFunction = profFunction;
@@ -413,7 +456,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             continue;
 
             // check against user specified HCAs/ports
-          if (!(matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact) ^ searchNot)) {
+          int userIfId = -1;
+          if (!(matchIfList(devices[d]->name, port_num, userIfs, nUserIfs, searchExact, &userIfId) ^ searchNot)) {
             continue;
           }
 
@@ -471,11 +515,15 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             }
 
             IbCastDevs[IbCastNDevs].maxQp = devAttr.max_qp;
+            IbCastDevs[IbCastNDevs].maxCqe = devAttr.max_cqe;
             IbCastDevs[IbCastNDevs].oooRqSize = oooRqSize;
             IbCastDevs[IbCastNDevs].mrCache.capacity = 0;
             IbCastDevs[IbCastNDevs].mrCache.population = 0;
             IbCastDevs[IbCastNDevs].mrCache.slots = NULL;
             NCCLCHECK(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats));
+
+            IbCastDevs[IbCastNDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
+            IbCastDevs[IbCastNDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
 
             // Enable ADAPTIVE_ROUTING by default on IB networks
             // But allow it to be overloaded by an env parameter
@@ -523,13 +571,33 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     // sort devices to ensure a consistent order across nodes
     if (ncclParamIbCastDevicePciOrder()) qsort(IbCastDevs, IbCastNDevs, sizeof(struct ncclIbDev), IbCastCompareDevs);
-    // Once sorted, get the realPort ID and create the virtual devices.
-    // Doing it after sorting ensures that devices will have consistent realPort ids across nodes.
+    // Once sorted, get the realPort ID, the plane index, and create the virtual devices.
+    // Doing it after sorting ensures that devices will have consistent realPort IDs and plane indexes accross ranks.
     char line[2048] = "";
+    int16_t uniquePlaneCount = 1, uniquePlaneIds[NCCL_IB_PLANE_MAX_INDEX] = {NCCL_NET_ID_UNDEF};
     for (int d = 0; d < IbCastNDevs; d++) {
+      NCCLCHECKGOTO(IbCastGetPlaneIndex(IbCastDevs[d].planeId, &uniquePlaneCount, uniquePlaneIds,
+                                        &IbCastDevs[d].planeIdx),
+                    ret, fail);
       NCCLCHECKGOTO(IbCastGetRealPort(IbCastDevs[d].pciPath, &IbCastDevs[d].realPort, d), ret, fail);
-      snprintf(line + strlen(line), sizeof(line) - strlen(line), " [%d]%s:%d/%s", d, IbCastDevs[d].devName,
-               IbCastDevs[d].portNum, NCCL_IB_LLSTR(IbCastDevs[d].link));
+      snprintf(line + strlen(line), sizeof(line) - strlen(line), " [%d]%s:%d", d, IbCastDevs[d].devName,
+               IbCastDevs[d].portNum);
+      if (IbCastDevs[d].railId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":%d", IbCastDevs[d].railId);
+      } else if (IbCastDevs[d].planeId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":");
+      }
+      if (IbCastDevs[d].planeId != NCCL_NET_ID_UNDEF) {
+        snprintf(line + strlen(line), sizeof(line) - strlen(line), ":%d", IbCastDevs[d].planeId);
+      }
+      snprintf(line + strlen(line), sizeof(line) - strlen(line), "/%s", NCCL_IB_LLSTR(IbCastDevs[d].link));
+
+      // Register after the sort: the data path books counters under post-sort
+      // index d. Registration walks sysfs, so skip it when telemetry is off.
+      if (rcclTelemetryOn() && rcclTelemetryRegisterDevice(d, IbCastDevs[d].devName, "IB-CAST") < 0) {
+        INFO(NCCL_NET, "NET/IB-CAST: telemetry did not register device %s, its counters are not collected",
+             IbCastDevs[d].devName);
+      }
 
       // Add this plain physical device to the list of virtual devices (after sorting)
       int vDev;
@@ -552,7 +620,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // CTS Offload and CTS Inline are mutually dependent — both must be
       // enabled for either to function. Disable both if either is missing.
       if (IbCastOffloadEnabled && !IbCastUseInline) {
-        INFO(NCCL_INIT|NCCL_NET, "NET/IB : IB Use Inline is disabled and CTS Offload is enabled - enabling IB Use Inline Data");
+        INFO(NCCL_INIT | NCCL_NET,
+             "NET/IB : IB Use Inline is disabled and CTS Offload is enabled - enabling IB Use Inline Data");
         IbCastUseInline = true;
       }
       if (IbCastOffloadEnabled && rcclUseIbCastQpSched()) {
@@ -567,10 +636,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       INFO(NCCL_INIT | NCCL_NET,
            "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: %s; GDR Flush: %s",
-           IbCastAinicCtsInlineData ? "Enabled": "Disabled",
-           IbCastOffloadEnabled ? "Enabled": "Disabled",
-           IbCastUseInline ? "Enabled": "Disabled",
-           IbCastGdrFlushDisable ? "Disabled": "Enabled");
+           IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
+           IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
     }
   }
 exit:
@@ -583,9 +650,8 @@ exit:
   }
   if (ret == ncclSuccess && IbCastOffloadEnabled &&
       (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
-    INFO(NCCL_INIT | NCCL_NET,
-         "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload, Inline Data "
-         "(not compatible with resiliency)");
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload, Inline Data "
+                               "(not compatible with resiliency)");
     IbCastOffloadEnabled = false;
     IbCastUseInline = false;
     IbCastAinicCtsInlineData = false;
@@ -602,6 +668,7 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
                         ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
+  // Telemetry is initialized and reported by IbCastInitDevices below.
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   NCCLCHECK(IbCastPortRecoveryThreadStart());
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));
@@ -639,7 +706,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxComms = ibDev->maxQp;
   // AINIC with CTS offload enabled supports max of 1 recv only.
   if (IbCastOffloadEnabled && !rcclParamIbCastP2pDisableCts()) {
-    props->maxRecvs = 1; 
+    props->maxRecvs = 1;
   } else {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   }
@@ -648,6 +715,8 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   props->maxCollBytes = MAX_COLLNET_SIZE;
   props->maxMultiRequestSize = 1;
+  props->railId = ibDev->railId;
+  props->planeId = ibDev->planeId;
   return ncclSuccess;
 }
 
@@ -661,6 +730,8 @@ ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props) {
   NCCLCHECK(IbCastGetPhysProperties(mergedDev->vProps.devs[0], props));
   props->name = mergedDev->devName;
   props->speed = mergedDev->speed;
+  props->railId = mergedDev->railId;
+  props->planeId = mergedDev->planeId;
   memcpy(&props->vProps, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
   return ncclSuccess;
 }

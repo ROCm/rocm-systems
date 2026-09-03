@@ -602,6 +602,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Set the active HW queue and keep the metadata preloader in sync.
   void SetGpuQueue(hsa_queue_t* queue);
 
+  //! Ensure a HW queue is held, acquiring one (with the last_hwq_ affinity hint) if a
+  //! dynamic-queue reclaim released it. No-op for dedicated queues or when one is already held.
+  //! Caller must hold the execution() lock.
+  void AcquireHwQueueIfNeeded();
+
   //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
   //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.
   void SetPreferredQueue() override {
@@ -657,6 +662,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command() const { return command_; }
 
   void* allocKernArg(size_t size, size_t alignment);
+  //! Returns the size of one managed kernarg pool chunk.
+  size_t KernArgPoolChunkSize() const;
   bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
@@ -685,6 +692,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet.
   //! Returns the faulting kernel name ("<not identified>" if not found).
   std::string AnalyzeAqlQueue() const;
+
+  //! Emits the hang report itself. Called by AnalyzeAqlQueue, which brackets it
+  //! with the banner.
+  std::string AnalyzeAqlQueueBody() const;
   bool ForceIrq() const { return force_irq_; }
 
   //! SDMA engine affinity management

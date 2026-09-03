@@ -9,7 +9,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -395,6 +397,7 @@ inline constexpr uint16_t kVop3pMfma = 423;
 class Sop1 : public IsaInstruction<Isa> {
 public:
   Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   using OpEncoding = Sop1MachineInst;
@@ -405,6 +408,7 @@ public:
 class Sopc : public IsaInstruction<Isa> {
 public:
   Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -417,13 +421,16 @@ public:
 class Sopp : public IsaInstruction<Isa> {
 public:
   Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
 public:
   Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
@@ -434,6 +441,7 @@ public:
 class Sop2 : public IsaInstruction<Isa> {
 public:
   Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -446,7 +454,16 @@ public:
 class Smem : public IsaInstruction<Isa> {
 public:
   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (inst->soffset_en && inst->imm)
+      out += " offset:" + std::to_string(inst->offset);
+    if (inst->glc)
+      out += " glc";
+    if (inst->nv)
+      out += " nv";
+  }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
 };
@@ -454,7 +471,35 @@ public:
 class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  void append_mnemonic(std::string &out) const override;
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src0_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src0_format_, sdwa_src0_sext_, sdwa_src0_neg_,
+                                  sdwa_src0_abs_);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src1_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src1_format_, sdwa_src1_sext_, sdwa_src1_neg_,
+                                  sdwa_src1_abs_);
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA)
+      amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
+                                                  sdwa_dst_unused_, sdwa_src0_sel_,
+                                                  sdwa_src1_operand_, sdwa_src1_sel_);
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, false,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx9);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -467,8 +512,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -477,14 +520,40 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
+  uint32_t sdwa_omod_ = 0;
 };
 
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src0_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src0_format_, sdwa_src0_sext_, sdwa_src0_neg_,
+                                  sdwa_src0_abs_);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src1_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src1_format_, sdwa_src1_sext_, sdwa_src1_neg_,
+                                  sdwa_src1_abs_);
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA)
+      amdgpu::sdwa::append_source_attributes(out, sdwa_src0_sel_, sdwa_src1_operand_,
+                                             sdwa_src1_sel_);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_sdwa();
@@ -496,8 +565,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -506,6 +573,10 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_sdst_ = 106;
   bool sdwa_sd_ = false;
 };
@@ -513,7 +584,35 @@ public:
 class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_dpp() const;
+  void append_mnemonic(std::string &out) const override;
+  bool has_encoded_literal32() const;
+  bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src0_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src0_format_, sdwa_src0_sext_, sdwa_src0_neg_,
+                                  sdwa_src0_abs_);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src1_operand_) {
+      amdgpu::sdwa::append_source(out, *operand, sdwa_src1_format_, sdwa_src1_sext_, sdwa_src1_neg_,
+                                  sdwa_src1_abs_);
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA)
+      amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
+                                                  sdwa_dst_unused_, sdwa_src0_sel_,
+                                                  sdwa_src1_operand_, sdwa_src1_sel_);
+    if (has_encoded_dpp())
+      amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                            dpp_bound_ctrl_, dpp_fi_, false,
+                                            amdgpu::dpp::DppCtrlDialect::Gfx9);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -528,8 +627,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -538,14 +635,31 @@ public:
   bool sdwa_src1_sext_ = false;
   bool sdwa_src1_neg_ = false;
   bool sdwa_src1_abs_ = false;
+  const Operand *sdwa_src0_operand_ = nullptr;
+  const Operand *sdwa_src1_operand_ = nullptr;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+  amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
   uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
+  uint32_t sdwa_omod_ = 0;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  uint32_t vop3p_encoded_source_count() const;
+  bool omits_vop3p_source_modifiers() const;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3p_disassembly(
+        out, inst->op_sel, inst->op_sel_hi | (inst->op_sel_hi_2 << 2), false ? 0 : inst->neg,
+        false ? 0 : inst->neg_hi, inst->clamp,
+        omits_vop3p_source_modifiers() ? 0 : vop3p_encoded_source_count(),
+        inst_.op <= 18 || (inst_.op >= 26 && inst_.op <= 28) || inst_.op == 35 ||
+            (inst_.op >= 38 && inst_.op <= 39) || (inst_.op >= 48 && inst_.op <= 51));
+  }
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
 };
@@ -553,6 +667,37 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool displays_vop3_op_sel() const;
+  uint32_t vop3_encoded_source_count() const;
+  int32_t vop3_encoded_source_index(uint8_t operand_index) const;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
+  }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    const int32_t modifier_index = vop3_encoded_source_index(operand_index);
+    const auto reg = operand->to_register_ref();
+    const bool half_width = modifier_index >= 0 && false && operand->size_bits() == 16 && reg &&
+                            reg->cls == RegClass::VGPR;
+    if (modifier_index < 0) {
+      out += operand->name();
+      return;
+    }
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (inst_.abs >> modifier_index) & 1,
+                                     (inst_.neg >> modifier_index) & 1, half_width,
+                                     (inst_.op_sel >> modifier_index) & 1);
+  }
+  void append_dst_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = dst_operands_[operand_index];
+    const auto reg = operand->to_register_ref();
+    const bool half_width =
+        false && operand->size_bits() == 16 && reg && reg->cls == RegClass::VGPR;
+    amdgpu::vop::append_vop3_operand(out, operand->name(), false, false, half_width,
+                                     (inst_.op_sel >> 3) & 1);
+  }
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
 };
@@ -560,6 +705,23 @@ public:
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (uses_split_ds_offsets()) {
+      if (inst->offset0)
+        out += " offset0:" + std::to_string(inst->offset0);
+      if (inst->offset1)
+        out += " offset1:" + std::to_string(inst->offset1);
+    } else {
+      const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
+      if (offset)
+        out += " offset:" + std::to_string(offset);
+    }
+    if (inst->gds)
+      out += " gds";
+  }
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
@@ -567,7 +729,24 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (inst->offen)
+      out += " offen";
+    if (inst->idxen)
+      out += " idxen";
+    if (inst->offset)
+      out += " offset:" + std::to_string(inst->offset);
+    if (inst->sc0)
+      out += " sc0";
+    if (inst->sc1)
+      out += " sc1";
+    if (inst->nt)
+      out += " nt";
+    if (inst->lds)
+      out += " lds";
+  }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
 };
@@ -575,7 +754,20 @@ public:
 class Mtbuf : public IsaInstruction<Isa> {
 public:
   Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (inst->offen)
+      out += " offen";
+    if (inst->offset)
+      out += " offset:" + std::to_string(inst->offset);
+    if (inst->sc0)
+      out += " sc0";
+    if (inst->sc1)
+      out += " sc1";
+    if (inst->nt)
+      out += " nt";
+  }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
 };
@@ -583,7 +775,23 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
-  void build_modifiers(std::string &out) const override;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    int flat_offset = inst->offset | (inst->pad_12 << 12);
+    if (inst->seg == 0)
+      flat_offset = inst->offset;
+    else if (flat_offset & 0x1000)
+      flat_offset -= 0x2000;
+    if (flat_offset)
+      out += " offset:" + std::to_string(flat_offset);
+    if (inst->sc0)
+      out += " sc0";
+    if (inst->sc1)
+      out += " sc1";
+    if (inst->nt)
+      out += " nt";
+  }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
   const OpEncoding inst_;
@@ -593,6 +801,35 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  uint32_t vop3_encoded_source_count() const;
+  int32_t vop3_encoded_source_index(uint8_t operand_index) const;
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    amdgpu::vop::append_vop3_disassembly(out, 0, inst->clamp, inst->omod,
+                                         vop3_encoded_source_count(), false);
+  }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    const int32_t modifier_index = vop3_encoded_source_index(operand_index);
+    const auto reg = operand->to_register_ref();
+    const bool half_width = modifier_index >= 0 && false && operand->size_bits() == 16 && reg &&
+                            reg->cls == RegClass::VGPR;
+    if (modifier_index < 0) {
+      out += operand->name();
+      return;
+    }
+    amdgpu::vop::append_vop3_operand(out, operand->name(), (0 >> modifier_index) & 1,
+                                     (inst_.neg >> modifier_index) & 1, half_width,
+                                     (0 >> modifier_index) & 1);
+  }
+  void append_dst_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = dst_operands_[operand_index];
+    const auto reg = operand->to_register_ref();
+    const bool half_width =
+        false && operand->size_bits() == 16 && reg && reg->cls == RegClass::VGPR;
+    amdgpu::vop::append_vop3_operand(out, operand->name(), false, false, half_width, (0 >> 3) & 1);
+  }
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
 };

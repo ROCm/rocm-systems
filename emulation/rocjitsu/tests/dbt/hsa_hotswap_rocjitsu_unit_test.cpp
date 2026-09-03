@@ -1280,28 +1280,26 @@ TEST_F(HsaHotswapMemoTest, RepeatedLoadsOfOneObjectTranslateOnce) {
   EXPECT_EQ(rj_test_translation_memo_bytes(), source.size() + first_output.size());
 }
 
-// Identity is exact. Two objects that a sampled fingerprint could plausibly place
-// in the same bucket -- same size, differing in one interior byte -- must not be
-// mistaken for each other, because the consequence is running the wrong code.
-TEST_F(HsaHotswapMemoTest, ObjectsDifferingInOneInteriorByteAreNotConfused) {
+// Identity is exact. Two objects the sampling cannot tell apart -- same size, same
+// fingerprint, different bytes -- must not be mistaken for each other, because the
+// consequence is running the wrong code. The count is the whole check: a confused
+// pair is served from the memo and never reaches a second translation.
+TEST_F(HsaHotswapMemoTest, ObjectsInOneFingerprintBucketAreNotConfused) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   const std::vector<uint8_t> base = read_translation_fixture();
   ASSERT_FALSE(base.empty()) << GFX1250_B0_TO_A0_FIXTURE;
 
   std::vector<uint8_t> altered = base;
-  ASSERT_GT(altered.size(), 2048u);
-  altered[altered.size() / 2] = static_cast<uint8_t>(altered[altered.size() / 2] ^ 0xff);
+  altered.resize(base.size() + 4096, 0);
+  const std::vector<uint8_t> twin = make_fingerprint_twin(base);
+  ASSERT_FALSE(twin.empty()) << "no colliding twin found; the sampling changed";
+  ASSERT_EQ(altered.size(), twin.size());
+  ASSERT_NE(altered, twin);
+  ASSERT_EQ(rj_test_sample_fingerprint(altered.data(), altered.size()),
+            rj_test_sample_fingerprint(twin.data(), twin.size()));
 
-  ASSERT_EQ(load_through_new_reader(base), HSA_STATUS_SUCCESS);
-  const std::vector<uint8_t> base_output = g_loaded_bytes;
-
-  g_loaded_bytes.clear();
-  const hsa_status_t altered_status = load_through_new_reader(altered);
-  // Whatever the altered object translates to, it must not be served the entry
-  // that belongs to the original.
-  if (altered_status == HSA_STATUS_SUCCESS) {
-    EXPECT_NE(g_loaded_bytes, base_output);
-  }
+  ASSERT_EQ(load_through_new_reader(altered), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load_through_new_reader(twin), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_translation_count(), 2u);
 }
 

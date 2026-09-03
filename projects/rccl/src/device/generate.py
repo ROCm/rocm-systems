@@ -7,7 +7,7 @@ import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
 # The empty entries are for collectives like Gather, Scatter, etc.
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "AllGatherV"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -35,6 +35,14 @@ ll128_reg_variant_colls = {"AllReduce", "AllGather", "Broadcast"}
 def reg_values_of(coll, proto):
   if proto == "LL128" and coll in ll128_reg_variant_colls:
     return ["1", "2"]
+  # SendRecv is generated as two latency-protocol kernel variants, selected on the
+  # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
+  #   reg "0" = legacy LL latency path (built on every arch; the default)
+  #   reg "1" = LL128 latency path (built for gfx942/gfx950 only; used when
+  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
+  if coll == "SendRecv":
+    return ["0", "1"]
   return ["0"]
 
 ################################################################################
@@ -105,14 +113,15 @@ if func_pattern and func_pattern[0]:
 else:
   # GDA (rocSHMEM-based) kernels only when rocshmem build requested
   if is_rocshmem:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
   else:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllGatherV|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
 
 ################################################################################
 
 algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
+  "AllGatherV":            ["RING"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
   "AlltoAllGda":           ["RING"],
@@ -125,6 +134,7 @@ algos_of_coll = {
 
 protos_of_coll = {
   "AllGather":              all_protos,
+  "AllGatherV":             all_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
   "AlltoAllGda":            ["SIMPLE"],
@@ -137,6 +147,7 @@ protos_of_coll = {
 
 redops_of_coll = {
   "AllGather":            ["Sum"],
+  "AllGatherV":           ["Sum"],
   "AllReduce":            all_redops,
   "AlltoAllPivot":        ["Sum"],
   "AlltoAllGda":          ["Sum"],
@@ -149,6 +160,7 @@ redops_of_coll = {
 
 tys_of_coll = {
   "AllGather":             ["i8"],
+  "AllGatherV":            ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
   "AlltoAllGda":           ["i8"],
@@ -161,6 +173,7 @@ tys_of_coll = {
 
 acc_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_accs,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -173,6 +186,7 @@ acc_of_coll = {
 
 pipelines_of_coll = {
   "AllGather":             ["0"],
+  "AllGatherV":            ["0"],
   "AllReduce":             all_pipelines,
   "AlltoAllPivot":         ["0"],
   "AlltoAllGda":           ["0"],
@@ -186,6 +200,7 @@ pipelined_types = ["bf16"]
 
 coll_camel_to_lower = {
   "AllGather":             "all_gather",
+  "AllGatherV":            "all_gather_v",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
   "AlltoAllGda":           "alltoall_gda",
@@ -270,6 +285,12 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
+    return False
+  # The LL128 SendRecv variant (reg=1) is only built/activated on gfx942/gfx950, which never
+  # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
+  # device linker would skip compiling them for gfx942 while the dispatch table still expected
+  # them (undefined-symbol link error).
+  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
     return False
   if not is_rocshmem and coll in gda_colls:
     return False
@@ -395,7 +416,11 @@ def custom_sort_key(fn: Fn):
 def get_arch_guard(fn):
   cond = None
 
-  if fn.unroll in ("8", "16", "32"):
+  if fn.coll == "SendRecv" and fn.reg == "1":
+      # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
+      # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
+      cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+  elif fn.unroll in ("8", "16", "32"):
       cond = "defined(__gfx1250__)"
   elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
@@ -571,7 +596,11 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       )
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8) | ((reg_idx & 0xF) << 28))
-      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
+      if fn.coll == "SendRecv":
+        # SendRecv has two latency-protocol variants distinguished by reg (0=LL, 1=LL128).
+        # reg=0 keeps the historical coll-only key for backward compatibility.
+        key = ((coll_idx & 0x3F) | ((reg_idx & 0xF) << 28))
+      if fn.coll in ["AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')

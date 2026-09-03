@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 
@@ -93,6 +74,8 @@ ualoe_handle_t AMDSmiGPUDevice::get_ualoe_handle() {
 }
 
 AMDSmiGPUDevice::~AMDSmiGPUDevice() {
+  delete backend_;
+  backend_ = nullptr;
   if (ualoe_handle_ != -1) {
     ualoe_close(ualoe_handle_);
     ualoe_handle_ = -1;
@@ -234,12 +217,12 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
 
     status_code = rsmi_compute_process_info_get(nullptr, &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
     if (cache_ptr->num_running_processes <= 0) {
       compute_process_list.clear();
       cache_ptr->last_compute_process_list_update_time = std::chrono::steady_clock::now();
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
 
     /**
@@ -254,7 +237,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     status_code = rsmi_compute_process_info_get(cache_ptr->list_all_processes_ptr.get(),
                                                 &cache_ptr->num_running_processes);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return status_code;
+      return static_cast<int32_t>(status_code);
     }
 
     if (cache_ptr->num_running_processes <= 0) {
@@ -273,7 +256,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
   auto list_device_allocation_size = uint32_t(0);
   status_code = rsmi_num_monitor_devices(&num_running_devices);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_devices <= 0)) {
-    return status_code;
+    return static_cast<int32_t>(status_code);
   }
 
   /**
@@ -403,7 +386,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       amdsmi_proc_info.mem = total_vram;
     }
 
-    return status_code;
+    return static_cast<int32_t>(status_code);
   };
 
   /**
@@ -458,7 +441,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     }
   }
 
-  return status_code;
+  return static_cast<int32_t>(status_code);
 }
 
 const GPUComputeProcessList_t& AMDSmiGPUDevice::amdgpu_get_compute_process_list(
@@ -482,6 +465,32 @@ std::string AMDSmiGPUDevice::bdf_to_string() const {
   return oss.str();
 }
 
+void AMDSmiGPUDevice::parse_cpulist(const std::string& cpulist, std::vector<uint64_t>& bitmask) {
+  if (bitmask.empty()) return;
+  const size_t highest = bitmask.size() * 64 - 1;
+
+  std::istringstream sstr(cpulist);
+  std::string range;
+  while (std::getline(sstr, range, ',')) {
+    size_t first = 0;
+    size_t last = 0;
+    try {
+      const size_t hyphen = range.find('-');
+      const long lo = std::stol(range.substr(0, hyphen));
+      const long hi = (hyphen == std::string::npos) ? lo : std::stol(range.substr(hyphen + 1));
+      if (lo < 0 || hi < 0) continue;
+      first = static_cast<size_t>(lo);
+      last = static_cast<size_t>(hi);
+    } catch (const std::exception&) {
+      continue;
+    }
+    // Clamp rather than skip, so an over-large range keeps the CPUs that fit.
+    for (size_t i = first; i <= std::min(last, highest); ++i) {
+      bitmask[i / 64] |= (1ULL << (i % 64));
+    }
+  }
+}
+
 std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_id,
                                                                   uint32_t size) const {
   std::vector<uint64_t> bitmask(size, 0);
@@ -497,21 +506,7 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
   if (file.is_open()) {
     std::string info;
     while (std::getline(file, info)) {
-      std::istringstream sstr(info);
-      std::string node_cpus;
-      while (std::getline(sstr, node_cpus, ',')) {
-        size_t hyphen = node_cpus.find('-');
-        if (hyphen != std::string::npos) {
-          int start = std::stoi(node_cpus.substr(0, hyphen));
-          int end = std::stoi(node_cpus.substr(hyphen + 1));
-          for (int i = start; i <= end; ++i) {
-            bitmask[i / 64] |= (1ULL << (i % 64));
-          }
-        } else {
-          int core = std::stoi(node_cpus);
-          bitmask[core / 64] |= (1ULL << (core % 64));
-        }
-      }
+      parse_cpulist(info, bitmask);
     }
   }
   return bitmask;
@@ -532,21 +527,7 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t d
   if (file.is_open()) {
     std::string info;
     while (std::getline(file, info)) {
-      std::istringstream sstr(info);
-      std::string node_cpus;
-      while (std::getline(sstr, node_cpus, ',')) {
-        size_t hyphen = node_cpus.find('-');
-        if (hyphen != std::string::npos) {
-          int start = std::stoi(node_cpus.substr(0, hyphen));
-          int end = std::stoi(node_cpus.substr(hyphen + 1));
-          for (int i = start; i <= end; ++i) {
-            bitmask[i / 64] |= (1ULL << (i % 64));
-          }
-        } else {
-          int core = std::stoi(node_cpus);
-          bitmask[core / 64] |= (1ULL << (core % 64));
-        }
-      }
+      parse_cpulist(info, bitmask);
     }
   }
   return bitmask;

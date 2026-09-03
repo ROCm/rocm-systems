@@ -32,7 +32,6 @@ _ANSI = {
     "red": "\033[31m",
     "yellow": "\033[33m",
     "green": "\033[32m",
-    "cyan": "\033[36m",
 }
 
 
@@ -71,6 +70,27 @@ class Diagnostic:
 def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
     """Return True if `line` falls within any of the given (start, end) ranges."""
     return any(start <= line <= end for start, end in ranges)
+
+
+def classify_diagnostic(diagnostic: Diagnostic, changed_file: ChangedFile) -> str | None:
+    """Classify `diagnostic` as belonging to `changed_file`, or not at all.
+
+    clang-tidy analyzes the whole translation unit, so scanning one file can
+    also emit diagnostics located in headers it includes (per
+    HeaderFilterRegex in .clang-tidy). Those are a different file's concern
+    and are picked up when that file is scanned instead, so only diagnostics
+    actually located in `changed_file.path` are classified here.
+
+    Returns "in_diff", "preexisting", or None if the diagnostic is in a
+    different file.
+    """
+    if os.path.normpath(diagnostic.file) != os.path.normpath(changed_file.path):
+        return None
+    return (
+        "in_diff"
+        if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+        else "preexisting"
+    )
 
 
 def _git(git_args: list[str], cwd: str | None = None) -> str:
@@ -223,9 +243,9 @@ def run_clang_tidy(
     return proc.stdout + proc.stderr, True
 
 
-def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
-    """Resolve the effective check list clang-tidy will apply to `sample_file`."""
-    result = _clang_tidy(args, "-list-checks", sample_file)
+def has_enabled_checks(args: argparse.Namespace) -> bool:
+    """Report whether clang-tidy will apply at least one check."""
+    result = _clang_tidy(args, "-list-checks")
 
     if result.returncode != 0:
         detail = result.stderr.strip() or "clang-tidy -list-checks failed"
@@ -233,27 +253,17 @@ def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
             _color(f"warning: could not resolve check list: {detail}", "yellow"),
             file=sys.stderr,
         )
-        return []
+        return False
 
-    checks = []
     in_list = False
     for line in result.stdout.splitlines():
         stripped = line.strip()
         if stripped == "Enabled checks:":
             in_list = True
             continue
-        if in_list:
-            if not stripped:
-                break
-            checks.append(stripped)
-    return checks
-
-
-def print_enabled_checks(checks: list[str]) -> None:
-    print(_color(f"Rules to apply ({len(checks)}):", "bold"))
-    for check in checks:
-        print(f"  {_color(check, 'cyan')}")
-    print()
+        if in_list and stripped:
+            return True
+    return False
 
 
 def print_changed_files(changed_files: list[ChangedFile]) -> None:
@@ -291,6 +301,7 @@ def print_rule_diagnostics(
     print(_color(title, "bold"))
     if not rule_diagnostics:
         print(f"  {_color('No issues found.', 'green')}")
+        print()
         return
     for check_name, diagnostics in sorted(
         rule_diagnostics.items(), key=lambda kv: len(kv[1]), reverse=True
@@ -300,6 +311,20 @@ def print_rule_diagnostics(
             location = f"{diagnostic.file}:{diagnostic.line}:{diagnostic.col}"
             color = "red" if diagnostic.severity == "error" else "yellow"
             print(f"        {_color(location, color)}: {diagnostic.message}")
+    print()
+
+
+def print_timed_out_files(paths: list[str], timeout: float | None) -> None:
+    """Report files clang-tidy could not finish, which make the run fail."""
+    if not paths:
+        return
+    print(_color(f"Timed out after {timeout}s ({len(paths)}):", "bold"))
+    for path in paths:
+        print(f"  {_color(path, 'red')}")
+    print(
+        "  These files were not fully checked, so the run is reported as "
+        "failed; raise --timeout to give them more time."
+    )
     print()
 
 
@@ -356,21 +381,17 @@ def main() -> int:
         print("No relevant changes found.")
         return 0
 
-    sample_file = os.path.join(repo_root, changed_files[0].path)
-    enabled_checks = get_enabled_checks(args, sample_file)
-
-    if not enabled_checks:
+    if not has_enabled_checks(args):
         print("No checks enabled.")
         return 0
 
-    print_enabled_checks(enabled_checks)
     print_changed_files(changed_files)
 
     print(f"Running clang-tidy on {len(changed_files)} files ...")
 
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
     preexisting_rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    any_timed_out = False
+    timed_out_files: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {
             pool.submit(
@@ -384,12 +405,16 @@ def main() -> int:
         for future in concurrent.futures.as_completed(futures):
             changed_file = futures[future]
             output, succeeded = future.result()
-            any_timed_out = any_timed_out or not succeeded
+            if not succeeded:
+                timed_out_files.append(changed_file.path)
 
             for diagnostic in parse_diagnostics(output, repo_root):
+                classification = classify_diagnostic(diagnostic, changed_file)
+                if classification is None:
+                    continue
                 target = (
                     rule_diagnostics
-                    if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+                    if classification == "in_diff"
                     else preexisting_rule_diagnostics
                 )
                 for check_name in diagnostic.checks:
@@ -399,8 +424,9 @@ def main() -> int:
     print_rule_diagnostics(
         "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
     )
+    print_timed_out_files(timed_out_files, args.timeout)
 
-    return 1 if rule_diagnostics or any_timed_out else 0
+    return 1 if rule_diagnostics or timed_out_files else 0
 
 
 if __name__ == "__main__":

@@ -1674,21 +1674,23 @@ class Marker : public Command {
 };
 
 class AccumulateCommand : public Command {
- private:
-  //! Stable kernel name pointers — one entry per kernel dispatch slot (base and
-  //! ext variants). Resolved from KernelMap at dispatch time; point into Kernel
-  //! objects that live for the device lifetime. Non-dispatch slots (barriers,
-  //! SDMA) are skipped so kernelNames_ and timestamps_ are always parallel.
-  //! "<unknown>" is used when the kernel_object is not found in KernelMap.
-  std::vector<const char*> kernelNames_;
-  //! GPU timestamps — one entry per kernel dispatch slot, parallel to
-  //! kernelNames_, populated at signal completion time.
-  struct KernelTimestamp {
-    uint64_t start;
-    uint64_t end;
-    uint32_t queue_index;  //!< vGPU index of the stream that ran this kernel
+ public:
+  //! One graph kernel dispatch. The name and queue are known when the AQL packet
+  //! is written; its signal fills the timing later by dispatch slot, so signal
+  //! drain order cannot change which name receives the timing.
+  struct KernelDispatch {
+    const char* kernel_name;
+    //! vGPU slot of the stream this dispatch ran on; one accumulate command can
+    //! span several streams when the graph is segmented.
+    uint32_t queue_index;
+    uint64_t start_ns;
+    uint64_t end_ns;
   };
-  std::vector<KernelTimestamp> timestamps_;
+
+ private:
+  //! Graph kernel dispatches in AQL packet order. Non-dispatch packets are
+  //! omitted; an unprocessed or invalid signal leaves its slot timing at zero.
+  std::vector<KernelDispatch> kernel_dispatches_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1726,20 +1728,23 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Record a stable kernel name pointer for one kernel dispatch slot.
-  //! Must not be nullptr — use "<unknown>" when the name cannot be resolved.
-  void addKernelName(const char* name) { kernelNames_.push_back(name); }
-
-  //! Add GPU timestamps for one dispatch slot (called at signal completion).
-  void addTimestamps(uint64_t startTs, uint64_t endTs, uint32_t queue_index = UINT32_MAX) {
-    timestamps_.push_back({startTs, endTs, queue_index});
+  //! Reserve one graph kernel dispatch slot and return its index. |name| must
+  //! not be nullptr — use "<unknown>" when it cannot be resolved.
+  uint32_t addKernelDispatch(const char* name, uint32_t queue_index) {
+    kernel_dispatches_.push_back({name, queue_index, 0, 0});
+    return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
   }
 
-  //! Return kernel name pointers (one per dispatch slot)
-  const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
+  //! Fill the timing for the dispatch slot owned by a completed signal.
+  void setDispatchTiming(uint32_t dispatch_slot, uint64_t start_ns, uint64_t end_ns) {
+    kernel_dispatches_[dispatch_slot].start_ns = start_ns;
+    kernel_dispatches_[dispatch_slot].end_ns = end_ns;
+  }
 
-  //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
-  const std::vector<KernelTimestamp>& getTimestamps() const { return timestamps_; }
+  //! Return graph kernel dispatches in AQL packet order.
+  const std::vector<KernelDispatch>& getKernelDispatches() const {
+    return kernel_dispatches_;
+  }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }

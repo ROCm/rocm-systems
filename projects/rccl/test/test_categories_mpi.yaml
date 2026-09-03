@@ -26,6 +26,7 @@ test_categories:
       - "ShmMPITest.*"
       - "NetTransportMPITest.*"
       - "NetIbMPITest.*"
+      - "InspectorPromP2pMPITest.*"
       - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
       - "UBR_AllReduce.OutOfPlace_MultiNode"
       - "UBR_AllGather.OutOfPlace_MultiNode"
@@ -39,6 +40,8 @@ test_categories:
       - "UBR_ConcurrentRegHang.*SHOULD_WORK"
       - "GraphCapture_AllToAll.MultiNode"
       - "GraphCapture_AllReduce.MultiNode"
+      - "PatLazyInitMPITest.*"
+      - "PatSharedConnectionMPITest.*"
     exclude_windows: &mpi_exclude_windows
       - "*"
     labels:
@@ -179,6 +182,18 @@ test_categories:
       - "NCCL_LAUNCH_MODE=GROUP"
       - "NCCL_DMABUF_ENABLE=1"
       - "RCCL_MPI_LOG_ALL_RANKS=1"
+  quick_env_pat_shared_qps_off:
+    description: "PAT shared-QP kill switch. RCCL_PARAM caches the flag for the process lifetime, so SeparateConnectionsWhenSharingDisabled only runs when RCCL_PAT_SHARED_QPS=0 is set before launch."
+    test_patterns:
+      - "PatSharedConnectionMPITest.SeparateConnectionsWhenSharingDisabled"
+      - "PatSharedConnectionMPITest.AlternatingReduceScatterAndAllGatherOnOneCommunicator"
+      - "PatSharedConnectionMPITest.GroupedReduceScatterAndAllGatherOnOneCommunicator"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "RCCL_PAT_SHARED_QPS=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -197,6 +212,8 @@ test_categories:
       - "UBR_ConcurrentRegHang.*SHOULD_WORK"
       - "GraphCapture_AllToAll.*"
       - "GraphCapture_AllReduce.*"
+      - "PatLazyInitMPITest.*"
+      - "PatSharedConnectionMPITest.*"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"
@@ -382,6 +399,7 @@ execution_settings:
     quick_env_net_graph_register: 1200
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
+    quick_env_pat_shared_qps_off: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200

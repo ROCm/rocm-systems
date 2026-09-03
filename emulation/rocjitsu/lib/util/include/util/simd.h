@@ -996,26 +996,48 @@ inline native<float> cube_tc_f32_simd(native<float> x, native<float> y, native<f
   return r;
 }
 
+/// Round an in-range finite float to the nearest integer, with halfway values
+/// choosing the even integer. Unlike nearbyint(), this is independent of the
+/// process floating-point environment.
+inline float round_to_nearest_even(float value) {
+  const float lower = std::floor(value);
+  const float fraction = value - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    return lower + 1.0f;
+  return lower;
+}
+
+/// SIMD counterpart of round_to_nearest_even().
+inline native<float> round_to_nearest_even_simd(native<float> value) {
+  native<float> lower = stdx::floor(value);
+  const native<float> fraction = value - lower;
+  const native<float> lower_mod_two = lower - native<float>(2.0f) * stdx::floor(lower * 0.5f);
+  const auto increment =
+      (fraction > native<float>(0.5f)) ||
+      ((fraction == native<float>(0.5f)) && (lower_mod_two != native<float>(0.0f)));
+  stdx::where(increment, lower) += native<float>(1.0f);
+  return lower;
+}
+
 /// Normalized f32->int16 / ->uint16 pack-convert lanes (back v_cvt_pk[_]norm_*).
-/// Scalar: `isnan(f) ? 0 : static_cast<intN>(clamp(f * K, lo, hi))`. The NaN->0
-/// blend is done in the FLOAT domain (so the mask type matches) before the int
-/// truncation, avoiding any float-mask -> int-mask conversion. Clamp keeps the
-/// value in range so static_simd_cast (truncate-toward-zero) matches the scalar
-/// cast; the caller masks &0xFFFF when packing. i16: K=32767, clamp
+/// Scalar: `isnan(f) ? 0 : static_cast<intN>(round_to_nearest_even(clamp(f * K, lo, hi)))`. The
+/// NaN->0 blend is done in the FLOAT domain (so the mask type matches) before the int conversion,
+/// avoiding any float-mask -> int-mask conversion. The caller masks &0xFFFF when packing. i16:
+/// K=32767, clamp
 /// [-32768,32767]; u16: K=65535, clamp [0,65535].
 inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
   native<float> p = f * native<float>(32767.0f);
   stdx::where(p < native<float>(-32768.0f), p) = native<float>(-32768.0f);
   stdx::where(p > native<float>(32767.0f), p) = native<float>(32767.0f);
   stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<int32_t>>(p);
+  return stdx::static_simd_cast<native<int32_t>>(round_to_nearest_even_simd(p));
 }
 inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
   native<float> p = f * native<float>(65535.0f);
   stdx::where(p < native<float>(0.0f), p) = native<float>(0.0f);
   stdx::where(p > native<float>(65535.0f), p) = native<float>(65535.0f);
   stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<uint32_t>>(p);
+  return stdx::static_simd_cast<native<uint32_t>>(round_to_nearest_even_simd(p));
 }
 
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
@@ -1167,7 +1189,7 @@ inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> 
 }
 
 /// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
-/// reference (src0) value is zero contributes nothing. Bit-identical to scalar.
+/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
 inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
   using U = native<uint32_t>;
   U r(0u);
@@ -1176,38 +1198,31 @@ inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t>
     U bi = (b >> (i * 8)) & U(0xFFu);
     U d = ai - bi;
     stdx::where(bi > ai, d) = bi - ai;
-    stdx::where(ai == 0u, d) = 0u; // skip masked-out (zero reference) bytes
+    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
     r += d;
   }
   return r;
 }
 
-/// Per-byte unsigned lerp (v_lerp_u8): out_byte = a + ((b - a) * c + 128) / 256,
-/// computed independently per byte and repacked. The division is signed and
-/// truncates toward zero (matching the scalar `int / 256`), so a negative
-/// numerator gets the +1 floor->trunc correction. Bit-identical to the scalar.
+/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
+/// computed independently per byte and repacked. Bit-identical to the scalar.
 inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
   using U = native<uint32_t>;
-  using I = native<int32_t>;
   U r(0u);
   for (int i = 0; i < 4; ++i) {
     const int sh = i * 8;
-    I ab = stdx::static_simd_cast<I>((a >> sh) & U(0xFFu));
-    I bb = stdx::static_simd_cast<I>((b >> sh) & U(0xFFu));
-    I cb = stdx::static_simd_cast<I>((c >> sh) & U(0xFFu));
-    I num = (bb - ab) * cb + I(128);
-    I q = num >> 8; // arithmetic shift == floor division by 256
-    stdx::where((num < 0) && ((num & I(255)) != 0), q) = q + I(1); // floor -> toward zero
-    I res = ab + q;
-    r = r | (stdx::static_simd_cast<U>(res) << sh);
+    U ab = (a >> sh) & U(0xFFu);
+    U bb = (b >> sh) & U(0xFFu);
+    U round_up = (c >> sh) & U(1u);
+    r = r | (((ab + bb + round_up) >> 1) << sh);
   }
   return r;
 }
 
 /// Byte permute (v_perm_b32): build each output byte from a selector byte of
 /// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
-/// Selector 0..7 picks a source byte; 0xD yields 0xFF; every other value yields
-/// 0. Bit-identical to the scalar byte loop.
+/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
+/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
 inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
   using U = native<uint32_t>;
   U srcbyte[8];
@@ -1218,10 +1233,13 @@ inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, na
   U r(0u);
   for (int i = 0; i < 4; ++i) {
     U sel = (c >> (i * 8)) & U(0xFFu);
-    U byte(0u); // 0xC and all other selectors >= 8 -> 0
+    U byte(0u);
     for (int k = 0; k < 8; ++k)
       stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
-    stdx::where(sel == U(0xDu), byte) = U(0xFFu); // 0xD -> 0xFF
+    for (int k = 0; k < 4; ++k)
+      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
+          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
+    stdx::where(sel >= U(13u), byte) = U(0xFFu);
     r = r | (byte << (i * 8));
   }
   return r;

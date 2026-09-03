@@ -49,6 +49,7 @@
 #include <cstring>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <memory>
@@ -134,8 +135,35 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
-  if (node_props.Capability.ui32.DoorbellType != 2)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
+  // Only DoorbellType 2 (HSA_CAP_DOORBELL_TYPE_2_0) is supported by the HSA runtime.
+  // Doorbell types are assigned by the kernel in kfd_topology.c based on ASIC generation:
+  //   0 = PRE_1_0: Kaveri, Hawaii, Tonga
+  //   1 = 1_0:     Carrizo, Fiji, Polaris10, Polaris11, Polaris12, Vegam
+  //   2 = 2_0:     Vega and newer (GCN 5.0+, GC IP >= 9.0.1)
+  //   3 =          Reserved for future use
+  //
+  // NOTE: DoorbellType is currently a 2-bit field (bits 12-13 of capability).
+  // As AMD adds new GPU generations, this field may be widened or new values
+  // added. When that happens, update this switch to accept the new type(s).
+  // The default case ensures unrecognized future types are skipped gracefully
+  // rather than aborting HSA initialization for all devices in the system.
+  switch (node_props.Capability.ui32.DoorbellType) {
+    case 2: // HSA_CAP_DOORBELL_TYPE_2_0 — supported
+      break;
+    case 0: // HSA_CAP_DOORBELL_TYPE_PRE_1_0 — deprecated (Kaveri, Hawaii, Tonga)
+    case 1: // HSA_CAP_DOORBELL_TYPE_1_0 — deprecated (Fiji, Polaris, Vegam)
+    default: {
+      // Fall through to default for any unrecognized future doorbell types.
+      // This prevents a single unsupported/new GPU from killing initialization
+      // for all devices. DiscoverGpu will catch this and skip the device.
+      std::ostringstream msg;
+      msg << "Agent creation failed.\nThe GPU node uses unsupported doorbell type "
+          << node_props.Capability.ui32.DoorbellType
+          << " (only type 2 is currently supported).\n";
+      const std::string msg_str = msg.str();
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA, msg_str.c_str());
+    }
+  }
 
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
@@ -201,6 +229,20 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 
   assert(isa != nullptr && "ISA registry inconsistency.");
+
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the 
+  // strict variant by name so the reported ISA and code-object
+  // selection target the A0-safe ISA. Later steppings keep the base target.
+  if (properties_.Capability.ui32.ASICRevision == 0 &&
+      !core::Runtime::runtime_singleton_->flag().disable_gfx12_strict()) {
+    const std::string strict_name =
+        "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
+    const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
+    // gfx1250 (12.5.0) A0 must have a registered strict variant.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+      assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
+    if (strict_isa != nullptr) isa = strict_isa;
+  }
 
   supported_isas_.push_back(isa);
   if (!supported_isas_[0]->GetIsaGeneric().empty()) {

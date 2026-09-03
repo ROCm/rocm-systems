@@ -17,7 +17,7 @@ Panel Config:
 
   - metric_table:
       id: 201
-      title: "System Speed-of-Light"
+      title: System Speed-of-Light
       header:
         metric: Metric
         value: Avg
@@ -29,192 +29,192 @@ Panel Config:
         # VALU counters: SP_VALU_FLOPS_* (SP block) - listed first as baseline compute
         # WMMA counters: SQ_VALU_WMMA_FLOP_* (SQ block) - specialized matrix ops
         VALU FLOPs (FP16):
-          value: AVG(SP_VALU_FLOPS_FP16_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 128 / 1000
           pct_of_peak: true
         VALU FLOPs (FP32):
-          value: AVG(SP_VALU_FLOPS_FP32_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
           pct_of_peak: true
         VALU FLOPs (FP64):
-          value: AVG(SP_VALU_FLOPS_FP64_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 32 / 1000
           pct_of_peak: true
         VALU IOPs:
-          value: AVG(SP_VALU_IOPS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_IOPS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
           pct_of_peak: true
         VALU Trans FLOPs (FP16):
-          value: AVG(SP_VALU_FLOPS_FP16_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 64 / 1000
           pct_of_peak: true
         VALU Trans FLOPs (FP32):
-          value: AVG(SP_VALU_FLOPS_FP32_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 32 / 1000
           pct_of_peak: true
         VALU Trans FLOPs (FP64):
-          value: AVG(SP_VALU_FLOPS_FP64_TRANS_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 16 / 1000
           pct_of_peak: true
         # WMMA FLOPs - Each instruction performs multiple FLOPs
         WMMA FLOPs (FP64):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP64_sum * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 16384 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP32):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP32_sum * 128 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 128 * SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 16384 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP16):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 2048 * SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA FLOPs (BF16):
-          value: AVG(SQ_VALU_WMMA_FLOP_BF16_sum * 2048 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 2048 * SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP8):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP6):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP6_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA FLOPs (FP4):
-          value: AVG(SQ_VALU_WMMA_FLOP_FP4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA IOPs (Int8):
-          value: AVG(SQ_VALU_WMMA_FLOP_I8_sum * 4096 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 4096 * SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         WMMA IOPs (Int4):
-          value: AVG(SQ_VALU_WMMA_FLOP_I4_sum * 8192 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         Active WGPs:
-          value: AVG(SQG_LEVEL_WGP_ACTIVE_sum / ((End_Timestamp - Start_Timestamp) / 1e9))
-          unit: WGPs
+          value: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum) / SUM(SQG_CYCLES_sum)
+          unit: WGPs per Cycle
           peak: $cu_per_gpu
           pct_of_peak: true
-          coll_level: SQG_LEVEL_WGP_ACTIVE_sum
+          coll_level: SQG_LEVEL_WGP_ACTIVE
         IPC:
-          value: AVG(((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
-          unit: Instr/cycle
+          value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          unit: Instructions per Cycle
           peak: 5
           pct_of_peak: true
         Wavefront Occupancy:
-          value: AVG(SQG_WAVE_CYCLES_sum / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          value: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Wavefronts
           peak: $max_waves_per_cu * $cu_per_gpu
           pct_of_peak: true
         LDS Read Bandwidth:
-          value: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk * $cu_per_gpu * 512 / 1000
           pct_of_peak: true
         LDS Write Bandwidth:
-          value: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: true
         LDS Bank Conflicts/Access:
-          value: AVG(((TX_VMW_LDS_BANK_CONFLICT_sum / (TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)) if ((TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum) != 0) else None))
-          unit: Conflicts/access
+          value: SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)
+          unit: Conflicts per Access
           peak: 64
           pct_of_peak: true
         # === Cache Hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 (L2) ===
         # GL0: Vector L0 Cache (per CU)
         GL0 Hit Rate:
-          value: ROUND((AVG((((TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / TX_VMW_REQ_sum) if (TX_VMW_REQ_sum != 0) else None)) * 100), 0)
-          unit: Pct
+          value: ROUND(SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100, 0)
+          unit: Percent
           peak: 100
           pct_of_peak: false
         GL0 Cache BW:
-          value: AVG((TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 256 * $cu_per_gpu
           pct_of_peak: true
         # GL1: Level-1 Graphics Buffer (Arbiter + 12 channels/SE)
         GL1A Busy Rate:
-          value: ROUND((AVG((GL1A_BUSY_sum / GL1A_CYCLE_sum) if (GL1A_CYCLE_sum != 0) else None)) * 100, 0)
-          unit: Pct
+          value: ROUND(SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum) * 100, 0)
+          unit: Percent
           peak: 100
           pct_of_peak: false
         # GL2: Level-2 Graphics Cache (Last-level cache on AID)
         GL2 Cache Hit Rate:
-          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
-          unit: pct
+          value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          unit: Percent
           peak: 100
           pct_of_peak: false
         GL2 Cache BW:
-          value: AVG(GL2C_REQ_sum * 256 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 256 * SUM(GL2C_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 256 * TO_INT($total_l2_chan)
           pct_of_peak: true
         GL2 to DRAM Read BW:
-          value: AVG(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $hbmBandwidth
           pct_of_peak: true
         GL2 to DRAM Write BW:
-          value: AVG(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $hbmBandwidth
           pct_of_peak: true
         GL2 to DRAM Read Latency:
-          value: AVG(((GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum / GC_EA_SE_DRAM_RD_CMD_POP_sum) if (GC_EA_SE_DRAM_RD_CMD_POP_sum != 0) else None))
+          value: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_DRAM_RD_CMD_POP_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false
         GL2 to DRAM Write Latency:
-          value: AVG(((GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum / GC_EA_SE_DRAM_WR_CMD_POP_sum) if (GC_EA_SE_DRAM_WR_CMD_POP_sum != 0) else None))
+          value: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_DRAM_WR_CMD_POP_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false
         Scalar Data Cache Hit Rate:
-          value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
-          unit: pct
+          value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+          unit: Percent
           peak: 100
           pct_of_peak: false
         Scalar Data Cache BW:
-          value: AVG(SQC_DCACHE_REQ_sum * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 64 * SUM(SQC_DCACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Hit Rate:
-          value: AVG(100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
-          unit: pct
+          value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          unit: Percent
           peak: 100
           pct_of_peak: false
         Instruction Cache BW:
-          value: AVG(SQC_ICACHE_REQ_sum * 64 / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          value: 64 * SUM(SQC_ICACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         Instruction Cache Fetch Latency:
-          value: AVG((SQ_IFETCH_LEVEL_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
           unit: Cycles
           peak: None
           pct_of_peak: false
-          coll_level: SQ_IFETCH_LEVEL_sum
+          coll_level: SQ_IFETCH_LEVEL
 
   metrics_description:
     VALU FLOPs (FP16): >-
@@ -267,7 +267,7 @@ Panel Config:
       Achieved Int4 WMMA throughput.
 
     Active WGPs: >-
-      Average number of WGPs that had at least one active wavefront.
+      Average number of WGPs that had at least one active wavefront in a cycle.
 
     IPC: >-
       Average number of instructions per active WGP cycle.

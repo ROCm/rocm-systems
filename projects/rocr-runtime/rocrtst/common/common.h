@@ -142,6 +142,16 @@ public:
 /// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
+/// Check if running under Windows Subsystem for Linux (WSL / DXG backend).
+/// \returns true if a WSL environment is detected
+bool isWslEnvironment();
+
+/// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
+/// true so the caller can return early; returns false otherwise.
+/// \param reason Why the test is skipped on WSL
+/// \returns true if the test should be skipped (WSL detected)
+bool SkipOnWsl(const char* reason);
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored

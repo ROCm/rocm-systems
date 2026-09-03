@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/rules.h"
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
@@ -1855,7 +1855,7 @@ ExpandResult expand_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst, uint32
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_cdna3[] = {
     {cdna4::encoding::kVop1, cdna4::kVPermlane16SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane16_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
@@ -1909,6 +1909,9 @@ const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
     {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4Mubuf, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx4_lds_cdna4_to_cdna3, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_cdna3),
+              "the CDNA4-to-CDNA3 rule table must stay sorted by (encoding id, opcode)");
 
 } // namespace
 

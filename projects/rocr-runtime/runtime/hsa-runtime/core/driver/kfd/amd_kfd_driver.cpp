@@ -113,11 +113,46 @@ __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
-hsa_status_t KfdDriver::Init() {
-  HSAKMT_STATUS ret =
-      HSAKMT_CALL(hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
+hsa_status_t KfdDriver::AcquireTopologySnapshot() const {
+  if (topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
 
+  HsaSystemProperties props = {};
+  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&props)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  sys_props_ = props;
+  topology_snapshot_acquired_ = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReleaseTopologySnapshot() {
+  if (!topology_snapshot_acquired_) return HSA_STATUS_SUCCESS;
+
+  topology_snapshot_acquired_ = false;
+  return HSAKMT_CALL(hsaKmtReleaseSystemProperties()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                               : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::DisableRuntime() {
+  if (!runtime_enabled_) return HSA_STATUS_SUCCESS;
+
+  runtime_enabled_ = false;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
+  return (ret == HSAKMT_STATUS_SUCCESS || ret == HSAKMT_STATUS_NOT_SUPPORTED) ? HSA_STATUS_SUCCESS
+                                                                              : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::Init() {
+  // Own one snapshot from before the debug probe through BuildTopology().
+  if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
+
+  HSAKMT_STATUS ret = HSAKMT_CALL(
+      hsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug()));
   if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+
+  runtime_enabled_ = true;
+  MAKE_NAMED_SCOPE_GUARD(runtime_guard, [this]() { DisableRuntime(); });
 
   uint32_t caps_mask = 0;
   if (HSAKMT_CALL(hsaKmtGetRuntimeCapabilities(&caps_mask)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -140,18 +175,19 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
+  runtime_guard.Dismiss();
+  snapshot_guard.Dismiss();
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
+  const hsa_status_t disable_status = DisableRuntime();
+  const hsa_status_t release_status = ReleaseTopologySnapshot();
+  const hsa_status_t close_status = Close();
 
-  ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
-
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
-  return Close();
+  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
+  if (release_status != HSA_STATUS_SUCCESS) return release_status;
+  return close_status;
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
@@ -170,23 +206,25 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t KfdDriver::Open() {
-  return HSAKMT_CALL(hsaKmtOpenKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                  : HSA_STATUS_ERROR;
+  const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
+  if (ret == HSAKMT_STATUS_SUCCESS ||
+      (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
+       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()))
+    return HSA_STATUS_SUCCESS;
+
+  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::Close() {
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                   : HSA_STATUS_ERROR;
+                                                                : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  // Note: We intentionally do NOT call hsaKmtReleaseSystemProperties() here.
-  // hsaKmtRuntimeEnable (called from Init) already acquired system properties.
-  // Releasing and re-acquiring would tear down FMM apertures and fail to
-  // re-acquire the VM because the kernel-side VM binding persists.
-  // hsaKmtAcquireSystemProperties handles the cached-snapshot case internally.
-  if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&sys_props)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  const hsa_status_t status = AcquireTopologySnapshot();
+  if (status != HSA_STATUS_SUCCESS) return status;
 
+  sys_props = sys_props_;
   return HSA_STATUS_SUCCESS;
 }
 

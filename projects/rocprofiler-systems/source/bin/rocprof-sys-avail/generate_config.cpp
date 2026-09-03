@@ -12,8 +12,8 @@
 #include "common/json_config.hpp"
 #include "common/path.hpp"
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/fmt.h>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -189,10 +189,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     _settings->find("suppress_config")->second->reset();
     _settings->find("suppress_parsing")->second->reset();
 
-    _config_file   = settings::format(_config_file, _settings->get_tag());
-    bool _absolute = _config_file.at(0) == '/';
-    auto _dirs     = rocprofsys::delimit(_config_file, "/\\/");
-    _config_file   = _dirs.back();
+    _config_file         = settings::format(_config_file, _settings->get_tag());
+    const bool _absolute = _config_file.at(0) == '/';
+    auto       _dirs     = rocprofsys::delimit(_config_file, "/\\/");
+    _config_file         = _dirs.back();
     _dirs.pop_back();
 
     std::string _output_dir = ".";
@@ -209,7 +209,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     auto        _fmts    = std::set<std::string>{};
     std::string _txt_ext = ".cfg";
-    for(std::string itr : { ".cfg", ".txt", ".json", ".xml" })
+    for(const std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
         if(_config_file.length() <= itr.length()) continue;
         auto _pos = _config_file.rfind(itr);

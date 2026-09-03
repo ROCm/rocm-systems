@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -25,6 +25,17 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageMsaaLoadVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_msaa_load", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageMsaaLoadVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
     : Vsample("image_sample", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleVsample)),
@@ -40,6 +51,17 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleVsample(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
     : Vsample("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
@@ -57,6 +79,17 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
     : Vsample("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleLVsample)),
@@ -72,6 +105,17 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
     : Vsample("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
@@ -89,6 +133,17 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleBVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
     : Vsample("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleLzVsample)),
@@ -104,6 +159,17 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLzVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
     : Vsample("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
@@ -121,6 +187,17 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDVsample)),
@@ -136,6 +213,17 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -153,6 +241,17 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCLVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCBVsample)),
@@ -168,6 +267,17 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -185,6 +295,17 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCLzVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
     : Vsample("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleOVsample)),
@@ -200,6 +321,17 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleOVsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -217,6 +349,17 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
     : Vsample("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleLOVsample)),
@@ -232,6 +375,17 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -249,6 +403,17 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleBOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleLzOVsample)),
@@ -264,6 +429,17 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleLzOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -281,6 +457,17 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCOVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDOVsample)),
@@ -296,6 +483,17 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -313,6 +511,17 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCLOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_l_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCBOVsample)),
@@ -328,6 +537,17 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCBOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -345,6 +565,17 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCLzOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzOVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
     : Vsample("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4Vsample)),
@@ -360,6 +591,17 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4Vsample(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4Vsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
     : Vsample("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -377,6 +619,17 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4LVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
     : Vsample("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4BVsample)),
@@ -392,6 +645,17 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4BVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -409,6 +673,17 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4LzVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
     : Vsample("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4CVsample)),
@@ -424,6 +699,17 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
@@ -441,6 +727,17 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4CLzVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_lz", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
     : Vsample("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4OVsample)),
@@ -456,6 +753,17 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4OVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4OVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -473,6 +781,17 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4LzOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzOVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4CLzOVsample)),
@@ -488,6 +807,17 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CLzOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_lz_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzOVsample>(opcode);
+}
+} // namespace detail
 
 ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
     : Vsample("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
@@ -505,6 +835,17 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGetLodVsample(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_get_lod", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGetLodVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleDG16Vsample)),
@@ -520,6 +861,17 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDG16Vsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDG16Vsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -537,6 +889,17 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCDG16Vsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDG16Vsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleDOG16Vsample)),
@@ -552,6 +915,17 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleDOG16Vsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOG16Vsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -569,6 +943,17 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCDOG16Vsample(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOG16Vsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
     : Vsample("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleClVsample)),
@@ -584,6 +969,17 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleClVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -601,6 +997,17 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleBClVsample)),
@@ -616,6 +1023,17 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -633,6 +1051,17 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDClVsample)),
@@ -648,6 +1077,17 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -665,6 +1105,17 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCBClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
     : Vsample("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleClOVsample)),
@@ -680,6 +1131,17 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleClOVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -697,6 +1159,17 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleBClOVsample)),
@@ -712,6 +1185,17 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleBClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -729,6 +1213,17 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCClOVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDClOVsample)),
@@ -744,6 +1239,17 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOVsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
@@ -761,6 +1267,17 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleCBClOVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_b_cl_o", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClOVsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDClG16Vsample)),
@@ -776,6 +1293,17 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClG16Vsample(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_c_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClG16Vsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -793,6 +1321,17 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDClOG16Vsample(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_o_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOG16Vsample>(opcode);
+}
+} // namespace detail
+
 ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageSampleCDClOG16Vsample)),
@@ -808,6 +1347,18 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageSampleCDClOG16Vsample(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vsample::validate_encoding("image_sample_c_d_cl_o_g16",
+                                 reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOG16Vsample>(opcode);
+}
+} // namespace detail
 
 ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
@@ -825,6 +1376,17 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageSampleDClG16Vsample(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_sample_d_cl_g16", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClG16Vsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
     : Vsample("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4ClVsample)),
@@ -840,6 +1402,17 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4ClVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4ClVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
     : Vsample("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -857,6 +1430,17 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4BClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BClVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4CClVsample)),
@@ -872,6 +1456,17 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CClVsample(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CClVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
@@ -889,6 +1484,17 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4CLVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_l", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4CBVsample)),
@@ -904,6 +1510,17 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4CBVsample(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_b", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBVsample>(opcode);
+}
+} // namespace detail
 
 ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
@@ -921,6 +1538,17 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
   vaddr.apply_fieldless_caps(false, false, false);
 }
 
+namespace detail {
+DecodeResult decodeImageGather4CBClVsample(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4_c_b_cl", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBClVsample>(opcode);
+}
+} // namespace detail
+
 ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
     : Vsample("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::ImageGather4hVsample)),
@@ -936,6 +1564,17 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
 }
+
+namespace detail {
+DecodeResult decodeImageGather4hVsample(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vsample::validate_encoding(
+      "image_gather4h", reinterpret_cast<const Vsample::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4hVsample>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

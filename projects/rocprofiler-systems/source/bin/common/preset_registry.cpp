@@ -7,7 +7,7 @@
 #include "common/path.hpp"
 #include "embedded_presets.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -292,6 +292,29 @@ preset_registry::is_section_enabled(std::string_view preset_name,
     return json[std::string{ section }].value("enabled", default_value);
 }
 
+bool
+preset_registry::is_rocpd_output_enabled(std::string_view preset_name,
+                                         bool             default_value) const
+{
+    auto iter = m_json_cache.find(std::string{ preset_name });
+    if(iter == m_json_cache.end())
+    {
+        return default_value;
+    }
+
+    const auto& json = iter->second;
+    if(!json.contains("output"))
+    {
+        return default_value;
+    }
+    const auto& output = json["output"];
+    if(!output.contains("rocpd_output"))
+    {
+        return default_value;
+    }
+    return output["rocpd_output"].value("enabled", default_value);
+}
+
 void
 preset_registry::list(std::string_view tool_name, std::ostream& os)
 {
@@ -381,7 +404,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("tracing"))
     {
         const auto& tracing = preset_json["tracing"];
-        bool        enabled = tracing.value("enabled", false);
+        const bool  enabled = tracing.value("enabled", false);
         std::string entry   = std::string("Tracing:         ") + (enabled ? "ON" : "OFF");
         if(enabled && tracing.contains("buffer_size_kb"))
         {
@@ -399,7 +422,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("profiling"))
     {
         const auto& profiling = preset_json["profiling"];
-        bool        enabled   = profiling.value("enabled", false);
+        const bool  enabled   = profiling.value("enabled", false);
         std::string entry = std::string("Profiling:       ") + (enabled ? "ON" : "OFF");
         if(enabled && profiling.contains("flat_profile") &&
            profiling["flat_profile"].value("enabled", false))
@@ -411,7 +434,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("sampling"))
     {
         const auto& sampling = preset_json["sampling"];
-        bool        enabled  = sampling.value("enabled", false);
+        const bool  enabled  = sampling.value("enabled", false);
         std::string entry = std::string("CPU Sampling:    ") + (enabled ? "ON" : "OFF");
         if(enabled && sampling.contains("frequency_hz"))
         {
@@ -484,8 +507,7 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Output: rocPD
-    if(preset_json.contains("output") && preset_json["output"].contains("rocpd_output") &&
-       preset_json["output"]["rocpd_output"].value("enabled", false))
+    if(is_rocpd_output_enabled(preset_name))
     {
         lines.emplace_back("rocPD Output:    ON");
     }
@@ -497,7 +519,7 @@ preset_registry::describe(std::string_view preset_name)
     oss << description << "\n";
     for(size_t i = 0; i < lines.size(); ++i)
     {
-        bool is_last = (i + 1 == lines.size());
+        const bool is_last = (i + 1 == lines.size());
         oss << "  " << (is_last ? "\u2514\u2500 " : "\u251c\u2500 ") << lines[i];
         if(!is_last) oss << "\n";
     }

@@ -18,7 +18,7 @@ namespace
 std::string
 find_env_var(const std::vector<std::string>& env, std::string_view var_name)
 {
-    std::string prefix = std::string(var_name) + "=";
+    const std::string prefix = std::string(var_name) + "=";
     for(const auto& entry : env)
     {
         if(std::string_view{ entry }.find(prefix) == 0) return entry;
@@ -205,8 +205,8 @@ TEST_F(RemoveEnvTest, VariableWithSpecialCharactersInValue)
 
 TEST_F(RemoveEnvTest, LongVariableName)
 {
-    std::string long_var_name = "VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_TESTING";
-    m_env_vars                = { long_var_name + "=some_value", "SHORT=val" };
+    const std::string long_var_name = "VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_TESTING";
+    m_env_vars                      = { long_var_name + "=some_value", "SHORT=val" };
 
     remove_env(m_env_vars, long_var_name, m_original_envs);
 
