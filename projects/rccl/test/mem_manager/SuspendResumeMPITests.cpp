@@ -123,11 +123,6 @@ struct VmmAlloc
 
 void allocateVmmPosixFd(int dev, size_t requestedSize, VmmAlloc* out)
 {
-    // These tests allocate raw HIP VMM with posix-fd export, independent of
-    // NCCL_CUMEM_ENABLE. Skip when the kernel/runtime cannot back cuMem.
-    if (!ncclCuMemRuntimeSupported())
-        GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
-
     ASSERT_NE(out, nullptr);
 
     hipMemAllocationProp prop            = {};
@@ -439,6 +434,13 @@ protected:
         if (!validateTestPrerequisites(/*min_processes=*/1, kNoProcessLimit)) {
             GTEST_SKIP() << "AnyRanks suite needs at least 1 rank";
         }
+        // Gate in SetUp so every MPI rank skips the whole test before entering
+        // any bootstrap barriers. GTEST_SKIP inside allocateVmmPosixFd only
+        // returned from that helper, so the caller continued with an empty
+        // allocation and peer-coupled tests deadlocked.
+        if (!ncclCuMemRuntimeSupported()) {
+            GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
+        }
         ASSERT_EQ(createTestCommunicator(), ncclSuccess);
     }
 };
@@ -667,6 +669,9 @@ protected:
         MPITestBase::SetUp();
         if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2)) {
             GTEST_SKIP() << "Two-rank suite, run with mpirun -np 2";
+        }
+        if (!ncclCuMemRuntimeSupported()) {
+            GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
         }
         ASSERT_EQ(createTestCommunicator(), ncclSuccess);
     }

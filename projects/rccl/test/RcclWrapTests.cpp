@@ -175,7 +175,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     comm->nNodes                    = 2; // triggers inter-node logic
     comm->rank                      = 0;
     comm->topo                      = new ncclTopoSystem();
-    *comm->topo                     = {};
+    // Aggregate value-initialization creates a sizeof(ncclTopoSystem) (13 MiB)
+    // temporary in this stack frame and overflows the default 8 MiB stack.
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     comm->topo->nodes[GPU].count    = 1;
@@ -218,6 +220,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     comm->nNodes                    = 2; // triggers inter-node logic
     comm->rank                      = 0;
     comm->topo                      = new ncclTopoSystem();
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     strncpy(
@@ -261,7 +264,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     comm->rank   = 0;
     comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
                                          // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     strncpy(
@@ -296,7 +299,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     comm->rank   = 0;
     comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
                                          // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
+    memset(comm->topo, 0, sizeof(*comm->topo));
     comm->topo->ll128Enabled        = true;
     comm->topo->nodes[GPU].nodes[0] = {};
     comm->topo->nodes[GPU].count    = 1;
@@ -1634,9 +1637,9 @@ TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
         []()
         {
             ncclComm_t            mockComm = nullptr;
-            struct ncclTopoSystem mockTopo;
+            auto                  mockTopo = std::make_unique<ncclTopoSystem>();
             struct ncclTopoNode   mockGpu;
-            CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+            CreateMockComm(mockComm, *mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
             SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
             // CreateMockComm leaves archName null, which the DDA gate dereferences.
             mockComm->archName = const_cast<char*>("gfx950");

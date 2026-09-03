@@ -70,7 +70,17 @@ int lsaBaseRank(int rank, int lsaSize) {
 // Fixture
 // ===========================================================================
 
-class DeviceApiMPITests : public MPITestBase {};
+class DeviceApiMPITests : public MPITestBase {
+ protected:
+  void SetUp() override {
+    MPITestBase::SetUp();
+    // ncclDevCommCreate needs symmetric-memory backing even for the Local
+    // kernels. Gate the fixture so tests that omitted their per-body LSA
+    // prerequisite cannot attempt device-communicator creation without cuMem.
+    if (auto reason = cuMemReason(); !reason.empty())
+      GTEST_SKIP() << reason;
+  }
+};
 
 // ===========================================================================
 // Local Copy: ncclLocalCopy (1 source -> N strided local destinations)
