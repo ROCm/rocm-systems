@@ -677,6 +677,20 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   peer->set_process_id(driver_->local_process_id());
   peer->set_queue_id(create.queue_id);
 
+  rocjitsu::amdgpu::DispatchEntry pending_peer{};
+  pending_peer.dispatch_id = 99;
+  pending_peer.queue_id = create.queue_id;
+  pending_peer.process_id = driver_->local_process_id();
+  pending_peer.kernel_entry_pc = kKernelAddress;
+  pending_peer.sgprs_per_wf = 16;
+  pending_peer.vgprs_per_wf = 4;
+  pending_peer.grid_size_x = 64;
+  pending_peer.grid_wgs_x = 1;
+  pending_peer.total_wgs = 1;
+  pending_peer.kind = rocjitsu::amdgpu::DispatchPacketKind::Kernel;
+  const uint64_t peer_workgroups = peer_cp->dispatched_workgroups();
+  peer_cp->accept_fanout_shard(std::move(pending_peer));
+
   cu->step(); // Enter the configured trap handler.
   cu->step(); // Load a doorbell-only M0 value.
   cu->step(); // A plain interrupt must not become a queue exception.
@@ -722,19 +736,29 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
         replica->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
   });
 
+  for (uint32_t attempt = 0; attempt < 16 && peer_cp->accepted_entry_count_for_test(
+                                                 create.queue_id, driver_->local_process_id()) == 0;
+       ++attempt)
+    ASSERT_TRUE(engine_->step());
+  EXPECT_EQ(peer_cp->accepted_entry_count_for_test(create.queue_id, driver_->local_process_id()),
+            1u);
+  EXPECT_EQ(peer_cp->dispatched_workgroups(), peer_workgroups)
+      << "the fatal queue gate must block an already-fanned-out peer shard";
+
   hsa_kernel_dispatch_packet_t pending{};
   pending.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
   std::memcpy(ring.data(), &pending, sizeof(pending));
   write_pointer = 1;
   const uint64_t owner_passes = cp->doorbell_handle_count_for_test();
   engine_->schedule_event_now(cp->doorbell_event());
-  engine_->schedule_event_now(peer_cp->doorbell_event());
-  ASSERT_TRUE(engine_->step());
+  for (uint32_t attempt = 0; attempt < 16 && cp->doorbell_handle_count_for_test() == owner_passes;
+       ++attempt)
+    ASSERT_TRUE(engine_->step());
   EXPECT_GT(cp->doorbell_handle_count_for_test(), owner_passes);
   EXPECT_EQ(read_pointer, 0u) << "the fatal queue gate must prevent pending packet fetch";
 }
 
-TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAfterCauseClearIsNotAQueueException) {
+TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
   constexpr uint32_t kExceptionEventId = 41;
@@ -769,8 +793,10 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAfterCauseClearIsNotAQueueException)
 
   std::atomic<bool> delivered = false;
   cp->set_interrupt_callback([&](uint32_t, uint32_t event_id) {
-    if (event_id == kExceptionEventId)
+    if (event_id == kExceptionEventId) {
       delivered.store(true, std::memory_order_release);
+      memory->write64(exception_status_address, 0, driver_->local_process_id());
+    }
   });
   struct ObserverGuard {
     rocjitsu::SimulatedKfd *driver;
@@ -803,8 +829,8 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAfterCauseClearIsNotAQueueException)
 
   constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
   const uint32_t handler[] = {
-      0xBEFD00FFu, 0x00000400u, // s_mov_b32 m0, PC-sampling event 1024
-      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT), profiling completion
+      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT), queue exception
   };
   memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
   for (uint32_t i = 0; i < std::size(handler); ++i)
@@ -817,13 +843,19 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAfterCauseClearIsNotAQueueException)
   wave->set_queue_id(create.queue_id);
   cu->step(); // Enter the GFX9 trap handler.
   wave->set_trapsts(wave->trapsts() | (1u << 26));
-  cu->step(); // Preserve the sampling event id in M0.
+  wave->set_ttmp(13, wave->ttmp(13) | (1u << 21));
+  wave->set_m0(0x400u);
   wave->set_trapsts(wave->trapsts() & ~(1u << 26));
   cu->step(); // Send the completion after the handler cleared its cause bit.
 
   EXPECT_FALSE(delivered.load(std::memory_order_acquire));
   EXPECT_FALSE(
       cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
+  wave->set_ttmp(13, wave->ttmp(13) & ~((1u << 21) | (1u << 22)));
+  wave->set_m0(0x407u);
+  cu->step(); // Route it independently of the profiling-completion payload.
+  EXPECT_TRUE(delivered.load(std::memory_order_acquire));
+  EXPECT_TRUE(cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
 }
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {

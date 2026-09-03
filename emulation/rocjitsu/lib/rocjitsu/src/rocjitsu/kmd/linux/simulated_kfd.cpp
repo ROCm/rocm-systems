@@ -3310,19 +3310,22 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   if (message_id != kMessageInterrupt || !wave.in_trap_handler())
     return false;
 
-  // Only the GFX12 ROCr handler keeps enough live provenance to distinguish
-  // its queue-exception M0 payload from profiling-completion event ids. Older
-  // handlers clear or stash the sampling cause before MSG_INTERRUPT.
   const auto arch = wave.cu().arch();
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
-    return true;
-
-  // PC-sampling host/perf traps use MSG_INTERRUPT too, but put a completion
-  // event id in M0. Their GFX12 EXCP_FLAG_PRIV causes occupy bits 22 and 26 in
-  // the common TRAPSTS representation. Do not reinterpret a large event id as
-  // the queue-exception layout below.
-  constexpr uint32_t kProfilingTrapstsMask = (1u << 22) | (1u << 26);
-  if ((wave.trapsts() & kProfilingTrapstsMask) != 0)
+  bool profiling_interrupt = false;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2) {
+    // GFX9.0-9.3 preserves host-trap provenance in TTMP11 after clearing the
+    // live cause. Stochastic sampling is supported only on GFX9.4+.
+    profiling_interrupt = (wave.ttmp(11) & (1u << 22)) != 0;
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // GFX9.4+ preserves stochastic and host-trap provenance in TTMP13.
+    profiling_interrupt = (wave.ttmp(13) & ((1u << 21) | (1u << 22))) != 0;
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    // GFX12 exposes the host/performance causes in common TRAPSTS bits 22/26.
+    profiling_interrupt = (wave.trapsts() & ((1u << 22) | (1u << 26))) != 0;
+  }
+  // Profiling completion uses MSG_INTERRUPT too, but puts an event id in M0.
+  // Do not reinterpret that id as the queue-exception layout below.
+  if (profiling_interrupt)
     return true;
 
   // The ROCr trap-handler ABI packs the 10-bit doorbell id below six KFD queue
