@@ -15,11 +15,13 @@
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -299,6 +301,68 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
   std::string err;
   EXPECT_FALSE(build_probe_callable(obj, sym, ROCJITSU_CODE_ARCH_CDNA2, &err).has_value());
   EXPECT_NE(err.find("overflow"), std::string::npos) << err;
+}
+
+//==============================================================================
+// ProbeAbi: the convention's register locations, and what it supplies.
+//==============================================================================
+
+TEST(ProbeAbiTest, DerivesTheLinkPairFromTheConvention) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_EQ(abi->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(abi->link_pair_base, 30);
+}
+
+TEST(ProbeAbiTest, RejectsAnUnrecognizedConvention) {
+  EXPECT_FALSE(derive_probe_abi(ProbeCallingConvention::Unknown).has_value());
+}
+
+TEST(ProbeAbiTest, SuppliesExactlyTheLinkPair) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+
+  RegisterSet expected;
+  expected.expand(RegisterRef{RegClass::SGPR, 30, 2});
+  EXPECT_EQ(supplied_registers(*abi), expected);
+}
+
+TEST(ProbeAbiTest, ADerivedAbiIsValid) {
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  ASSERT_TRUE(abi.has_value());
+  EXPECT_TRUE(is_valid_probe_abi(*abi));
+}
+
+TEST(ProbeAbiTest, ADefaultConstructedAbiIsInvalid) {
+  // Both halves of the default are individually disqualifying, so neither check
+  // is load-bearing alone.
+  EXPECT_EQ(ProbeAbi{}.link_pair_base, kUnsetLinkPairBase);
+  EXPECT_FALSE(is_valid_probe_abi(ProbeAbi{}));
+}
+
+TEST(ProbeAbiTest, RejectsAnOddLinkPairBase) {
+  // A 64-bit scalar operand must name an even-aligned pair, so an odd base
+  // cannot have come from a convention even with one named.
+  EXPECT_FALSE(is_valid_probe_abi(
+      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31, .link_pair_base = 31}));
+}
+
+TEST(ProbeAbiTest, RejectsAnEvenLinkPairBaseWithNoConvention) {
+  EXPECT_FALSE(
+      is_valid_probe_abi(ProbeAbi{.cc = ProbeCallingConvention::Unknown, .link_pair_base = 30}));
+}
+
+TEST(ProbeAbiTest, AnInvalidAbiSuppliesNothing) {
+  // Reporting a pair here would let a live-in subtraction excuse a register
+  // nothing had committed to writing.
+  EXPECT_TRUE(supplied_registers(ProbeAbi{}).none());
+  EXPECT_TRUE(
+      supplied_registers(ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31,
+                                  .link_pair_base = 31})
+          .none());
 }
 
 } // namespace
