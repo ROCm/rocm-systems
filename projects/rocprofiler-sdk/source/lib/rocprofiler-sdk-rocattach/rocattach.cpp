@@ -602,6 +602,9 @@ rocattach_attach_tree(int root_pid)
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Found " << pids.size()
               << " process(es) in tree rooted at pid " << root_pid;
 
+    // The root session owns tree_pids, which detach_tree(root_pid) later uses for cleanup.
+    // Attaching descendants after root setup failed would leave no root entry to record
+    // those PIDs, so attach the root first and return without touching descendants on failure.
     std::vector<pid_t> attached_pids;
     auto               failure_reason = rocprofiler::rocattach::setup_failure_reason::none;
     auto               root_status    = rocprofiler::rocattach::setup(root_pid, &failure_reason);

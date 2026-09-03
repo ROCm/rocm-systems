@@ -30,7 +30,9 @@ By default, ``rocprof-attach`` attaches to the target process and all of its des
 
    $ rocprof-attach -p 12345 -t path/to/your-tool-library.so --attach-children=false
 
-The root process must have attachment support enabled. Descendants without an attachment listener, such as CPU-only workers created with ``fork()`` after the listener started, are skipped with a warning. A skipped descendant isn't profiled; a fork-only child that performs GPU work must initialize its own attachment support before it can be attached.
+The PID passed to ``--attach`` is the root of the attachment operation and must have attachment support enabled. If the root has no attachment listener, the operation fails immediately without attempting any descendants. Consequently, ``--attach-children`` cannot use a non-attachable launcher merely to discover and attach its workers.
+
+After the root attaches successfully, descendants without an attachment listener are skipped with a warning. This commonly applies to CPU-only workers created with ``fork()`` after the parent started its listener, because threads aren't inherited across ``fork()``. Skipped descendants aren't profiled. A fork-only child that performs GPU work must initialize its own attachment support before it can be attached.
 
 More information can be found by invoking ``rocprof-attach -h``
 
