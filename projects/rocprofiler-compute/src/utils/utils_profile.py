@@ -40,18 +40,14 @@ _PROFILER_INTERNAL_RE = re.compile(
     r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
 )
 
-_OPTION_REGISTERED_MORE_THAN_ONCE = "registered more than once"
-_ROCPROFILER_REGISTER_LIBRARY_ALREADY_SET = (
-    "ROCPROFILER_REGISTER_LIBRARY is already set to"
-)
-_DUPLICATE_ROCM_COMGR_MESSAGE = (
-    "Two copies of libamd_comgr were loaded in this process. "
-    "LLVM aborted when both copies registered the same compiler option. "
-    "The profiler and the workload must use the same ROCm."
-)
-_DUPLICATE_ROCM_REGISTER_MESSAGE = (
-    "Two rocprofiler libraries were loaded in this process. "
-    "The profiler and the workload must use the same ROCm."
+_LLVM_DUPLICATE_OPTION = "registered more than once"
+_ROCPROFILER_REGISTER_CONFLICT = "ROCPROFILER_REGISTER_LIBRARY is already set to"
+_DUPLICATE_ROCM_MESSAGE = (
+    "The workload and the profiler loaded two different ROCm installations in "
+    "the same process. Duplicate ROCm libraries abort at startup. Install "
+    "PyTorch and rocm[profiler] from the same package index: "
+    "https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/"
+    "how-to/profile/mode.html#torch-trace-requirements"
 )
 
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
@@ -143,10 +139,9 @@ def _classify_output_line(line: str) -> None:
 
 
 def _duplicate_rocm_install_message(output: str) -> Optional[str]:
-    if _OPTION_REGISTERED_MORE_THAN_ONCE in output:
-        return _DUPLICATE_ROCM_COMGR_MESSAGE
-    if _ROCPROFILER_REGISTER_LIBRARY_ALREADY_SET in output:
-        return _DUPLICATE_ROCM_REGISTER_MESSAGE
+    """Return the duplicate-ROCm hint if the output shows that failure."""
+    if _LLVM_DUPLICATE_OPTION in output or _ROCPROFILER_REGISTER_CONFLICT in output:
+        return _DUPLICATE_ROCM_MESSAGE
     return None
 
 
@@ -289,13 +284,13 @@ def run_prof(
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if (not is_live_attach(profiler_options)) and (not success):
-        duplicate_rocm_message = _duplicate_rocm_install_message(output)
-        if duplicate_rocm_message is not None:
-            console_error(duplicate_rocm_message)
         for line in output.splitlines():
             stripped = line.strip()
             if stripped:
                 _classify_output_line(stripped)
+        duplicate_rocm_message = _duplicate_rocm_install_message(output)
+        if duplicate_rocm_message is not None:
+            console_error(duplicate_rocm_message, exit=False)
         console_error("Profiling execution failed.")
 
     out_dir = Path(workload_dir) / "out"

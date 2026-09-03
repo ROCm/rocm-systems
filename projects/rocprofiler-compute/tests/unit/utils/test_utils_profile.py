@@ -332,16 +332,17 @@ def test_run_prof_failure_subprocess(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
-    assert (
-        utils_profile._DUPLICATE_ROCM_COMGR_MESSAGE,
-        True,
-    ) not in errors
-    assert (
-        utils_profile._DUPLICATE_ROCM_REGISTER_MESSAGE,
-        True,
-    ) not in errors
+    assert all(msg != utils_profile._DUPLICATE_ROCM_MESSAGE for msg, _ in errors)
 
 
+@pytest.mark.parametrize(
+    "abort_line",
+    [
+        "Option 'spirv-expand-step' registered more than once!",
+        "ROCPROFILER_REGISTER_LIBRARY is already set to '/opt/rocm/lib/lib.so'",
+    ],
+    ids=["llvm-duplicate-option", "rocprofiler-register-conflict"],
+)
 @pytest.mark.parametrize(
     "rocprof_cmd, profiler_options",
     [
@@ -351,12 +352,11 @@ def test_run_prof_failure_subprocess(
     ids=["rocprofv3", "rocprofiler-sdk"],
 )
 def test_run_prof_failure_prints_duplicate_rocm_install_message(
-    tmp_path, monkeypatch, rocprof_cmd, profiler_options
+    tmp_path, monkeypatch, rocprof_cmd, profiler_options, abort_line
 ):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
-    abort_line = "Option 'spirv-expand-step' registered more than once!"
     captured_output = "\n".join([
         f"[{rocprof_cmd}] tool initialization ::     0.146483 sec",
         "running vcopy",
@@ -384,12 +384,12 @@ def test_run_prof_failure_prints_duplicate_rocm_install_message(
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), profiler_options, workload_dir)
 
-    assert (abort_line, False) not in errors
-    assert (
-        utils_profile._DUPLICATE_ROCM_COMGR_MESSAGE,
-        True,
-    ) in errors
-    assert ("Profiling execution failed.", True) not in errors
+    # The raw failure output stays visible; the hint follows it, then the abort.
+    assert (abort_line, False) in errors
+    assert errors[-2:] == [
+        (utils_profile._DUPLICATE_ROCM_MESSAGE, False),
+        ("Profiling execution failed.", True),
+    ]
 
 
 def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):

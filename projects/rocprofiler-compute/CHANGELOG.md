@@ -9,10 +9,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
-* ML API tracing requires PyTorch to be pip-installed alongside ROCm from the
-  same package index; separate or incompatible installations can load duplicate
-  ROCm components and fail profiling.
-
 ### Changed
 
 * gfx115x Memory Chart improvements.
@@ -35,6 +31,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
 
 ### Optimized
+
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
 
 ### Resolved issues
 

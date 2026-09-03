@@ -897,6 +897,8 @@ which operators contribute to specific performance counter values.
    markers that map the collected kernel performance counters to their originating PyTorch
    operators.
 
+.. _torch-trace-requirements:
+
 Requirements
 ------------
 
@@ -1071,6 +1073,19 @@ The Torch trace feature currently has the following limitations:
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
+If PyTorch and ROCm come from different installations, the workload aborts while
+loading ROCm libraries and profiling fails with output such as:
+
+.. code-block:: text
+
+   : CommandLine Error: Option 'spirv-expand-step' registered more than once!
+   LLVM ERROR: inconsistency in registered CommandLine options
+   ERROR The workload and the profiler loaded two different ROCm installations in the same
+   process. Duplicate ROCm libraries abort at startup. Install PyTorch and rocm[profiler]
+   from the same package index: <link to the requirements above>
+
+This means the install requirement above was not met.
+
 
 .. _torch-operator-profiling:
 
@@ -1155,9 +1170,9 @@ trace.
 Requirements
 ------------
 
-Triton trace has the same limitations as Torch trace (see
-:ref:`torch-trace-limitations`). It requires a valid Triton installation
-in the profiling environment, using the same ROCm as this tool
+Triton trace has the same requirements and limitations as Torch trace (see
+:ref:`torch-trace-requirements` and :ref:`torch-trace-limitations`), with a
+valid Triton installation required in place of PyTorch.
 
 Usage
 -----
