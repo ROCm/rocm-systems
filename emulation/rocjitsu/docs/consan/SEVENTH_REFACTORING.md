@@ -902,3 +902,55 @@ narrow identity-to-type trust boundaries, while the transformer composes its
 axes through normalized operations. A later macro-slice must therefore be
 justified by a duplicated semantic representation or lifecycle, not by adding
 another registry or callback layer around these seams.
+
+### 14.7 Rejected branch-only deferred-owner lifecycle slice
+
+A whole-production-call-site audit found that the branch-only relay router
+still implemented deferred storage-owner materialization even though the sixth
+refactoring had removed its last production producer. No production caller
+used the deferred-owner `offer` overload or constructed an LDS-reservoir owner.
+Direct reservoirs were already selected and paid for before their relay words
+were offered, and `BranchOnlyDirectRelayReservoirSet::reservoir_by_relay` was
+the authoritative relay-to-reservoir ownership map.
+
+The hard prototype removed the complete stale lifecycle rather than merely its
+unused overload:
+
+- owner kinds, identities, and paid/deferred materialization state;
+- owner grouping and activation-cost search;
+- the owner-aware exact-solver objective and lower-bound proof;
+- owner carry through exact-pair and greedy fallbacks;
+- owner identity in offers, claims, endpoint retirement, and commit checks;
+- duplicate direct-reservoir ownership tags, using `reservoir_by_relay`
+  directly for selected and transitive dependencies;
+- exact-batch optimization budgets and telemetry that existed only for the
+  removed owner objective; and
+- eighteen representation-specific tests, while retaining and adapting the
+  routing, capacity, fallback, work-bound, provenance, direct-reservoir, and
+  randomized oracle suites.
+
+The prototype built successfully. All 72 retained branch-only router tests and
+a strengthened architecture-boundary check passed. The complete nonphysical
+ConSan matrix then passed 4,769/4,769 tests across all four engines and all five
+emulated targets. An accidentally broad first selector started a few physical
+gfx1201 rows; it was stopped immediately, the completed rows passed, and the
+actual gate was rerun with `-LE physical` as required.
+
+The result nevertheless missed the macro economics contract. It removed 701
+net physical production lines and 670 nonblank production lines, but only
+**575 net production implementation lines**. The difference was mostly the
+large obsolete public contract narrative. The surviving independent
+relay-count optimizer was then traced separately. It is not deferred-owner
+residue: on exact-pair fallback it preserves a feasibility baseline for later
+pairs while retaining a shorter committed route, and focused plus randomized
+tests demonstrate that behavior. Removing it would weaken live routing and
+capacity behavior solely to cross the 750-line floor.
+
+The full prototype was therefore reverted. This is negative knowledge for the
+next search: deferred relay-owner materialization is genuinely dead and a
+worthwhile later cleanup, but its complete production deletion is not a
+seventh-refactoring macro-slice by itself. Do not retry it unless another
+representation collapse in the same routing/reservoir lifecycle gives the
+combined slice a credible four-digit payoff. In particular, do not relabel
+the live relay-count optimizer as owner machinery or count deletion of its
+tests as production shrinkage.
