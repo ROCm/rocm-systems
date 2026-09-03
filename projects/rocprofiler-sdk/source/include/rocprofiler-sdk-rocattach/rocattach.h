@@ -86,10 +86,10 @@ rocattach_get_version_triplet(rocattach_version_triplet_t* info) ROCATTACH_API R
  *
  * Enumerates the full process tree rooted at `pid` (via /proc) and attaches to each process.
  * The root PID is attached first and must have attachment support. If root attachment fails,
- * descendants are not attempted; the root cannot be used only as a process-tree traversal anchor.
- * After the root succeeds, attachment proceeds breadth-first. Descendants without an attachment
- * listener are skipped with a warning. Other descendant failures are logged, attachment continues
- * with the remaining processes, and the return status reflects the last error seen.
+ * descendants are not attempted, even if some descendants support attachment. After the root
+ * succeeds, attachment proceeds breadth-first. Descendants without an attachment listener are
+ * skipped with a warning. Other descendant failures are logged, attachment continues with the
+ * remaining processes, and the return status reflects the last error seen.
  *
  * @param [in] pid Root process ID to attach to
  * @return ::rocattach_status_t
