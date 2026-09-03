@@ -957,6 +957,7 @@ _PCAP_MIN_W = 50
 _PCAP_MAX_W = 300
 _PCAP_CURRENT_W = 200
 _PCAP_REQUEST_W = 100
+_PCAP_DEFAULT_W = 250
 
 # Too short to be a CPER record, so the library rejects it rather than decoding.
 _JUNK_CPER_BYTES = b"\x00" * 64
@@ -1416,6 +1417,29 @@ def _reset_args(reset, **option):
     return ns
 
 
+_RESET_POWER_CAP_SENSORS = [0, 1]
+
+
+def _reset_power_cap_success_patches(reset, on_set=None):
+    """Patches letting reset's per-sensor power-cap loop run to completion.
+
+    sensor_inds/sensor_types are parallel lists, as amdsmi_get_supported_power_cap
+    returns them -- not the empty containers that used to make the loop a no-op.
+    """
+    ai = reset.amdsmi_interface
+    return {
+        "amdsmi_get_supported_power_cap": lambda *a, **k: {
+            "sensor_inds": list(_RESET_POWER_CAP_SENSORS),
+            "sensor_types": [ai.AmdSmiPowerCapType.PPT0, ai.AmdSmiPowerCapType.PPT1],
+        },
+        "amdsmi_get_power_cap_info": lambda *a, **k: {
+            "default_power_cap": _watts(_PCAP_DEFAULT_W),
+            "power_cap": _watts(_PCAP_CURRENT_W),
+        },
+        "amdsmi_set_power_cap": on_set or _noop,
+    }
+
+
 def _build_reset_specs(reset):
     """Per-option drivers for the generic GPU ``reset`` exercisers.
 
@@ -1464,14 +1488,7 @@ def _build_reset_specs(reset):
     def power_cap(cmd, mode):
         if mode == "fail":
             return {"amdsmi_get_supported_power_cap": _raise_not_supported}
-        # An empty sensor list makes the per-sensor loop a no-op: nothing is set
-        # and nothing is recorded, so the command finishes clean.
-        return {
-            "amdsmi_get_supported_power_cap": lambda *a, **k: {
-                "sensor_inds": [],
-                "sensor_types": {},
-            }
-        }
+        return _reset_power_cap_success_patches(reset)
 
     def clean_local_data(cmd, mode):
         fn = _raise_not_supported if mode == "fail" else _noop
@@ -1739,3 +1756,29 @@ class TestResetGpuGAllFailureGuards(unittest.TestCase):
                     0,
                     f"{name}: success path did not resolve to exit 0",
                 )
+
+    def test_reset_power_cap_writes_the_default_back_for_every_sensor(self):
+        """`reset --power_cap` must write the default cap back for every sensor
+        the GPU reports. The generic success exerciser only checks that nothing
+        was recorded, which stays true even if the loop never runs.
+        """
+        reset = _load_reset()
+        cmd = _make_reset_cmd(reset)
+        set_calls = []
+
+        def _record_set(handle, sensor, value):
+            set_calls.append((sensor, value))
+
+        patches = _reset_power_cap_success_patches(reset, on_set=_record_set)
+        args = _reset_args(reset, power_cap=True)
+        with _patch_amdsmi_interface(reset, **patches):
+            cmd.reset(args)
+
+        self.assertEqual(
+            [sensor for sensor, _ in set_calls],
+            [0, 1],
+            "per-sensor loop did not visit every supported sensor",
+        )
+        for _, value in set_calls:
+            self.assertEqual(value, _watts(_PCAP_DEFAULT_W), "did not write the default cap back")
+        self.assertFalse(cmd.helpers.error_collector.has_errors)
