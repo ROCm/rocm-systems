@@ -618,6 +618,13 @@ add_test(
 )
 
 add_test(
+    NAME test_mem_chart_gfx1250
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
+        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_roofline_calc
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_calc.xml
@@ -790,6 +797,14 @@ add_test(
 # -----------------------------------
 # TUI component tests
 # -----------------------------------
+
+add_test(
+    NAME test_charts
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -m tui --junitxml=tests/test_charts.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_tui/widgets/test_charts.py
+        ${WORKING_DIR_OPTION}
+)
 
 add_test(
     NAME test_instant_button
@@ -1052,9 +1067,11 @@ if(${ENABLE_COVERAGE})
         test_list_metrics_cli
         test_mem_chart_gfx9
         test_mem_chart_gfx11
+        test_mem_chart_gfx1250
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
+        test_charts
         test_instant_button
         test_menu_bar
         test_tui_utils

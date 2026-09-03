@@ -12,7 +12,7 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
+from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
@@ -23,7 +23,12 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx9, is_gfx115x
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    is_gfx9,
+    is_gfx115x,
+    is_gfx1250,
+)
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -789,37 +794,36 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For a single run, format Bytes/s metrics with human-readable units.
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
-    if is_single_run and is_gfx115x(gpu_arch) and "Unit" in df.columns:
+    # Capture raw metric values before human-readable BW scaling so the chart
+    # renderer still receives Bytes/s floats.
+    raw_chart_values: Optional[dict[str, Any]] = None
+    if "Metric" in df.columns and "Value" in df.columns:
+        raw_chart_values = dict(zip(df["Metric"], df["Value"]))
+
+    if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
 
-    # When --view table is set, force table output and ignore cli_style from config.
-    # Gate to architectures with a renderer so unsupported arches fall back to table.
+    # When --view table is set, force table output and ignore cli_style from config
     use_mem_chart = (
         not _tty_view_is_table(args)
         and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
+        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
     )
 
     if use_mem_chart:
         if mem_data_override is not None:
             mem_data = mem_data_override
         else:
-            mem_data = (
-                pd
-                .DataFrame([df["Metric"], df["Value"]])
-                .transpose()
-                .set_index("Metric")
-                .to_dict()["Value"]
-            )
+            mem_data = raw_chart_values or {}
 
         if is_gfx115x(gpu_arch):
             content += (
@@ -832,7 +836,18 @@ def format_table_output(
                 )
                 + "\n"
             )
-        elif is_gfx9(gpu_arch):
+        elif is_gfx1250(gpu_arch):
+            content += (
+                mem_chart_gfx1250.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                )
+                + "\n"
+            )
+        else:
             content += (
                 mem_chart_gfx9.plot_mem_chart(
                     mem_data,
@@ -996,12 +1011,16 @@ def show_all(
 
                 # For mem_chart panels, collect all tables and merge
                 # into a single chart; skip individual table output.
-                # Gate to architectures with a renderer; unsupported arches
-                # fall back to normal table output.
+                # Gate to architectures with a renderer; unsupported arches fall back to
+                # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
                     and not _tty_view_is_table(args)
-                    and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch))
+                    and (
+                        is_gfx9(gpu_arch)
+                        or is_gfx115x(gpu_arch)
+                        or is_gfx1250(gpu_arch)
+                    )
                 )
 
                 if is_mem_chart and len(runs) == 1:
@@ -1026,7 +1045,7 @@ def show_all(
                     gpu_arch,
                 )
 
-        # Emit merged mem_chart for the panel
+        # Emit the merged memory chart for the panel.
         if mem_chart_data and not _tty_view_is_table(args):
             heading = format_mem_chart_heading(
                 args.normal_unit,
@@ -1040,7 +1059,15 @@ def show_all(
                     )
                     + "\n"
                 )
-            elif is_gfx9(gpu_arch):
+            elif is_gfx1250(gpu_arch):
+                panel_content += (
+                    mem_chart_gfx1250.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                    )
+                    + "\n"
+                )
+            else:
                 panel_content += (
                     mem_chart_gfx9.plot_mem_chart(
                         mem_chart_data,

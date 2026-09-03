@@ -41,8 +41,8 @@ Panel Config:
           value: 100 * SUM(SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache-GL1 Read Bandwidth:
-          value: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 128 * SUM(SQC_TC_INST_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         ICache-GL1 Request Latency:
           value: SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_TC_INST_REQ_sum)
           unit: Cycles
@@ -74,11 +74,11 @@ Panel Config:
           value: 100 * SUM(SQC_DCACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache Request Bandwidth:
-          value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         Dcache-GL1 Read Bandwidth:
-          value: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         Dcache-GL1 Request Latency:
           value: SUM(SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_TC_DATA_READ_REQ_sum)
           unit: Cycles
@@ -100,9 +100,6 @@ Panel Config:
         GL0 Utilization:
           value: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
           unit: Percent
-        GL0 Total Requests:
-          value: SUM(TX_VMW_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
         GL0 Read Requests:
           value: SUM(TX_VMW_REQ_READ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
@@ -115,9 +112,6 @@ Panel Config:
         GL0 Hit Rate:
           value: 100 * SUM(1 - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
           unit: Percent
-        GL0 Request Latency:
-          value: SUM(TX_VMW_VMW_LATENCY_sum) / SUM(TX_VMW_REQ_sum)
-          unit: Cycles
 
   - metric_table:
       id: 304
@@ -148,41 +142,30 @@ Panel Config:
         LDS Utilization:
           value: 100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
           unit: Percent
-        # LDS Utilization (Load/Store): guard with TX_VMW_LDS_INPUT_ACTIVE_sum > 0 so kernels
-        # without user LDS (e.g. vcopy) do not produce spurious ratios from internal counters.
-        LDS Utilization - Load:
-          value: 100 * SUM(TX_VMW_LDS_ACTIVE_LOAD_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          unit: Percent
-        LDS Utilization - Store:
-          value: 100 * SUM(TX_VMW_LDS_ACTIVE_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          unit: Percent
         LDS Bank Conflict Stall Rate:
           value: 100 * SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
           unit: Percent
-        LDS Address Conflict Stall Rate:
-          value: 100 * SUM(TX_VMW_LDS_ADDR_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          unit: Percent
         LDS Load Bandwidth:
-          value: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         LDS Store Bandwidth:
-          value: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         LDS Atomic Bandwidth:
-          value: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         Async Load Bandwidth:
-          value: SUM(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         Async Store Bandwidth:
-          value: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         TDM Load Bandwidth:
-          value: SUM(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         TDM Store Bandwidth:
-          value: SUM(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         TDM Load Requests:
           value: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
           unit: (Requests + $normUnit)
@@ -200,30 +183,15 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        GL0-GL1 Read Requests:
-          value: SUM(TX_VMW_GL1_REQ_READ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        GL0-GL1 Write Requests:
-          value: SUM(TX_VMW_GL1_REQ_WRITE_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
         GL0-GL1 Read Bandwidth:
-          value: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL0-GL1 Write Bandwidth:
-          value: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL0-GL1 Atomic Bandwidth:
-          value: 128 * SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
-        GL0-GL1 Read Latency:
-          value: SUM(TX_VMW_GL1_READ_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_READ_sum)
-          unit: Cycles
-        GL0-GL1 Write Latency:
-          value: SUM(TX_VMW_GL1_WRITE_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_WRITE_sum)
-          unit: Cycles
-        GL0-GL1 Request Stall Rate:
-          value: 100 * SUM(TX_VMW_GL1_VMW_BACK_PRESSURE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          unit: Percent
+          value: 128 * SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL1A Utilization:
           value: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
           unit: Percent
@@ -248,15 +216,6 @@ Panel Config:
         GLARBA Utilization:
           value: 100 * SUM(GLARBA_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
           unit: Percent
-        GLARBA Request Path Utilization:
-          value: 100 * SUM(GLARBA_REQ_PATH_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
-          unit: Percent
-        GLARBA Return Path Utilization:
-          value: 100 * SUM(GLARBA_RET_PATH_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
-          unit: Percent
-        GLARBA Request Latency:
-          value: SUM(GLARBA_REQ_INFLIGHT_LEVEL_sum) / SUM(GLARBA_ARB_REQUESTS_sum)
-          unit: Cycles
         GLARBC Utilization:
           value: 100 * SUM(GLARBC_BUSY_sum) / SUM(GLARBC_CYCLE_sum)
           unit: Percent
@@ -264,20 +223,20 @@ Panel Config:
           value: 100 * SUM(GLARBC_STALL_BUFFER_FULL_sum) / SUM(GLARBC_BUSY_sum)
           unit: Percent
         GL1-GLARB Read Bandwidth:
-          value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL1-GLARB Write Bandwidth:
-          value: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GLARB-GL2 Read Bandwidth:
-          value: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GLARB-GL2 Write Bandwidth:
-          value: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GLARB-GL2 Atomic Bandwidth:
-          value: 64 * SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 64 * SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
 
   - metric_table:
       id: 307
@@ -297,20 +256,14 @@ Panel Config:
           value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
         GL2-EA Read Bandwidth:
-          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL2-EA Write Bandwidth:
-          value: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GL2-EA Atomic Bandwidth:
-          value: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
-        GL2-EA Read Latency:
-          value: SUM(GL2C_EA_RDREQ_LEVEL_sum) / SUM(GL2C_EA_RDREQ_sum)
-          unit: Cycles
-        GL2-EA Write Latency:
-          value: SUM(GL2C_EA_WRREQ_LEVEL_sum) / SUM(GL2C_EA_WRREQ_sum)
-          unit: Cycles
+          value: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
 
   - metric_table:
       id: 308
@@ -327,29 +280,29 @@ Panel Config:
           value: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
           unit: Percent
         DRAM Read Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         DRAM Write Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         IO Read Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         IO Write Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         HDM Read Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         HDM Write Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GMI Read Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         GMI Write Bandwidth:
-          value: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GB/s
+          value: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         EA Stall Rate:
           value: 100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
@@ -364,11 +317,17 @@ Panel Config:
     ICache Hit Rate: >-
       Instruction Cache hit rate.
 
+    ICache Latency: >-
+      Average Instruction Cache request latency.
+
     ICache Request Stall Rate: >-
       Percentage of shader-busy cycles the instruction fetch unit is stalled.
 
     ICache-GL1 Read Bandwidth: >-
       Instruction Cache miss fill bandwidth from GL1.
+
+    ICache-GL1 Request Latency: >-
+      Average latency of Instruction Cache requests sent to GL1.
 
     Dcache Requests: >-
       Total Scalar Data Cache requests.
@@ -379,17 +338,20 @@ Panel Config:
     Dcache Hit Rate: >-
       Scalar Data Cache hit rate.
 
+    Dcache Latency: >-
+      Average Scalar Data Cache request latency.
+
     Dcache Request Stall Rate: >-
       Percentage of WGP cycles the SQC scalar cache is stalled.
 
     Dcache Request Bandwidth: >-
-      Total Scalar Data Cache bandwidth.
+      Total Scalar Data Cache request bandwidth.
 
     Dcache-GL1 Read Bandwidth: >-
       Scalar Data Cache miss fill bandwidth from GL1.
 
-    GL0 Total Requests: >-
-      Total GL0 cache requests.
+    Dcache-GL1 Request Latency: >-
+      Average latency of Scalar Data Cache requests sent to GL1.
 
     GL0 Read Requests: >-
       Number of GL0 read requests.
@@ -405,9 +367,6 @@ Panel Config:
 
     GL0 Hit Rate: >-
       GL0 cache hit rate.
-
-    GL0 Request Latency: >-
-      Average GL0 cache request latency.
 
     LDS Load Requests: >-
       Number of LDS load requests.
@@ -427,17 +386,8 @@ Panel Config:
     LDS Utilization: >-
       Percentage of VMW-busy cycles the LDS is executing any operation.
 
-    LDS Utilization - Load: >-
-      Percentage of VMW-busy cycles the LDS is executing a load.
-
-    LDS Utilization - Store: >-
-      Percentage of VMW-busy cycles the LDS is executing a store.
-
     LDS Bank Conflict Stall Rate: >-
       Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
-
-    LDS Address Conflict Stall Rate: >-
-      Percentage of VMW-busy cycles LDS is stalled due to address conflict.
 
     LDS Load Bandwidth: >-
       Total LDS load bandwidth.
@@ -466,12 +416,6 @@ Panel Config:
     TDM Store Requests: >-
       Total TDM store requests.
 
-    GL0-GL1 Read Requests: >-
-      Number of GL0-GL1 read requests.
-
-    GL0-GL1 Write Requests: >-
-      Number of GL0-GL1 write requests.
-
     GL0-GL1 Read Bandwidth: >-
       Total GL0-GL1 read bandwidth.
 
@@ -480,15 +424,6 @@ Panel Config:
 
     GL0-GL1 Atomic Bandwidth: >-
       Total GL0-GL1 atomic bandwidth.
-
-    GL0-GL1 Read Latency: >-
-      Average GL0-GL1 read latency.
-
-    GL0-GL1 Write Latency: >-
-      Average GL0-GL1 write latency.
-
-    GL0-GL1 Request Stall Rate: >-
-      Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
 
     GL1A Utilization: >-
       Percentage of cycles GL1 Arbiter is processing requests from GL0.
@@ -501,15 +436,6 @@ Panel Config:
 
     GLARBA Utilization: >-
       Percentage of cycles the Graphic Level Arbiter is processing requests.
-
-    GLARBA Request Path Utilization: >-
-      Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
-
-    GLARBA Return Path Utilization: >-
-      Percentage of cycles the GL2 to GL1 return path is busy.
-
-    GLARBA Request Latency: >-
-      Average latency of requests sent to the Graphics Level Arbiter.
 
     GLARBC Utilization: >-
       Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
