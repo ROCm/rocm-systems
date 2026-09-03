@@ -528,6 +528,8 @@ kfd_memory_pool_t::kfd_memory_pool_t(const rocprofiler_agent_t& agent)
 
 kfd_memory_pool_t::~kfd_memory_pool_t()
 {
+    ROCP_INFO << "Deleting kfd pool";
+
     auto allocations = std::vector<std::pair<void*, impl::allocation_t>>{};
     {
         auto lock = std::unique_lock{_impl->mutex};
@@ -710,6 +712,7 @@ kfd_signal_t::kfd_signal_t(std::shared_ptr<kfd_memory_pool_t> memory)
 kfd_signal_t::~kfd_signal_t()
 {
     wait();
+    ROCP_INFO << "Deleting signal";
     _memory->deallocate(_signal);
 }
 
@@ -728,9 +731,14 @@ kfd_signal_t::reset()
 void
 kfd_signal_t::wait() const
 {
+    ROCP_TRACE << "Waiting for KFD signal";
+    auto t0 = std::chrono::system_clock::now();
     for(size_t iteration = 0; load_signal_value(_signal) != 0; ++iteration)
-        if((iteration & 1023) == 1023) std::this_thread::yield();
-    std::atomic_thread_fence(std::memory_order_acquire);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
+
+    std::atomic_thread_fence(std::memory_order_acq_rel);
+    auto t1 = std::chrono::system_clock::now();
+    ROCP_TRACE << "KFD signal pass in " << (t1-t0).count() / 1000.0f;
 }
 
 namespace
@@ -919,7 +927,7 @@ struct kfd_aql_queue_t::impl
         write_index = load_acquire(queue.wptr);
     }
 
-    ~impl() { queue.memory->deallocate(copy_commands); }
+    ~impl() { ROCP_INFO << "Deleting queue impl"; queue.memory->deallocate(copy_commands); }
 
     void submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
     {
@@ -954,7 +962,7 @@ kfd_aql_queue_t::kfd_aql_queue_t(std::shared_ptr<kfd_memory_pool_t> memory, size
 : _impl{std::make_unique<impl>(std::move(memory), max_copy_size)}
 {}
 
-kfd_aql_queue_t::~kfd_aql_queue_t() = default;
+kfd_aql_queue_t::~kfd_aql_queue_t() { ROCP_INFO << "Deleting queue"; }
 
 void
 kfd_aql_queue_t::submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
@@ -1086,7 +1094,7 @@ sdma_queue_t::sdma_queue_t(const std::shared_ptr<kfd_memory_pool_t>& memory, siz
 : _impl{std::make_unique<impl>(memory, max_copy_size)}
 {}
 
-sdma_queue_t::~sdma_queue_t() = default;
+sdma_queue_t::~sdma_queue_t() { ROCP_INFO << "Deleting SDMA"; };
 
 void
 sdma_queue_t::copy(void* dst, const void* src, size_t size, kfd_signal_t& completion)
@@ -1159,7 +1167,7 @@ kfd_copy_queue_t::kfd_copy_queue_t(const std::shared_ptr<kfd_memory_pool_t>& mem
 : _impl{std::make_unique<impl>(memory, max_copy_size)}
 {}
 
-kfd_copy_queue_t::~kfd_copy_queue_t() = default;
+kfd_copy_queue_t::~kfd_copy_queue_t() { ROCP_INFO << "Destroy copy queue"; }
 
 void
 kfd_copy_queue_t::submit(const hsa_ext_amd_aql_pm4_packet_t& packet, hsa_signal_t completion)
