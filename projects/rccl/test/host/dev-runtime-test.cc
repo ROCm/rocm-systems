@@ -404,6 +404,12 @@ TEST_F(DevrFinalizeTest, ProxyOnly_SkipsSymmetricTeardown) {
 // Branch: every stream call fails. All are wrapped in CUDACHECKIGNORE or
 // CUDASUCCESS, so teardown must still complete and still report success --
 // finalize runs on the abort path, where giving up would leak.
+//
+// The success assertion pins that documented contract, not the state of the
+// stream: `cudaStream_t stream` is declared uninitialised (dev_runtime.cc:211)
+// and its create is CUDACHECKIGNORE'd, so when the create fails the six later
+// uses pass an indeterminate handle to the driver. See AICOMRCCL-2180
+// finding 16. Nothing here dereferences it because every stream call is hooked.
 TEST_F(DevrFinalizeTest, StreamCallsFail_StillCompletes) {
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
   ScopedHook create(g_devrHipStreamCreateWithFlags,
@@ -1083,6 +1089,7 @@ TEST_F(SymMemoryMapLsaTeamTest, AlreadyReserved_SkipsReservation) {
 // than us still has room. Two ranks x 2 segments each = 4 messages.
 TEST_F(SymMemoryMapLsaTeamTest, SizesMessagesFromWidestRank) {
   lsaNumSegments.assign({1, 2});  // the peer has more segments than we do
+  mem.lsaNumSegments = lsaNumSegments.data();  // assign() may reallocate; SetUp cached the old data()
   size_t gatherBytes = 0;
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [&](void*, int*, int, int, void*, int bytes) {
@@ -2604,6 +2611,18 @@ protected:
 
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
+    // Tests that make teardown fail deliberately leave the window registered,
+    // so production never frees it. Mirror DevrWindowRegisterInGroupTest's
+    // TearDown and reclaim whatever is still on the sorted list -- otherwise
+    // those cases leak a window per run, which the sanitiser build reports.
+    for (int i = 0; i < devr->winSortedCount; i++) {
+      ncclDevrWindow* w = devr->winSorted[i].win;
+      if (w == nullptr) continue;
+      free(w->ipcPeerPtrs);
+      free(w->ipcPeerPtrsAllocBase);
+      free(w);
+    }
+    devr->winSortedCount = devr->winSortedCapacity = 0;
     free(devr->winSorted);
     devr->winSorted = nullptr;
     ncclDevCommWindowTable* t = devr->windowTable;
@@ -3225,6 +3244,11 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 class DevrWindowRegisterInGroupSymTest : public DevrWindowRegisterInGroupTest {
 protected:
   void SetUp() override {
+    // Base SetUp first, before any skip: gtest still runs TearDown for a test
+    // skipped from SetUp, and the inherited TearDown dereferences comm. Skipping
+    // ahead of this line leaves comm null and segfaults the binary instead of
+    // skipping the suite.
+    DevrWindowRegisterInGroupTest::SetUp();
 #if ROCM_VERSION < 70000
     // Below 7.0 alloc.h compiles ncclCuMemGetAddressRange as a WARN plus
     // `return ncclInternalError` (alloc.h:805-810) that never consults the
@@ -3233,7 +3257,6 @@ protected:
     // skip rather than fail on a 6.4-6.9 build.
     GTEST_SKIP() << "ncclCuMemGetAddressRange is a stub below ROCm 7.0";
 #endif
-    DevrWindowRegisterInGroupTest::SetUp();
     comm->symmetricSupport = 1;
     comm->devrState.bigSize = size_t(1) << 32;
     comm->devrState.granularity = 4096;
@@ -4297,6 +4320,17 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 
 // Branch: an allocation part-way through the copy releases what was built and
 // reports nothing back, rather than handing over a half-copied structure.
+//
+// +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
+// source struct (dev_runtime.cc:1430), which copies the caller's list-head
+// pointers into the copy, and only overwrites them on the first *successful*
+// node alloc. ncclCallocDebug returns without touching *ptr on failure
+// (alloc.h:415-418), so failing the first node alloc leaves the copy's
+// resourceRequirementsList still pointing at the caller's &res1 -- a fixture
+// member -- and the fail: label's freeDevCommRequirements then free()s it.
+// +1 is therefore the index that exposes AICOMRCCL-2180 finding 15; running it
+// would corrupt the heap rather than assert, so this covers the adjacent
+// index and the bug is documented instead of pinned.
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;

@@ -410,11 +410,15 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 // dev_runtime.cc drives the CUDA/HIP driver VMM API (hipMemAddressReserve /
 // hipMemMap / ...) which needs a real GPU. Here we replace just those calls
 // with host-memory equivalents so symMemoryObtain runs to completion on a plain
-// CPU. HIDDEN visibility is essential: it satisfies dev_runtime's references
-// without exporting these names, so libamdhip64's own internal calls still bind
-// to the real driver (no process-wide interposition).
+// CPU.
+//
+// These are plain definitions, not interposers: the binary links neither
+// librccl nor the HIP runtime (MICRO_TEST_LINK_LIBS carries no HIP and the
+// target is linked -no-hip-rt), so they are the only definitions of these
+// symbols in the process and an unfaked one is a link error rather than a call
+// into a real driver.
 // ---------------------------------------------------------------------------
-#define HIP_FAKE /* default visibility: this binary does not link librccl */
+#define HIP_FAKE /* sole definition: this binary links neither librccl nor HIP */
 
 // A reserved VA range: mirror the real cuMemAddressReserve semantics with an
 // uncommitted anonymous mapping (MAP_NORESERVE). This makes multi-GB flat-VA
@@ -528,10 +532,11 @@ std::function<hipError_t(void*, size_t)> g_devrHipMemUnmap = DefaultMemUnmap;
 
 HIP_FAKE hipError_t hipMemUnmap(void* ptr, size_t size) { return g_devrHipMemUnmap(ptr, size); }
 
-// Not faked until now, and its absence did not show as a link error: this
-// target links the HIP runtime, so an unfaked call reaches the real driver and
-// fails at run time without a GPU. The shadow-pool fake gives the same buffer
-// for device and host, so a self-copy is skipped.
+// Missed by the original audit because the target used to link the HIP runtime,
+// so an unfaked call bound to the real driver instead of failing the link. That
+// is no longer possible: the binary is linked -no-hip-rt, so anything unfaked
+// now fails at build time. The shadow-pool fake gives the same buffer for
+// device and host, so a self-copy is skipped.
 static hipError_t DefaultMemcpyAsync(void* dst, const void* src, size_t n, hipMemcpyKind, hipStream_t) {
   if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, n);
   return hipSuccess;
@@ -738,6 +743,12 @@ void ResetDevRuntimeMicroFakes() {
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrLoadParam                               = DefaultLoadParam;
+
+  // Not a hook either, but 12 tests assign it directly to steer the
+  // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}
+  // SegmentHandle, and nothing put it back. Restore the value declared at the
+  // top of this file.
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
   // The liveness set is state, not a hook, but it is just as capable of
   // outliving a test: anything that installs a non-freeing g_devrShadowPoolFree

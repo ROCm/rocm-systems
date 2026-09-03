@@ -384,71 +384,84 @@ if(BUILD_TESTS)
   # suite needs a real mmap-backed flat VA and per-call controllable failure,
   # where hip_fakes returns fixed canned values. Merging them would mean
   # rewriting shared fakes used by four other suites to no one's benefit.
-  set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
-    dev-runtime-test.cc
-    fakes/dev_runtime_micro_fakes.cc
-    ../common/main_altrsmi.cpp
-    ../common/ProcessIsolatedTestRunner.cpp
-  )
+  # Same ROCm floor the target carried in test/CMakeLists.txt before the move:
+  # dev_runtime.cc's VMM paths need the 6.4 cuMem surface.
+  if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
+    set(TEST_MICRO_DEVRUNTIME_SOURCE_FILES
+      dev-runtime-test.cc
+      fakes/dev_runtime_micro_fakes.cc
+      ../common/main_altrsmi.cpp
+      ../common/ProcessIsolatedTestRunner.cpp
+    )
 
-  add_executable(rccl-UnitTestsMicroDevRuntime ${TEST_MICRO_DEVRUNTIME_SOURCE_FILES})
+    add_executable(rccl-UnitTestsMicroDevRuntime ${TEST_MICRO_DEVRUNTIME_SOURCE_FILES})
 
-  target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device  # gin/gin_host.h
-    ${PROJECT_BINARY_DIR}/hipify/src/device
-    ${RCCL_COMMON_INCLUDE_DIRS})
+    target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device  # gin/gin_host.h
+      ${PROJECT_BINARY_DIR}/hipify/src/device
+      ${RCCL_COMMON_INCLUDE_DIRS})
 
-  target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
-    ${RCCL_COMMON_COMPILE_DEFS}
-    DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc")
+    target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
+      ${RCCL_COMMON_COMPILE_DEFS}
+      DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc")
 
-  # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
-  foreach(_hip_tgt hip::host hip::device)
-    if(TARGET ${_hip_tgt})
-      target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
-      target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
-      target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    # HIP compile requirements without linking the runtime (see rccl-UnitTestsMicro).
+    foreach(_hip_tgt hip::host hip::device)
+      if(TARGET ${_hip_tgt})
+        target_include_directories(rccl-UnitTestsMicroDevRuntime PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+        target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+        target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+      endif()
+    endforeach()
+
+    # Mirrors the opt-out rccl-UnitTestsMicro and rccl-UnitTestsMicroInit make above,
+    # and the one test/CMakeLists.txt's RCCL_TEST_EXECUTABLES loop used to make for
+    # this binary before it moved here. dev_runtime.cc reaches the SDMA device
+    # headers through nccl_device.h -> impl/gin__funcs.h -> gin/gin_device_api.h,
+    # so without this a GIN-enabled build pulls rocSHMEM into a host-only microtest.
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(rccl-UnitTestsMicroDevRuntime PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
     endif()
-  endforeach()
 
-  target_link_libraries(rccl-UnitTestsMicroDevRuntime PRIVATE ${MICRO_TEST_LINK_LIBS})
-  add_dependencies(rccl-UnitTestsMicroDevRuntime
-    hipify_all copy_nccl_device_headers
-    net_ib_header_symlinks rma_header_symlinks)
+    target_link_libraries(rccl-UnitTestsMicroDevRuntime PRIVATE ${MICRO_TEST_LINK_LIBS})
+    add_dependencies(rccl-UnitTestsMicroDevRuntime
+      hipify_all copy_nccl_device_headers
+      net_ib_header_symlinks rma_header_symlinks)
 
-  target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-    --offload-host-only
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-    -no-hip-rt
-    -fprofile-instr-generate -fcoverage-mapping)
+    target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
+      --offload-host-only
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE
+      -no-hip-rt
+      -fprofile-instr-generate -fcoverage-mapping)
 
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    if(BUILD_ADDRESS_SANITIZER)
+      target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address)
+      target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE -fsanitize=address -shared-libasan)
+      if(DEFINED ASAN_RUNTIME_DIR)
+        target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+      endif()
     endif()
-  endif()
 
-  rocm_install(TARGETS rccl-UnitTestsMicroDevRuntime COMPONENT tests)
+    rocm_install(TARGETS rccl-UnitTestsMicroDevRuntime COMPONENT tests)
 
-  if(COMMAND apply_test_category_labels)
-    set(_devr_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devruntime.yaml")
-    if(EXISTS "${_devr_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicroDevRuntime")
-      apply_test_category_labels(
-        rccl-UnitTestsMicroDevRuntime
-        "${_devr_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicroDevRuntime: missing ${_devr_categories_yaml}")
+    if(COMMAND apply_test_category_labels)
+      set(_devr_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devruntime.yaml")
+      if(EXISTS "${_devr_categories_yaml}")
+        message(STATUS "Applying test categories for rccl-UnitTestsMicroDevRuntime")
+        apply_test_category_labels(
+          rccl-UnitTestsMicroDevRuntime
+          "${_devr_categories_yaml}"
+          "${PROJECT_BINARY_DIR}"
+          "${INSTALL_TEST_FILE}"
+        )
+      else()
+        message(WARNING "Skipping test categories for rccl-UnitTestsMicroDevRuntime: missing ${_devr_categories_yaml}")
+      endif()
     endif()
   endif()
   return()
