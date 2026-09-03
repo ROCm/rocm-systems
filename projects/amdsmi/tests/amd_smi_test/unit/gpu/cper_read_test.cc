@@ -534,7 +534,7 @@ std::vector<char> MakeNonStandardRecord(uint16_t reg_arr_size, size_t sec_pad = 
 
 // Positive control for the truncation test below: with record_length covering
 // the whole descriptor table, both crashdump descriptors decode.
-TEST(GpuUnit, CperDecodeDecodesEveryDescriptorInsideTheRecord) {
+TEST_F(GpuUnit, CperDecodeDecodesEveryDescriptorInsideTheRecord) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -545,7 +545,7 @@ TEST(GpuUnit, CperDecodeDecodesEveryDescriptorInsideTheRecord) {
 // The same bytes with record_length claiming only one descriptor. sec_cnt still
 // says three, so an unbounded walk decodes desc1 and desc2 from past the record
 // end (2 AFIDs, as the control above shows); the walk must stop at desc1.
-TEST(GpuUnit, CperDecodeStopsAtTruncatedDescriptorTable) {
+TEST_F(GpuUnit, CperDecodeStopsAtTruncatedDescriptorTable) {
   std::vector<char> buf =
       MakeCrashdumpRecord(static_cast<uint32_t>(kDescTableOffset + sizeof(struct cper_sec_desc)));
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
@@ -557,7 +557,7 @@ TEST(GpuUnit, CperDecodeStopsAtTruncatedDescriptorTable) {
 // record_length exactly at the header size is the smallest value that is not a
 // reject: the record is well formed and simply carries no descriptor table, so
 // the walk must produce nothing rather than read the first descriptor.
-TEST(GpuUnit, CperDecodeStopsAtRecordLengthExactlyTheHeaderSize) {
+TEST_F(GpuUnit, CperDecodeStopsAtRecordLengthExactlyTheHeaderSize) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t)));
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -567,7 +567,7 @@ TEST(GpuUnit, CperDecodeStopsAtRecordLengthExactlyTheHeaderSize) {
 
 // sec_cnt of zero ends the walk before it starts, whatever the descriptors that
 // follow happen to contain. The control decodes 2 AFIDs from these same bytes.
-TEST(GpuUnit, CperDecodeDecodesNothingWhenSectionCountIsZero) {
+TEST_F(GpuUnit, CperDecodeDecodesNothingWhenSectionCountIsZero) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data());
   hdr->sec_cnt = 0;
@@ -581,7 +581,7 @@ TEST(GpuUnit, CperDecodeDecodesNothingWhenSectionCountIsZero) {
 // Unguarded, this offset faults rather than returning garbage, which would take
 // the whole runner down and silently skip every case after it. The forked child
 // keeps that failure inside one test.
-TEST(GpuUnit, CperDecodeSkipsSectionWithOutOfBoundsOffset) {
+TEST_F(GpuUnit, CperDecodeSkipsSectionWithOutOfBoundsOffset) {
   std::vector<char> buf(kDescTableOffset + sizeof(struct cper_sec_desc), 0);
   InitHeader(&buf, /*sec_cnt=*/1, static_cast<uint32_t>(buf.size()));
   struct cper_sec_desc* desc = DescAt(&buf, 0);
@@ -601,7 +601,7 @@ TEST(GpuUnit, CperDecodeSkipsSectionWithOutOfBoundsOffset) {
 // crashdump body needs more bytes than remain. Distinct from the wild offset
 // above, which fails on the offset alone. Unbounded, the decoder reads a whole
 // crashdump struct starting one byte before the record end.
-TEST(GpuUnit, CperDecodeSkipsSectionThatStartsInsideButOverrunsTheRecord) {
+TEST_F(GpuUnit, CperDecodeSkipsSectionThatStartsInsideButOverrunsTheRecord) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data());
   // One byte of room at sec_offset, against a section that needs the full struct.
@@ -620,7 +620,7 @@ TEST(GpuUnit, CperDecodeSkipsSectionThatStartsInsideButOverrunsTheRecord) {
 // The same overrun on the non-standard path, which reaches the bound through an
 // explicit extent rather than through at<> because the body is a flexible array
 // member.
-TEST(GpuUnit, CperDecodeSkipsNonStandardSectionThatOverrunsTheRecord) {
+TEST_F(GpuUnit, CperDecodeSkipsNonStandardSectionThatOverrunsTheRecord) {
   std::vector<char> buf = MakeNonStandardRecord(kMaxRegArrayBytes);
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data());
   const size_t sec_offset = (kDescTableOffset + sizeof(struct cper_sec_desc));
@@ -638,7 +638,7 @@ TEST(GpuUnit, CperDecodeSkipsNonStandardSectionThatOverrunsTheRecord) {
 // hands over less than the record claims must be believed over the record. The
 // control above decodes 2 AFIDs from these same bytes at a full buf_size; here
 // everything past the first descriptor is the caller's, not the record's.
-TEST(GpuUnit, CperDecodeBoundsTheRecordByTheCallersBufferSize) {
+TEST_F(GpuUnit, CperDecodeBoundsTheRecordByTheCallersBufferSize) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -654,7 +654,7 @@ TEST(GpuUnit, CperDecodeBoundsTheRecordByTheCallersBufferSize) {
 // non-standard case below: x86-64 absorbs the unaligned loads, so this passes
 // either way here. It detects the fault under -fsanitize=undefined, which
 // ADDRESS_SANITIZER=ON does not turn on, and on targets that trap.
-TEST(GpuUnit, CperDecodeDecodesCrashdumpSectionAtAnUnalignedOffset) {
+TEST_F(GpuUnit, CperDecodeDecodesCrashdumpSectionAtAnUnalignedOffset) {
   std::vector<char> aligned = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   std::vector<char> unaligned =
       MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize + 1), /*sec_pad=*/1);
@@ -670,7 +670,7 @@ TEST(GpuUnit, CperDecodeDecodesCrashdumpSectionAtAnUnalignedOffset) {
 
 // Positive control for the reject and misalignment tests below: the largest
 // register array the decoder accepts yields one AFID.
-TEST(GpuUnit, CperDecodeDecodesNonStandardSectionWithFullRegisterArray) {
+TEST_F(GpuUnit, CperDecodeDecodesNonStandardSectionWithFullRegisterArray) {
   std::vector<char> buf = MakeNonStandardRecord(kMaxRegArrayBytes);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -681,7 +681,7 @@ TEST(GpuUnit, CperDecodeDecodesNonStandardSectionWithFullRegisterArray) {
 // Processor-error sections share the non-standard section layout and decode
 // through the same branch. A mistyped GUID on either constant routes the record
 // to "unknown error type" and yields nothing, which no other test would catch.
-TEST(GpuUnit, CperDecodeDecodesProcErrSectionThroughTheNonStandardPath) {
+TEST_F(GpuUnit, CperDecodeDecodesProcErrSectionThroughTheNonStandardPath) {
   std::vector<char> buf = MakeNonStandardRecord(kMaxRegArrayBytes);
   DescAt(&buf, 0)->sec_type = kProcErrGuid;
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
@@ -693,7 +693,7 @@ TEST(GpuUnit, CperDecodeDecodesProcErrSectionThroughTheNonStandardPath) {
 // An empty register array is in bounds and stays in bounds, so the section is
 // read; decode_error_info takes only 4 or 16 registers, so it yields no AFID.
 // Pins the low end of the range the capacity guard brackets.
-TEST(GpuUnit, CperDecodeAcceptsEmptyRegisterArrayAndYieldsNoAfid) {
+TEST_F(GpuUnit, CperDecodeAcceptsEmptyRegisterArrayAndYieldsNoAfid) {
   std::vector<char> buf = MakeNonStandardRecord(/*reg_arr_size=*/0);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -707,7 +707,7 @@ TEST(GpuUnit, CperDecodeAcceptsEmptyRegisterArrayAndYieldsNoAfid) {
 // loads, so this passes either way here. It detects the fault under
 // -fsanitize=undefined, which ADDRESS_SANITIZER=ON does not turn on, and on
 // targets that trap.
-TEST(GpuUnit, CperDecodeDecodesNonStandardSectionAtAnUnalignedOffset) {
+TEST_F(GpuUnit, CperDecodeDecodesNonStandardSectionAtAnUnalignedOffset) {
   std::vector<char> aligned = MakeNonStandardRecord(kMaxRegArrayBytes);
   std::vector<char> unaligned = MakeNonStandardRecord(kMaxRegArrayBytes, /*sec_pad=*/1);
 
@@ -729,7 +729,7 @@ TEST(GpuUnit, CperDecodeDecodesNonStandardSectionAtAnUnalignedOffset) {
 //
 // Forked for the same reason as the sec_offset cases: unguarded, the overread
 // runs off a stack buffer and aborts the runner rather than returning garbage.
-TEST(GpuUnit, CperDecodeRejectsOversizedRegisterArraySize) {
+TEST_F(GpuUnit, CperDecodeRejectsOversizedRegisterArraySize) {
   std::vector<char> buf = MakeNonStandardRecord(/*reg_arr_size=*/0xFFFF);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -747,7 +747,7 @@ TEST(GpuUnit, CperDecodeRejectsOversizedRegisterArraySize) {
 // shows in the return value, because 17 is not a length decode_error_info takes
 // and an unguarded build discards the AFID after reading 8 bytes past reg_dump.
 // The fork is what turns that read into an observable failure.
-TEST(GpuUnit, CperDecodeBracketsTheRegisterArrayCapacityByRegisterCount) {
+TEST_F(GpuUnit, CperDecodeBracketsTheRegisterArrayCapacityByRegisterCount) {
   std::vector<char> accepted = MakeNonStandardRecord(kLargestAcceptedRegArrayBytes);
   const auto* accepted_hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(accepted.data());
   EXPECT_EQ(cper_decode(accepted_hdr, accepted.size()).size(), 1u);
@@ -766,7 +766,7 @@ TEST(GpuUnit, CperDecodeBracketsTheRegisterArrayCapacityByRegisterCount) {
 // context drops any length other than 4 or 16 before reading a register, so the
 // ACA cases above would still return an empty list unguarded. Boot decodes
 // whatever count it is handed. Positive control for the reject below.
-TEST(GpuUnit, CperDecodeDecodesNonStandardSectionUnderBootRegisterContext) {
+TEST_F(GpuUnit, CperDecodeDecodesNonStandardSectionUnderBootRegisterContext) {
   std::vector<char> buf =
       MakeNonStandardRecord(kMaxRegArrayBytes, /*sec_pad=*/0, kBootRegisterContext);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
@@ -778,7 +778,7 @@ TEST(GpuUnit, CperDecodeDecodesNonStandardSectionUnderBootRegisterContext) {
 // The same 8191-register claim under boot context. Nothing downstream discards
 // the result here, so the guard is the only thing standing between the record
 // and a ~64 KB read off a 128-byte dump.
-TEST(GpuUnit, CperDecodeRejectsOversizedRegisterArraySizeUnderBootRegisterContext) {
+TEST_F(GpuUnit, CperDecodeRejectsOversizedRegisterArraySizeUnderBootRegisterContext) {
   std::vector<char> buf =
       MakeNonStandardRecord(/*reg_arr_size=*/0xFFFF, /*sec_pad=*/0, kBootRegisterContext);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
@@ -795,7 +795,7 @@ TEST(GpuUnit, CperDecodeRejectsOversizedRegisterArraySizeUnderBootRegisterContex
 // size assertion cannot tell whether the dump reached the decoder at the indices
 // the record wrote it to. Comparing a patterned decode against a zeroed one says
 // that without pinning either result to an entry in the error map.
-TEST(GpuUnit, CperDecodeNonStandardAfidDependsOnTheRegisterPayload) {
+TEST_F(GpuUnit, CperDecodeNonStandardAfidDependsOnTheRegisterPayload) {
   std::vector<char> patterned = MakeNonStandardRecord(kMaxRegArrayBytes);
   std::vector<char> zeroed = patterned;
   auto* body = reinterpret_cast<struct cper_sec_nonstd_err_body*>(
@@ -815,7 +815,7 @@ TEST(GpuUnit, CperDecodeNonStandardAfidDependsOnTheRegisterPayload) {
 
 // The same payload dependence on the crashdump path, which reaches its registers
 // through fatal_err rather than reg_dump.
-TEST(GpuUnit, CperDecodeCrashdumpAfidDependsOnTheRegisterPayload) {
+TEST_F(GpuUnit, CperDecodeCrashdumpAfidDependsOnTheRegisterPayload) {
   std::vector<char> patterned = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   std::vector<char> zeroed = patterned;
   auto* crashdump =
@@ -836,7 +836,7 @@ TEST(GpuUnit, CperDecodeCrashdumpAfidDependsOnTheRegisterPayload) {
 // amdsmi_get_afids_from_cper ran first, so it is safe for any (pointer, size). Pins
 // the return contract only; the guard-page test below is what proves the read itself
 // never happens.
-TEST(GpuUnit, CperDecodeRejectsBufferSmallerThanHeader) {
+TEST_F(GpuUnit, CperDecodeRejectsBufferSmallerThanHeader) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -850,7 +850,7 @@ TEST(GpuUnit, CperDecodeRejectsBufferSmallerThanHeader) {
 // unsignatured bytes cannot walk as a record and report AFIDs no device produced.
 // Decoding the record before and after flipping the signature pins that the
 // signature alone separates the two outcomes.
-TEST(GpuUnit, CperDecodeRejectsBufferWithoutTheCperSignature) {
+TEST_F(GpuUnit, CperDecodeRejectsBufferWithoutTheCperSignature) {
   std::vector<char> buf = MakeCrashdumpRecord(static_cast<uint32_t>(kCrashdumpRecordSize));
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(buf.data());
   ASSERT_EQ(cper_decode(hdr, buf.size()).size(), 2u);
@@ -864,7 +864,7 @@ TEST(GpuUnit, CperDecodeRejectsBufferWithoutTheCperSignature) {
 // buffer flush against an unmapped page turns the read into a fault, which the
 // forked child reports as a non-zero exit. Without the guard in cper_decode, the
 // record_length load at offset 20 of a 8-byte buffer lands on the guard page.
-TEST(GpuUnit, CperDecodeDoesNotReadPastAShortBuffer) {
+TEST_F(GpuUnit, CperDecodeDoesNotReadPastAShortBuffer) {
   const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
   char* region = static_cast<char*>(
       mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
@@ -891,7 +891,7 @@ TEST(GpuUnit, CperDecodeDoesNotReadPastAShortBuffer) {
 // here: sec_cnt is 1, record_length is exact, the one descriptor is fully inside
 // the record. Only the terminator is missing, so an unbounded stream runs off the
 // descriptor and, on a record that ends against an unmapped page, off the buffer.
-TEST(GpuUnit, CperDecodeDoesNotReadPastUnterminatedFruFields) {
+TEST_F(GpuUnit, CperDecodeDoesNotReadPastUnterminatedFruFields) {
   const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
   char* region = static_cast<char*>(
       mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
@@ -929,7 +929,7 @@ TEST(GpuUnit, CperDecodeDoesNotReadPastUnterminatedFruFields) {
 // so a decoder with no descriptor check still returns an empty list. Here desc1
 // begins exactly on the guard page, so only the descriptor bound keeps the walk
 // from faulting.
-TEST(GpuUnit, CperDecodeDoesNotReadPastTheDescriptorTable) {
+TEST_F(GpuUnit, CperDecodeDoesNotReadPastTheDescriptorTable) {
   const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
   char* region = static_cast<char*>(
       mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
@@ -959,7 +959,7 @@ TEST(GpuUnit, CperDecodeDoesNotReadPastTheDescriptorTable) {
 // record_length undercutting the header is the input class that walks the serial
 // injection off the end of the caller's buffer in the by-path test below. Here it
 // must bound the view to nothing rather than reach the descriptor table at all.
-TEST(GpuUnit, CperDecodeRejectsRecordLengthBelowHeader) {
+TEST_F(GpuUnit, CperDecodeRejectsRecordLengthBelowHeader) {
   std::vector<char> buf = MakeCrashdumpRecord(/*record_length=*/4);
   const auto* hdr = reinterpret_cast<const amdsmi_cper_hdr_t*>(buf.data());
 
@@ -970,7 +970,7 @@ TEST(GpuUnit, CperDecodeRejectsRecordLengthBelowHeader) {
 // in the list, the memcpy copies record_length bytes and then the serial
 // injection reads record_length and sec_cnt back from bytes it never wrote,
 // deriving a garbage bound and writing fru_id past the caller's buffer.
-TEST(GpuUnit, CperByPathRejectsRecordLengthBelowHeader) {
+TEST_F(GpuUnit, CperByPathRejectsRecordLengthBelowHeader) {
   std::vector<char> blob = MakeOneRecordBlob();
   reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data())->record_length = 4;
   std::string path;
@@ -1000,7 +1000,7 @@ TEST(GpuUnit, CperByPathRejectsRecordLengthBelowHeader) {
 // A severity of 200 is wider than the 32-bit mask, so no mask can select it. Under
 // the old (1 << severity) test the shift wrapped to bit 8, which a full mask has
 // set, and the record was accepted.
-TEST(GpuUnit, CperByPathRejectsSeverityWiderThanTheMask) {
+TEST_F(GpuUnit, CperByPathRejectsSeverityWiderThanTheMask) {
   std::vector<char> blob = MakeOneRecordBlob();
   auto* hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data());
   constexpr uint32_t kOutOfRangeSeverity = 200;
@@ -1022,7 +1022,7 @@ TEST(GpuUnit, CperByPathRejectsSeverityWiderThanTheMask) {
 // A header-only record claiming 64 descriptors: the serial injection walks the
 // descriptor table of the copy it just made, so it must stop at record_length
 // instead of writing fru_id past the copied record.
-TEST(GpuUnit, CperInjectSerialStopsAtRecordEnd) {
+TEST_F(GpuUnit, CperInjectSerialStopsAtRecordEnd) {
   std::vector<char> blob = MakeOneRecordBlob();
   reinterpret_cast<amdsmi_cper_hdr_t*>(blob.data())->sec_cnt = 64;
   std::string path;
