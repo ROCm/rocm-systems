@@ -1280,3 +1280,68 @@ layout-validation mechanics are already shared. This candidate therefore
 offers only a few hundred lines of possible mechanical extraction and cannot
 meet the macro floor without reducing the public evidence contract. No
 production scaffold was added.
+
+### 14.15 Rejected observation decision/intent collapse
+
+The policy-to-lowering lifetime was traced again because an admitted access,
+barrier, atomic, or fence appears both as a typed site decision and as one or
+more probe intents. That is a real overlap, but it is not two implementations
+of the same lifecycle. The decision sequences retain the complete policy
+domain, including not-applicable and unsupported sites, typed exclusion
+reasons, physical aliases, and the exact semantic-to-intent relation. The
+intent sequence is the smaller executable contract: coalesced physical
+placement, ordering relative to the guest, synchronization association, and
+dynamic-result demand. Several semantic decisions may intentionally cite one
+intent, while an atomic or fence decision may cite both its pre-guest address
+capture and post-guest evidence intent.
+
+Both sides have live consumers. The hook derives fail-closed static coverage
+from unsupported as well as admitted decisions. Record/Replay and InlineShadow
+render typed unsupported-operation warnings. Barrier placement reserves relay
+capacity for some policy-visible but non-emitting sites. Atomic and fence
+lowering consume classifier-normalized forms retained by their decisions,
+then independently join them to the immutable synchronization graph and
+operand-rich inventory. The coverage ledger owns intent outcomes and committed
+locations; it cannot represent policy exclusions that never had an intent.
+
+Eliminating the decisions would therefore require at least three replacement
+products: a generic policy-coverage inventory, a warning/rejection inventory,
+and a specialized admitted synchronization-form map. Moving all of those into
+`ConSanProbeIntent` instead makes the supposedly common intent a union of
+access, barrier, atomic, and fence policy fields. A single variant decision
+vector similarly retains every existing specialized payload and adds repeated
+visitation at the policy, hook, placement, and emission boundaries. The only
+code that actually disappears is roughly 150--250 lines of repeated validity,
+append, and traversal mechanics; the semantic decision ladders remain. This
+does not approach the macro floor, so the typed policy domain and the smaller
+executable intent domain remain separate.
+
+### 14.16 Rejected register/private entry-prologue collapse
+
+The two persistent-state entry paths were compared from placement through
+descriptor mutation, body construction, paired kernarg-preload entries, patch
+publication, and final proof. They already share the operations that have the
+same semantics: dispatch-ID capture and ABI repair, exact workgroup capture,
+runtime selection, workgroup-shadow initialization, entry scalar backup,
+semantic payload restoration, return construction, descriptor extent
+application, and patch publication helpers.
+
+Their remaining transactions are storage-specific. The register path derives
+owner identity into persistent scalar or vector state, may preserve a borrowed
+entry SGPR window in a dead VGPR carrier, supports owner-local assignments and
+branch-only entry islands, and grows persistent register descriptors. The
+private path first spills its temporary VGPR window, optionally spills entry
+SGPRs into address-free private memory, snapshots owner/epoch/dispatch and
+exact workgroup fields at fixed private offsets, applies a private-segment
+extent, and restores both spill domains before returning. Its placement is
+also deliberately driven by an already-emitted private-state consumer, while
+the register path can be required by barrier-only and atomic-only objects.
+
+A common prologue plan would consequently contain both private offsets and
+spill programs plus register destinations, scalar persistence, owner source,
+entry routing, and descriptor-growth state. A common transaction would branch
+back into the two existing descriptor and body protocols. The shared prefix
+and suffix already factored into helpers account for most genuine overlap;
+unifying the remaining orchestration is estimated to remove only 200--350
+lines before charging the union-shaped plan and storage dispatch. This is not
+a credible macro replacement, so the two storage owners remain explicit.
