@@ -27,6 +27,20 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
+
+// Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
+// makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these:
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, int* savedDev);
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream, int savedDev, ncclResult_t launchRes);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
+  int savedDev = -1;
+  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &savedDev);
+  if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, savedDev, result);
+  return rcclAddonLaunchEnd(comm, stream, savedDev, launch());
+}
+
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
