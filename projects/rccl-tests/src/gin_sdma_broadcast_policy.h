@@ -152,13 +152,25 @@ GIN_SDMA_HD inline bool bcastUseScatterAllgather(size_t msgBytes, size_t count,
 }
 
 // Host gate: use the pipelined-ring large tier (highest priority when enabled).
-// Opt-in via ringMin (NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES); needs >=2 ranks,
+// Gated by ringMin (NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES); needs >=2 ranks,
 // message at/above the cutover, and count >= nRanks so every ring chunk is
 // non-empty on every rank.
+//
+// lsaSize is devComm.lsaSize, and it must cover the whole world for the ring to
+// be legal. Unlike the SAG and flat tiers, which move data with
+// gin.put(ncclTeamWorld(...)) and therefore work over the network, the ring
+// forwards with direct peer stores through ncclGetLsaPointer(recvwin, off,
+// nextRank) and synchronizes with an LSA-team barrier. nextRank comes from the
+// world ring order, so it is a WORLD rank index handed to an API that expects an
+// LSA peer index. When the LSA team is smaller than the world those two indices
+// stop agreeing: the store lands on the wrong peer, or out of the team entirely,
+// and the LSA barrier never covers the ranks the ring spans. Requiring
+// lsaSize == nRanks makes the two index spaces identical, which is the only
+// configuration where the existing code is correct.
 GIN_SDMA_HD inline bool bcastUseRing(size_t msgBytes, size_t count,
-                                     int nRanks, size_t ringMin) {
-  return ringMin != 0 && nRanks >= 2 && msgBytes >= ringMin &&
-         count >= (size_t)nRanks;
+                                     int nRanks, int lsaSize, size_t ringMin) {
+  return ringMin != 0 && nRanks >= 2 && lsaSize == nRanks &&
+         msgBytes >= ringMin && count >= (size_t)nRanks;
 }
 
 enum class BcastLargeTier { None, Ring, ScatterAG };
@@ -170,10 +182,16 @@ enum class BcastLargeTier { None, Ring, ScatterAG };
 // Asserting the predicates one at a time is satisfied by "both true" and would
 // not catch the order being swapped; asserting this enum across the 1 MiB, 2 MiB
 // and 32 MiB boundaries does.
+//
+// The precedence is what makes lsaSize load-bearing here. Ring is checked first,
+// so on a world the LSA team does not cover, an lsaSize-blind gate would hand
+// every message at or above the ring cutover to a tier that cannot reach an
+// off-team peer, even though SAG sitting right behind it is network-capable.
+// Refusing the ring on that topology is what lets the fall-through pick SAG.
 GIN_SDMA_HD inline BcastLargeTier bcastLargeTier(size_t msgBytes, size_t count,
-                                                 int nRanks, size_t ringMin,
-                                                 size_t sagMin) {
-  if (bcastUseRing(msgBytes, count, nRanks, ringMin)) return BcastLargeTier::Ring;
+                                                 int nRanks, int lsaSize,
+                                                 size_t ringMin, size_t sagMin) {
+  if (bcastUseRing(msgBytes, count, nRanks, lsaSize, ringMin)) return BcastLargeTier::Ring;
   if (bcastUseScatterAllgather(msgBytes, count, nRanks, sagMin)) return BcastLargeTier::ScatterAG;
   return BcastLargeTier::None;
 }

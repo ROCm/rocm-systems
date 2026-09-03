@@ -1094,9 +1094,11 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         }();
         // Pipelined-ring large tier: distributes forwarding across
         // all ranks with no serial root-scatter phase, to beat the SAG plateau at
-        // very large messages. Opt-in via NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES
-        // (0 = disabled, default) until a warm A/B vs SAG sets a default; the
-        // pipeline depth is NCCL_GIN_ANVIL_BCAST_RING_CHUNKS (else size-derived).
+        // very large messages. Enabled by default from 32 MiB (the measured SAG
+        // crossover) via NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES, where 0 disables the
+        // tier and falls back to SAG; the pipeline depth is
+        // NCCL_GIN_ANVIL_BCAST_RING_CHUNKS (else size-derived). Selection also
+        // requires the LSA team to cover the world -- see bcastUseRing.
         static const size_t bcastRingMin = []() {
           size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES");
           return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
@@ -1107,6 +1109,10 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         // casts it), NOT a real ncclComm_t -- so read nRanks from the devComm
         // struct rather than ncclCommCount (which would fault on a corrupted comm).
         const int sagRanks = (int)((struct ncclDevComm*)comm)->nRanks;
+        // Ring-tier legality, not a performance input: the ring forwards through
+        // ncclGetLsaPointer with world rank indices, so it is only correct when
+        // the LSA team is the whole world. See bcastUseRing.
+        const int lsaSize = (int)((struct ncclDevComm*)comm)->lsaSize;
         const size_t msgBytes = count * wordSize(type);
         static const size_t bcastCtasEnv = BroadcastParseCtasEnv();
         const int hybridPool = gin_sdma::bcastHybridPoolCtas(deviceCtaCount);
@@ -1115,7 +1121,7 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         // every large message, so what runs is set by the precedence inside
         // bcastLargeTier, where the host tests can assert it.
         const gin_sdma::BcastLargeTier largeTier =
-            gin_sdma::bcastLargeTier(msgBytes, count, sagRanks, bcastRingMin, bcastSagMin);
+            gin_sdma::bcastLargeTier(msgBytes, count, sagRanks, lsaSize, bcastRingMin, bcastSagMin);
         if (largeTier == gin_sdma::BcastLargeTier::Ring) {
           const int ringCtas = bcastRingCtas();
           const size_t nChunks = (size_t)gin_sdma::bcastRingChunks(msgBytes, ringCtas, bcastRingChunksEnv);
@@ -1225,12 +1231,13 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
     return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
   }();
   const int nRanks = (int)(args->devComms[0].nRanks);
+  const int lsaSize = (int)(args->devComms[0].lsaSize);
   // Only device-time the ring when it is the active tier and its tables are built
   // on this device. builtNRings > 0 is exactly the condition under which
   // BroadcastRunColl launches the table kernel, so the timed kernel below always
   // matches the kernel that actually ran (N=4/6 fall back to the coprime-stride
   // kernel, which has no timed variant, and are skipped here).
-  if (!gin_sdma::bcastUseRing(msgBytes, count, nRanks, bcastRingMin)) return testSuccess;
+  if (!gin_sdma::bcastUseRing(msgBytes, count, nRanks, lsaSize, bcastRingMin)) return testSuccess;
   if (bcastRingState().builtNRings <= 0) return testSuccess;
 
   auto kernel = SPECIALIZE_KERNEL(GinRingSmTableBroadcastTimedKernel, type, op);
