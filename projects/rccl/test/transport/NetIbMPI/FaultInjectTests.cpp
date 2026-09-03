@@ -431,6 +431,15 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
     // QP 0 and still has to deliver intact data while the other workers keep the
     // device busy.
     if (MPIEnvironment::nThreads > 1) {
+        // The start gates only synchronize entry into the body; allocation,
+        // registration, the warm-up and arming the delay all happen after them. A
+        // fast worker could otherwise finish its whole delayed run before a sibling
+        // had armed anything, and the concurrency this test claims -- delayed
+        // traffic while the other workers keep the device busy -- would never have
+        // happened. Bounded, so a worker that failed earlier cannot hang the rest.
+        std::atomic<int> armed{0};
+        std::atomic<bool> armFailed{false};
+        static constexpr int kArmPolls = 3000;  // 3000 * 10ms = 30s
         RunMultiThreadedIndependent(
             0, MPIEnvironment::nThreads,
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
@@ -439,6 +448,7 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
                 const size_t size = 8192;
                 void* buffer = malloc(size);
                 if (!buffer) {
+                    armFailed.store(true, std::memory_order_release);
                     result.ok = false;
                     result.msg = "malloc failed";
                     return result;
@@ -448,20 +458,41 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
                 void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
                 void* mhandle = nullptr;
                 result = WorkerRegister(workerComm, buffer, size, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
+                if (!result.ok) {
+                    armFailed.store(true, std::memory_order_release);
+                    return result;
+                }
                 NetMHandleWorkerGuard mhandleGuard(mhandle,
                                                    NetMHandleWorkerDeleter(net_, workerComm));
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 4999, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok)
+                if (!result.ok) {
+                    armFailed.store(true, std::memory_order_release);
                     return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
                                                              &bufferGuard);
+                }
 
                 if (rank == 1) {
                     result = WorkerCastFaultSetDelay(pair.sendComm, /*qpIdx=*/0,
                                                      /*delayUs=*/2000);
-                    if (!result.ok) return result;
+                    if (!result.ok) {
+                        armFailed.store(true, std::memory_order_release);
+                        return result;
+                    }
+                }
+
+                // Every worker has armed its own delay by here, so the loops below
+                // overlap rather than running one worker at a time.
+                if (!WorkerRendezvous(armed, MPIEnvironment::nThreads, kArmPolls, &armFailed)) {
+                    result.ok = false;
+                    result.msg = armFailed.load(std::memory_order_acquire)
+                                     ? "another worker failed before arming its delay; its own "
+                                       "message is the cause"
+                                     : "only " + std::to_string(armed.load()) + " of "
+                                           + std::to_string(MPIEnvironment::nThreads)
+                                           + " workers armed the delay before the transfer loop";
+                    return result;
                 }
 
                 // One pattern per worker: the claim is whose data arrived, not which.
