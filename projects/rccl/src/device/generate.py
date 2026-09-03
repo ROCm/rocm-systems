@@ -274,7 +274,7 @@ def calc_unroll_and_pipeline_for_local_arch():
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:
-      # gfx1250 (MI450/MI455) runs unroll 32; build 8/16 via --all_unrolls when measuring.
+      # gfx1250 (MI450/MI455) runs unroll 32. Use --all_unrolls to build 8 and 16.
       return (["32"], all_pipelines)
     else:
       return (["4"], all_pipelines)

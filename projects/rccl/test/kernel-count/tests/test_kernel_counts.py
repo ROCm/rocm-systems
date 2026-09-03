@@ -99,7 +99,7 @@ COMMON_DIMS = {
     },
     "acc": {"0", "1"},
     "pipeline": {"0", "1"},
-    # A multi-arch build skips 8/16 (gfx1250 tuning-only); --all_unrolls adds them back.
+    # Unrolls emitted by a multi-arch build. --all_unrolls adds 8 and 16.
     "unroll": {"1", "2", "4", "32"},
     "reg": {"0", "1", "2"},
 }
