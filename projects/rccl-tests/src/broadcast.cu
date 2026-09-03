@@ -894,17 +894,16 @@ static BcastRingState g_bcastRingState[BCAST_MAX_DEVICES];
 
 // hipify maps cudaMemcpyToSymbolAsync(sym, src, nbytes, offset, stream) to
 // hipMemcpyToSymbolAsync without hipMemcpyKind; ROCm 7.x requires the kind arg.
+// Template on the symbol so scalar __constant__ ints and array tables both resolve.
+template <typename Symbol>
+inline cudaError_t bcastMemcpyConstantAsync(Symbol& symbol, const void* src,
+                                            size_t nbytes, cudaStream_t stream) {
 #if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
-inline cudaError_t bcastMemcpyConstantAsync(const void* symbol, const void* src,
-                                            size_t nbytes, cudaStream_t stream) {
   return hipMemcpyToSymbolAsync(symbol, src, nbytes, 0, hipMemcpyHostToDevice, stream);
-}
 #else
-inline cudaError_t bcastMemcpyConstantAsync(const void* symbol, const void* src,
-                                            size_t nbytes, cudaStream_t stream) {
   return cudaMemcpyToSymbolAsync(symbol, src, nbytes, 0, stream);
-}
 #endif
+}
 
 // startColl() calls cudaSetDevice(args->gpus[i]) immediately before runColl on the
 // device-API path, so the current device identifies the state slot. Out-of-range
