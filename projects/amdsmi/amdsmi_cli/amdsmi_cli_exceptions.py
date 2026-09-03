@@ -12,6 +12,7 @@ import json
 # imported lazily where it is actually needed (see AmdSmiPermissionDeniedException).
 
 
+@enum.unique
 class AmdSmiExitCode(enum.IntEnum):
     """CLI-invented process exit codes, in the reserved 192-255 band.
 
@@ -34,10 +35,13 @@ class AmdSmiExitCode(enum.IntEnum):
     present, but an interface the CLI reads directly yielded no usable data, so
     there is no library status to fold.
 
-    Reserved, not emitted by this CLI (via another PR; consolidating with original PR author.
-    Free to re-assign if needed and remove this comment (and the below items).):
-      203 - retired; permission-denied surfaces the library NO_PERM (10) directly
-      204 - reserved for a CLI platform/build mismatch
+    Not emitted by this CLI. An earlier PR intended to use these codes, so they
+    are left unassigned here and are open to be re-assigned:
+      203 - permission-denied; the library NO_PERM (10) surfaces directly instead
+      204 - a CLI platform/build mismatch
+
+    Re-assigning them is free only until they ship: a released code keeps its
+    meaning forever, because scripts branch on the number.
     """
 
     def __new__(cls, value, note=""):

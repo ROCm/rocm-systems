@@ -288,8 +288,23 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             )
 
     def test_exit_codes_are_unique(self):
-        values = [int(c) for c in self.ExitCode]
-        self.assertEqual(len(values), len(set(values)), "duplicate exit-code values")
+        """Two members sharing a value is a silent bug: the second becomes an
+        alias of the first and vanishes from enum iteration, so iterating
+        self.ExitCode can never see the duplicate. __members__ keeps alias
+        names, so it is the only view that can catch this.
+        """
+        by_value = {}
+        for name, code in self.ExitCode.__members__.items():
+            by_value.setdefault(int(code), []).append(name)
+        collisions = {value: names for value, names in by_value.items() if len(names) > 1}
+        self.assertEqual(
+            collisions,
+            {},
+            "exit-code values must be unique: "
+            + "; ".join(
+                f"{value} shared by {', '.join(names)}" for value, names in collisions.items()
+            ),
+        )
 
     def test_cli_codes_never_collide_with_library_exit_codes(self):
         """Every exit code must mean exactly one thing: either a library status
