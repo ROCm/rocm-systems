@@ -1353,7 +1353,7 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle, std::s
   const amdcuid_status_t cuid_status =
       amdcuid_get_handle_by_bdf(bdf_out.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out);
   if (cuid_status != AMDCUID_STATUS_SUCCESS) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    return cuid_status_to_amdsmi(cuid_status);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -1365,10 +1365,22 @@ amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       return AMDSMI_STATUS_SUCCESS;
+    case AMDCUID_STATUS_FILE_NOT_FOUND:
+      return AMDSMI_STATUS_FILE_NOT_FOUND;
+    case AMDCUID_STATUS_DEVICE_NOT_FOUND:
+      return AMDSMI_STATUS_NOT_FOUND;
     case AMDCUID_STATUS_PERMISSION_DENIED:
       return AMDSMI_STATUS_NO_PERM;
     case AMDCUID_STATUS_INVALID_ARGUMENT:
       return AMDSMI_STATUS_INVAL;
+    case AMDCUID_STATUS_NOT_SUPPORTED:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    case AMDCUID_STATUS_INSUFFICIENT_SIZE:
+      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+    case AMDCUID_STATUS_FILE_ERROR:
+      return AMDSMI_STATUS_FILE_ERROR;
+    case AMDCUID_STATUS_INVALID_FORMAT:
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
     default:
       return AMDSMI_STATUS_API_FAILED;
   }
@@ -1501,8 +1513,6 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
     memset(info, 0, sizeof(*info));
     info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
     info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
-    std::cout << "Failed to query temporary CUID, status: "
-              << cuid_status_to_amdsmi(auxiliary_status) << std::endl;
     return cuid_status_to_amdsmi(auxiliary_status);
   }
   info->auxiliary = temporary ? 1 : 0;
