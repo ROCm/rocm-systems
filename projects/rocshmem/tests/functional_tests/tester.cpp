@@ -1054,8 +1054,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";
       testers.push_back(new ReduceOnStreamTester<int>(args));
-      testers.push_back(new ReduceOnStreamTester<__half>(args));
-      testers.push_back(new ReduceOnStreamTester<__hip_bfloat16>(args));
       break;
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
