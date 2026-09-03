@@ -304,8 +304,12 @@ void ComputeUnitCore::flush_cp_notifications() {
     // against the CP's dispatch path.
     if (!cp_)
       return;
-    for (const auto &exception : exceptions)
-      cp_->signal_queue_exception(exception.queue_id, exception.process_id, exception.status);
+    for (const auto &exception : exceptions) {
+      if (queue_exception_handler_)
+        queue_exception_handler_(exception.queue_id, exception.process_id, exception.status);
+      else
+        cp_->signal_queue_exception(exception.queue_id, exception.process_id, exception.status);
+    }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
@@ -856,6 +860,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
         active->set_trap_saved_status(saved_status);
         active->set_trap_saved_exec(active->exec());
         active->set_trap_interrupt_sent(false);
+        active->clear_trap_queue_exception_status();
         // A fresh handler entry owns the halt state from here on; a marker left
         // over from a previous stop would attribute this entry's HALT to an
         // s_sendmsghalt that has already been resumed past.

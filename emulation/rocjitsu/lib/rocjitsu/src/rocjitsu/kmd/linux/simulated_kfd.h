@@ -375,6 +375,10 @@ private:
   resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
   bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
   void on_wave_trap_complete(amdgpu::Wavefront &wf);
+  uint64_t debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                         uint64_t exception_mask);
+  bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
+                                      uint64_t exception_mask);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
@@ -573,6 +577,7 @@ private:
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
   mutable std::mutex interrupt_mutex_;
+  std::mutex queue_exception_mutex_;
   std::unordered_map<uint32_t, EventState *> event_dispatch_;
 
   /// @brief Process ID for local-mode (interposer). Set once in open().

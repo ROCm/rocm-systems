@@ -83,6 +83,10 @@ struct HwQueue {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
+  bool exception_suspended = false;
+  [[nodiscard]] bool suspended() const {
+    return debug_suspended || runtime_suspended || exception_suspended;
+  }
   /// A command-processor pass observed this queue while its debugger gate was closed.
   /// Cleared on resume after scheduling one pass to process the deferred work.
   bool debug_work_deferred = false;
@@ -206,7 +210,8 @@ public:
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                     uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool publish_interrupt = true);
   uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const;
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
@@ -363,6 +368,14 @@ public:
       return candidate.queue_id == queue_id && candidate.process_id == process_id;
     });
     return queue != hw_queues_.end() && queue->runtime_suspended;
+  }
+
+  [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->exception_suspended;
   }
 
   /// @brief Test-only count of executed command-processor doorbell passes.

@@ -780,7 +780,7 @@ void CommandProcessor::register_queue(HwQueue queue) {
 }
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                              uint64_t status) {
+                                              uint64_t status, bool publish_interrupt) {
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   {
@@ -790,27 +790,34 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
     });
     if (queue == hw_queues_.end() || queue->exception_status_va == 0)
       return false;
+    queue->exception_suspended = true;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
   }
-
-  memory_->write64(exception_status_va, status, process_id);
-  if (interrupt_cb_)
-    interrupt_cb_(process_id, exception_event_id);
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-  while (memory_->read64(exception_status_va, process_id) == status &&
-         std::chrono::steady_clock::now() < deadline)
-    std::this_thread::yield();
 
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
-        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+        if (!wave->is_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id) {
+          wave->set_fatal_exception_pending(true);
           wave->set_debug_suspended(true);
+        }
       }
     });
   }
+  if (!publish_interrupt)
+    return true;
+
+  const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
+  memory_->write64(exception_status_va, combined_status, process_id);
+  if (interrupt_cb_)
+    interrupt_cb_(process_id, exception_event_id);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (memory_->read64(exception_status_va, process_id) == combined_status &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
   return true;
 }
 
@@ -910,7 +917,7 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
         // here while the debugger still holds the gate would leave the later
         // debugger resume with nothing to release, and the already-fetched
         // packets would sit until an unrelated doorbell arrived.
-        if (changed && !suspended && !q.debug_suspended)
+        if (changed && !suspended && !q.debug_suspended && !q.exception_suspended)
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
@@ -965,7 +972,7 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
-        } else if (!q.runtime_suspended) {
+        } else if (!q.runtime_suspended && !q.exception_suspended) {
           wake_command_processor |= std::exchange(q.debug_work_deferred, false);
         }
       }
@@ -1195,8 +1202,7 @@ HwQueueState *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < new_queue_states_.size(); ++i) {
     size_t idx = (start + i) % new_queue_states_.size();
     auto &qs = new_queue_states_[idx];
-    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
-        hw_queues_[idx].runtime_suspended)
+    if (hw_queues_[idx].is_sdma || hw_queues_[idx].suspended())
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
       next_queue_idx_ = (idx + 1) % new_queue_states_.size();
@@ -1747,7 +1753,7 @@ void CommandProcessor::on_cu_idle() {
   // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1775,7 +1781,7 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     if (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1807,8 +1813,7 @@ bool CommandProcessor::step() {
 
 void CommandProcessor::process_queues() {
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-        hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].is_sdma || hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -2203,7 +2208,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
-  if (queue.debug_suspended || queue.runtime_suspended) {
+  if (queue.suspended()) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
@@ -2579,8 +2584,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     progress = false;
 
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-          hw_queues_[qi].runtime_suspended)
+      if (hw_queues_[qi].is_sdma || hw_queues_[qi].suspended())
         continue;
       auto &qs = new_queue_states_[qi];
 
@@ -2679,7 +2683,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
   // Process any new non-kernel entries (barrier-kind packets).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].suspended())
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
