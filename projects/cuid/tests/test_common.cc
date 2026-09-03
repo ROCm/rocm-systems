@@ -100,7 +100,7 @@ void RecordStoreEnvironment::TearDown() {
 
 static void print_help() {
   printf(
-      "amdcuid_test — CUID test suite\n"
+      "amdcuid_test: CUID test suite\n"
       "\n"
       "Usage: amdcuid_test [options] [gtest options]\n"
       "\n"
