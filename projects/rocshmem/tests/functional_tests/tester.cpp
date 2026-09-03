@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "tester.hpp"
+#include "type_lists.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -86,7 +87,6 @@
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
-#include "type_lists.hpp"
 #if defined(USE_GDA)
 #include "qp_ping_pong_tester.hpp"
 #include "qp_put_nbi_tester.hpp"
@@ -385,7 +385,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new BroadcastWaveTester<float>(args));
         testers.push_back(new BroadcastWaveTester<double>(args));
       } else {
-        ROCSHMEM_BCAST_WAVE_TYPES_FULL(PUSH_BWAVE)
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_BWAVE)
       }
       #undef PUSH_BWAVE
       break;
@@ -430,7 +430,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AlltoallWaveTester<char>(args));
         testers.push_back(new AlltoallWaveTester<int>(args));
       } else {
-        ROCSHMEM_ALLTOALL_WAVE_TYPES_FULL(PUSH_A2AWAVE)
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2AWAVE)
       }
       #undef PUSH_A2AWAVE
       break;
