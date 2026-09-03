@@ -594,8 +594,19 @@ amdcuid_status_t CuidDeviceManager::invalidate_derived_cuids(const uint8_t new_k
     // straight into the regenerated file.
     unpriv_cuid_file_.clear();
     priv_cuid_file_.clear();
-    std::remove(unpriv_cuid_file_.get_file_path().c_str());
-    std::remove(priv_cuid_file_.get_file_path().c_str());
+
+    // A record that survives this is read back by the next get_derived_cuid()
+    // and written into the regenerated file, which is the outcome the whole
+    // call exists to prevent, so the removal has to be checked. Failing to
+    // remove a record we cannot read is not that outcome: an unprivileged
+    // process never removes the root-owned record and never reads it either.
+    const auto record_is_gone = [](const std::string& path) {
+      return std::remove(path.c_str()) == 0 || access(path.c_str(), R_OK) != 0;
+    };
+    if (!record_is_gone(unpriv_cuid_file_.get_file_path()) ||
+        !record_is_gone(priv_cuid_file_.get_file_path())) {
+      return AMDCUID_STATUS_FILE_ERROR;
+    }
     cuid_index_.clear();
     have_devices = !devices_.empty();
   }
