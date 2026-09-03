@@ -3674,16 +3674,17 @@ if(NOT _fault_selection_contract MATCHES "ConSanFaultSelectionView")
     message(FATAL_ERROR "ConSan fault selection lost its narrow immutable inventory contract")
 endif()
 file(READ "${_consan_dir}/consan_fault_planning.h" _fault_planning_contract)
-if(NOT _fault_planning_contract MATCHES "ConSanFaultPlanningInput" OR
-   NOT _fault_planning_contract MATCHES "ConSanFaultPlanningResult")
-    message(FATAL_ERROR "ConSan fault planning lost its explicit input/product contract")
+if(_fault_planning_contract MATCHES
+   "ConSanFaultPlanning(Input|Result)|build_fault_mutation_plan")
+    message(FATAL_ERROR "ConSan fault planning regained its retired split contract")
 endif()
 file(READ "${_consan_dir}/consan_fault_injection.h" _fault_application_contract)
 if(NOT _fault_application_contract MATCHES
-   "apply_consan_fault_mutations[^;]*ConSanPatchedImageGrowthLimit[^;]*ConSanFaultMutationPlan" OR
-   _fault_application_contract MATCHES "ConSanOptions")
+   "resolve_consan_fault_mutations[^;]*ConSanOptions[^;]*ConSanTransformArtifacts" OR
+   _fault_application_contract MATCHES
+   "apply_consan_fault_mutations|compose_consan_fault_mutation")
     message(FATAL_ERROR
-        "ConSan fault application lost its one complete typed-plan transaction"
+        "ConSan fault injection lost its single private resolution/mutation transaction"
     )
 endif()
 file(READ "${_consan_dir}/consan_placement.h" _placement_contract)

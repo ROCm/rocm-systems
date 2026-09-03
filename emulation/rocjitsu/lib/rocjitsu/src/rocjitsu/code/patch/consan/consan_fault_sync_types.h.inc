@@ -128,7 +128,9 @@ struct ConSanFaultMutationPresentation {
 
 /// Diagnostic description of one validation-only corruption admitted by the
 /// private resolution-and-mutation transaction.
-using ConSanFaultMutationPlan = ConSanFaultMutationPresentation;
+struct ConSanFaultMutationPlan : ConSanFaultMutationPresentation {
+  bool operator==(const ConSanFaultMutationPlan &) const = default;
+};
 
 enum class ConSanBarrierMoveDestinationIssue : uint8_t {
   None,

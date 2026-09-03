@@ -72,11 +72,11 @@ struct ResolvedFaultTargets {
   std::optional<OrdinaryAcquireMutationTarget> ordinary;
 };
 
-static void apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
                                                   rj_code_arch_t arch, const ConSanOptions &options,
                                                   const ResolvedFaultTargets &targets,
                                                   bool require_exactly_one,
-                                                  ConSanTransformArtifacts &result);
+                                                  FaultApplicationState &transaction);
 
 [[nodiscard]] AtomicOrderBoundary resolve_atomic_order_boundary(const ProgramInventory &inventory,
                                                                 const ConSanFaultSite &site,
@@ -280,7 +280,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                                            .fault_sites = artifacts.fault_sites};
   const bool prior_attempt_unsupported = artifacts.outcome == ConSanTransformOutcome::Unsupported;
   const size_t initial_fault_count = artifacts.fault_plans.size();
-  ConSanTransformArtifacts &result = artifacts;
+  auto &result = artifacts;
   const ProgramInventory &program_inventory = selection.program_inventory;
   const SynchronizationInventoryView sync = program_inventory.sync();
   const auto reject_application = [&](std::string dry_run_warning, std::string application_error) {
@@ -738,8 +738,23 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
   }
   artifacts.mutation.fault.planned = artifacts.fault_plans.size();
   if (apply && artifacts.errors.empty()) {
-    apply_resolved_consan_fault_mutations(code_object, arch, options, targets,
-                                          require_exactly_one_applied, artifacts);
+    FaultApplicationState transaction(artifacts);
+    const bool mechanisms_succeeded = apply_resolved_consan_fault_mutations(
+        code_object, arch, options, targets, require_exactly_one_applied, transaction);
+    const bool accepted = transaction.successful();
+    artifacts.errors = std::move(transaction.errors);
+    artifacts.transform_failure_cause = transaction.transform_failure_cause;
+    if (!accepted) {
+      artifacts.mutation.fault.applied =
+          mechanisms_succeeded ? transaction.mutation.fault.applied
+                               : applied_fault_mutation_count(artifacts.patches);
+      return;
+    }
+    artifacts.warnings = std::move(transaction.warnings);
+    artifacts.outcome = transaction.outcome;
+    artifacts.replacement = std::move(transaction.replacement);
+    artifacts.patches = std::move(transaction.patches);
+    artifacts.mutation = std::move(transaction.mutation);
   }
 }
 
@@ -918,8 +933,7 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
   return std::nullopt;
 }
 
-static void
-try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
+static void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
                                        const ConSanSyncSequence *selected,
                                        const ConSanBarrierLifecycleGroup *lifecycle_group,
                                        int32_t target_id, FaultApplicationState &result) {
@@ -1717,13 +1731,11 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   }
 }
 
-static void apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+static bool apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
                                                   rj_code_arch_t arch, const ConSanOptions &options,
                                                   const ResolvedFaultTargets &targets,
                                                   bool require_exactly_one,
-                                                  ConSanTransformArtifacts &result) {
-  FaultApplicationState transaction(result);
-
+                                                  FaultApplicationState &transaction) {
   if (targets.drop_primary != nullptr || targets.drop_group || targets.drop_pair) {
     try_apply_barrier_drop_fault_patch(code_object, arch, targets, transaction);
   }
@@ -1770,21 +1782,7 @@ static void apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_o
         "ConSan fault injection required exactly one applied mutation, got " +
         std::to_string(transaction.mutation.fault.applied));
   }
-
-  const bool accepted = transaction.successful();
-  result.errors = std::move(transaction.errors);
-  result.transform_failure_cause = transaction.transform_failure_cause;
-  if (!accepted) {
-    result.mutation.fault.applied = mechanisms_succeeded
-                                        ? transaction.mutation.fault.applied
-                                        : applied_fault_mutation_count(result.patches);
-    return;
-  }
-  result.warnings = std::move(transaction.warnings);
-  result.outcome = transaction.outcome;
-  result.replacement = std::move(transaction.replacement);
-  result.patches = std::move(transaction.patches);
-  result.mutation = std::move(transaction.mutation);
+  return mechanisms_succeeded;
 }
 
 void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
