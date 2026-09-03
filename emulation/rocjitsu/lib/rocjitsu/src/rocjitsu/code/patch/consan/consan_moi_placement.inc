@@ -2448,7 +2448,6 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
   plan.current_vgpr_count = kMaxVgprs;
   plan.ordinary_vgpr_limit = kMaxVgprs;
   plan.current_sgpr_count = kMaxSgprs;
-  plan.sgpr_reference_coverage_complete = true;
   bool every_owner_can_move_empty_accumulator_boundary = consan_arch_is_cdna3_or_cdna4(state.arch);
   bool every_owner_accumulator_boundary_is_allocation_tail =
       every_owner_can_move_empty_accumulator_boundary;
@@ -2465,20 +2464,6 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanRequest &sem
     plan.current_sgpr_count = std::min(plan.current_sgpr_count, owner->current_sgpr_count);
     plan.max_referenced_sgpr_count =
         std::max(plan.max_referenced_sgpr_count, owner->max_referenced_sgpr_count);
-    const consan_detail::ScalarOwnerContextSummary scalar_owner = {
-        .descriptor_file_offset = owner->kernel->descriptor_file_offset,
-        .current_sgpr_count = owner->current_sgpr_count,
-        .max_referenced_sgpr_count = owner->max_referenced_sgpr_count,
-        .has_indirect_sgpr_access = owner->has_indirect_sgpr_access,
-        .sgpr_reference_coverage_complete = owner->sgpr_reference_coverage_complete,
-        .descriptor_valid = owner->descriptor_valid,
-    };
-    plan.scalar_tail_floor =
-        std::max(plan.scalar_tail_floor, consan_detail::scalar_owner_tail_floor(scalar_owner));
-    // These two fields summarize diagnostics only. The actionable bound above
-    // is computed per owner before aggregation.
-    plan.has_indirect_sgpr_access |= owner->has_indirect_sgpr_access;
-    plan.sgpr_reference_coverage_complete &= owner->sgpr_reference_coverage_complete;
     plan.original_private_segment_size =
         std::max(plan.original_private_segment_size, owner->original_private_segment_size);
     live_before_all_owners |= owner->liveness->live_before(*anchor);

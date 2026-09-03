@@ -21,6 +21,14 @@ struct InlineReleaseSequenceTarget {
 
 enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease };
 
+[[nodiscard]] ConSanAtomicClassifierReason
+inline_atomic_exact_ordering_reason(const ConSanAtomicSite &site,
+                                    ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch,
+                                    bool is_rmw = true) {
+  (void)event_kind;
+  return classify_consan_atomic_lowering(site, arch, is_rmw).exact_ordering_reason;
+}
+
 [[nodiscard]] std::vector<size_t> subsequence_positions(std::span<const uint32_t> haystack,
                                                         std::span<const uint32_t> needle) {
   std::vector<size_t> positions;
@@ -250,9 +258,9 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteRdna3CacheSequence) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Acquire,
-                                                      ROCJITSU_CODE_ARCH_RDNA3),
-            ConSanMoiInlineAtomicSupport::Supported)
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::Acquire,
+                                                ROCJITSU_CODE_ARCH_RDNA3),
+            ConSanAtomicClassifierReason::None)
       << "mnemonic=" << site.mnemonic << " size=" << site.size
       << " raw_saddr=" << testing::PrintToString(site.raw_saddr)
       << " raw_ioffset=" << testing::PrintToString(site.raw_ioffset)
@@ -635,9 +643,9 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
                                              return candidate.mnemonic == "global_atomic_add_u32";
                                            });
     ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
-    EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, ConSanMoiAtomicEventKind::Acquire,
-                                                        ROCJITSU_CODE_ARCH_RDNA3),
-              ConSanMoiInlineAtomicSupport::Supported);
+    EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
+                                                  ROCJITSU_CODE_ARCH_RDNA3),
+              ConSanAtomicClassifierReason::None);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     const auto patch = std::ranges::find(
@@ -687,9 +695,9 @@ TEST(ConSanMoi, Gfx1100VglobalAtomicRejectsInvalidScalarBase) {
                                            return candidate.mnemonic == "global_atomic_add_u32";
                                          });
   ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, ConSanMoiAtomicEventKind::Acquire,
-                                                      ROCJITSU_CODE_ARCH_RDNA3),
-            ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, ConSanMoiAtomicEventKind::Acquire,
+                                                ROCJITSU_CODE_ARCH_RDNA3),
+            ConSanAtomicClassifierReason::UnsupportedEncoding);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                                &ConSanPatchInfo::kind),
             0u);
@@ -1195,7 +1203,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
     std::optional<uint16_t> scalar_base_sgpr;
     int32_t signed_byte_offset;
     uint32_t semantics;
-    ConSanMoiInlineAtomicSupport expected_support;
+    ConSanAtomicClassifierReason expected_reason;
   };
   constexpr std::array cases = {
       VglobalCase{
@@ -1211,7 +1219,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           std::nullopt,
           0,
           2u,
-          ConSanMoiInlineAtomicSupport::Supported,
+          ConSanAtomicClassifierReason::None,
       },
       VglobalCase{
           "release add vector-only negative offset",
@@ -1226,7 +1234,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           std::nullopt,
           -20,
           2u,
-          ConSanMoiInlineAtomicSupport::Supported,
+          ConSanAtomicClassifierReason::None,
       },
       VglobalCase{
           "release add scalar-base positive offset",
@@ -1241,7 +1249,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           20u,
           20,
           2u,
-          ConSanMoiInlineAtomicSupport::Supported,
+          ConSanAtomicClassifierReason::None,
       },
       VglobalCase{
           "acquire returning add vector-only",
@@ -1256,7 +1264,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           std::nullopt,
           0,
           3u,
-          ConSanMoiInlineAtomicSupport::Supported,
+          ConSanAtomicClassifierReason::None,
       },
       VglobalCase{
           "acquire-release returning CAS scalar-base",
@@ -1271,7 +1279,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           20u,
           20,
           3u,
-          ConSanMoiInlineAtomicSupport::Supported,
+          ConSanAtomicClassifierReason::None,
       },
       VglobalCase{
           "acquire-release no-return CAS fails closed",
@@ -1286,7 +1294,7 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
           std::nullopt,
           0,
           2u,
-          ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable,
+          ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable,
       },
   };
 
@@ -1320,10 +1328,10 @@ TEST(ConSanMoi, CdnaInlineVglobalAtomicMatrixUsesTargetNativeAddressLowering) {
                                  return candidate.mnemonic.starts_with("global_atomic_");
                                });
       ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end());
-      EXPECT_EQ(classify_consan_moi_inline_atomic_support(*site, test_case.event_kind, target.arch),
-                test_case.expected_support);
+      EXPECT_EQ(inline_atomic_exact_ordering_reason(*site, test_case.event_kind, target.arch),
+                test_case.expected_reason);
       EXPECT_EQ(site->raw_th, test_case.semantics);
-      if (test_case.expected_support != ConSanMoiInlineAtomicSupport::Supported) {
+      if (test_case.expected_reason != ConSanAtomicClassifierReason::None) {
         EXPECT_FALSE(result.modified());
         EXPECT_EQ(std::ranges::count(result.patches,
                                      ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
@@ -2773,56 +2781,56 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   site.raw_th = 0;
   site.returns_old_value = false;
 
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(site, ConSanMoiAtomicEventKind::Acquire,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(
-                site, ConSanMoiAtomicEventKind::AcquireRelease, ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::Acquire,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::AcquireRelease,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
 
   ConSanAtomicSite changed = site;
   changed.mnemonic = "flat_atomic_cmpswap_u32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.returns_old_value = false;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable);
   changed = site;
   changed.mnemonic = "global_atomic_add_u32";
   changed.raw_saddr = 4;
   changed.saddr_sgpr = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.size = 2u * sizeof(uint32_t);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::UnsupportedEncoding);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::UnsupportedEncoding);
   changed.raw_saddr = kCdnaGlobalNoSaddrEncoding;
   changed.saddr_sgpr.reset();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_CDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_CDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.size = 3u * sizeof(uint32_t);
   changed.raw_saddr = 4;
   changed.saddr_sgpr = 4;
   changed.mnemonic = "global_atomic_cmpswap_b32";
   changed.dst_vgpr = 6;
   changed.returns_old_value = true;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.returns_old_value = false;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable);
 
   struct VglobalContractCase {
     rj_code_target_id_t target;
@@ -2851,9 +2859,9 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
         contract_case.raw_saddr == 4u ? std::optional<uint16_t>(4u) : std::nullopt;
     representative.raw_scale_offset =
         contract_case.arch == ROCJITSU_CODE_ARCH_CDNA5 ? std::optional<bool>(false) : std::nullopt;
-    EXPECT_EQ(classify_consan_moi_inline_atomic_support(
-                  representative, ConSanMoiAtomicEventKind::Release, contract_case.arch),
-              ConSanMoiInlineAtomicSupport::Supported);
+    EXPECT_EQ(inline_atomic_exact_ordering_reason(representative, ConSanMoiAtomicEventKind::Release,
+                                                  contract_case.arch),
+              ConSanAtomicClassifierReason::None);
     EXPECT_EQ(consan_capability_disposition(contract_case.target,
                                             ConSanCapabilityEngine::InlineShadow,
                                             ConSanCapabilityForm::OrderedVglobalAtomic),
@@ -2861,54 +2869,46 @@ TEST(ConSanMoi, InlineAtomicSupportInventoryPinsAdmittedAndDeferredClasses) {
   }
   changed = site;
   changed.width_bits = 64;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::UnsupportedWidth);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::InvalidAccessWidth);
   changed = site;
   changed.raw_ioffset = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::NonzeroOffset);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::UnsupportedOffset);
   changed = site;
   changed.scope = ConSanMemoryScope::Wavefront;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::UnsupportedScope);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::UnsupportedScope);
   changed.scope = ConSanMemoryScope::Workgroup;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.scope = ConSanMemoryScope::System;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::Supported);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::None);
   changed.scope = static_cast<ConSanMemoryScope>(4);
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::UnsupportedScope);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::UnsupportedScope);
   changed = site;
   changed.raw_saddr = 4;
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::MissingOperands);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::UnsupportedInputWidth);
   changed = site;
   changed.addr_vgpr.reset();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::MissingOperands);
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::MissingOperands);
   changed = site;
   changed.scope.reset();
-  EXPECT_EQ(classify_consan_moi_inline_atomic_support(changed, ConSanMoiAtomicEventKind::Release,
-                                                      ROCJITSU_CODE_ARCH_RDNA4),
-            ConSanMoiInlineAtomicSupport::MissingOrderingMetadata);
-}
-
-TEST(ConSanMoi, InlineAtomicSupportReasonNamesAreStable) {
-  EXPECT_EQ(consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport::Supported),
-            "supported");
-  EXPECT_EQ(consan_moi_inline_atomic_support_name(
-                ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable),
-            "compare-exchange-outcome-unavailable");
+  EXPECT_EQ(inline_atomic_exact_ordering_reason(changed, ConSanMoiAtomicEventKind::Release,
+                                                ROCJITSU_CODE_ARCH_RDNA4),
+            ConSanAtomicClassifierReason::MissingOrderingMetadata);
 }
 
 TEST(ConSanMoi, SharedAtomicAddressPlanAliasesFlatAndMaterializesVglobal) {
@@ -4666,9 +4666,9 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
     const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
-    EXPECT_EQ(classify_consan_moi_inline_atomic_support(
-                  site, ConSanMoiAtomicEventKind::AcquireRelease, ROCJITSU_CODE_ARCH_RDNA4),
-              ConSanMoiInlineAtomicSupport::Supported);
+    EXPECT_EQ(inline_atomic_exact_ordering_reason(site, ConSanMoiAtomicEventKind::AcquireRelease,
+                                                  ROCJITSU_CODE_ARCH_RDNA4),
+              ConSanAtomicClassifierReason::None);
 
     const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
       return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;

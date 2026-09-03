@@ -32,10 +32,6 @@ struct FaultApplicationState {
   [[nodiscard]] bool successful() const { return errors.empty(); }
 };
 
-[[nodiscard]] ConSanFaultSelectionView fault_selection_view(const FaultApplicationState &state) {
-  return {.program_inventory = state.program_inventory, .fault_sites = state.fault_sites};
-}
-
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
                                              const ConSanFaultSelectionView &inventory,
                                              const ConSanOptions &options);

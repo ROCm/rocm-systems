@@ -4292,11 +4292,6 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
     EXPECT_TRUE(test_moi_persistent_sgpr_state(result).epoch());
     EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner(), 40u);
     ASSERT_FALSE(result.resource_plans.empty());
-    EXPECT_TRUE(
-        std::ranges::all_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-          return plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
-                 plan.scalar_tail_floor >= 40u;
-        }));
     EXPECT_FALSE(test_moi_owner_vgpr(result));
     EXPECT_FALSE(test_moi_epoch_vgpr(result));
     EXPECT_TRUE(

@@ -7713,9 +7713,7 @@ TEST(ConSanMoi, Rdna4ScalarRelativeVariantsUseFixedWaveSgprBound) {
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       ASSERT_FALSE(result.resource_plans.empty());
       EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
-        return plan.current_sgpr_count == 106u && plan.max_referenced_sgpr_count >= 81u &&
-               plan.scalar_tail_floor == 106u && plan.has_indirect_sgpr_access &&
-               plan.sgpr_reference_coverage_complete;
+        return plan.current_sgpr_count == 106u && plan.max_referenced_sgpr_count >= 81u;
       }));
       EXPECT_FALSE(test_moi_persistent_sgpr_state(result).owner());
       EXPECT_FALSE(test_moi_persistent_sgpr_state(result).epoch());
@@ -10201,10 +10199,6 @@ TEST(ConSanMoi, Cdna4ScalarHoleFailsClosedWithoutCompleteTextCoverage) {
   EXPECT_FALSE(test_moi_persistent_sgpr_state(result).owner());
   EXPECT_FALSE(test_moi_persistent_sgpr_state(result).epoch());
   ASSERT_FALSE(result.resource_plans.empty());
-  EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
-    return !plan.has_indirect_sgpr_access && !plan.sgpr_reference_coverage_complete &&
-           plan.scalar_tail_floor >= 104u;
-  }));
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("unresolved guest call s_swappc_b64") != std::string::npos;
   })) << testing::PrintToString(result.warnings);

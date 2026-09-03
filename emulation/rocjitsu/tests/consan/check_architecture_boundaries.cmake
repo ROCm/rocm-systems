@@ -138,6 +138,21 @@ foreach(_file IN ITEMS consan_moi_sync_emission.cpp consan_moi_sync_emission.h)
     )
 endforeach()
 
+# Keep classifier and resource-planning contracts singular. These names were
+# retired after they became test-only projections of the production atomic
+# classifier and placement result; recreating them would restore parallel APIs
+# whose only consumer is the test suite.
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_core_types.h.inc"
+    "ConSanMoiInlineAtomicSupport|classify_consan_moi_inline_atomic_support|consan_moi_inline_atomic_support_name"
+    "InlineShadow tests must consume the production atomic classifier"
+)
+_consan_assert_no_match(
+    "${_consan_dir}/consan_resource_types.h.inc"
+    "scalar_tail_floor|has_indirect_sgpr_access|sgpr_reference_coverage_complete"
+    "candidate resource plans may not publish test-only scalar telemetry"
+)
+
 # The production build graph is intentionally small and forward-only:
 # contracts -> target normalization -> analysis -> transformation ->
 # independent validation -> orchestration. Validation also reads analysis

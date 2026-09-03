@@ -74,18 +74,6 @@ plan_consan_moi_lazy_workgroup_shadow(uint32_t original_group_segment_size,
   return layout;
 }
 
-enum class ConSanMoiInlineAtomicSupport : uint8_t {
-  Supported,
-  NonFlatAddress,
-  NonzeroOffset,
-  UnsupportedScope,
-  UnsupportedWidth,
-  CompareExchangeOutcomeUnavailable,
-  UnsupportedEncoding,
-  MissingOperands,
-  MissingOrderingMetadata,
-};
-
 /// Consumer-neutral effective-address recipe for MOI atomic instrumentation.
 /// Inline-shadow and record/replay must use the same recipe so that they key
 /// synchronization metadata by exactly the address consumed by the guest
@@ -181,57 +169,6 @@ plan_consan_moi_atomic_address(const ConSanAtomicLoweringForm &form, uint16_t sc
 build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan &plan,
                                                 uint16_t vcc_save_sgpr, uint16_t scc_save_sgpr,
                                                 rj_code_arch_t arch);
-
-[[nodiscard]] inline ConSanMoiInlineAtomicSupport
-classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
-                                          ConSanMoiAtomicEventKind event_kind, rj_code_arch_t arch,
-                                          bool is_rmw = true) {
-  (void)event_kind;
-  switch (classify_consan_atomic_lowering(site, arch, is_rmw).exact_ordering_reason) {
-  case ConSanAtomicClassifierReason::None:
-    return ConSanMoiInlineAtomicSupport::Supported;
-  case ConSanAtomicClassifierReason::UnsupportedAddressSource:
-  case ConSanAtomicClassifierReason::TargetUnavailable:
-    return ConSanMoiInlineAtomicSupport::NonFlatAddress;
-  case ConSanAtomicClassifierReason::InvalidAccessWidth:
-    return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
-  case ConSanAtomicClassifierReason::UnsupportedEncoding:
-    return ConSanMoiInlineAtomicSupport::UnsupportedEncoding;
-  case ConSanAtomicClassifierReason::NonzeroImmediateOffset:
-    return ConSanMoiInlineAtomicSupport::NonzeroOffset;
-  case ConSanAtomicClassifierReason::MissingOperands:
-  case ConSanAtomicClassifierReason::UnsupportedInputWidth:
-  case ConSanAtomicClassifierReason::ResultAddressAlias:
-    return ConSanMoiInlineAtomicSupport::MissingOperands;
-  case ConSanAtomicClassifierReason::UnsupportedOffset:
-    return ConSanMoiInlineAtomicSupport::NonzeroOffset;
-  case ConSanAtomicClassifierReason::CompareExchangeOutcomeUnavailable:
-    return ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable;
-  case ConSanAtomicClassifierReason::MissingOrderingMetadata:
-    return ConSanMoiInlineAtomicSupport::MissingOrderingMetadata;
-  case ConSanAtomicClassifierReason::UnsupportedScope:
-    return ConSanMoiInlineAtomicSupport::UnsupportedScope;
-  case ConSanAtomicClassifierReason::Count:
-    break;
-  }
-  return ConSanMoiInlineAtomicSupport::UnsupportedEncoding;
-}
-
-[[nodiscard]] constexpr std::string_view
-consan_moi_inline_atomic_support_name(ConSanMoiInlineAtomicSupport support) {
-  using E = ConSanMoiInlineAtomicSupport;
-  constexpr auto vocabulary = make_consan_enum_vocabulary(
-      "unknown", consan_enum(E::Supported, "supported"),
-      consan_enum(E::NonFlatAddress, "non-flat-address"),
-      consan_enum(E::NonzeroOffset, "nonzero-offset"),
-      consan_enum(E::UnsupportedScope, "unsupported-scope"),
-      consan_enum(E::UnsupportedWidth, "unsupported-width"),
-      consan_enum(E::CompareExchangeOutcomeUnavailable, "compare-exchange-outcome-unavailable"),
-      consan_enum(E::UnsupportedEncoding, "unsupported-encoding"),
-      consan_enum(E::MissingOperands, "missing-operands"),
-      consan_enum(E::MissingOrderingMetadata, "missing-ordering-metadata"));
-  return vocabulary.name(support);
-}
 
 /// Shared ordinary per-buffer safety bound used by Sampled and InlineShadow.
 /// Each mode publishes its selected ceiling through the MOI mode registry.

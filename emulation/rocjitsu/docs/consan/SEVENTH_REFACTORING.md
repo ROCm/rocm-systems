@@ -1345,3 +1345,41 @@ and suffix already factored into helpers account for most genuine overlap;
 unifying the remaining orchestration is estimated to remove only 200--350
 lines before charging the union-shaped plan and storage dispatch. This is not
 a credible macro replacement, so the two storage owners remain explicit.
+
+### 14.17 Consolidation: delete test-only contract projections
+
+A whole-tree public-contract consumer audit found two representations that had
+survived only because tests asserted them. `ConSanMoiInlineAtomicSupport` and
+its classifier/name helpers were a lossy InlineShadow-named projection of the
+production atomic classifier. They performed no mode-specific work: the event
+kind was ignored, and the helper merely coalesced several precise
+`ConSanAtomicClassifierReason` values into a second enum. Tests now consume the
+sole production classifier and assert its more precise normalization,
+operand, offset, ordering, and scope reasons directly.
+
+Likewise, three fields on `ConSanCandidateResourcePlan` summarized scalar-tail
+diagnostics that no production consumer read. Placement already uses each
+owner's complete scalar context at the point where it makes the actual
+allocation decision; the aggregate fields were populated afterward only for
+test inspection. Those fields, their aggregation, and the now-de-unused local
+summary are gone. So is a zero-use `FaultApplicationState` view builder, whose
+real selection callers already construct the required immutable view at their
+ownership boundary. Tests retain stronger assertions over selected
+resource plans, placement outcomes, emitted patches, and transformer behavior.
+
+The architecture-boundary test now rejects restoration of the parallel atomic
+classifier API or the test-only candidate-plan telemetry. Fresh accounting is:
+
+| Signal | Before consolidation | Consolidated | Slice change | Campaign change |
+| --- | ---: | ---: | ---: | ---: |
+| Production files | 313 | 313 | 0 | +2 locality owners |
+| Physical production lines | 96,187 | **96,100** | **-87** | **-1,360** |
+| Nonblank production lines | 89,847 | **89,764** | **-83** | **-1,291** |
+| Production implementation lines | 82,381 | **82,302** | **-79** | **-1,179** |
+
+This is deliberately consolidation rather than macro-slice credit: it follows
+the broad contract-lifetime audit and does not satisfy the 750-line subsystem
+floor by itself. The focused MOI tests and architecture-boundary test passed,
+followed by the complete nonphysical ConSan gate: **4,765/4,765** tests at
+`-j16` across all four modes and all five emulated targets. No physical gfx1201
+test was run.
