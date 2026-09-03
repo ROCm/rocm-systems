@@ -4310,7 +4310,9 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
   const uint64_t helper_offset = kSharedHelperEntryWord * sizeof(uint32_t);
   const uint32_t first_nop = build_s_nop(3, ROCJITSU_CODE_ARCH_CDNA3);
   const uint32_t second_nop = build_s_nop(4, ROCJITSU_CODE_ARCH_CDNA3);
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  BinaryTranslatorOptions options;
+  options.preserve_source_text_prefix = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3, 0, options);
   translator.set_instruction_rewrite_callback(
       [&](const Instruction &, uint64_t source_offset)
           -> std::optional<std::vector<uint32_t>> {
@@ -4335,6 +4337,10 @@ TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
   ASSERT_TRUE(translated.is_valid());
   ASSERT_EQ(translated.text_sections().size(), 1u);
   const Section &text = *translated.text_sections().front();
+  for (const AmdGpuFunctionInfo &function : translated.functions()) {
+    ASSERT_LE(function.entry_text_offset, text.size());
+    EXPECT_LE(function.code_size, text.size() - function.entry_text_offset);
+  }
   const auto translated_words =
       std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text.data()),
                                 text.size() / sizeof(uint32_t));

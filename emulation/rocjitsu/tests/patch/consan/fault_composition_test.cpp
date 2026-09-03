@@ -808,15 +808,21 @@ TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
   options.sc_perturb_required_count = 1;
   options.max_patches = 2;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 2u);
-  EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
-  EXPECT_EQ(result.patches[0].anchor_offset, 32u);
-  EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
-  EXPECT_EQ(result.patches[1].anchor_offset, 4u);
-  EXPECT_EQ(result.patches[1].trampoline_offset,
-            (kernel_words.size() + function_words.size()) * sizeof(uint32_t));
+  const auto flat = std::ranges::find(result.patches, ConSanPatchKind::FlatLoadCheckTrap,
+                                      &ConSanPatchInfo::kind);
+  const auto perturbation = std::ranges::find(result.patches,
+                                              ConSanPatchKind::TrampolineScPerturbation,
+                                              &ConSanPatchInfo::kind);
+  ASSERT_NE(flat, result.patches.end());
+  ASSERT_NE(perturbation, result.patches.end());
+  EXPECT_EQ(flat->anchor_offset, 32u);
+  EXPECT_EQ(perturbation->anchor_offset, 4u);
+  ASSERT_TRUE(result.text_relocation);
+  EXPECT_GE(flat->trampoline_offset, result.text_relocation->source_text_size);
 }
 
 TEST(ConSan, PerturbationEmissionAcceptsReturningOrderedCasReleaseEdge) {

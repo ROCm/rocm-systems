@@ -253,6 +253,8 @@ struct ConSanTransformArtifacts {
   ConSanMoiOperatingPoint moi_operating_point;
   /// Validated byte-level changes emitted by lowering.
   std::vector<ConSanPatchInfo> patches;
+  /// Optional image-level executable relocation enclosing active bodies.
+  std::optional<ConSanTextRelocationProof> text_relocation;
   /// Complete validated code-object replacement, or empty when none is installable.
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
@@ -286,6 +288,7 @@ struct ConSanTransformArtifacts {
   void discard_candidate_modification() {
     replacement.clear();
     patches.clear();
+    text_relocation.reset();
     coverage_ledger.discard_instrumented_lowerings();
   }
   /// Publish the bytes, semantic commits, and patch proof of one completed

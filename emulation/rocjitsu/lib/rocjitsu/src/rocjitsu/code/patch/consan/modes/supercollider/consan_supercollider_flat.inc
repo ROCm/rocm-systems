@@ -192,7 +192,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                      const ConSanTargetProfile &target,
                                      const ConSanOptions &options, ConSanTransformArtifacts &result,
-                                     std::span<const ByteRange> initial_reserved_ranges) {
+                                     std::span<const ByteRange>) {
   const rj_code_arch_t arch = target.arch;
 
   const std::unordered_set<uint64_t> admitted_file_offsets = sc_admitted_access_file_offsets(
@@ -217,27 +217,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
-  uint64_t appended_cave_offset = 0;
-  if (code_object.text_sections().size() == 1)
-    appended_cave_offset = code_object.text_sections().front()->size();
-  std::vector<LocalNopCave> local_nop_caves =
-      find_uncovered_nop_caves(code_object, result.program_inventory, arch);
-  std::erase_if(local_nop_caves, [&](const LocalNopCave &cave) {
-    return overlaps_preapplied_reserved_range(
-        result.program_inventory,
-        {cave.text_offset,
-         cave.text_offset + static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t)});
-  });
-  uint32_t max_uncovered_nop_cave_words = 0;
-  for (const LocalNopCave &cave : local_nop_caves)
-    max_uncovered_nop_cave_words = std::max(max_uncovered_nop_cave_words, cave.word_count);
-  BranchOnlyRelayRouter branch_router;
-  for (const LocalNopCave &cave : local_nop_caves) {
-    for (uint64_t word = 0; word < cave.word_count; ++word) {
-      (void)branch_router.offer(cave.text_offset + word * sizeof(uint32_t),
-                                BranchOnlyRelayProvenance::PristineNop);
-    }
-  }
 
   struct FlatOwnerPlanningContext {
     uint64_t descriptor_file_offset = 0;
@@ -271,19 +250,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   struct FlatCheckTrapCandidate {
     const ConSanAccessInventorySite *site = nullptr;
-    const LocalNopCave *local_cave = nullptr;
-    const LocalNopCave *entry_island = nullptr;
     uint16_t scratch_vgpr = 0;
     uint64_t requested_words = 0;
-    bool use_local_cave = false;
-    bool use_appended_cave = false;
-    std::optional<BranchOnlyRelayRoute> branch_only_route;
-    std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch;
     std::vector<uint64_t> owner_descriptor_file_offsets;
-    std::optional<DbiPatchPlacement> placement;
-    bool entry_island_at_anchor = false;
-    uint32_t displaced_original_size = 0;
-    std::vector<uint32_t> displaced_tail_words;
     uint16_t vcc_save_sgpr = 0;
     std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
     std::optional<VgprSpillSequence> vgpr_spill;
@@ -296,44 +265,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     Mixed,
   };
 
-  const auto make_candidate = [](const ConSanAccessInventorySite *site,
-                                 const LocalNopCave *local_cave, const LocalNopCave *entry_island,
-                                 uint16_t scratch_vgpr, uint64_t requested_words,
-                                 bool use_local_cave, bool use_appended_cave,
-                                 std::optional<LdsCheckTrapIndirectScalarScratch> indirect_scratch,
+  const auto make_candidate = [](const ConSanAccessInventorySite *site, uint16_t scratch_vgpr,
+                                 uint64_t requested_words,
                                  const std::vector<uint64_t> &owner_descriptor_file_offsets) {
     FlatCheckTrapCandidate candidate;
     candidate.site = site;
-    candidate.local_cave = local_cave;
-    candidate.entry_island = entry_island;
     candidate.scratch_vgpr = scratch_vgpr;
     candidate.requested_words = requested_words;
-    candidate.use_local_cave = use_local_cave;
-    candidate.use_appended_cave = use_appended_cave;
-    candidate.indirect_scratch = indirect_scratch;
     candidate.owner_descriptor_file_offsets = owner_descriptor_file_offsets;
     return candidate;
   };
 
-  std::vector<FlatCheckTrapCandidate> inline_candidates;
-  std::vector<FlatCheckTrapCandidate> local_cave_candidates;
-  std::vector<FlatCheckTrapCandidate> appended_cave_candidates;
-  std::vector<FlatCheckTrapCandidate> branch_only_appended_candidates;
-  std::vector<FlatCheckTrapCandidate> indirect_appended_candidates;
-  std::vector<LocalNopCave> flat_entry_islands;
-  size_t flat_entry_island_count = 0;
-  for (const LocalNopCave &cave : local_nop_caves)
-    flat_entry_island_count += cave.word_count / kLdsCheckTrapIndirectJumpWords;
-  flat_entry_islands.reserve(flat_entry_island_count);
-  for (const LocalNopCave &cave : local_nop_caves) {
-    for (uint64_t word = 0; word + kLdsCheckTrapIndirectJumpWords <= cave.word_count;
-         word += kLdsCheckTrapIndirectJumpWords) {
-      flat_entry_islands.push_back(
-          {.text_offset = cave.text_offset + word * sizeof(uint32_t),
-           .file_offset = cave.file_offset + word * sizeof(uint32_t),
-           .word_count = static_cast<uint32_t>(kLdsCheckTrapIndirectJumpWords)});
-    }
-  }
+  std::vector<FlatCheckTrapCandidate> candidates;
   bool skipped_supported_site_for_excessive_delay = false;
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
@@ -341,28 +284,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   size_t mixed_stack_owner_spill_rejection_count = 0;
   size_t dynamic_stack_spill_encoding_failure_count = 0;
   size_t private_spill_encoding_failure_count = 0;
-  size_t append_cave_reachable_candidate_count = 0;
-  size_t local_cave_reachable_candidate_count = 0;
-  uint32_t max_observed_padding_words = 0;
-  auto reachable_local_caves = [&](const ConSanAccessInventorySite &site,
-                                   uint64_t requested_words) {
-    std::vector<const LocalNopCave *> caves;
-    const uint64_t cave_words = requested_words + 1u;
-    for (const LocalNopCave &cave : local_nop_caves) {
-      // find_uncovered_nop_caves already proves that the complete run lies
-      // outside every decoded kernel/function range. Ownership describes the
-      // adjacent symbol, not an execution constraint: a direct branch may use
-      // any such nonoverlapping run when both outbound and return edges reach.
-      if (cave.word_count < cave_words)
-        continue;
-      const uint64_t return_branch_pc = cave.text_offset + requested_words * sizeof(uint32_t);
-      if (compute_sopp_branch_simm16(site.physical_id.original_text_offset, cave.text_offset) &&
-          compute_sopp_branch_simm16(return_branch_pc,
-                                     site.physical_id.original_text_offset + site.instruction_size))
-        caves.push_back(&cave);
-    }
-    return caves;
-  };
   auto visit_site = [&](const ConSanAccessInventorySite &site,
                         std::optional<uint16_t> min_auto_scratch_vgpr,
                         std::optional<uint16_t> max_auto_scratch_vgpr,
@@ -482,7 +403,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       skipped_supported_site_for_excessive_delay = true;
       return;
     }
-    const uint32_t padding_words = static_cast<uint32_t>(requested_words - 3u);
     const std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill =
         spill_vcc_save_pair_to_vgprs
             ? std::optional<ConSanSuperColliderScalarVccSpill>{ConSanSuperColliderScalarVccSpill{
@@ -494,137 +414,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                             : ConSanSuperColliderScalarVccReservoir::PackedLanes,
               }}
             : std::nullopt;
-    const auto finish_candidate = [&](FlatCheckTrapCandidate &candidate) {
-      candidate.vcc_save_sgpr = *vcc_save;
-      candidate.scalar_vcc_spill = scalar_vcc_spill;
-      candidate.vgpr_spill = vgpr_spill;
-      candidate.dynamic_stack_spill = dynamic_stack_spill;
-    };
     ++scratchable_candidate_count;
-    uint32_t observed_padding = count_nop_padding(
-        original_bytes, site.file_offset + site.instruction_size, padding_words, arch);
-    if (overlaps_preapplied_reserved_range(
-            result.program_inventory,
-            {site.physical_id.original_text_offset,
-             site.physical_id.original_text_offset +
-                 requested_words * static_cast<uint64_t>(sizeof(uint32_t))})) {
-      observed_padding = 0;
-    }
-    max_observed_padding_words = std::max(max_observed_padding_words, observed_padding);
-    // Text growth must start from the same image whose earlier patches we retain.
-    // The combined native-LDS + flat path currently carries those earlier edits
-    // in result.replacement, so leave it to inline/local placement for now.
-    if (appended_cave_offset != 0 && result.replacement.empty()) {
-      const uint64_t return_branch_pc = appended_cave_offset + requested_words * sizeof(uint32_t);
-      if (compute_sopp_branch_simm16(site.physical_id.original_text_offset, appended_cave_offset) &&
-          compute_sopp_branch_simm16(return_branch_pc, site.physical_id.original_text_offset +
-                                                           site.instruction_size)) {
-        ++append_cave_reachable_candidate_count;
-        appended_cave_candidates.push_back(
-            make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
-                           /*use_local_cave=*/false, /*use_appended_cave=*/true, std::nullopt,
-                           owner_descriptor_file_offsets));
-        finish_candidate(appended_cave_candidates.back());
-      }
-      branch_only_appended_candidates.push_back(
-          make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
-                         /*use_local_cave=*/false, /*use_appended_cave=*/true, std::nullopt,
-                         owner_descriptor_file_offsets));
-      finish_candidate(branch_only_appended_candidates.back());
-    }
-    const std::vector<const LocalNopCave *> caves = reachable_local_caves(site, requested_words);
-    if (!caves.empty())
-      ++local_cave_reachable_candidate_count;
-    for (const LocalNopCave *cave : caves) {
-      local_cave_candidates.push_back(
-          make_candidate(&site, cave, nullptr, *scratch, requested_words,
-                         /*use_local_cave=*/true, /*use_appended_cave=*/false, std::nullopt,
-                         owner_descriptor_file_offsets));
-      finish_candidate(local_cave_candidates.back());
-    }
-    if (!scalar_vcc_spill && appended_cave_offset != 0 && result.replacement.empty() &&
-        !owner_descriptor_file_offsets.empty()) {
-      auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
-          site_inst, owner_liveness, min_fresh_sgpr, options);
-      // Prefer fresh scalar words above every owner reference.  A maximally
-      // allocated owner may leave too little room there for the PC pair plus
-      // SCC/VCC saves even though liveness proves a disjoint dead window at
-      // the shared function site.  Match the LDS far-trampoline policy and
-      // use that bounded fallback before rejecting the supported access.
-      if (!scalar_scratch && min_fresh_sgpr) {
-        scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(site_inst, owner_liveness,
-                                                                        std::nullopt, options);
-      }
-      if (scalar_scratch) {
-        for (const LocalNopCave &island : flat_entry_islands) {
-          if (!compute_sopp_branch_simm16(site.physical_id.original_text_offset,
-                                          island.text_offset))
-            continue;
-          indirect_appended_candidates.push_back(
-              make_candidate(&site, nullptr, &island, *scratch, requested_words,
-                             /*use_local_cave=*/false, /*use_appended_cave=*/true, scalar_scratch,
-                             owner_descriptor_file_offsets));
-          indirect_appended_candidates.back().vcc_save_sgpr = scalar_scratch->vcc_save_sgpr;
-        }
-        if (code_object.text_sections().size() == 1) {
-          const Section *text = code_object.text_sections().front();
-          const auto text_bytes = std::span<const uint8_t>(
-              reinterpret_cast<const uint8_t *>(text->data()), text->size());
-          std::vector<uint32_t> displaced_words;
-          uint64_t cursor = site.physical_id.original_text_offset;
-          while (displaced_words.size() < kLdsCheckTrapIndirectJumpWords) {
-            const Instruction *instruction =
-                find_instruction_at_text_offset(KernelBlockScope(block_ptrs), cursor);
-            if (instruction == nullptr || instruction->size() <= 0 ||
-                instruction->size() % static_cast<int>(sizeof(uint32_t)) != 0 ||
-                instruction->raw_encoding() == nullptr ||
-                (cursor != site.physical_id.original_text_offset &&
-                 (!is_relocatable_anchor(*instruction, cursor, text_bytes, arch) ||
-                  overlaps_preapplied_reserved_range(
-                      result.program_inventory,
-                      {cursor, cursor + static_cast<uint64_t>(instruction->size())})))) {
-              displaced_words.clear();
-              break;
-            }
-            const size_t old_size = displaced_words.size();
-            displaced_words.resize(old_size + instruction->size() / sizeof(uint32_t));
-            std::memcpy(displaced_words.data() + old_size, text_bytes.data() + cursor,
-                        instruction->size());
-            cursor += static_cast<uint64_t>(instruction->size());
-          }
-          const uint64_t displaced_size = displaced_words.size() * sizeof(uint32_t);
-          BasicBlock *entry_block =
-              block_for_offset(block_index, site.physical_id.original_text_offset);
-          const bool single_entry_window =
-              entry_block != nullptr &&
-              site.physical_id.original_text_offset >= entry_block->start_offset() &&
-              site.physical_id.original_text_offset <= entry_block->end_offset() &&
-              displaced_size <= entry_block->end_offset() - site.physical_id.original_text_offset;
-          if (displaced_words.size() >= kLdsCheckTrapIndirectJumpWords &&
-              displaced_size <= std::numeric_limits<uint32_t>::max() && single_entry_window) {
-            FlatCheckTrapCandidate direct =
-                make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
-                               /*use_local_cave=*/false, /*use_appended_cave=*/true, scalar_scratch,
-                               owner_descriptor_file_offsets);
-            direct.entry_island_at_anchor = true;
-            direct.vcc_save_sgpr = scalar_scratch->vcc_save_sgpr;
-            direct.displaced_original_size =
-                static_cast<uint32_t>(displaced_words.size() * sizeof(uint32_t));
-            direct.displaced_tail_words.assign(displaced_words.begin() +
-                                                   site.instruction_size / sizeof(uint32_t),
-                                               displaced_words.end());
-            indirect_appended_candidates.push_back(std::move(direct));
-          }
-        }
-      }
-    }
-    if (observed_padding < padding_words)
-      return;
-    inline_candidates.push_back(make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
-                                               /*use_local_cave=*/false,
-                                               /*use_appended_cave=*/false, std::nullopt,
-                                               owner_descriptor_file_offsets));
-    finish_candidate(inline_candidates.back());
+    candidates.push_back(
+        make_candidate(&site, *scratch, requested_words, owner_descriptor_file_offsets));
+    candidates.back().vcc_save_sgpr = *vcc_save;
+    candidates.back().scalar_vcc_spill = scalar_vcc_spill;
+    candidates.back().vgpr_spill = vgpr_spill;
+    candidates.back().dynamic_stack_spill = dynamic_stack_spill;
   };
 
   // Shared functions can contribute hundreds of candidate sites to the same
@@ -789,291 +585,14 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  auto candidate_order = [](const FlatCheckTrapCandidate &lhs, const FlatCheckTrapCandidate &rhs) {
-    if (lhs.site->file_offset != rhs.site->file_offset)
-      return lhs.site->file_offset < rhs.site->file_offset;
-    if (lhs.use_local_cave != rhs.use_local_cave)
-      return !lhs.use_local_cave;
-    if (lhs.use_appended_cave != rhs.use_appended_cave)
-      return !lhs.use_appended_cave;
-    if (lhs.entry_island_at_anchor != rhs.entry_island_at_anchor)
-      return lhs.entry_island_at_anchor;
-    const uint64_t lhs_cave = lhs.local_cave ? lhs.local_cave->file_offset : 0;
-    const uint64_t rhs_cave = rhs.local_cave ? rhs.local_cave->file_offset : 0;
-    return lhs_cave < rhs_cave;
-  };
-  std::ranges::sort(inline_candidates, candidate_order);
-  std::ranges::sort(local_cave_candidates, candidate_order);
-  std::ranges::sort(appended_cave_candidates, candidate_order);
-  std::ranges::sort(branch_only_appended_candidates, candidate_order);
-  std::ranges::sort(indirect_appended_candidates, candidate_order);
-
   const size_t max_patches =
       options.max_patches_is_expert_limit ? options.max_patches : supported_candidate_count;
-  std::vector<FlatCheckTrapCandidate> selected_candidates;
-  selected_candidates.reserve(std::min(max_patches, supported_candidate_count));
-  DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
-  BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
-  const auto prepare_direct_branch_reservoirs = [&]() {
-    if (selected_candidates.size() >= max_patches || branch_only_appended_candidates.empty() ||
-        pristine_text.empty()) {
-      return true;
-    }
-    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
-    protected_ranges.reserve(admitted_sites.size() + local_nop_caves.size() +
-                             result.program_inventory.kernels().size() +
-                             result.program_inventory.functions().size() +
-                             result.program_inventory.preapplied_mutation().reserved_ranges.size() +
-                             result.patches.size());
-    for (const auto &[file_offset, access] : admitted_sites) {
-      (void)file_offset;
-      protected_ranges.emplace_back(access->physical_id.original_text_offset,
-                                    access->physical_id.original_text_offset +
-                                        access->instruction_size);
-    }
-    for (const LocalNopCave &cave : local_nop_caves) {
-      protected_ranges.emplace_back(cave.text_offset,
-                                    cave.text_offset +
-                                        static_cast<uint64_t>(cave.word_count) * sizeof(uint32_t));
-    }
-    const auto protect_sync_sites = [&](const auto &container) {
-      const auto append = [&](const auto &sites) {
-        for (const auto &site : sites)
-          protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-      };
-      append(container.barrier_sites);
-      append(container.atomic_sites);
-      append(container.fence_sites);
-    };
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      protect_sync_sites(kernel);
-      protected_ranges.emplace_back(
-          kernel.entry_text_offset,
-          std::min<uint64_t>(pristine_text.size(), kernel.entry_text_offset + 256u));
-    }
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      protect_sync_sites(function);
-    for (const ConSanPreappliedReservedRange &range :
-         result.program_inventory.preapplied_mutation().reserved_ranges)
-      protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
-    for (const ConSanPatchLoweringProduct &patch : result.patches) {
-      protected_ranges.emplace_back(patch.anchor_offset,
-                                    patch.anchor_offset +
-                                        std::max<uint32_t>(patch.original_size, sizeof(uint32_t)));
-      if (patch.trampoline_size != 0u) {
-        protected_ranges.emplace_back(patch.trampoline_offset,
-                                      patch.trampoline_offset + patch.trampoline_size);
-      }
-    }
-    std::vector<const FlatCheckTrapCandidate *> pending_candidates;
-    pending_candidates.reserve(branch_only_appended_candidates.size());
-    for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates) {
-      const bool already_selected =
-          std::ranges::any_of(selected_candidates, [&](const FlatCheckTrapCandidate &selected) {
-            return selected.site->physical_id == candidate.site->physical_id;
-          });
-      if (!already_selected)
-        pending_candidates.push_back(&candidate);
-    }
-    if (pending_candidates.empty())
-      return true;
-    const uint64_t route_frontier_source =
-        std::ranges::min(pending_candidates, {}, [](const FlatCheckTrapCandidate *candidate) {
-          return candidate->site->physical_id.original_text_offset;
-        })->site->physical_id.original_text_offset;
-    const size_t remaining_selection_count = max_patches - selected_candidates.size();
-    const size_t reservoir_demand_count =
-        std::min(remaining_selection_count, pending_candidates.size());
-    std::string relay_error;
-    if (!branch_router.plan_direct_reservoirs(
-            block_ptrs, pristine_text, protected_ranges, arch, route_frontier_source,
-            2u * reservoir_demand_count, placement_planner, direct_branch_reservoirs, &relay_error,
-            {.discovery = options.direct_reservoir_planning_work_limit})) {
-      result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
-      return false;
-    }
-    return true;
-  };
-  std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
-  const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
-                                              uint32_t original_size) {
-    branch_router.retire_range(candidate.site->physical_id.original_text_offset, original_size);
-    if (candidate.entry_island_at_anchor || original_size <= sizeof(uint32_t))
-      return;
-    for (uint64_t offset = candidate.site->physical_id.original_text_offset + sizeof(uint32_t);
-         offset < candidate.site->physical_id.original_text_offset + original_size;
-         offset += sizeof(uint32_t)) {
-      if (selected_flat_anchor_relay_offsets.insert(offset).second) {
-        (void)branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedAnchor);
-      }
-    }
-  };
-  std::unordered_set<uint64_t> selected_flat_site_offsets;
-  auto try_select_candidate = [&](FlatCheckTrapCandidate candidate,
-                                  bool branch_only_continuation = false) {
-    if (selected_candidates.size() >= max_patches)
-      return;
-    const ConSanAccessInventorySite &site = *candidate.site;
-    if (selected_flat_site_offsets.contains(site.physical_id.original_text_offset))
-      return;
-    const uint64_t body_bytes =
-        (candidate.requested_words +
-         (candidate.entry_island_at_anchor
-              ? 1u + static_cast<uint64_t>(candidate.displaced_tail_words.size())
-              : 0u)) *
-        sizeof(uint32_t);
-    const uint32_t original_size = candidate.entry_island_at_anchor
-                                       ? candidate.displaced_original_size
-                                       : site.instruction_size;
-    const ByteRange anchor_file_range{site.file_offset, site.file_offset + original_size};
-    if (overlaps_reserved_range(initial_reserved_ranges, anchor_file_range))
-      return;
-    if (candidate.use_local_cave) {
-      if (candidate.local_cave == nullptr)
-        return;
-      const ByteRange cave_file_range{candidate.local_cave->file_offset,
-                                      candidate.local_cave->file_offset + body_bytes +
-                                          sizeof(uint32_t)};
-      if (overlaps_reserved_range(initial_reserved_ranges, cave_file_range))
-        return;
-    }
-    if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
-      if (candidate.entry_island != nullptr) {
-        const ByteRange island_file_range{candidate.entry_island->file_offset,
-                                          candidate.entry_island->file_offset +
-                                              kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)};
-        if (overlaps_reserved_range(initial_reserved_ranges, island_file_range))
-          return;
-        const ByteRange island_text_range{candidate.entry_island->text_offset,
-                                          candidate.entry_island->text_offset +
-                                              kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)};
-        if (placement_planner.overlaps_reserved_range(island_text_range.begin,
-                                                      island_text_range.end))
-          return;
-      }
-    }
-    if (!candidate.use_local_cave && !candidate.use_appended_cave &&
-        overlaps_reserved_range(initial_reserved_ranges,
-                                {site.file_offset, site.file_offset + body_bytes}))
-      return;
-
-    if (branch_only_continuation) {
-      DbiPatchPlacementPlanner tentative_planner = placement_planner;
-      const auto placement = tentative_planner.plan_indirect_appended(
-          site.physical_id.original_text_offset, original_size, body_bytes + sizeof(uint32_t));
-      if (!placement)
-        return;
-
-      std::string relay_error;
-      auto route = branch_router.plan_pair(
-          tentative_planner, site.physical_id.original_text_offset, placement->body_offset,
-          placement->body_offset + body_bytes,
-          site.physical_id.original_text_offset + original_size, &relay_error);
-      if (!route)
-        return;
-      if (!branch_router.commit(*route, &relay_error))
-        return;
-      if (!direct_branch_reservoirs.mark_claims_used(route->claims, &relay_error)) {
-        result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
-        return;
-      }
-      candidate.branch_only_route = std::move(*route);
-      placement_planner = std::move(tentative_planner);
-      candidate.placement = placement;
-      selected_candidates.push_back(std::move(candidate));
-      selected_flat_site_offsets.insert(site.physical_id.original_text_offset);
-      publish_flat_anchor_relays(selected_candidates.back(), original_size);
-      return;
-    }
-
-    if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
-      DbiPatchPlacementPlanner tentative_planner = placement_planner;
-      const auto placement = tentative_planner.plan_indirect_appended(
-          site.physical_id.original_text_offset, original_size,
-          body_bytes + kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
-      if (!placement || (candidate.entry_island != nullptr &&
-                         !tentative_planner.reserve_existing_range(
-                             candidate.entry_island->text_offset,
-                             kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t)))) {
-        return;
-      }
-      placement_planner = std::move(tentative_planner);
-      candidate.placement = placement;
-      selected_candidates.push_back(std::move(candidate));
-      selected_flat_site_offsets.insert(site.physical_id.original_text_offset);
-      publish_flat_anchor_relays(selected_candidates.back(), original_size);
-      if (selected_candidates.back().entry_island != nullptr) {
-        branch_router.retire_range(selected_candidates.back().entry_island->text_offset,
-                                   kLdsCheckTrapIndirectJumpWords * sizeof(uint32_t));
-      }
-      return;
-    }
-
-    DbiPatchPlacementRequest request;
-    request.anchor_offset = site.physical_id.original_text_offset;
-    request.original_size = site.instruction_size;
-    request.body_size = body_bytes;
-    request.inline_capacity =
-        (candidate.use_local_cave || candidate.use_appended_cave) ? 0u : body_bytes;
-    request.allow_appended_cave = candidate.use_appended_cave;
-    if (candidate.use_local_cave) {
-      request.local_cave = DbiPatchLocalCave{
-          candidate.local_cave->text_offset,
-          static_cast<uint64_t>(candidate.local_cave->word_count) * sizeof(uint32_t)};
-    }
-    DbiPatchPlacementPlanner tentative_planner = placement_planner;
-    const auto placement = tentative_planner.plan(request);
-    if (!placement)
-      return;
-    if ((candidate.use_local_cave && placement->kind != DbiPatchPlacementKind::LocalCave) ||
-        (candidate.use_appended_cave && placement->kind != DbiPatchPlacementKind::AppendedCave) ||
-        (!candidate.use_local_cave && !candidate.use_appended_cave &&
-         placement->kind != DbiPatchPlacementKind::Inline)) {
-      return;
-    }
-    placement_planner = std::move(tentative_planner);
-    candidate.placement = placement;
-    selected_candidates.push_back(std::move(candidate));
-    selected_flat_site_offsets.insert(site.physical_id.original_text_offset);
-    if (placement->kind == DbiPatchPlacementKind::Inline) {
-      branch_router.retire_range(placement->body_offset, placement->body_size);
-    } else {
-      publish_flat_anchor_relays(selected_candidates.back(), original_size);
-      if (placement->kind == DbiPatchPlacementKind::LocalCave) {
-        branch_router.retire_range(placement->body_offset, placement->return_branch_offset +
-                                                               sizeof(uint32_t) -
-                                                               placement->body_offset);
-      }
-    }
-  };
-
-  for (const FlatCheckTrapCandidate &candidate : inline_candidates)
-    try_select_candidate(candidate);
-  for (const FlatCheckTrapCandidate &candidate : appended_cave_candidates)
-    try_select_candidate(candidate);
-  for (const FlatCheckTrapCandidate &candidate : local_cave_candidates)
-    try_select_candidate(candidate);
-
-  for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
-    try_select_candidate(candidate, true);
-  if (selected_candidates.size() < max_patches && !branch_only_appended_candidates.empty()) {
-    BranchOnlyRelayRouter router_without_direct_reservoirs = branch_router;
-    DbiPatchPlacementPlanner planner_without_direct_reservoirs = placement_planner;
-    const size_t selected_before_direct_reservoirs = selected_candidates.size();
-    if (!prepare_direct_branch_reservoirs())
-      return;
-
-    for (const FlatCheckTrapCandidate &candidate : branch_only_appended_candidates)
-      try_select_candidate(candidate, true);
-
-    if (selected_candidates.size() == selected_before_direct_reservoirs) {
-      branch_router = std::move(router_without_direct_reservoirs);
-      placement_planner = std::move(planner_without_direct_reservoirs);
-      direct_branch_reservoirs = {};
-    }
-  }
-  for (const FlatCheckTrapCandidate &candidate : indirect_appended_candidates)
-    try_select_candidate(candidate);
+  std::ranges::sort(candidates, {}, [](const FlatCheckTrapCandidate &candidate) {
+    return candidate.site->file_offset;
+  });
+  if (candidates.size() > max_patches)
+    candidates.resize(max_patches);
+  std::vector<FlatCheckTrapCandidate> selected_candidates = std::move(candidates);
 
   const size_t selection_target = std::min(max_patches, supported_candidate_count);
   if (selected_candidates.size() < selection_target) {
@@ -1095,8 +614,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       return;
     }
     result.warnings.emplace_back(
-        "ConSan flat check/trap proof found no selectable padded or "
-        "local- or appended-cave-reachable likely group-FLAT load/store site; "
+        "ConSan flat check/trap proof found no selectable likely group-FLAT load/store site; "
         "supported_candidates=" +
         std::to_string(supported_candidate_count) +
         " scratchable_candidates=" + std::to_string(scratchable_candidate_count) +
@@ -1105,35 +623,16 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         std::to_string(mixed_stack_owner_spill_rejection_count) +
         " dynamic_stack_spill_encoding_failures=" +
         std::to_string(dynamic_stack_spill_encoding_failure_count) +
-        " private_spill_encoding_failures=" + std::to_string(private_spill_encoding_failure_count) +
-        " inline_candidates=" + std::to_string(inline_candidates.size()) +
-        " local_cave_candidates=" + std::to_string(local_cave_candidates.size()) +
-        " branch_only_appended_candidates=" +
-        std::to_string(branch_only_appended_candidates.size()) + " max_observed_padding_words=" +
-        std::to_string(max_observed_padding_words) + " append_cave_reachable_candidates=" +
-        std::to_string(append_cave_reachable_candidate_count) +
-        " uncovered_nop_caves=" + std::to_string(local_nop_caves.size()) +
-        " max_uncovered_nop_cave_words=" + std::to_string(max_uncovered_nop_cave_words) +
-        " local_cave_reachable_candidates=" + std::to_string(local_cave_reachable_candidate_count));
+        " private_spill_encoding_failures=" +
+        std::to_string(private_spill_encoding_failure_count));
     return;
   }
 
   struct PlannedFlatCheckTrapPatch {
     const ConSanAccessInventorySite *site = nullptr;
     std::vector<ConSanProbeIntentId> intent_ids;
-    const LocalNopCave *local_cave = nullptr;
-    const LocalNopCave *entry_island = nullptr;
     std::vector<uint32_t> words;
-    std::vector<uint32_t> cave_words;
-    std::vector<uint32_t> entry_island_words;
-    std::vector<uint32_t> anchor_words;
     ConSanPatchInfo info;
-    bool use_local_cave = false;
-    bool use_appended_cave = false;
-    std::optional<BranchOnlyRelayRoute> branch_only_route;
-    std::optional<DbiPatchPlacement> placement;
-    bool entry_island_at_anchor = false;
-    std::vector<uint32_t> displaced_tail_words;
   };
 
   const auto wait_flat = consan_sc_build_guest_flat_completion_wait(arch);
@@ -1170,9 +669,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
 
     std::optional<std::array<uint32_t, 3>> duplicate_load;
-    const bool use_trampoline = candidate.use_local_cave || candidate.use_appended_cave;
-    ConSanPatchKind patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatLoadCheckTrap
-                                                : ConSanPatchKind::InlineFlatLoadCheckTrap;
+    ConSanPatchKind patch_kind = ConSanPatchKind::FlatLoadCheckTrap;
     if (!access_scratch_tuple_base_is_valid(site, candidate.scratch_vgpr)) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof selected a misaligned tuple scratch base");
@@ -1183,8 +680,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     } else if (site.kind == ConSanLdsAccessKind::Write) {
       duplicate_load = build_flat_load_from_flat_store(
           original_access, site.lowering.form->element_width_bits, candidate.scratch_vgpr, arch);
-      patch_kind = use_trampoline ? ConSanPatchKind::LocalCaveFlatStoreCheckTrap
-                                  : ConSanPatchKind::InlineFlatStoreCheckTrap;
+      patch_kind = ConSanPatchKind::FlatStoreCheckTrap;
     }
     if (!duplicate_load) {
       result.errors.emplace_back("ConSan flat check/trap proof could not encode readback");
@@ -1200,22 +696,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           "ConSan flat check/trap proof selected a site without a pending semantic intent");
       return;
     }
-    planned.local_cave = candidate.local_cave;
-    planned.entry_island = candidate.entry_island;
-    planned.use_local_cave = candidate.use_local_cave;
-    planned.use_appended_cave = candidate.use_appended_cave;
-    planned.branch_only_route = candidate.branch_only_route;
-    planned.placement = candidate.placement;
-    planned.entry_island_at_anchor = candidate.entry_island_at_anchor;
-    planned.displaced_tail_words = candidate.displaced_tail_words;
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.physical_id.original_text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
     planned.info.sc_scalar_vcc_spill = candidate.scalar_vcc_spill;
     planned.info.owner_descriptor_file_offsets = candidate.owner_descriptor_file_offsets;
-    if (candidate.branch_only_route)
-      planned.info.branch_only_route =
-          consan_branch_only_continuation(*candidate.branch_only_route);
     planned.info.required_sgpr_count = static_cast<uint16_t>(candidate.vcc_save_sgpr + 2u);
     if (candidate.vgpr_spill) {
       planned.info.spilled_vgpr_count = candidate.vgpr_spill->vgpr_count;
@@ -1467,181 +952,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       planned.words = std::move(wrapped);
     }
 
-    if (use_trampoline) {
-      if (!candidate.placement || (candidate.use_local_cave && candidate.local_cave == nullptr)) {
-        result.errors.emplace_back("ConSan flat check/trap proof selected missing cave placement");
-        return;
-      }
-      planned.cave_words = planned.words;
-      uint64_t entry_target = candidate.placement->body_offset;
-      if (candidate.branch_only_route) {
-        if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor ||
-            candidate.indirect_scratch ||
-            candidate.placement->body_size !=
-                planned.words.size() * sizeof(uint32_t) + sizeof(uint32_t)) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof found inconsistent branch-only placement");
-          return;
-        }
-        const uint64_t return_source =
-            candidate.placement->body_offset + planned.words.size() * sizeof(uint32_t);
-        const uint64_t return_target =
-            candidate.branch_only_route->return_relay_offsets.empty()
-                ? candidate.placement->return_target
-                : candidate.branch_only_route->return_relay_offsets.front();
-        const auto ret = compute_sopp_branch_simm16(return_source, return_target);
-        if (!ret) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof branch-only return is unreachable");
-          return;
-        }
-        planned.cave_words.push_back(build_s_branch(*ret, arch));
-        entry_target = candidate.branch_only_route->entry_relay_offsets.empty()
-                           ? candidate.placement->body_offset
-                           : candidate.branch_only_route->entry_relay_offsets.front();
-      } else if (candidate.entry_island != nullptr || candidate.entry_island_at_anchor) {
-        if (!candidate.indirect_scratch) {
-          result.errors.emplace_back("ConSan flat check/trap proof lost indirect scalar scratch");
-          return;
-        }
-        const auto &scalar = *candidate.indirect_scratch;
-        if (candidate.entry_island_at_anchor) {
-          const auto restore_scc = instrumentation::build_s_cmp_lg_u32(
-              scalar.jump.scc_save_sgpr, scalar_positive_inline_u32(0), arch);
-          if (!restore_scc) {
-            result.errors.emplace_back(
-                "ConSan flat check/trap proof could not restore SCC before displaced tail");
-            return;
-          }
-          planned.cave_words.push_back(*restore_scc);
-          planned.cave_words.insert(planned.cave_words.end(),
-                                    candidate.displaced_tail_words.begin(),
-                                    candidate.displaced_tail_words.end());
-        }
-        planned.info.sc_indirect_body_route = ConSanSuperColliderIndirectBodyRoute{
-            .jump = scalar.jump,
-            .vcc_save_sgpr = scalar.vcc_save_sgpr,
-            .return_offset =
-                candidate.placement->body_offset + planned.cave_words.size() * sizeof(uint32_t),
-        };
-        planned.info.required_sgpr_count = static_cast<uint16_t>(
-            std::max<uint32_t>(planned.info.required_sgpr_count,
-                               std::max(scalar.jump.minimum_required_sgpr_count(),
-                                        static_cast<uint32_t>(scalar.vcc_save_sgpr) + 2u)));
-        const bool return_encoded =
-            candidate.entry_island_at_anchor
-                ? append_lds_check_trap_indirect_jump(
-                      planned.cave_words, candidate.placement->body_offset,
-                      candidate.placement->return_target, scalar.jump.pc_sgpr,
-                      scalar.jump.scc_save_sgpr, target)
-                : append_lds_check_trap_indirect_return(
-                      planned.cave_words, candidate.placement->body_offset,
-                      candidate.placement->return_target, scalar.jump.pc_sgpr,
-                      scalar.jump.scc_save_sgpr, target);
-        const uint64_t entry_island_offset = candidate.entry_island_at_anchor
-                                                 ? site.physical_id.original_text_offset
-                                                 : candidate.entry_island->text_offset;
-        if (!return_encoded ||
-            planned.cave_words.size() * sizeof(uint32_t) != candidate.placement->body_size ||
-            !append_lds_check_trap_indirect_jump(
-                planned.entry_island_words, entry_island_offset, candidate.placement->body_offset,
-                scalar.jump.pc_sgpr, scalar.jump.scc_save_sgpr, target)) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof could not encode indirect relay");
-          return;
-        }
-        entry_target = entry_island_offset;
-      } else {
-        if (planned.words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof body size changed after placement");
-          return;
-        }
-        const auto ret = compute_sopp_branch_simm16(candidate.placement->return_branch_offset,
-                                                    candidate.placement->return_target);
-        if (!ret) {
-          result.errors.emplace_back(
-              "ConSan flat check/trap proof cave return exceeds s_branch simm16");
-          return;
-        }
-        planned.cave_words.push_back(build_s_branch(*ret, arch));
-      }
-      const auto fwd =
-          candidate.entry_island_at_anchor
-              ? std::optional<int16_t>(0)
-              : compute_sopp_branch_simm16(candidate.placement->anchor_offset, entry_target);
-      if (!fwd) {
-        result.errors.emplace_back("ConSan flat check/trap proof relay entry is unreachable");
-        return;
-      }
-      if (candidate.use_local_cave &&
-          candidate.local_cave->word_count < planned.cave_words.size()) {
-        result.errors.emplace_back("ConSan flat check/trap proof local cave is too small");
-        return;
-      }
-
-      if (!candidate.entry_island_at_anchor) {
-        planned.anchor_words.assign(access_words, build_s_nop(0, arch));
-        planned.anchor_words.front() = build_s_branch(*fwd, arch);
-      }
-      planned.info.trampoline_offset = candidate.placement->body_offset;
-      planned.info.original_size = candidate.placement->original_size;
-      planned.info.trampoline_size =
-          static_cast<uint32_t>(planned.cave_words.size() * sizeof(uint32_t));
-    } else {
-      planned.info.trampoline_offset =
-          site.physical_id.original_text_offset + site.instruction_size;
-      planned.info.original_size = static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
-      planned.info.trampoline_size = 0;
-    }
+    planned.info.original_size = site.instruction_size;
+    planned.info.trampoline_size =
+        static_cast<uint32_t>(planned.words.size() * sizeof(uint32_t));
 
     planned_patches.push_back(std::move(planned));
-  }
-
-  std::unordered_map<uint64_t, size_t> flat_anchor_relay_donors;
-  for (size_t index = 0; index < planned_patches.size(); ++index) {
-    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
-    for (uint64_t offset = planned.info.anchor_offset + sizeof(uint32_t);
-         offset < planned.info.anchor_offset + planned.info.original_size;
-         offset += sizeof(uint32_t)) {
-      if (selected_flat_anchor_relay_offsets.contains(offset))
-        flat_anchor_relay_donors.emplace(offset, index);
-    }
-  }
-  for (size_t index = 0; index < planned_patches.size(); ++index) {
-    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
-    if (!planned.branch_only_route)
-      continue;
-    const auto donor_precedes_borrower = [&](uint64_t relay) {
-      if (!selected_flat_anchor_relay_offsets.contains(relay))
-        return true;
-      const auto donor = flat_anchor_relay_donors.find(relay);
-      return donor != flat_anchor_relay_donors.end() && donor->second < index;
-    };
-    if (!std::ranges::all_of(planned.branch_only_route->entry_relay_offsets,
-                             donor_precedes_borrower) ||
-        !std::ranges::all_of(planned.branch_only_route->return_relay_offsets,
-                             donor_precedes_borrower)) {
-      result.errors.emplace_back(
-          "ConSan flat check/trap proof planned an anchor-tail relay before its donor");
-      return;
-    }
-  }
-
-  std::vector<ConSanPatchInfo> new_patch_infos;
-  new_patch_infos.reserve(planned_patches.size());
-  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    new_patch_infos.push_back(planned.info);
-    if (planned.entry_island != nullptr && !planned.entry_island_at_anchor) {
-      ConSanPatchInfo island_info;
-      island_info.kind = ConSanPatchKind::TrampolineScIndirectBranchIsland;
-      island_info.anchor_offset = planned.info.anchor_offset;
-      island_info.trampoline_offset = planned.entry_island->text_offset;
-      island_info.original_size = 0;
-      island_info.trampoline_size =
-          static_cast<uint32_t>(planned.entry_island_words.size() * sizeof(uint32_t));
-      new_patch_infos.push_back(std::move(island_info));
-    }
   }
   ConSanDescriptorRegisterRequirements descriptor_sgpr_growths;
   const ConSanDescriptorRegisterRequirements no_vgpr_requirements;
@@ -1678,74 +993,53 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
            .maximum_group_segment_bytes = std::nullopt},
           arch, "ConSan flat check/trap proof", result.errors))
     return;
-  std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
-  for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
-    std::string relay_error;
-    if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, new_patch_infos,
-                                                      &relay_error)) {
-      result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
+
+  std::vector<ConSanInlineTextRewrite> rewrites;
+  rewrites.reserve(planned_patches.size());
+  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    rewrites.push_back({planned.site->physical_id.original_text_offset, planned.words});
+  }
+  std::vector<uint8_t> descriptor_image = std::move(patcher).emit();
+  auto relocated = relocate_consan_text(
+      descriptor_image, arch, rewrites, options.patched_image_growth_limit,
+      result.program_inventory.code_object_id(), "flat check/trap proof", result.errors,
+      &result.transform_failure_cause);
+  if (!relocated)
+    return;
+
+  if (relocated->source_text_size > std::numeric_limits<uint64_t>::max() -
+                                        relocated->relocated_text_size ||
+      relocated->relocated_text_size > std::numeric_limits<uint32_t>::max()) {
+    result.errors.emplace_back("ConSan flat check/trap proof relocated text is too large");
+    return;
+  }
+  std::vector<ConSanPatchInfo> new_patch_infos;
+  std::vector<ConSanPatchInfo> primary_patch_infos;
+  primary_patch_infos.reserve(planned_patches.size());
+  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    bool found_placement = false;
+    for (const TranslatedTextPlacement &placement : relocated->placements) {
+      if (placement.source_offset != planned.info.anchor_offset)
+        continue;
+      ConSanPatchInfo placed = planned.info;
+      placed.trampoline_offset = placement.target_offset;
+      if (!found_placement)
+        primary_patch_infos.push_back(placed);
+      new_patch_infos.push_back(std::move(placed));
+      found_placement = true;
+    }
+    if (!found_placement) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof lost a relocated instruction placement");
       return;
     }
   }
-  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    const ConSanAccessInventorySite &site = *planned.site;
-    const uint64_t anchor_bytes = planned.entry_island_at_anchor
-                                      ? planned.entry_island_words.size() * sizeof(uint32_t)
-                                      : planned.anchor_words.size() * sizeof(uint32_t);
-    if (planned.use_appended_cave) {
-      if (!planned.placement) {
-        result.errors.emplace_back("ConSan flat check/trap proof lost appended placement");
-        return;
-      }
-      const uint64_t body_offset = planned.placement->body_offset;
-      const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
-      if (body_offset > std::numeric_limits<size_t>::max() - body_bytes) {
-        result.errors.emplace_back("ConSan flat check/trap proof appended body overflows text");
-        return;
-      }
-      new_text.resize(std::max<uint64_t>(new_text.size(), body_offset + body_bytes), 0);
-      const uint32_t *anchor_data = planned.entry_island_at_anchor
-                                        ? planned.entry_island_words.data()
-                                        : planned.anchor_words.data();
-      std::memcpy(new_text.data() + site.physical_id.original_text_offset, anchor_data,
-                  anchor_bytes);
-      std::memcpy(new_text.data() + body_offset, planned.cave_words.data(), body_bytes);
-      if (planned.entry_island != nullptr) {
-        std::memcpy(new_text.data() + planned.entry_island->text_offset,
-                    planned.entry_island_words.data(),
-                    planned.entry_island_words.size() * sizeof(uint32_t));
-      }
-    } else if (planned.use_local_cave) {
-      const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
-      std::memcpy(new_text.data() + site.physical_id.original_text_offset,
-                  planned.anchor_words.data(), anchor_bytes);
-      std::memcpy(new_text.data() + planned.local_cave->text_offset, planned.cave_words.data(),
-                  body_bytes);
-    } else {
-      std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),
-                  planned.words.size() * sizeof(uint32_t));
-    }
-    if (planned.branch_only_route) {
-      std::string relay_error;
-      if (!BranchOnlyRelayRouter::emit_and_record(
-              new_text, *planned.branch_only_route, planned.info.trampoline_offset,
-              planned.info.anchor_offset + planned.info.original_size, arch, new_patch_infos,
-              &relay_error)) {
-        result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
-        return;
-      }
-    }
-  }
-  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                           "flat check/trap proof", result.program_inventory.code_object_id(),
-                           result.errors, &result.transform_failure_cause))
-    return;
-  std::vector<uint8_t> replacement = std::move(patcher).emit();
   std::vector<ConSanCommittedLowering> lowering_commits;
   lowering_commits.reserve(planned_patches.size());
-  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+  for (size_t index = 0; index < planned_patches.size(); ++index) {
+    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
     auto commit = make_sc_access_lowering_commit(result.observation_plan(), planned.intent_ids,
-                                                 *planned.site, planned.info);
+                                                 *planned.site, primary_patch_infos[index]);
     if (!commit) {
       result.errors.emplace_back(
           "ConSan flat check/trap proof produced an invalid intent-bound lowering");
@@ -1754,7 +1048,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
     lowering_commits.push_back(std::move(*commit));
   }
-  if (!result.publish_access_lowering(std::move(replacement), "ConSan flat check/trap proof",
+  result.text_relocation = ConSanTextRelocationProof{
+      relocated->source_text_size,
+      relocated->relocated_text_size,
+  };
+  if (!result.publish_access_lowering(std::move(relocated->image), "ConSan flat check/trap proof",
                                       std::move(lowering_commits), std::move(new_patch_infos))) {
     return;
   }

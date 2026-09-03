@@ -1681,6 +1681,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
+    bool preserve_unreferenced_local_text_symbols,
     std::vector<TranslationDiagnostic> &diagnostics) {
   if (translated_text.size() < original_text_size)
     append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
@@ -1704,7 +1705,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
   }
 
   if (!patcher.replace_text(translated_text, text_relocations, data_relocations, code_relocations,
-                            require_every_text_symbol_mapped, &canonical_code_pointer_placement)) {
+                            require_every_text_symbol_mapped, &canonical_code_pointer_placement,
+                            preserve_unreferenced_local_text_symbols)) {
     append_error(diagnostics, DiagnosticKind::ResourceLimit,
                  "relocated .text could not be materialized safely; leaving code object unchanged");
     return std::nullopt;
@@ -4937,7 +4939,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
-    if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
+    if (arch_descriptor_encodes_sgpr_allocation(host_arch_) &&
+        kernel_context.required_sgpr_count > kernel_context.num_sgprs)
       scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
     if (kernel_context.required_private_segment_fixed_size >
         kernel_context.private_segment_fixed_size)
@@ -5120,7 +5123,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
       data_relocations, code_relocations, descriptor_translations, host_arch_, target_mach_,
-      relied_on_relocated_by_construction, canonical_code_pointer_placement, result.diagnostics);
+      relied_on_relocated_by_construction, canonical_code_pointer_placement,
+      options_.preserve_source_text_prefix, result.diagnostics);
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);

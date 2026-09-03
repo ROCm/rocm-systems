@@ -700,7 +700,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
   const uint32_t max_descriptor_sgprs = arch_descriptor_sgpr_allocation_limit(host_arch);
-  if (max_descriptor_sgprs != 0 && result.host_sgpr_count > max_descriptor_sgprs) {
+  if (arch_descriptor_encodes_sgpr_allocation(host_arch) && max_descriptor_sgprs != 0 &&
+      result.host_sgpr_count > max_descriptor_sgprs) {
     append_descriptor_error(result, "required SGPR count exceeds target limit; spill tiers are not "
                                     "implemented for this descriptor");
   }

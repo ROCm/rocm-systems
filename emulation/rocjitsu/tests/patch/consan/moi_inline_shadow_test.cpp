@@ -230,9 +230,9 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       << "narrow unaligned accesses must not reference unplanned loop registers";
   EXPECT_EQ(count_subsequence(text_words, *atomic_swap), 0u);
 
-  const auto version_load = build_flat_load_b32_vaddr_vdst(
-      /*vaddr=*/8, /*vdst=*/21, ROCJITSU_CODE_ARCH_RDNA4,
-      offsetof(ConSanMoiInlineExactShadowSlot, version));
+  const auto version_load = ib::build_flat_atomic_add_u32(
+      /*vaddr=*/8, /*vsrc=*/21, /*vdst=*/21, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   const auto version_cas = build_flat_atomic_cmpswap_b32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/22, /*vdst=*/22, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -249,7 +249,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   const auto wait_load = instrumentation::build_s_wait_global_load0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_load);
   EXPECT_EQ(count_subsequence(text_words, *version_load), 2u)
-      << "both possible cells must read their prior version";
+      << "both possible cells must read their prior version coherently";
   EXPECT_EQ(count_subsequence(text_words, *version_cas), 4u)
       << "both possible cells must claim odd and commit even";
   std::vector<uint32_t> drained_version_cas(version_cas->begin(), version_cas->end());
@@ -303,18 +303,15 @@ TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
   std::vector<uint32_t> patched_words(text->size() / sizeof(uint32_t));
   std::memcpy(patched_words.data(), text->data(), text->size());
 
-  const auto version_load = build_cdna4_flat_load_b32(
-      /*vaddr=*/8, /*vdst=*/21, offsetof(ConSanMoiInlineExactShadowSlot, version),
-      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto version_load = build_cdna4_flat_atomic_add_u32(
+      /*vaddr=*/8, /*vsrc=*/21, /*vdst=*/21, /*return_old_value=*/true,
+      /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
   const auto version_cas = build_cdna4_flat_atomic_cmpswap_b32(
       /*vaddr=*/8, /*vsrc=*/22, /*vdst=*/22, /*return_old_value=*/true,
       /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto retry_invalidate = build_cdna4_buffer_inv_sc1(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(version_load && version_cas && retry_invalidate);
+  ASSERT_TRUE(version_load && version_cas);
   EXPECT_EQ(count_subsequence(patched_words, *version_load), 2u);
   EXPECT_EQ(count_subsequence(patched_words, *version_cas), 4u);
-  EXPECT_EQ(count_subsequence(patched_words, *retry_invalidate), 2u)
-      << "both possible cells must invalidate stale payload on retry";
   EXPECT_GE(std::count(patched_words.begin(), patched_words.end(), 0xbf8c0f70u), 1);
   const std::array<uint32_t, 2> guest_store = {text_words[0], text_words[1]};
   const auto first_shadow_transaction = std::search(patched_words.begin(), patched_words.end(),

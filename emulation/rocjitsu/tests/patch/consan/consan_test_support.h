@@ -703,6 +703,16 @@ std::vector<uint32_t> text_words_at_offset(const AmdGpuCodeObject &code_object, 
   return words;
 }
 
+std::vector<uint32_t> emitted_patch_words(const ConSanTransformArtifacts &result,
+                                          const ConSanPatchInfo &patch) {
+  if (result.replacement.empty()) {
+    ADD_FAILURE() << "patched image is empty";
+    return {};
+  }
+  const AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  return text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+}
+
 MoiOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay) {
   MoiOptions options;
   options.flavor = ConSanFlavor::Moi;

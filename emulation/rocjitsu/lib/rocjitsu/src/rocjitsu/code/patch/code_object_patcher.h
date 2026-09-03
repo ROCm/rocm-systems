@@ -268,7 +268,8 @@ public:
       std::span<const PcRelativeDataRelocation> data_relocations = {},
       std::span<const PcRelativeTextRelocation> code_relocations = {},
       bool require_every_text_symbol_mapped = false,
-      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
+      const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr,
+      bool preserve_unreferenced_local_text_symbols = false);
 
   /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
   ///

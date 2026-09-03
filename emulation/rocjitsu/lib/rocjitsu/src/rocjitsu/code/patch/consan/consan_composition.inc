@@ -563,9 +563,24 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   redundant_options.max_patches =
       overall_patch_budget - static_cast<uint32_t>(perturbation.plans.size());
 
+  // Native LDS still uses source-coordinate cave placement, so complete it
+  // before perturbation as in the established composition transaction. FLAT
+  // then relocates the already composed LDS and perturbation text into the
+  // active bodies, leaving no post-relocation coordinate rediscovery problem.
+  if (options.probe_lds_check_trap)
+    try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
+
+  if (has_perturbation && result.errors.empty()) {
+    try_apply_perturbation_patches(*code_object, arch, options, perturbation, result);
+    if (result.mutation.perturbation.applied != perturbation.plans.size()) {
+      if (result.outcome == ConSanTransformOutcome::ModifiedValid)
+        result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
+                                               : ConSanTransformOutcome::Invalid;
+      result.discard_candidate_modification();
+    }
+  }
+
   if (has_redundant_access) {
-    if (options.probe_lds_check_trap)
-      try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
     if (options.probe_flat_check_trap && result.errors.empty()) {
       if (!result.modified()) {
         try_apply_flat_check_trap_patch(*code_object, *target_profile, redundant_options, result);
@@ -578,10 +593,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
               case ConSanPatchKind::InlineLdsStoreCheckTrap:
               case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
               case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
-              case ConSanPatchKind::InlineFlatLoadCheckTrap:
-              case ConSanPatchKind::InlineFlatStoreCheckTrap:
-              case ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
-              case ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
+              case ConSanPatchKind::FlatLoadCheckTrap:
+              case ConSanPatchKind::FlatStoreCheckTrap:
                 return true;
               default:
                 return false;
@@ -617,16 +630,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     try_apply_proof_endpgm_patch(*code_object, arch, result);
   else if (!has_perturbation && (options.probe_nop || options.probe_trampoline_nop))
     try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
-
-  if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(*code_object, arch, options, perturbation, result);
-    if (result.mutation.perturbation.applied != perturbation.plans.size()) {
-      if (result.outcome == ConSanTransformOutcome::ModifiedValid)
-        result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
-                                               : ConSanTransformOutcome::Invalid;
-      result.discard_candidate_modification();
-    }
-  }
 
   publish_unplaced_sc_access_rejections(result.coverage_ledger, result.errors);
 

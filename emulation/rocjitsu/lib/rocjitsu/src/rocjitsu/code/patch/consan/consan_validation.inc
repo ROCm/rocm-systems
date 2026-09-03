@@ -11,7 +11,7 @@ struct ConSanFinalValidationInput {
       : program_inventory(artifacts.program_inventory), coverage_ledger(artifacts.coverage_ledger),
         mutation(artifacts.mutation), resource_plans(artifacts.resource_plans),
         moi_operating_point(artifacts.moi_operating_point), patches(artifacts.patches),
-        replacement(artifacts.replacement) {}
+        text_relocation(artifacts.text_relocation), replacement(artifacts.replacement) {}
 
   const ProgramInventory &program_inventory;
   const ConSanCoverageLedger &coverage_ledger;
@@ -19,6 +19,7 @@ struct ConSanFinalValidationInput {
   std::span<const ConSanCandidateResourcePlan> resource_plans;
   const ConSanMoiOperatingPoint &moi_operating_point;
   std::span<const ConSanPatchInfo> patches;
+  const std::optional<ConSanTextRelocationProof> &text_relocation;
   std::span<const uint8_t> replacement;
 
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
@@ -267,6 +268,19 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
   const std::span<const uint8_t> replacement_bytes = environment.replacement_text.bytes;
   std::vector<InventoryRange> ranges;
   std::vector<bool> accounted(replacement_bytes.size(), false);
+
+  if (result.text_relocation) {
+    const ConSanTextRelocationProof &relocation = *result.text_relocation;
+    if (relocation.source_text_size < original_bytes.size() ||
+        relocation.source_text_size > replacement_bytes.size() ||
+        relocation.relocated_text_size !=
+            replacement_bytes.size() - relocation.source_text_size) {
+      errors.emplace_back("ConSan final validation found invalid whole-text relocation geometry");
+      return;
+    }
+    std::fill(accounted.begin() + static_cast<ptrdiff_t>(relocation.source_text_size),
+              accounted.end(), true);
+  }
 
   const auto add_range = [&](uint64_t begin, uint32_t size, ConSanPatchPhase phase,
                              ConSanPatchKind kind, bool must_be_original, bool is_trampoline,
@@ -3817,7 +3831,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
         return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
       });
-  errors = validate_consan_input_layout(replacement, redirects_entry);
+  errors = validate_consan_input_layout(replacement, redirects_entry || result.text_relocation);
   for (std::string &error : errors)
     error = "ConSan final validation: " + error;
 

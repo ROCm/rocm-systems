@@ -3997,15 +3997,16 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   ASSERT_TRUE(token_claim_or_update);
   EXPECT_EQ(count_subsequence(acquire_words, *token_claim_or_update), 15u)
       << "five destinations each have reserve, rollback, and commit CAS bodies";
-  const std::array<uint32_t, 3> rollback_operand_swap = {
-      build_v_mov_b32_e32(/*hash=*/29, vector_source_vgpr(/*journaled prior=*/28),
-                          ROCJITSU_CODE_ARCH_RDNA4),
-      build_v_mov_b32_e32(/*expected=*/28, vector_source_vgpr(/*odd reservation=*/27),
-                          ROCJITSU_CODE_ARCH_RDNA4),
-      build_v_mov_b32_e32(/*new=*/27, vector_source_vgpr(/*saved prior=*/29),
+  const auto rollback_expected_odd = instrumentation::build_v_add_u32(
+      /*vdst=*/28, scalar_positive_inline_u32(1), /*vsrc=*/28, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(rollback_expected_odd);
+  std::vector<uint32_t> rollback_operands = {
+      build_v_mov_b32_e32(/*new=*/27, vector_source_vgpr(/*journaled prior=*/28),
                           ROCJITSU_CODE_ARCH_RDNA4),
   };
-  EXPECT_EQ(count_subsequence(acquire_words, rollback_operand_swap), 5u)
+  rollback_operands.insert(rollback_operands.end(), rollback_expected_odd->begin(),
+                           rollback_expected_odd->end());
+  EXPECT_EQ(count_subsequence(acquire_words, rollback_operands), 5u)
       << "each rollback CAS must restore the journaled even version rather than leave the "
          "reservation odd";
 

@@ -613,6 +613,7 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
 
 struct TextPlacementIndex {
   std::unordered_map<uint64_t, uint64_t> target_by_source;
+  std::unordered_map<uint64_t, std::vector<uint64_t>> targets_by_source;
   std::unordered_set<uint64_t> conflicting_sources;
 };
 
@@ -628,12 +629,14 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
                            std::span<const TextOffsetRelocation> relocations) {
   TextPlacementIndex placements;
   placements.target_by_source.reserve(relocations.size());
+  placements.targets_by_source.reserve(relocations.size());
   placements.conflicting_sources.reserve(relocations.size());
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
       return std::nullopt;
     auto [it, inserted] =
         placements.target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    placements.targets_by_source[relocation.source_offset].push_back(relocation.target_offset);
     if (!inserted && it->second != relocation.target_offset)
       placements.conflicting_sources.insert(relocation.source_offset);
   }
@@ -644,7 +647,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
                                          std::span<const Elf64_Shdr> shdrs, size_t text_index,
                                          uint64_t old_text_size,
                                          const TextPlacementIndex &placements,
-                                         bool require_every_text_symbol_mapped) {
+                                         bool require_every_text_symbol_mapped,
+                                         bool preserve_unreferenced_local_text_symbols) {
   if (placements.target_by_source.empty())
     return true;
 
@@ -733,6 +737,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       const bool must_relocate =
           (require_every_text_symbol_mapped && externally_resolvable) ||
           (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
+      if (preserve_unreferenced_local_text_symbols && !externally_resolvable && !must_relocate)
+        continue;
 
       uint64_t source_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
@@ -827,15 +833,33 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
       }
 
       const uint64_t old_size = symbol.st_size;
+      uint64_t relocated_symbol_start = relocated_start->second;
+      if (const auto starts = placements.targets_by_source.find(source_text_offset);
+          starts != placements.targets_by_source.end() && !starts->second.empty()) {
+        relocated_symbol_start = std::ranges::min(starts->second);
+      }
       if (old_size <= old_text_size - source_text_offset) {
-        const auto relocated_end = placements.target_by_source.find(source_text_offset + old_size);
-        if (relocated_end != placements.target_by_source.end() &&
-            relocated_end->second >= relocated_start->second) {
-          symbol.st_size = relocated_end->second - relocated_start->second;
+        const auto starts = placements.targets_by_source.find(source_text_offset);
+        const auto ends = placements.targets_by_source.find(source_text_offset + old_size);
+        if (starts != placements.targets_by_source.end() &&
+            ends != placements.targets_by_source.end()) {
+          std::optional<std::pair<uint64_t, uint64_t>> best_extent;
+          for (uint64_t start : starts->second) {
+            for (uint64_t end : ends->second) {
+              if (end <= start)
+                continue;
+              if (!best_extent || end - start < best_extent->second - best_extent->first)
+                best_extent = std::pair{start, end};
+            }
+          }
+          if (best_extent) {
+            relocated_symbol_start = best_extent->first;
+            symbol.st_size = best_extent->second - best_extent->first;
+          }
         }
       }
-      symbol.st_value =
-          ehdr.e_type == ET_REL ? relocated_start->second : text.sh_addr + relocated_start->second;
+      symbol.st_value = ehdr.e_type == ET_REL ? relocated_symbol_start
+                                              : text.sh_addr + relocated_symbol_start;
       std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
     }
   }
@@ -1619,7 +1643,8 @@ bool CodeObjectPatcher::replace_text(
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const PcRelativeTextRelocation> code_relocations,
     bool require_every_text_symbol_mapped,
-    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement,
+    bool preserve_unreferenced_local_text_symbols) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -1802,7 +1827,8 @@ bool CodeObjectPatcher::replace_text(
   }
   shdrs[*text_index].sh_size = new_text.size();
   if (!relocate_text_symbols(image, header, shdrs, *text_index, text_size_, *text_placements,
-                             require_every_text_symbol_mapped)) {
+                             require_every_text_symbol_mapped,
+                             preserve_unreferenced_local_text_symbols)) {
     return false;
   }
   if (!relocate_relative_text_addends(image, header, shdrs, *text_index, text_size_,

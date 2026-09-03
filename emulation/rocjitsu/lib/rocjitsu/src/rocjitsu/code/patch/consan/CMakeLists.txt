@@ -112,6 +112,7 @@ rj_add_object_library(
         consan_perturbation.cpp
         consan_placement.cpp
         consan_resource.cpp
+        consan_text_relocation.cpp
         modes/supercollider/consan_supercollider.cpp
         modes/supercollider/consan_supercollider_report_plan.cpp
         modes/supercollider/consan_supercollider_support.cpp

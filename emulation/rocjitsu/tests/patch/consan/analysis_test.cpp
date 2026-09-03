@@ -2722,7 +2722,7 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatLoadCheckTrap);
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(result.patches.front().scratch_vgpr, 3u);
-  EXPECT_EQ(result.patches.front().original_size, 17u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size, 2u * sizeof(uint32_t));
   ASSERT_EQ(result.observation_plan().probe_intents.size(), 1u);
   EXPECT_EQ(result.observation_plan().probe_intents.front().kind,
             ConSanProbeIntentKind::RedundantAccessObservation);
@@ -2797,7 +2797,7 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
   }
 }
 
-TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
+TEST(ConSan, Cdna4SuperColliderFarGroupFlatUsesRelocatedInlineBody) {
   constexpr size_t kLargeTextWords = 33000u;
   constexpr uint16_t kCallTargetSgpr = 2u;
   constexpr uint16_t kReturnSgpr = 30u;
@@ -2857,19 +2857,10 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
                                       &ConSanPatchInfo::kind);
   ASSERT_NE(body, result.patches.end());
   ASSERT_EQ(body->owner_descriptor_file_offsets.size(), 1u);
-  ASSERT_TRUE(body->sc_indirect_body_route);
-  const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
-  EXPECT_LT(route.jump.pc_sgpr, 100u);
-  const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
-                                 uint16_t rhs_width) {
-    return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
-           static_cast<uint32_t>(rhs_base) < static_cast<uint32_t>(lhs_base) + lhs_width;
-  };
-  EXPECT_FALSE(ranges_overlap(route.vcc_save_sgpr, 2u, route.jump.pc_sgpr, 2u));
-  EXPECT_FALSE(ranges_overlap(route.jump.scc_save_sgpr, 1u, route.vcc_save_sgpr, 2u));
-  EXPECT_FALSE(ranges_overlap(route.jump.scc_save_sgpr, 1u, route.jump.pc_sgpr, 2u));
-  EXPECT_GE(body->required_sgpr_count, route.minimum_required_sgpr_count(2u));
-  EXPECT_GT(body->trampoline_offset, body->anchor_offset);
+  EXPECT_FALSE(body->sc_indirect_body_route);
+  EXPECT_FALSE(body->branch_only_route);
+  ASSERT_TRUE(result.text_relocation);
+  EXPECT_GE(body->trampoline_offset, result.text_relocation->source_text_size);
 }
 
 TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {

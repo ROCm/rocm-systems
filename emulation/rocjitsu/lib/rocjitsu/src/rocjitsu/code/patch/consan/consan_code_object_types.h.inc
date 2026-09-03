@@ -92,10 +92,14 @@ enum class ConSanPatchKind : uint8_t {
   InlineLdsStoreCheckTrap,
   LocalCaveLdsLoadCheckTrap,
   LocalCaveLdsStoreCheckTrap,
-  InlineFlatLoadCheckTrap,
-  InlineFlatStoreCheckTrap,
-  LocalCaveFlatLoadCheckTrap,
-  LocalCaveFlatStoreCheckTrap,
+  FlatLoadCheckTrap,
+  FlatStoreCheckTrap,
+  // Compatibility spellings for callers that have not yet stopped describing
+  // semantic FLAT instrumentation by its former physical placement.
+  InlineFlatLoadCheckTrap = FlatLoadCheckTrap,
+  LocalCaveFlatLoadCheckTrap = FlatLoadCheckTrap,
+  InlineFlatStoreCheckTrap = FlatStoreCheckTrap,
+  LocalCaveFlatStoreCheckTrap = FlatStoreCheckTrap,
   InlineFlatTrapRewrite,
   InlineBarrierNopRewrite,
   InlineBarrierIdScopeRewrite,
@@ -657,3 +661,11 @@ struct ConSanPatchMutationProduct : ConSanPatchLoweringProduct, ConSanPatchMutat
 /// Consumers should accept the narrow base contract they need; only final
 /// validation is expected to inspect the complete joined proof.
 struct ConSanPatchInfo : ConSanPatchMutationProduct, ConSanPatchFaultProof {};
+
+/// Image-level proof for one whole-text relocation transaction. This is not a
+/// semantic site patch: it accounts for the active relocated bodies while the
+/// ordinary patch inventory continues to describe only instrumented sites.
+struct ConSanTextRelocationProof {
+  uint64_t source_text_size = 0;
+  uint64_t relocated_text_size = 0;
+};
