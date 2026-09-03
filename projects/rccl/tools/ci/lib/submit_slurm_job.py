@@ -24,9 +24,38 @@ from types import FrameType
 from typing import Callable
 
 # Non-terminal sacct states (and a missing row); keep polling while we see these.
+# This is the complement of the terminal set (BOOT_FAIL, CANCELLED, COMPLETED,
+# DEADLINE, FAILED, NODE_FAIL, OUT_OF_MEMORY, PREEMPTED, TIMEOUT) -- it is the
+# wait predicate now that `sbatch --wait` no longer guarantees terminality, so a
+# state missing from here is silently read as "job finished" while it is still
+# holding the reservation. Held/suspended states are the ones that used to be
+# absent; keep this list exhaustive.
 NON_TERMINAL_STATES = frozenset(
-    {"", "RUNNING", "PENDING", "REQUEUED", "COMPLETING", "RESIZING"}
+    {
+        "",  # sacct has no accounting row (yet)
+        "COMPLETING",
+        "CONFIGURING",
+        "PENDING",
+        "REQUEUED",
+        "REQUEUE_FED",
+        "REQUEUE_HOLD",
+        "RESIZING",
+        "RESV_DEL_HOLD",
+        "REVOKED",
+        "RUNNING",
+        "SIGNALING",
+        "SPECIAL_EXIT",
+        "STAGE_OUT",
+        "STOPPED",
+        "SUSPENDED",
+    }
 )
+
+# How long to keep polling when sacct never produces a row for a job id that
+# sbatch accepted. Past this the accounting DB is unusable, so we cannot verify
+# success anyway -- give up loudly and scancel rather than hold nodes until the
+# GitHub job timeout.
+MISSING_ROW_TIMEOUT = 600.0
 
 
 @dataclass
@@ -54,7 +83,10 @@ def scancel_job(job_id: str) -> None:
     """Best-effort cancel. Missing scancel/job is not fatal; the wait loop will still end."""
     if not job_id:
         return
-    log(f"==> scancel {job_id}")
+    # Cancel first, log after. This runs from a signal handler, and if the
+    # signal lands while the main thread is inside print/flush, CPython raises
+    # RuntimeError ("reentrant call") out of the handler -- which would abort it
+    # before the one thing it exists to do.
     try:
         subprocess.run(
             ["scancel", job_id],
@@ -64,6 +96,8 @@ def scancel_job(job_id: str) -> None:
         )
     except FileNotFoundError:
         log(f"WARNING: scancel not found; job {job_id} may keep running")
+        return
+    log(f"==> scancel {job_id}")
 
 
 def submit_and_wait(
@@ -93,10 +127,10 @@ def submit_and_wait(
     def _on_signal(signum: int, _frame: FrameType | None) -> None:
         nonlocal cancel_requested
         cancel_requested = True
-        log(f"==> caught signal {signum}; cancelling Slurm job {job_id or '<pending>'}")
         scancel_job(job_id)
+        log(f"==> caught signal {signum}; cancelled Slurm job {job_id or '<pending>'}")
 
-    previous: dict[int, signal.Handlers] = {}
+    previous: dict[int, object] = {}
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous[sig] = signal.signal(sig, _on_signal)
 
@@ -131,9 +165,7 @@ def submit_and_wait(
             return 1, job_id
 
         log(f"==> waiting for job {job_id} (scancel on INT/TERM/HUP)")
-        wait_rc = wait_for_job(
-            job_id, wait_poll_interval, lambda: cancel_requested
-        )
+        wait_rc = wait_for_job(job_id, wait_poll_interval, lambda: cancel_requested)
         return wait_rc, job_id
     except KeyboardInterrupt:
         cancel_requested = True
@@ -175,18 +207,45 @@ def query_job(job_id: str, retries: int, interval: float) -> JobResult:
     return JobResult(state=state, exit_code=exit_code)
 
 
-def wait_for_job(job_id: str, poll_interval: float, cancelled: Callable[[], bool]) -> int:
+def wait_for_job(
+    job_id: str,
+    poll_interval: float,
+    cancelled: Callable[[], bool],
+    missing_row_timeout: float = MISSING_ROW_TIMEOUT,
+) -> int:
     """Block until sacct reports a terminal state, or until a cancel flag is set.
 
-    Returns 0 if the job reached a terminal state on its own, 1 if we scancelled it.
+    Returns 0 if the job reached a terminal state on its own, 1 if we scancelled
+    it or gave up waiting.
+
+    A real PENDING/RUNNING state is waited on without a deadline -- the queue is
+    allowed to be slow, and the GitHub job timeout is the backstop. What *is*
+    bounded is a *continuously* empty state: sbatch handed us this id, so an
+    accounting row should appear within seconds, and `""` is a member of
+    NON_TERMINAL_STATES, so a permanently broken sacct would otherwise spin here
+    forever. The clock resets on every non-empty answer, so a transient sacct
+    outage (query_job maps CalledProcessError to `""`) mid-run does not count
+    against a job that is already reporting state.
     """
+    last_state_seen = time.monotonic()
     while True:
         if cancelled():
             scancel_job(job_id)
             return 1
         result = query_job(job_id, retries=1, interval=0)
-        if result.state and result.state not in NON_TERMINAL_STATES:
-            return 1 if cancelled() else 0
+        if result.state:
+            if result.state not in NON_TERMINAL_STATES:
+                return 1 if cancelled() else 0
+            last_state_seen = time.monotonic()
+        elif time.monotonic() - last_state_seen >= missing_row_timeout:
+            # Cancel: sacct is the only success oracle we have, so this run is
+            # already lost -- do not also leave the job holding the reservation.
+            scancel_job(job_id)
+            log(
+                f"ERROR: sacct reported no state for job {job_id} for "
+                f"{missing_row_timeout:.0f}s; giving up and cancelling it"
+            )
+            return 1
         deadline = time.monotonic() + poll_interval
         while time.monotonic() < deadline:
             if cancelled():

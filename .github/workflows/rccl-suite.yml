@@ -339,6 +339,7 @@ jobs:
       - name: scancel Slurm job if GitHub cancelled
         if: cancelled()
         run: |
+          set -euo pipefail
           id_file="${GITHUB_WORKSPACE}/${CI_SUBDIR}/.ci-out/${SUITE}-logs/slurm-job-id"
           if [[ -f "${id_file}" ]]; then
             job_id="$(tr -d '[:space:]' < "${id_file}")"
