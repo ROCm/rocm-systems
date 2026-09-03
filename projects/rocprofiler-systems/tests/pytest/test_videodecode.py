@@ -68,46 +68,64 @@ def require_video_data(rocprof_config) -> None:
 
 
 @pytest.fixture
-def require_rocdecode_support() -> None:
+def require_rocdecode_support(rocprof_config) -> None:
     """Skip if the rocDecode VA-API driver cannot be initialized on this system.
 
-    rocDecode uses VA-API for hardware video decoding. On some GPUs (e.g.
-    gfx1250 with the current software stack) the VA driver is present but
-    exports no __vaDriverInit_* symbol, causing every decode attempt to abort
-    with a runtime error. Check for the symbol before running the test and
-    skip cleanly when absent. The exact symbol name varies by libva version
-    (__vaDriverInit_<major>_<minor>), so any match is accepted.
+    rocDecode uses VA-API for hardware video decoding. On some GPUs the VA
+    driver is present but libva cannot load it — either because the driver
+    exports no __vaDriverInit_* symbol, or because it exports a version
+    (__vaDriverInit_1_22) that does not match what the installed libva expects
+    (__vaDriverInit_1_0). Either way, every decode attempt aborts at runtime.
+
+    A static symbol check (nm -D) is insufficient because the expected symbol
+    name is determined by the installed libva version at runtime, not by the
+    driver's exported symbols. Instead, probe by running the videodecode binary
+    without LD_PRELOAD against a single video file and checking the output for
+    known VA-API initialisation failure patterns. The probe completes quickly on
+    both supported and unsupported systems.
     """
     import subprocess
-    from pathlib import Path
+    import os
+    import shutil
+    import tempfile
 
-    candidate_dirs = sorted(Path("/opt").glob("rocm*/lib/rocm_sysdeps/lib"))
-    candidate_dirs = [Path("/opt/rocm/lib/rocm_sysdeps/lib")] + list(candidate_dirs)
+    videodecode_bin = rocprof_config.rocprofsys_examples_dir / "videodecode"
+    if not videodecode_bin.exists():
+        return  # Binary missing; let the test fail naturally
 
-    drv_path = None
-    for d in candidate_dirs:
-        candidate = d / "radeonsi_drv_video.so"
-        if candidate.exists():
-            drv_path = candidate
-            break
+    videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
+    first_mp4 = next(videos_dir.glob("*.mp4"), None) if videos_dir.is_dir() else None
+    if first_mp4 is None:
+        return  # No videos; require_video_data fixture will skip
 
-    if drv_path is None:
+    # Strip LD_PRELOAD so rocprofiler-systems does not interfere with the probe.
+    env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+
+    # Run with a single video so that the process exits cleanly after the first
+    # file rather than aborting on the second with an uncaught C++ exception.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        shutil.copy2(str(first_mp4), tmpdir)
+        try:
+            result = subprocess.run(
+                [str(videodecode_bin), "-i", tmpdir, "-t", "1"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return  # Hanging; let the test surface the problem
+
+    combined = result.stdout + result.stderr
+    # Known VA-API initialisation failure patterns:
+    #   "has no function __vaDriverInit" — libva cannot find the init symbol
+    #   "vaInitialize failed"            — VA-API init failed for any reason
+    va_errors = ("has no function __vaDriverInit", "vaInitialize failed")
+    if any(err in combined for err in va_errors):
         pytest.skip(
-            "rocDecode VA-API driver (radeonsi_drv_video.so) not found; "
-            "video decode tests require a ROCm build with VA-API support"
-        )
-
-    result = subprocess.run(
-        ["nm", "-D", str(drv_path)], capture_output=True, text=True
-    )
-    # Check for any __vaDriverInit_<major>_<minor> symbol; the exact name
-    # is constructed by libva from its compile-time VA_MAJOR/MINOR constants
-    # and therefore varies across libva versions.
-    has_va_init = any("__vaDriverInit" in line for line in result.stdout.splitlines())
-    if not has_va_init:
-        pytest.skip(
-            f"{drv_path.name} exports no __vaDriverInit_* symbol; "
-            "the VA-API driver is incompatible with the installed libva on this system"
+            "rocDecode VA-API initialization failed on this system "
+            "(libva could not load the VA-API driver); "
+            "video decode is not supported by the current driver stack for this GPU."
         )
 
 
