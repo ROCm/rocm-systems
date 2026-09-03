@@ -46,20 +46,25 @@ targets/
   cdna5/
   shared/
     cdna3_cdna4/
-    gfx11_gfx12/
-    gfx12/
-    pregfx12/
     rdna3_rdna4/
+    consan_*_rdna4_cdna5_*  # mechanisms shared by those architectures
+    consan_*_common_*       # mechanisms with a wider consumer set
   consan_*_target_ops.*       # normalized contracts and dispatch
 ```
 
-The public generation names describe genuinely generation-specific owners.
-Exact product names such as gfx1100, gfx1201, gfx942, gfx950, and gfx1250
-remain in filenames where a file is about that exact target. Cross-generation
-encoding implementations are not copied into an arbitrary marketed
-generation: the shared gfx12 implementation, for example, is used by RDNA4
-and CDNA5, while the shared gfx9-CDNA implementation is used by CDNA3 and
-CDNA4.
+Architecture owners use the canonical names RDNA3, RDNA4, CDNA3, CDNA4, and
+CDNA5. In ConSan, `gfx11` means RDNA3 and `gfx12` means RDNA4; they do not name
+distinct layers or broader families. CDNA5 is likewise its own architecture,
+not a flavor of GFX12. Exact target names such as gfx1100, gfx1201, gfx942,
+gfx950, and gfx1250 remain only where a file, fixture, target ID, or diagnostic
+is about that exact target.
+
+Cross-architecture implementations are named for their actual consumers or
+their semantic responsibility. CDNA3/CDNA4 sharing remains explicit, as does
+RDNA3/RDNA4 sharing. Individual mechanisms shared by otherwise distinct
+architectures, such as RDNA4 and CDNA5 memory decoding, live directly under
+`targets/shared/`; that sharing does not create an artificial architecture
+family.
 
 Mode-owned transformer code now lives under:
 
@@ -79,15 +84,24 @@ placement, report transport, patch publication, and shared lowering were not
 duplicated merely to make directory ownership look pure.
 
 The empty `consan_validation_gfx11_target_ops.cpp` tombstone was deleted. The
-production CMake ownership check is recursive, and the architecture-boundary
-test now rejects:
+later canonical-name correction also removed `ConSanEncodingFamily`: it had
+incorrectly grouped CDNA5 with RDNA4 merely because selected encodings are
+shared. Exact architecture predicates now say which architectures consume a
+mechanism, while target capabilities describe the semantic operation required
+by common code.
+
+The production CMake ownership check is recursive, and the
+architecture-boundary test now rejects:
 
 - a concrete architecture-named production file outside `targets/`;
 - a mode-named production or host-report file outside `modes/`, except for
   architecture providers under `targets/`;
 - target-operation files inside a mode directory;
 - generated ISA or concrete architecture knowledge in mode providers; and
-- mode policy in target providers.
+- mode policy in target providers;
+- architecture-owner filenames using `gfx11` or `gfx12`, or using `gfx1250`
+  outside the exact-target profile; and
+- restoration of a synthetic GFX encoding-family contract.
 
 The hypothetical-target exercise now registers two independent normalized
 operation packages and proves exact selection plus fail-closed lookup of an
@@ -95,51 +109,53 @@ unregistered target. The hypothetical-mode exercise does the analogous work
 with two independent policy packages, including target-neutral scratch,
 report, prologue, and call-form behavior.
 
-This consolidation was deliberately not a seventh-refactoring shrinkage
-slice. Relative to the sixth-refactoring final tree it removes one comment-only
-file and two lexically counted implementation lines introduced by formatting:
+This consolidation and the subsequent nomenclature correction are deliberately
+the baseline preparation, not a seventh-refactoring macro-slice. Relative to
+the sixth-refactoring final tree, they remove one comment-only file and 35
+implementation lines. Of those, 33 came from deleting the false encoding
+family and its projections rather than from the file renames themselves:
 
-| Signal | Sixth final | Consolidated baseline | Change |
-| --- | ---: | ---: | ---: |
-| Production files | 312 | 311 | -1 |
-| Physical production lines | 97,525 | 97,513 | -12 |
-| Nonblank production lines | 91,118 | 91,107 | -11 |
-| Production implementation lines | 83,516 | **83,514** | -2 |
+| Signal | Sixth final | Initial consolidation | Canonical baseline | Total change |
+| --- | ---: | ---: | ---: | ---: |
+| Production files | 312 | 311 | 311 | -1 |
+| Physical production lines | 97,525 | 97,513 | 97,460 | -65 |
+| Nonblank production lines | 91,118 | 91,107 | 91,055 | -63 |
+| Production implementation lines | 83,516 | 83,514 | **83,481** | -35 |
 
 The consolidated implementation is distributed as follows:
 
 | Physical owner | Files | Implementation lines |
 | --- | ---: | ---: |
-| Shared static transformer | 174 | 47,618 |
-| Target packages and dispatch | 42 | 2,294 |
+| Shared static transformer | 174 | 47,594 |
+| Target packages and dispatch | 42 | 2,297 |
 | Record/Replay transformer mode | 12 | 5,887 |
-| Sampled transformer mode | 18 | 6,547 |
+| Sampled transformer mode | 18 | 6,545 |
 | InlineShadow transformer mode | 14 | 5,941 |
-| SuperCollider transformer mode | 12 | 5,714 |
+| SuperCollider transformer mode | 12 | 5,704 |
 | Shared host report/hook stack | 20 | 7,839 |
 | Record/Replay host mode | 7 | 559 |
 | Sampled host mode | 7 | 743 |
 | InlineShadow host mode | 5 | 372 |
 
-The full local-toolchain rebuild passed. The complete nonphysical ConSan gate
-passed 4,787/4,787 tests. The complete nonphysical RocJitsu gate then passed
-all 9,571 executed tests, with one disabled test and nine expected environment
-skips. These results cover all four modes and the gfx942, gfx950, gfx1100,
-gfx1201, and gfx1250 emulated targets.
+The canonical baseline passed a full local-toolchain rebuild. The complete
+nonphysical ConSan gate passed 4,787/4,787 tests. The complete nonphysical
+RocJitsu gate then passed all 9,571 executed tests, with one disabled test and
+nine expected environment skips. These results cover all four modes and the
+gfx942, gfx950, gfx1100, gfx1201, and gfx1250 emulated targets.
 
 ## 3. What the physical layout reveals
 
 The new tree makes the two intended growth axes visible, but physical locality
 does not by itself prove semantic independence.
 
-Target locality is already strong. Only 2,294 implementation lines are in the
+Target locality is already strong. Only 2,297 implementation lines are in the
 target component, and exact target packages are small: 7 lines for the CDNA3
-profile, 9 for CDNA4, 87 for RDNA3, 130 for RDNA4, and 293 for CDNA5. Most
+profile, 9 for CDNA4, 86 for RDNA3, 129 for RDNA4, and 291 for CDNA5. Most
 target implementation is correctly shared through normalized dispatch and
-encoding-family packages. Architecture code is therefore unlikely to be the
-largest direct deletion source. Its more valuable role in the seventh
-refactoring is as an extension-pressure probe: a hypothetical new encoding
-family can reveal common code that still assumes the current closed set.
+explicit cross-architecture mechanisms. Architecture code is therefore
+unlikely to be the largest direct deletion source. Its more valuable role in
+the seventh refactoring is as an extension-pressure probe: a hypothetical new
+architecture can reveal common code that still assumes the current closed set.
 
 Mode locality is physically strong but semantically less complete. Several
 shared aggregation or coordination files import mode-owned products:
@@ -179,7 +195,7 @@ largest?" It is:
 ## 4. Proposed executable goal
 
 Carry out a discovery-driven structural refactoring of ConSan from the
-83,514-line consolidated baseline. Use extension pressure, change-impact
+83,481-line canonical baseline. Use extension pressure, change-impact
 tracing, comparative mode reads, and representation-lifetime analysis to find
 large duplicated authorities. For every accepted macro-slice, state a
 falsifiable deletion thesis, replace the complete subsystem boundary, delete
@@ -537,9 +553,11 @@ by inertia.
 - Preserve Record/Replay, Sampled, InlineShadow, and SuperCollider behavior.
 - Preserve gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, gfx1201/RDNA4, and
   gfx1250/CDNA5 support.
-- Keep concrete architecture implementation under `targets/`, using public
-  generation names for generation owners and exact gfx names for exact-target
-  files.
+- Keep concrete architecture implementation under `targets/`, using canonical
+  RDNA/CDNA architecture names for architecture owners and exact gfx names only
+  for exact-target files, fixtures, IDs, and diagnostics. Shared mechanisms
+  must name their actual consumers without inventing a broader architecture
+  family.
 - Keep mode implementation under its mode directory; shared mechanisms remain
   single implementations outside those directories.
 - Do not introduce a mode-by-target implementation matrix.
@@ -559,7 +577,7 @@ by inertia.
 
 ## 12. Accounting and completion
 
-The seventh-refactoring baseline is the consolidated 311-file tree at 83,514
+The seventh-refactoring baseline is the canonical 311-file tree at 83,481
 production implementation lines. The governing scope remains:
 
 - `lib/rocjitsu/src/rocjitsu/code/patch/consan/` and
