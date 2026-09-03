@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
+#include "common/string_utility.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -318,34 +319,35 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto _domain = p.get<std::string>("list-operations");
-            std::transform(_domain.begin(), _domain.end(), _domain.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            auto domain = rocprofsys::utility::string::to_lower(
+                p.get<std::string>("list-operations"));
 
-            auto _settings     = tim::settings::shared_instance();
-            auto _setting_name = rocm_setting_name_for_domain(_domain);
-            auto _sitr         = _settings->find(_setting_name);
+            auto settings_ptr = tim::settings::shared_instance();
+            auto setting_name = rocm_setting_name_for_domain(domain);
+            auto sitr         = settings_ptr->find(setting_name);
 
-            if(_sitr == _settings->end())
+            if(sitr == settings_ptr->end())
             {
-                std::cerr << "Error: Domain '" << _domain << "' not found.\n"
+                std::cerr << "Error: Domain '" << domain << "' not found.\n"
                           << "Use 'rocprof-sys-avail --list-domains' "
                              "to see available domains.\n";
                 return;
             }
 
-            auto _choices = _sitr->second->get_choices();
-            filter_operations(_setting_name, _choices);
+            auto choices = sitr->second->get_choices();
+            filter_operations(setting_name, choices);
 
-            if(_choices.empty())
+            if(choices.empty())
             {
-                std::cerr << "Domain '" << _domain << "' has no operations.\n";
+                std::cerr << "Domain '" << domain << "' has no operations.\n";
                 return;
             }
 
-            std::cout << "Operations for " << _domain << ":\n";
-            for(const auto& itr : _choices)
+            std::cout << "Operations for " << domain << ":\n";
+            for(const auto& itr : choices)
+            {
                 std::cout << "    " << itr << "\n";
+            }
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
         .max_count(1)
@@ -537,7 +539,8 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                if(rocprofsys::utility::string::to_bool(_config_file, false) &&
+                   !_out.empty())
                 {
                     _config_file = _out;
                 }

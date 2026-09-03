@@ -4,6 +4,7 @@
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "config.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
@@ -29,10 +30,12 @@ get_clock_id_choices()
 {
     auto clock_name = [](std::string _v) {
         constexpr auto _clock_prefix = std::string_view{ "clock_" };
-        for(auto& itr : _v)
-            itr = tolower(itr);
-        auto _pos = _v.find(_clock_prefix);
-        if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
+        _v                           = utility::string::to_lower(_v);
+        auto pos                     = _v.find(_clock_prefix);
+        if(pos == 0)
+        {
+            _v = _v.substr(pos + _clock_prefix.length());
+        }
         if(_v == "process_cputime_id") _v = "cputime";
         return _v;
     };
@@ -1353,10 +1356,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
     if(_add_group)
     {
-        auto _group_label = _group_name;
-        for(auto& c : _group_label)
-            c = toupper(c);
-        _parser.start_group(_group_label);
+        _parser.start_group(utility::string::to_upper(_group_name));
     }
 
     for(const auto& itr : _settings)

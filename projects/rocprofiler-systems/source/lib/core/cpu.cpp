@@ -3,6 +3,7 @@
 
 #include "cpu.hpp"
 #include "agent_manager.hpp"
+#include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -42,13 +43,6 @@ process_cpu_info_data()
         {
             return -1;
         }
-    };
-
-    auto trim_whitespace = [](const std::string& str) -> std::string {
-        const size_t start = str.find_first_not_of(" \t");
-        if(start == std::string::npos) return "";
-        const size_t end = str.find_last_not_of(" \t");
-        return str.substr(start, end - start + 1);
     };
 
     static const std::unordered_map<std::string,
@@ -103,8 +97,8 @@ process_cpu_info_data()
             continue;
         }
 
-        std::string       key   = trim_whitespace(line.substr(0, colon_pos));
-        const std::string value = trim_whitespace(line.substr(colon_pos + 1));
+        std::string       key   = utility::string::trim(line.substr(0, colon_pos));
+        const std::string value = utility::string::trim(line.substr(colon_pos + 1));
 
         std::transform(key.begin(), key.end(), key.begin(), ::tolower);
 

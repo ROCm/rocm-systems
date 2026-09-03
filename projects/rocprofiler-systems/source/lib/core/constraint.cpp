@@ -3,6 +3,7 @@
 
 #include "constraint.hpp"
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
 #include "state.hpp"
@@ -37,10 +38,12 @@ auto
 clock_name(std::string _v)
 {
     constexpr auto _clock_prefix = std::string_view{ "clock_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
-    auto _pos = _v.find(_clock_prefix);
-    if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
+    _v                           = utility::string::to_lower(_v);
+    auto pos                     = _v.find(_clock_prefix);
+    if(pos == 0)
+    {
+        _v = _v.substr(pos + _clock_prefix.length());
+    }
     if(_v == "process_cputime_id") _v = "cputime";
     return _v;
 }
@@ -179,12 +182,10 @@ clock_identifier::operator==(std::string _rhs) const
 std::string
 clock_identifier::as_string() const
 {
-    auto _name = name;
-    for(auto& itr : _name)
-        itr = tolower(itr);
-    auto _ss = std::stringstream{};
-    _ss << _name << "(id=" << raw_name << ", value=" << value << ")";
-    return _ss.str();
+    auto lower_name = utility::string::to_lower(name);
+    auto oss        = std::stringstream{};
+    oss << lower_name << "(id=" << raw_name << ", value=" << value << ")";
+    return oss.str();
 }
 
 //--------------------------------------------------------------------------------------//

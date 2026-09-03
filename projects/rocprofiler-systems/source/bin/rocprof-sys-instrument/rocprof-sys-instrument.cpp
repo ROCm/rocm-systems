@@ -1194,14 +1194,13 @@ main(int argc, char** argv)
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
     {
         auto _is_executable = rocprofsys_get_is_executable(_cmdv[0], binary_rewrite);
-        const std::string _cmdv_base      = path::filename(_cmdv[0]);
-        auto              _has_lib_suffix = _cmdv_base.length() > 3 &&
-                               (_cmdv_base.find(".so.") != std::string::npos ||
-                                _cmdv_base.find(".so") == (_cmdv_base.length() - 3) ||
-                                _cmdv_base.find(".a") == (_cmdv_base.length() - 2));
-        auto _has_lib_prefix = _cmdv_base.length() > 3 && _cmdv_base.find("lib") == 0;
+        const std::string cmdv_base      = path::filename(_cmdv[0]);
+        auto              has_lib_suffix = cmdv_base.length() > 3 &&
+                              (cmdv_base.find(".so.") != std::string::npos ||
+                               cmdv_base.ends_with(".so") || cmdv_base.ends_with(".a"));
+        auto has_lib_prefix = cmdv_base.length() > 3 && cmdv_base.starts_with("lib");
         if(!force_config && !_is_executable && !binary_rewrite &&
-           (_has_lib_prefix || _has_lib_suffix))
+           (has_lib_prefix || has_lib_suffix))
         {
             fflush(stdout);
             std::stringstream _separator{};
@@ -1220,9 +1219,9 @@ main(int argc, char** argv)
                           "--all-functions'\n");
             verbprintf(
                 0, "(which will provide an approximation for runtime instrumentation)\n");
-            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", _cmdv_base.c_str(),
-                       (_has_lib_prefix) ? "true" : "false",
-                       (_has_lib_suffix) ? "true" : "false");
+            verbprintf(1, "%s :: (^lib)=%s, (.so$|.a$|.so.*)=%s\n", cmdv_base.c_str(),
+                       (has_lib_prefix) ? "true" : "false",
+                       (has_lib_suffix) ? "true" : "false");
             verbprintf(0, "\n");
             verbprintf(0, "%s\n", _separator.str().c_str());
             verbprintf(0, "\n");
@@ -2719,18 +2718,22 @@ namespace
 std::string
 canonicalize(std::string _path)
 {
-    if(_path.find("./") == 0)
-        _path = _path.replace(0, 1, get_cwd());
-    else if(_path.find("../") == 0)
-        _path = _path.insert(0, get_cwd() + "/");
-
-    auto _leading_dash = (_path.find('/') == 0);
-    auto _pieces       = rocprofsys::delimit(_path, "/");
-    std::reverse(_pieces.begin(), _pieces.end());
-    auto _tree = std::vector<std::string>{};
-    for(size_t i = 0; i < _pieces.size(); ++i)
+    if(_path.starts_with("./"))
     {
-        const auto& itr = _pieces.at(i);
+        _path = _path.replace(0, 1, get_cwd());
+    }
+    else if(_path.starts_with("../"))
+    {
+        _path = _path.insert(0, get_cwd() + "/");
+    }
+
+    auto leading_dash = _path.starts_with('/');
+    auto pieces       = rocprofsys::delimit(_path, "/");
+    std::ranges::reverse(pieces);
+    auto _tree = std::vector<std::string>{};
+    for(size_t i = 0; i < pieces.size(); ++i)
+    {
+        const auto& itr = pieces.at(i);
         if(itr == ".")
         {
             continue;
@@ -2741,11 +2744,11 @@ canonicalize(std::string _path)
             _tree.emplace_back(itr);
     }
     std::reverse(_tree.begin(), _tree.end());
-    auto _cpath = std::string{ (_leading_dash) ? "/" : "" };
+    auto cpath = std::string{ leading_dash ? "/" : "" };
     for(size_t i = 0; i < _tree.size() - 1; ++i)
-        _cpath += _tree.at(i) + "/";
-    _cpath += _tree.back();
-    return _cpath;
+        cpath += _tree.at(i) + "/";
+    cpath += _tree.back();
+    return cpath;
 }
 
 //======================================================================================//
@@ -2753,7 +2756,10 @@ canonicalize(std::string _path)
 std::string
 absolute(std::string _path)
 {
-    if(_path.find('/') == 0) return canonicalize(_path);
+    if(_path.starts_with('/'))
+    {
+        return canonicalize(_path);
+    }
     return canonicalize(fmt::format("{}/{}", get_cwd(), _path));
 }
 

@@ -4,6 +4,7 @@
 #include "common.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/string_utility.hpp"
 #include <cstdint>
 
 #include <timemory/mpl/apply.hpp>
@@ -284,14 +285,6 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     category_view = p.get<str_set_t>("categories");
     std::vector<std::function<void()>> _shorthand_patches{};
 
-    // Helper to do case-insensitive string comparison
-    auto _tolower = [](std::string_view in) {
-        std::string out(in);
-        std::transform(out.begin(), out.end(), out.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-        return out;
-    };
-
     // Cache lowercase -> original category mapping to avoid repeated string conversions
     // Also pre-compute shorthand mappings (e.g., "wallclock" -> "component::WallClock")
     std::unordered_map<std::string, std::string> _category_map;
@@ -300,14 +293,14 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 
     for(const auto& opt : _category_options)
     {
-        auto opt_lower           = _tolower(opt);
+        auto opt_lower           = rocprofsys::utility::string::to_lower(opt);
         _category_map[opt_lower] = opt;
 
         // Add shorthand mappings if the option starts with a known prefix
         for(auto prefix : _prefixes)
         {
             if(opt_lower.size() > prefix.size() &&
-               opt_lower.compare(0, prefix.size(), _tolower(prefix)) == 0)
+               opt_lower.starts_with(rocprofsys::utility::string::to_lower(prefix)))
             {
                 // Map the shorthand (without prefix) to the full canonical form
                 auto shorthand           = opt_lower.substr(prefix.size());
@@ -318,9 +311,8 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     }
 
     // Helper to find case-insensitive match in category options
-    auto _find_category = [&_category_map,
-                           &_tolower](std::string_view input) -> std::string_view {
-        auto input_lower = _tolower(input);
+    auto find_category = [&_category_map](std::string_view input) -> std::string_view {
+        auto input_lower = rocprofsys::utility::string::to_lower(input);
         auto it          = _category_map.find(input_lower);
         if(it != _category_map.end()) return it->second;
         return "";
@@ -330,18 +322,18 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     // map
     for(const auto& itr : category_view)
     {
-        auto _matched = _find_category(itr);
-        if(!_matched.empty())
+        auto matched = find_category(itr);
+        if(!matched.empty())
         {
             // Only create patch if the matched form differs from input (normalization
             // needed)
-            if(_matched != itr)
+            if(matched != itr)
             {
                 // Explicitly convert string_view to string for safe capture
-                const std::string _matched_str(_matched);
-                _shorthand_patches.emplace_back([itr, _matched_str]() {
+                const std::string matched_str(matched);
+                _shorthand_patches.emplace_back([itr, matched_str]() {
                     category_view.erase(itr);
-                    category_view.emplace(_matched_str);
+                    category_view.emplace(matched_str);
                 });
             }
         }
@@ -418,19 +410,18 @@ rocm_domain_from_setting_name(std::string_view _env_var_name)
     // Check if the environment variable name matches the expected shape
     // ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS.
     if(_env_var_name.size() <= _rocm_op_prefix.size() + _rocm_op_suffix.size() ||
-       _env_var_name.compare(0, _rocm_op_prefix.size(), _rocm_op_prefix) != 0 ||
-       _env_var_name.compare(_env_var_name.size() - _rocm_op_suffix.size(),
-                             _rocm_op_suffix.size(), _rocm_op_suffix) != 0)
+       !_env_var_name.starts_with(_rocm_op_prefix) ||
+       !_env_var_name.ends_with(_rocm_op_suffix))
+    {
         return std::nullopt;
+    }
 
     // Extract the domain name from the environment variable name, then convert it to
     // lowercase.
-    std::string _domain{ _env_var_name.substr(
+    auto domain = rocprofsys::utility::string::to_lower(_env_var_name.substr(
         _rocm_op_prefix.size(),
-        _env_var_name.size() - _rocm_op_prefix.size() - _rocm_op_suffix.size()) };
-    std::transform(_domain.begin(), _domain.end(), _domain.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return _domain;
+        _env_var_name.size() - _rocm_op_prefix.size() - _rocm_op_suffix.size()));
+    return domain;
 }
 
 std::string

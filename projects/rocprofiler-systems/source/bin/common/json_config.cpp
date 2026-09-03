@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,7 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -31,14 +33,10 @@ split_csv_lowercase(const std::string& input)
 
     while(std::getline(ss, token, ','))
     {
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if(start != std::string::npos)
+        auto trimmed = utility::string::to_lower(utility::string::trim(token));
+        if(!trimmed.empty())
         {
-            token = token.substr(start, end - start + 1);
-            for(auto& c : token)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            tokens.push_back(std::move(token));
+            tokens.push_back(std::move(trimmed));
         }
     }
     return tokens;
@@ -80,12 +78,10 @@ csv_to_json_enabled_flags(nlohmann::json& target_obj, const std::string& csv_val
     std::string        token;
     while(std::getline(ss, token, ','))
     {
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if(start != std::string::npos)
+        auto trimmed = utility::string::trim(token);
+        if(!trimmed.empty())
         {
-            token                        = token.substr(start, end - start + 1);
-            target_obj[token]["enabled"] = true;
+            target_obj[trimmed]["enabled"] = true;
         }
     }
 }
@@ -647,10 +643,7 @@ is_truthy(const std::string& v)
 {
     if(v == "1") return true;
     if(v.size() < 2 || v.size() > 4) return false;
-    std::string lower;
-    lower.reserve(v.size());
-    for(auto c : v)
-        lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    auto lower = utility::string::to_lower(v);
     return lower == "true" || lower == "on" || lower == "yes";
 }
 

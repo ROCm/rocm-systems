@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/env_vars.hpp"
+#include "common/string_utility.hpp"
 #include "core/config.hpp"
 #include "core/gpu_visibility.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
@@ -256,12 +257,15 @@ struct settings_policy
 private:
     static cpu::enabled_metrics parse_cpu_enabled_metrics(const std::string& input)
     {
-        std::string trimmed;
-        trimmed.reserve(input.size());
-        std::for_each(input.begin(), input.end(), [&trimmed](char ch) {
-            if(ch != '\t' && ch != ' ')
-                trimmed.push_back(static_cast<char>(std::tolower(ch)));
+        std::string filtered;
+        filtered.reserve(input.size());
+        std::ranges::for_each(input, [&filtered](char chr) {
+            if(chr != '\t' && chr != ' ')
+            {
+                filtered.push_back(chr);
+            }
         });
+        auto trimmed = rocprofsys::utility::string::to_lower(filtered);
 
         if(trimmed.empty() || trimmed == "all")
         {
@@ -317,14 +321,15 @@ private:
 
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
     {
-        std::string settings_trimmed;
-        settings_trimmed.reserve(input.size());
-        std::for_each(input.begin(), input.end(), [&settings_trimmed](char ch) {
-            if(ch != '\t' && ch != ' ')
+        std::string settings_filtered;
+        settings_filtered.reserve(input.size());
+        std::ranges::for_each(input, [&settings_filtered](char chr) {
+            if(chr != '\t' && chr != ' ')
             {
-                settings_trimmed.push_back(static_cast<char>(std::tolower(ch)));
+                settings_filtered.push_back(chr);
             }
         });
+        auto settings_trimmed = rocprofsys::utility::string::to_lower(settings_filtered);
 
         if(settings_trimmed.empty() || settings_trimmed == "all")
         {
@@ -462,12 +467,10 @@ private:
             std::string       subtoken;
             while(std::getline(ss2, subtoken, ';'))
             {
-                // Trim whitespace
-                auto start = subtoken.find_first_not_of(" \t");
-                auto end   = subtoken.find_last_not_of(" \t");
-                if(start != std::string::npos && end != std::string::npos)
+                auto trimmed = rocprofsys::utility::string::trim(subtoken);
+                if(!trimmed.empty())
                 {
-                    result.insert(subtoken.substr(start, end - start + 1));
+                    result.insert(std::move(trimmed));
                 }
             }
         }

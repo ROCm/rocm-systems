@@ -6,10 +6,10 @@
 #include "common/domain_flag_state.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
+#include "common/string_utility.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -34,7 +34,7 @@ constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
 bool
 starts_with_rocprofsys(std::string_view entry) noexcept
 {
-    return entry.compare(0, rocprofsys_prefix.size(), rocprofsys_prefix) == 0;
+    return entry.starts_with(rocprofsys_prefix);
 }
 
 [[nodiscard]] std::string_view
@@ -110,8 +110,10 @@ print_environment_impl(const std::vector<std::string>&              env,
 static std::string
 strip_flag_prefix(std::string_view name)
 {
-    if(name.size() > 2 && name.compare(0, 2, "--") == 0)
+    if(name.size() > 2 && name.starts_with("--"))
+    {
         return std::string{ name.substr(2) };
+    }
     return std::string{ name };
 }
 
@@ -506,15 +508,13 @@ strip_ansi(const std::string& text)
 bool
 is_section_header(const std::string& line, std::string& bracket_name)
 {
-    auto stripped = strip_ansi(line);
-    auto first    = stripped.find_first_not_of(" \t");
-    if(first == std::string::npos) return false;
-    stripped = stripped.substr(first);
+    auto ansi_stripped = strip_ansi(line);
+    auto stripped      = utility::string::ltrim(ansi_stripped);
     if(stripped.empty() || stripped.front() != '[') return false;
     // Find the closing bracket -the bracket name ends at the first ']'
     auto close = stripped.find(']');
     if(close == std::string::npos) return false;
-    bracket_name = stripped.substr(0, close + 1);
+    bracket_name = std::string{ stripped.substr(0, close + 1) };
     return true;
 }
 
@@ -856,18 +856,15 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
         lines.push_back(line);
 
     // Print header
-    std::string upper_domain{ domain };
-    for(auto& c : upper_domain)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    out << upper_domain << " OPTIONS (" << entry.description << ")\n\n";
+    out << utility::string::to_upper(domain) << " OPTIONS (" << entry.description
+        << ")\n\n";
 
     // Skip lines before "Options:" to avoid matching flags in the usage summary
     size_t options_start = 0;
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
     {
         auto stripped = strip_ansi(lines[line_idx]);
-        auto trimmed  = stripped.find_first_not_of(" \t");
-        if(trimmed != std::string::npos && stripped.substr(trimmed).find("Options:") == 0)
+        if(utility::string::ltrim(stripped).starts_with("Options:"))
         {
             options_start = line_idx + 1;
             break;
@@ -883,10 +880,10 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     {
         const auto& current_line = lines[idx];
         auto        stripped     = strip_ansi(current_line);
-        auto        first        = stripped.find_first_not_of(" \t");
+        auto        trimmed      = utility::string::ltrim(stripped);
 
         // Skip separators and empty lines at the top
-        if(first == std::string::npos)
+        if(trimmed.empty())
         {
             if(in_match) out << '\n';
             in_match = false;
@@ -894,14 +891,14 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
         }
 
         // Check if this is a section header -skip it
-        if(stripped[first] == '[')
+        if(trimmed.front() == '[')
         {
             in_match = false;
             continue;
         }
 
         // Check if this line starts a new argument (has - prefix after indent)
-        const bool is_arg_line = (stripped[first] == '-');
+        const bool is_arg_line = (trimmed.front() == '-');
 
         if(is_arg_line)
         {
