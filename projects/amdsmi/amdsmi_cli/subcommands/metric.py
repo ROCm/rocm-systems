@@ -1913,7 +1913,7 @@ class MetricCommands:
                         e.get_error_info(),
                     )
         if "voltage" in current_platform_args:
-            if args.voltage and not apu_suppressed:
+            if args.voltage:
                 voltage_dict = {}
                 all_voltage = {"vddboard": amdsmi_interface.AmdSmiVoltageType.VDDBOARD}
                 for volt_type, volt_metric in all_voltage.items():
