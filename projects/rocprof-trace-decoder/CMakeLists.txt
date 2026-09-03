@@ -1,6 +1,9 @@
 #
 # Build Standaone Library for Advanced Thread Tracer
 #
+
+# Temporary no-op change on rocprof-trace-decoder to exercise TheRock Multi-arch CI
+
 cmake_minimum_required(VERSION 3.16.0)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.cmake)
