@@ -135,8 +135,9 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
 
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
-  
-  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+
+  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
   const bool p2pDisabled = ncclParamP2pDisable();
   const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
   const bool interGraphGen = rcclParamInterGraphGen();
@@ -470,7 +471,7 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   }
 
   return ncclSuccess;
-  
+
   fail:
     free(nodeOrder);
     return res;
