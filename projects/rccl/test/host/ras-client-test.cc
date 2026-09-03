@@ -2931,6 +2931,9 @@ TEST_F(RasClientMicrotest, MonitorEvents_NoEventGroups_SendsBareMonitorCommandAn
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("MONITOR\n", g_writtenData);
+  // The descriptor, not just the bytes: monitorNCCLEvents must use `sock`, and the payload alone cannot tell.
+  EXPECT_EQ(std::vector<int>({kMonitorSock}), g_writtenFds);
+  EXPECT_EQ(std::vector<int>({kMonitorSock, kMonitorSock}), g_readFds);
   EXPECT_EQ("", g_stdoutData);
   EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
   EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;

@@ -46,7 +46,8 @@ struct MicroExit {
 // `err` in errno; `ret` == 0 is EOF; a positive `ret` is the byte count the
 // step promises and must equal data.size(), which ScriptReadData derives for
 // you. The delivery is truncated to the caller's buffer, so a read asking for
-// fewer bytes than the step offers gets a short read, not an overrun.
+// fewer bytes than the step offers gets a short read, not an overrun; the tail
+// is dropped rather than requeued, and the step is spent either way.
 struct MicroReadStep {
   ssize_t ret;
   int err;
@@ -78,6 +79,8 @@ extern std::string g_writtenData;       // every byte the unit wrote to a descri
 extern std::string g_stdoutData;        // every byte the unit fwrite()'d, whichever stream it chose
 extern FILE* g_lastFwriteStream;        // stream of the last fwrite; distinguishes stdout from stderr
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
+extern std::vector<int> g_writtenFds;   // fds passed to write(), in order; without it a unit writing to the wrong
+extern std::vector<int> g_readFds;      // descriptor still produces the expected bytes and no test notices
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;
 extern int g_nextSocketFd;              // what the default socket() hands back (-1 to fail it)
@@ -87,12 +90,14 @@ extern int g_lastSetsockoptOptname;     // SO_SNDTIMEO / SO_RCVTIMEO of the last
 extern struct timeval g_lastSetsockoptTimeval;
 extern int g_getaddrinfoResult;         // non-zero makes the default getaddrinfo fail with that code
 extern int g_addrinfoCount;             // how many entries the default getaddrinfo returns
-extern int g_addrinfoBasePort;          // entry i gets port g_addrinfoBasePort + i
+extern int g_addrinfoBasePort;          // entry i gets port g_addrinfoBasePort + i; no test drives it yet,
+                                        // ras-client-test.cc mirrors the default as kEntryPort0 instead
 extern int g_freeaddrinfoCalls;
 extern int g_connectResult;             // 0 succeeds; non-zero fails and sets errno to g_connectErrno
 extern int g_connectErrno;
 
-// Queues one scripted read result. Reads past the end of the script return 0 (EOF).
+// Queues one scripted read result. Reads past the end of the script return 0 (EOF),
+// as does a zero-length read, which is answered without spending a step.
 void ScriptRead(ssize_t ret, int err, std::string data);
 
 // Convenience: script one successful read that delivers `data`.

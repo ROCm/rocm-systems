@@ -30,6 +30,8 @@ std::string g_writtenData;
 std::string g_stdoutData;
 FILE* g_lastFwriteStream = nullptr;
 std::vector<int> g_closedFds;
+std::vector<int> g_writtenFds;
+std::vector<int> g_readFds;
 std::vector<MicroReadStep> g_readScript;
 size_t g_readScriptPos = 0;
 int g_nextSocketFd = 42;
@@ -48,17 +50,22 @@ int g_connectErrno = ECONNREFUSED;
 // Defaults
 // ---------------------------------------------------------------------------
 
-static ssize_t DefaultWrite(int, const void* buf, size_t count) {
+static ssize_t DefaultWrite(int fd, const void* buf, size_t count) {
+  g_writtenFds.push_back(fd);
   g_writtenData.append(static_cast<const char*>(buf), count);
   return static_cast<ssize_t>(count);
 }
 
-static ssize_t DefaultRead(int, void* buf, size_t count) {
+static ssize_t DefaultRead(int fd, void* buf, size_t count) {
+  g_readFds.push_back(fd);
   // A zero-length read returns 0 without consuming a step, as read(2) does and as RecordingReader does. rasRead asks
   // for 0 once its buffer is full, so spending a step there would shift every later step onto the wrong call.
   if (count == 0) return 0;
   if (g_readScriptPos >= g_readScript.size()) return 0;  // EOF past the end of the script
   const MicroReadStep& step = g_readScript[g_readScriptPos++];
+  // A failing or EOF step delivers nothing, so a payload on one is a script the fake would silently ignore.
+  assert((step.ret > 0 || step.data.empty()) &&
+         "ScriptRead: a non-positive ret cannot deliver data; drop the payload or make ret positive");
   if (step.ret < 0) {
     errno = step.err;
     return step.ret;
@@ -218,6 +225,8 @@ void ResetLibcFakes() {
   g_stdoutData.clear();
   g_lastFwriteStream = nullptr;
   g_closedFds.clear();
+  g_writtenFds.clear();
+  g_readFds.clear();
   g_readScript.clear();
   g_readScriptPos = 0;
   g_nextSocketFd = 42;

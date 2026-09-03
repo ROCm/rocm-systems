@@ -81,6 +81,9 @@ if(BUILD_TESTS)
   # private copy of the unit instead of editing the shared hipified tree.
   set(RAS_CLIENT_CC "${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc" CACHE FILEPATH
       "Hipified src/ras/client.cc to compile into rccl-UnitTestsMicro")
+  # Echoed because it is a cache variable: a stale entry silently builds the pristine unit, which reads as a mutation
+  # the suite failed to catch.
+  message(STATUS "rccl-UnitTestsMicro RAS_CLIENT_CC: ${RAS_CLIENT_CC}")
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
     RAS_CLIENT_CC_PATH="${RAS_CLIENT_CC}"
@@ -690,6 +693,9 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE
 #   cmake -B build-mut ... -DRAS_CLIENT_CC=/path/to/mutated/client.cc
 set(RAS_CLIENT_CC "${RCCL_HIPIFY_DIR}/src/ras/client.cc" CACHE FILEPATH
     "Hipified src/ras/client.cc to compile into rccl-UnitTestsMicro")
+# Echoed because it is a cache variable: a stale entry silently builds the
+# pristine unit, which reads as a mutation the suite failed to catch.
+message(STATUS "rccl-UnitTestsMicro RAS_CLIENT_CC: ${RAS_CLIENT_CC}")
 
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   __HIP_PLATFORM_AMD__
