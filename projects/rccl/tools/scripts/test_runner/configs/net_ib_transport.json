@@ -969,11 +969,15 @@
       "timeout": 120,
       "env_variables": {
         "NCCL_GIN_ENABLE": "1",
-        "NCCL_GIN_TYPE": "2"
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_NET": "ib"
       },
       "tests": [
         { "name": "NetIB_GIN_NicFusion_HostRma", "description": "GIN nic fusion: host RMA proxy stays available on fused vNICs", "test_filter": "GinNicFusionMPITest.HostRmaSurvivesNicFusion" },
-        { "name": "NetIB_GIN_NicFusion_GinType", "description": "GIN nic fusion: communicator keeps a usable GIN backend on fused vNICs", "test_filter": "GinNicFusionMPITest.GinTypeSurvivesNicFusion" }
+        { "name": "NetIB_GIN_NicFusion_GinType", "description": "GIN nic fusion: communicator keeps a usable GIN backend on fused vNICs", "test_filter": "GinNicFusionMPITest.GinTypeSurvivesNicFusion" },
+        { "name": "NetIB_GIN_NicFusion_IPut", "description": "GIN nic fusion: RMA proxy iput delivers over a fused vNIC", "test_filter": "RmaMPIFusedNicTest.IPutOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IGet", "description": "GIN nic fusion: RMA proxy iget delivers over a fused vNIC", "test_filter": "RmaMPIFusedNicTest.IGetOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IPutSignal", "description": "GIN nic fusion: RMA proxy iput+signal delivers over a fused vNIC", "test_filter": "RmaMPIFusedNicTest.IPutSignalOverFusedVNic" }
       ]
     },
     "net_ib_cast_gin_peermem": {
