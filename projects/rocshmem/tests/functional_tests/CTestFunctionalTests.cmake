@@ -1274,9 +1274,9 @@ endfunction()
 ###############################################################################
 
 function(add_tile_tests)
-    # Tile tests are only supported on IPC backend
+	# Tile tests are only supported on IPC and GDA backends
     # These tests use 2D strided memory access patterns
-    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_put_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_put_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_put_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
@@ -1286,12 +1286,12 @@ function(add_tile_tests)
 
     # Wavefront and workgroup tile put tests
     # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
-    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;PUT" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_put_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_put_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
     end_test_group()
 
-    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_get_contiguous RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_rowmajor RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_colmajor RANKS 2 WORKGROUPS 1 THREADS 1)
@@ -1301,7 +1301,7 @@ function(add_tile_tests)
 
     # Wavefront and workgroup tile get tests
     # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
-    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;GET" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 1)
         add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 NUM_WF 16)
         add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 NUM_WF 16)
@@ -1309,7 +1309,7 @@ function(add_tile_tests)
 
     # Tile collective tests (broadcast and allgather)
     # NUM_WF 1: wg_size is set at runtime to 1 * GPU's wave-front size
-    begin_test_group(CATEGORY "TILE;COLLECTIVE;BROADCAST" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;BROADCAST" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         # Thread-level broadcast - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_broadcast RANKS 4 WORKGROUPS 1 THREADS 1)
@@ -1321,7 +1321,7 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
     end_test_group()
 
-    begin_test_group(CATEGORY "TILE;COLLECTIVE;ALLGATHER" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;ALLGATHER" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         # Thread-level allgather - test with 2 and 4 PEs
         add_rocshmem_functional_test(NAME tile_allgather RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_allgather RANKS 4 WORKGROUPS 1 THREADS 1)
@@ -1333,7 +1333,7 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 4 NUM_WF 1)
     end_test_group()
 
-    begin_test_group(CATEGORY "TILE;COLLECTIVE;REDUCE" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;REDUCE" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         # Each tile_reduce test exercises sum, max, and min reductions.
         add_rocshmem_functional_test(NAME tile_reduce RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_reduce RANKS 4 WORKGROUPS 1 THREADS 1)

@@ -1,5 +1,7 @@
 HeaderFilterRegex: "/rocprofiler-systems/source/"
 
+# Deliberately not enabled:
+#   bugprone-exception-escape: nice to have, but too slow on current tree.
 Checks: >
   -*,
   bugprone-assignment-in-if-condition,
@@ -15,7 +17,6 @@ Checks: >
   bugprone-dynamic-static-initializers,
   bugprone-empty-catch,
   bugprone-exception-copy-constructor-throws,
-  bugprone-exception-escape,
   bugprone-float-loop-counter,
   bugprone-fold-init-type,
   bugprone-implicit-widening-of-multiplication-result,
@@ -115,6 +116,7 @@ Checks: >
   readability-function-cognitive-complexity,
   readability-function-size,
   readability-identifier-length,
+  readability-identifier-naming,
   readability-magic-numbers,
   readability-misleading-indentation,
   readability-redundant-declaration,
@@ -169,12 +171,8 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.TypeAliasCase
     value: lower_case
-  - key: readability-identifier-naming.TypeAliasSuffix
-    value: "_t"
   - key: readability-identifier-naming.TypedefCase
     value: lower_case
-  - key: readability-identifier-naming.TypedefSuffix
-    value: "_t"
 
   # --- Abstract/interface classes: require an "_interface" suffix
   - key: readability-identifier-naming.AbstractClassCase
@@ -199,6 +197,8 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.ClassMethodCase
     value: lower_case
+  - key: readability-identifier-naming.GlobalFunctionCase
+    value: lower_case
 
   # --- Parameters
   - key: readability-identifier-naming.ParameterCase
@@ -212,68 +212,64 @@ CheckOptions:
   - key: readability-identifier-naming.ConstantPointerParameterCase
     value: lower_case
 
-  # --- Member variables
+  # --- Mutable variables (all scopes): lower_case, scope encoded in prefix
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalPointerCase
+    value: lower_case
   - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PublicMemberCase
     value: lower_case
   - key: readability-identifier-naming.PrivateMemberPrefix
     value: "m_"
   - key: readability-identifier-naming.ProtectedMemberPrefix
     value: "m_"
-  - key: readability-identifier-naming.PublicMemberCase
-    value: lower_case
-  - key: readability-identifier-naming.ClassConstantCase
-    value: lower_case
-  - key: readability-identifier-naming.ClassConstantPrefix
-    value: "k_"
-  # NOTE: ClassMemberCase/Prefix applies to ALL static data members
-  # regardless of access specifier (public/protected/private) -- clang-tidy
-  # has no PrivateStaticMember/ProtectedStaticMember/PublicStaticMember
-  # split, so a per-visibility static prefix isn't expressible. No prefix
-  # is used here on purpose.
   - key: readability-identifier-naming.ClassMemberCase
     value: lower_case
-  - key: readability-identifier-naming.ConstantMemberCase
+  - key: readability-identifier-naming.StaticVariableCase
     value: lower_case
+  - key: readability-identifier-naming.StaticVariablePrefix
+    value: "s_"
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariablePrefix
+    value: "g_"
+  - key: readability-identifier-naming.GlobalPointerCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalPointerPrefix
+    value: "g_"
 
-  # --- Local variables / constants
-  - key: readability-identifier-naming.VariableCase
-    value: lower_case
-  - key: readability-identifier-naming.LocalVariableCase
+  # --- Constants (const / constexpr, all scopes)
+  # UPPER_CASE is reserved for macros only (C++ Core Guidelines NL.9).
+  - key: readability-identifier-naming.ConstantCase
     value: lower_case
   - key: readability-identifier-naming.LocalConstantCase
     value: lower_case
   - key: readability-identifier-naming.LocalConstantPointerCase
     value: lower_case
-  - key: readability-identifier-naming.LocalPointerCase
+  - key: readability-identifier-naming.ConstantMemberCase
     value: lower_case
-
-  # --- Static / global variables
-  - key: readability-identifier-naming.StaticVariableCase
+  - key: readability-identifier-naming.ClassConstantCase
     value: lower_case
-  - key: readability-identifier-naming.StaticVariablePrefix
-    value: "s_"
+  - key: readability-identifier-naming.ClassConstantPrefix
+    value: "k_"
   - key: readability-identifier-naming.StaticConstantCase
     value: lower_case
   - key: readability-identifier-naming.StaticConstantPrefix
     value: "k_"
-  - key: readability-identifier-naming.GlobalVariableCase
-    value: lower_case
-  - key: readability-identifier-naming.GlobalVariablePrefix
-    value: "g_"
   - key: readability-identifier-naming.GlobalConstantCase
-    value: UPPER_CASE
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: "k_"
   - key: readability-identifier-naming.GlobalConstantPointerCase
-    value: UPPER_CASE
-  - key: readability-identifier-naming.GlobalPointerCase
     value: lower_case
-  - key: readability-identifier-naming.GlobalPointerPrefix
-    value: "g_"
-  - key: readability-identifier-naming.GlobalFunctionCase
-    value: lower_case
-
-  # --- Constants (fallback bucket, e.g. free-standing constexpr)
-  - key: readability-identifier-naming.ConstantCase
-    value: UPPER_CASE
+  - key: readability-identifier-naming.GlobalConstantPointerPrefix
+    value: "k_"
+  # NOTE: constexpr is matched before any const/scope bucket above, so this
+  # style wins for EVERY constexpr variable, function-local ones included.
   - key: readability-identifier-naming.ConstexprVariableCase
     value: lower_case
   - key: readability-identifier-naming.ConstexprVariablePrefix
@@ -299,7 +295,7 @@ CheckOptions:
   - key: readability-identifier-naming.IgnoreMainLikeFunctions
     value: "1"
 
-  # --- identifier lenght
+  # --- identifier length
   - key: readability-identifier-length.MinimumBindingNameLength
     value: "3"
   - key: readability-identifier-length.MinimumExceptionNameLength
@@ -307,6 +303,6 @@ CheckOptions:
   - key: readability-identifier-length.MinimumLoopCounterNameLength
     value: "3"
 
-  # include igrone
+  # include ignore
   - key: misc-include-cleaner.IgnoreHeaders
-    value: "<compare>,<string_view>"
+    value: "compare$;string_view$;concepts$"

@@ -44,8 +44,12 @@ void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     int16_t c_hi = static_cast<int16_t>(sel2_hi ? (raw2 >> 16) : raw2);
-    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);
-    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);
+    uint16_t rlo = amdgpu::vop3_integer_mad<int16_t, 16>(static_cast<uint16_t>(a_lo),
+                                                         static_cast<uint16_t>(b_lo),
+                                                         static_cast<uint16_t>(c_lo), inst_.clamp);
+    uint16_t rhi = amdgpu::vop3_integer_mad<int16_t, 16>(static_cast<uint16_t>(a_hi),
+                                                         static_cast<uint16_t>(b_hi),
+                                                         static_cast<uint16_t>(c_hi), inst_.clamp);
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -88,8 +92,10 @@ void VPkAddI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo + b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi + b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<int16_t>(a_lo, b_lo, inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<int16_t>(a_hi, b_hi, inst_.clamp));
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -110,8 +116,10 @@ void VPkSubI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     int16_t b_lo = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     int16_t a_hi = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     int16_t b_hi = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo - b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi - b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<int16_t>(a_lo, b_lo, inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<int16_t>(a_hi, b_hi, inst_.clamp));
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -247,8 +255,8 @@ void VPkMadU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
     uint16_t c_hi = static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2);
-    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);
-    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);
+    uint16_t rlo = amdgpu::vop3_integer_mad<uint16_t, 16>(a_lo, b_lo, c_lo, inst_.clamp);
+    uint16_t rhi = amdgpu::vop3_integer_mad<uint16_t, 16>(a_hi, b_hi, c_hi, inst_.clamp);
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -269,8 +277,10 @@ void VPkAddU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo + b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi + b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(a_lo, b_lo, inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_add<uint16_t>(a_hi, b_hi, inst_.clamp));
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -291,8 +301,10 @@ void VPkSubU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(a_lo - b_lo);
-    uint16_t rhi = static_cast<uint16_t>(a_hi - b_hi);
+    uint16_t rlo =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(a_lo, b_lo, inst_.clamp));
+    uint16_t rhi =
+        static_cast<uint16_t>(amdgpu::vop3_integer_sub<uint16_t>(a_hi, b_hi, inst_.clamp));
     amdgpu::sdwa::write_lane<false>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }

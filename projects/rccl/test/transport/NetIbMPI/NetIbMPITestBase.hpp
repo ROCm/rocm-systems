@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "NetIbFaultInject.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -19,6 +20,7 @@
 #include "net.h"
 #include "plugin/nccl_net.h"
 #include <atomic>
+#include <chrono>
 #include <vector>
 #include <memory>
 #include <cstring>
@@ -129,9 +131,27 @@ struct NetMHandleDeleter {
     }
 };
 
+// Deregistrations that failed inside a worker. A destructor cannot fail a test,
+// and swallowing the result would turn a refused deregistration into a phantom
+// MR leak later, so the count is recorded here and the harness checks it on the
+// main thread once the workers have joined. The serial teardown asserts on the
+// same return value.
+//
+// Process-global, and deliberately so: it is written by every worker of every
+// threaded body, and a per-fixture member would need threading through helpers
+// that have no fixture. That makes it correct only under two properties, both of
+// which hold and neither of which is free. GTest runs the tests in a translation
+// unit one after another on the calling thread, so no two bodies are counting at
+// once; and every threaded body joins its workers before returning, so no worker
+// from a finished test can still be writing. Each run resets the counter first,
+// which limits a stray increment to the test that produced it rather than
+// blaming the next one -- but if either property is ever given up (a
+// GTest-parallel runner, or a body that abandons a worker on timeout), this
+// counter becomes wrong, not merely imprecise.
+inline std::atomic<int> g_workerDeregFailures{0};
+
 // Worker threads must not invoke TEST_INFO or any helper that can call MPI.
-// This deleter is used only by the threaded test bodies; errors are surfaced
-// by the surrounding transfer operation and resource-leak checks.
+// This deleter is used only by the threaded test bodies.
 struct NetMHandleWorkerDeleter {
     ncclNet_t* net;
     void* comm;
@@ -140,7 +160,9 @@ struct NetMHandleWorkerDeleter {
 
     void operator()(void* mhandle) const {
         if (mhandle && net && comm) {
-            (void)net->deregMr(comm, mhandle);
+            if (net->deregMr(comm, mhandle) != ncclSuccess) {
+                g_workerDeregFailures.fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
 };
@@ -512,7 +534,15 @@ protected:
         return linkLayerRead && strcmp(linkLayer, "Ethernet") == 0;
     }
 
-    static bool PortHasRoutableGid(const char* portsPath, const char* port) {
+    // familiesOut, when given, accumulates kGidFamily* over every routable GID on
+    // the port rather than the first one found. Which single GID the plugin will
+    // pick is not knowable from here -- it depends on NCCL_IB_GID_INDEX,
+    // NCCL_IB_ADDR_FAMILY, the RoCE version files and prefix matching
+    // (connect.cc) -- so sampling one and calling it "the" family would be an
+    // arbitrary choice that can disagree with the plugin's on a dual-stack port.
+    // The whole set carries no such assumption.
+    static bool PortHasRoutableGid(const char* portsPath, const char* port,
+                                   unsigned* familiesOut = nullptr) {
         char path[PATH_MAX];
         if (snprintf(path, sizeof(path), "%s/%s/gids", portsPath, port) >= (int)sizeof(path))
             return false;
@@ -522,7 +552,9 @@ protected:
 
         struct dirent* ent;
         bool found = false;
-        while (!found && (ent = readdir(gidDir)) != nullptr) {
+        // Scanning stops at the first routable GID unless the caller wants the
+        // family set, which needs all of them.
+        while ((!found || familiesOut) && (ent = readdir(gidDir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             char gidPath[PATH_MAX];
             if (snprintf(gidPath, sizeof(gidPath), "%s/%s", path, ent->d_name) >= (int)sizeof(gidPath))
@@ -536,7 +568,14 @@ protected:
             // Skip all-zero GIDs and link-local (fe80::) GIDs
             bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
             bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
-            found = !allZero && !linkLocal;
+            if (allZero || linkLocal) continue;
+            found = true;
+            // A GID that cannot be parsed still counts as routable -- that is the
+            // decision this function has always made -- it just adds no family, so
+            // a port whose GIDs are all unreadable stays uncomparable and the
+            // caller falls back to index symmetry alone.
+            uint8_t raw[16] = {};
+            if (familiesOut && ParseGidText(gid, raw)) *familiesOut |= GidAddrFamilyBit(raw);
         }
         closedir(gidDir);
         return found;
@@ -550,7 +589,13 @@ protected:
     // The ports come from the device directory rather than ncclNetProperties_t::port, which the
     // plugin sets to portNum + realPort. realPort counts VF siblings on one PCI path, so for
     // every VF past the first it names a port that does not exist in sysfs.
-    static bool CanRouteCrossNode(const char* devName) {
+    // familiesOut, when given, collects the address families of every routable GID
+    // on the device, so the ranks can check they have one in common rather than
+    // only agreeing that each end has something routable. It is left empty when
+    // the answer is "routable" for any other reason -- no ports directory, or no
+    // Ethernet port at all, i.e. a real IB link -- and the caller reads an empty
+    // set as "cannot tell".
+    static bool CanRouteCrossNode(const char* devName, unsigned* familiesOut = nullptr) {
         char portsPath[PATH_MAX];
         if (snprintf(portsPath, sizeof(portsPath), "/sys/class/infiniband/%s/ports", devName)
             >= (int)sizeof(portsPath))
@@ -562,15 +607,32 @@ protected:
         int ethernetPorts = 0;
         bool routable = false;
         struct dirent* ent;
-        while (!routable && (ent = readdir(portsDir)) != nullptr) {
+        // As in PortHasRoutableGid: the family set needs every port looked at, the
+        // routable verdict alone does not.
+        while ((!routable || familiesOut) && (ent = readdir(portsDir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             if (!PortIsEthernet(portsPath, ent->d_name)) continue;
             ethernetPorts++;
-            routable = PortHasRoutableGid(portsPath, ent->d_name);
+            if (PortHasRoutableGid(portsPath, ent->d_name, familiesOut)) routable = true;
         }
         closedir(portsDir);
 
         return routable || ethernetPorts == 0;
+    }
+
+    // sysfs writes a GID as eight colon-separated 16-bit groups. ibv_gid is those
+    // same sixteen bytes in network order, which is what the plugin's subnet
+    // comparison expects.
+    static bool ParseGidText(const char* text, uint8_t out[16]) {
+        unsigned g[8];
+        if (sscanf(text, "%4x:%4x:%4x:%4x:%4x:%4x:%4x:%4x", &g[0], &g[1], &g[2], &g[3], &g[4],
+                   &g[5], &g[6], &g[7]) != 8)
+            return false;
+        for (int i = 0; i < 8; i++) {
+            out[2 * i]     = static_cast<uint8_t>((g[i] >> 8) & 0xFF);
+            out[2 * i + 1] = static_cast<uint8_t>(g[i] & 0xFF);
+        }
+        return true;
     }
 
     // What CreateMergedDevice() tried before giving up. Empty after a success.
@@ -852,8 +914,12 @@ protected:
     static constexpr int kThreadTagStride = 1000;
     static constexpr int kMaxThreadTagOffset = 1; // listener-ready flag + handle
     static constexpr int kMpiGuaranteedTagUb = 32767;
+    // Upper bound on connections a single worker may own; each one consumes its
+    // own tag stride during the main-thread handle exchange.
+    static constexpr int kMaxConnsPerWorker = 2;
 
-    static_assert((MPIEnvironment::kMaxThreads - 1) * kThreadTagStride + kMaxThreadTagOffset
+    static_assert((MPIEnvironment::kMaxThreads * kMaxConnsPerWorker - 1) * kThreadTagStride
+                          + kMaxThreadTagOffset
                       <= kMpiGuaranteedTagUb,
                   "worst-case per-thread MPI tag must fit in the tag range every "
                   "MPI implementation is required to provide");
@@ -870,12 +936,26 @@ protected:
         run.results.resize(nThreads);
         run.threadIds.resize(nThreads);
 
+        // The HIP current device is thread-local, and MPIEnvironment binds it
+        // once on the main thread. Without propagating it, a worker touching GPU
+        // memory would land on device 0 regardless of this rank's assignment.
+        int hipDevice = -1;
+        // Kept, not swallowed: treating a failed query as "no device to propagate"
+        // would let every worker run on the default device, which is the exact
+        // situation this propagation exists to prevent.
+        const hipError_t deviceQueryError = hipGetDevice(&hipDevice);
+
         ThreadStartGate startGate(nThreads);
         ThreadStartGate bodyGate(nThreads);
         std::atomic<int> inFlight{0};
         std::atomic<int> maxInFlight{0};
         auto worker = [&](int threadIdx) {
             run.threadIds[threadIdx] = std::this_thread::get_id();
+            // Reported only after both gates below: leaving early would strand
+            // the sibling workers waiting on them.
+            const hipError_t deviceError = (deviceQueryError != hipSuccess)
+                                               ? deviceQueryError
+                                               : hipSetDevice(hipDevice);
             if (!startGate.ArriveAndWait()) {
                 run.results[threadIdx].ok = false;
                 run.results[threadIdx].msg = "worker launch was cancelled";
@@ -891,6 +971,18 @@ protected:
                 inFlight.fetch_sub(1, std::memory_order_relaxed);
                 run.results[threadIdx].ok = false;
                 run.results[threadIdx].msg = "worker body start was cancelled";
+                return;
+            }
+            if (deviceError != hipSuccess) {
+                inFlight.fetch_sub(1, std::memory_order_relaxed);
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg =
+                    (deviceQueryError != hipSuccess)
+                        ? std::string("hipGetDevice failed on the main thread, so the rank's "
+                                      "device could not be propagated into this worker: ")
+                              + hipGetErrorString(deviceQueryError)
+                        : "hipSetDevice(" + std::to_string(hipDevice)
+                              + ") failed in the worker: " + hipGetErrorString(deviceError);
                 return;
             }
             try {
@@ -941,25 +1033,192 @@ protected:
         }
     }
 
+    // Reduces worker outcomes across ranks and reports them on rank 0, which is
+    // the only rank with GTest listeners. The failing worker's message travels
+    // with the flag: without that, a failure on a non-zero rank shows up as
+    // "failed on a peer rank" and the actual reason is lost, since non-zero ranks
+    // have their output muted unless RCCL_MPI_LOG_ALL_RANKS is set.
     bool SynchronizeThreadResults(const std::vector<ThreadResult>& results, const char* phase) {
+        static constexpr int kResultTextBytes = 512;
+
         int localFailed = 0;
-        for (const auto& result : results)
-            if (!result.ok) localFailed = 1;
+        int localFailures = 0;
+        int omitted = 0;
+        std::string localText;
+        for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
+            if (results[threadIdx].ok) continue;
+            localFailed = 1;
+            localFailures++;
+            // The text crosses in a fixed-size MPI_Allgather, so it has to be
+            // bounded. A mass failure is usually the same message N times, and the
+            // first few carry it -- but a reader must not mistake a truncated list
+            // for the whole one, so the number left out travels with it.
+            if (localText.size() < kResultTextBytes / 2) {
+                localText += "thread " + std::to_string(threadIdx) + ": "
+                             + results[threadIdx].msg + "; ";
+            } else {
+                omitted++;
+            }
+        }
+        if (omitted > 0) {
+            // Prepended, not appended: the snprintf below cuts the tail, which is
+            // where a note about truncation would be the first thing lost.
+            localText = "[" + std::to_string(localFailures) + " worker(s) failed on this rank, "
+                        + std::to_string(omitted) + " message(s) not shown] " + localText;
+        }
 
         int globalFailed = 0;
-        if (MPI_Allreduce(&localFailed, &globalFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) != MPI_SUCCESS) {
+        if (MPI_Allreduce(&localFailed, &globalFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
             ADD_FAILURE() << phase << ": MPI_Allreduce failed";
             return false;
         }
         if (!globalFailed) return true;
 
-        for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
-            if (!results[threadIdx].ok)
-                ADD_FAILURE() << phase << ", thread " << threadIdx << ": " << results[threadIdx].msg;
+        std::vector<char> sendText(kResultTextBytes, '\0');
+        snprintf(sendText.data(), kResultTextBytes, "%s", localText.c_str());
+        std::vector<char> allText(kResultTextBytes * MPIEnvironment::world_size, '\0');
+        if (MPI_Allgather(sendText.data(), kResultTextBytes, MPI_CHAR, allText.data(),
+                          kResultTextBytes, MPI_CHAR, MPI_COMM_WORLD) != MPI_SUCCESS) {
+            ADD_FAILURE() << phase << ": MPI_Allgather of worker messages failed";
+            return false;
         }
-        if (!localFailed)
-            ADD_FAILURE() << phase << " failed on a peer rank";
+
+        for (int rank = 0; rank < MPIEnvironment::world_size; ++rank) {
+            const char* text = allText.data() + rank * kResultTextBytes;
+            if (text[0] == '\0') continue;
+            ADD_FAILURE() << phase << ", rank " << rank << ": " << text;
+        }
         return false;
+    }
+
+    // ── Worker-safe data path ────────────────────────────────────────
+    //
+    // The ordinary transfer helpers (PostSendWithRetry, DoSendRecv, CastDoSendRecv)
+    // barrier and assert fatally, so a worker cannot use them: a fatal assertion
+    // only returns from the worker, and a worker-side collective strands the peer
+    // rank when a sibling fails. These return ThreadResult instead, and the main
+    // thread reports it after joining.
+    // ────────────────────────────────────────────────────────────────
+
+    ThreadResult WorkerRegister(void* comm, void* data, size_t size, int type, void** mhandle) {
+        ThreadResult result;
+        if (RegisterMemory(comm, data, size, type, mhandle) != ncclSuccess || *mhandle == nullptr) {
+            result.ok = false;
+            result.msg = "regMr failed";
+        }
+        return result;
+    }
+
+    // isend returns success with a null request until the receiver's FIFO slot is
+    // available, so the caller has to retry. busyPoll retries without sleeping,
+    // for timing tests: with the backoff, waiting for the slot costs one poll
+    // interval and that interval, not the plugin, is what a measurement then
+    // reports.
+    //
+    // Both paths stop at timeoutMs. Bounding the sleeping one by a retry count
+    // instead made the wait depend on which path a caller took -- a caller asking
+    // for a longer timeout got the retry cap anyway, and one asking for a shorter
+    // timeout waited past it. The default is that former cap, so the behaviour a
+    // caller gets without saying anything is unchanged.
+    static constexpr int kSlotWaitDefaultMs = kMaxRetryAttempts * kPollIntervalMs;
+
+    ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
+                                void* mhandle, void** request, bool busyPoll = false,
+                                int timeoutMs = kSlotWaitDefaultMs) {
+        ThreadResult result;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        do {
+            if (PostSend(sendComm, data, size, tag, mhandle, request) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "isend failed";
+                return result;
+            }
+            if (*request != nullptr) break;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                result.ok = false;
+                result.msg = "isend kept returning a NULL request for "
+                             + std::to_string(timeoutMs) + " ms: the receiver never "
+                             "published a FIFO slot";
+                return result;
+            }
+            if (!busyPoll) usleep(kPollIntervalUs);
+        } while (*request == nullptr);
+        return result;
+    }
+
+    ThreadResult WorkerPostRecv(void* recvComm, void* data, size_t size, int tag,
+                                void* mhandle, void** request) {
+        ThreadResult result;
+        void*  bufs[1]    = {data};
+        size_t sizes[1]   = {size};
+        int    tags[1]    = {tag};
+        void*  handles[1] = {mhandle};
+        if (PostRecv(recvComm, 1, bufs, sizes, tags, handles, request) != ncclSuccess
+            || *request == nullptr) {
+            result.ok = false;
+            result.msg = "irecv failed or returned a NULL request";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerWait(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        if (WaitForCompletion(request, sizes, timeoutMs) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "request did not complete within the timeout";
+        }
+        return result;
+    }
+
+    // Same wait without the 10 ms backoff between polls. A small transfer
+    // completes in tens of microseconds, so the sleeping wait spends one full
+    // interval on every one of them: measurements built on it report the poll
+    // interval rather than anything the plugin did, and contention inside a
+    // plugin call disappears under it. Only timing tests should use this -- it
+    // burns a core per waiting worker, which is why the functional tests keep
+    // the sleeping version.
+    ThreadResult WorkerWaitBusy(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+        int done = 0;
+        while (!done) {
+            if (TestRequest(request, &done, sizes) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "test failed while polling for completion";
+                return result;
+            }
+            if (done) break;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                result.ok = false;
+                result.msg = "request did not complete within the timeout";
+                return result;
+            }
+        }
+        return result;
+    }
+
+    // One transfer on the worker's own connection, without touching buffer
+    // contents. For GPU buffers, or when the caller verifies the payload itself.
+    ThreadResult WorkerSendRecvRaw(int rank, ConnectionPair& pair, void* buffer, size_t size,
+                                   int tag, void* mhandle, int timeoutMs = kDefaultTimeoutMs,
+                                   int* receivedSize = nullptr, bool busyPoll = false) {
+        void* request = nullptr;
+        ThreadResult result =
+            (rank == 0)
+                ? WorkerPostRecv(pair.recvComm, buffer, size, tag, mhandle, &request)
+                : WorkerPostSend(pair.sendComm, buffer, size, tag, mhandle, &request, busyPoll,
+                                 std::max(timeoutMs, kSlotWaitDefaultMs));
+        if (!result.ok) return result;
+
+        int sizes[1] = {0};
+        result = busyPoll ? WorkerWaitBusy(request, sizes, timeoutMs)
+                          : WorkerWait(request, sizes, timeoutMs);
+        if (!result.ok) return result;
+        if (receivedSize) *receivedSize = sizes[0];
+        return result;
     }
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
@@ -1054,21 +1313,238 @@ protected:
         for (auto& connection : connections) TeardownConnectionForThread(connection, rank);
     }
 
+    // Which device each worker connects over. Spreading puts workers on
+    // different NICs, so concurrency reaches several devices' protection
+    // domains and MR caches instead of hammering one.
+    struct ThreadDevPolicy {
+        int  dev    = 0;
+        bool spread = false;
+
+        static ThreadDevPolicy Fixed(int dev) { return ThreadDevPolicy{dev, false}; }
+        static ThreadDevPolicy Spread() { return ThreadDevPolicy{0, true}; }
+    };
+
+    // Payload seed for worker threadIdx at sequence position seq. Workers must
+    // differ here, otherwise a payload delivered on the wrong connection still
+    // verifies and the cross-worker check is vacuous.
+    //
+    // makeBytePattern() observes the seed only modulo 256, so the stride has to
+    // be odd: an even stride collides for workers whose indices differ by
+    // 256/gcd(stride, 256) -- with a stride of 100000 that is every 8th worker.
+    // The base keeps the seed off zero, whose pattern begins with the 0x00 that
+    // the receive buffer is cleared to.
+    static constexpr int kWorkerSeedBase   = 55;
+    static constexpr int kWorkerSeedStride = 100001;
+    // Plugin-visible indices of physical (non-merged) devices. devices() also
+    // reports virtual NICs created by earlier tests, and a deduped 1-device vNIC
+    // reuses an existing physical index, so dedupe on vProps.devs[0].
+    // Only devices that can actually deliver traffic are returned: a RoCE NIC
+    // with link-local GIDs only sets up QPs without complaint and then drops
+    // packets silently, which would surface as an unexplained connect or accept
+    // timeout on whichever worker happened to be handed that device.
+    std::vector<int> PhysicalDeviceIndices() {
+        std::vector<int> indices;
+        int n = 0;
+        if (GetDeviceCount(&n) != ncclSuccess) return indices;
+        std::set<int> seen;
+        for (int i = 0; i < n; i++) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(i, &props) != ncclSuccess) continue;
+            if (props.vProps.ndevs > 1) continue;
+            if (props.name && !CanRouteCrossNode(props.name)) continue;
+            if (seen.insert(props.vProps.devs[0]).second) indices.push_back(i);
+        }
+        return indices;
+    }
+
+    // The cross-rank device agreement travels as one 64-bit mask, so it covers
+    // plugin device indices 0..63.
+    static constexpr int kAgreedDevMaskBits = 64;
+    static constexpr unsigned kGidFamilyV4 = 1u << 0;
+    static constexpr unsigned kGidFamilyV6 = 1u << 1;
+
+    // The plugin's getGidAddrFamily(), byte for byte: AF_INET covers both
+    // ::ffff:a.b.c.d and the IPv4-mapped multicast form ff0e::ffff:a.b.c.d, and
+    // everything else is AF_INET6. Reading only the first of those would classify
+    // a multicast-form GID as IPv6 here while the plugin calls it IPv4, which
+    // would invent a cross-rank mismatch and drop a usable NIC.
+    static unsigned GidAddrFamilyBit(const uint8_t gid[16]) {
+        static const uint8_t kV4Suffix[4]         = {0x00, 0x00, 0xff, 0xff};
+        static const uint8_t kZeros[8]            = {0, 0, 0, 0, 0, 0, 0, 0};
+        static const uint8_t kMulticastPrefix[4]  = {0xff, 0x0e, 0x00, 0x00};
+        const bool v4Suffix = memcmp(gid + 8, kV4Suffix, 4) == 0;
+        const bool v4Mapped = v4Suffix && memcmp(gid, kZeros, 8) == 0;
+        const bool v4MappedMulticast =
+            v4Suffix && memcmp(gid, kMulticastPrefix, 4) == 0 && memcmp(gid + 4, kZeros, 4) == 0;
+        return (v4Mapped || v4MappedMulticast) ? kGidFamilyV4 : kGidFamilyV6;
+    }
+
+    // Device indices both ranks agree on. PhysicalDeviceIndices() reads local
+    // sysfs only, so where the two nodes have different NICs alive, slot k would
+    // sit on different hardware per rank: connect and accept still succeed and
+    // the traffic is then dropped, which surfaces as an unexplained completion
+    // timeout -- the very failure the routability filter exists to prevent.
+    // Intersecting the two lists keeps every slot symmetric. Index symmetry is not
+    // reachability, though, so the surviving slots are then checked for a shared
+    // GID address family: see the second half of this function.
+    bool AgreedPhysicalDeviceIndices(std::vector<int>* out, std::string* reason) {
+        out->clear();
+        unsigned long long localMask = 0;
+        int aboveMask = 0;
+        for (int dev : PhysicalDeviceIndices()) {
+            // The agreement mask is one 64-bit word, so an index at or above 64
+            // cannot take part. No machine has that many plugin-visible devices,
+            // but dropping one with nothing in the log would quietly narrow the
+            // spread, so say how many did not fit.
+            if (dev < 0 || dev >= kAgreedDevMaskBits) { aboveMask++; continue; }
+            localMask |= (1ull << dev);
+        }
+        if (aboveMask > 0) {
+            TEST_INFO("Rank %d: %d device index(es) outside [0,%d) are left out of the "
+                      "cross-rank device agreement and will not be spread onto",
+                      MPIEnvironment::world_rank, aboveMask, kAgreedDevMaskBits);
+        }
+        unsigned long long agreed = 0;
+        if (MPI_Allreduce(&localMask, &agreed, 1, MPI_UNSIGNED_LONG_LONG, MPI_BAND,
+                          MPI_COMM_WORLD) != MPI_SUCCESS) {
+            *reason = "MPI_Allreduce of the routable device mask failed";
+            return false;
+        }
+        for (int dev = 0; dev < kAgreedDevMaskBits; ++dev)
+            if (agreed & (1ull << dev)) out->push_back(dev);
+        if (out->empty()) {
+            *reason = "no device index is routable on both ranks, so workers cannot be spread";
+            return false;
+        }
+
+        // CanRouteCrossNode() reads local sysfs, so an agreed index only means each
+        // rank has something routable in slot k -- not that the two ends can reach
+        // each other. So the ranks exchange, per slot, the set of address families
+        // its routable GIDs offer, and keep the slots that have one in common.
+        //
+        // A set and not one sampled GID. Which GID the plugin will actually use is
+        // not knowable from here: it depends on NCCL_IB_GID_INDEX,
+        // NCCL_IB_ADDR_FAMILY, the RoCE version files and prefix matching, all
+        // resolved in connect.cc at connect time. Picking whichever GID sysfs
+        // happens to list first would therefore be an arbitrary choice that a
+        // dual-stack port can make disagree with the plugin's, dropping a usable
+        // NIC or keeping an unusable one. Asking only whether the two ends share a
+        // family assumes nothing about the selection, and is still enough to catch
+        // the case worth catching, since the plugin cannot pair AF_INET with
+        // AF_INET6 whatever else it decides.
+        //
+        // Family and not subnet, which is what one would reach for first. On this
+        // fabric a working link's two ends are deliberately on different subnets:
+        // every NIC on a node shares one /24 whose third octet is the node
+        // (10.101.43.x on mia1-p01-g43, all eight of rdma0..7), so any two nodes
+        // differ and the traffic is routed. Requiring a shared /24 -- the plugin's
+        // NCCL_IB_SUBNET_PREFIX_LEN default -- would therefore reject every
+        // cross-node pair that in fact works. That rule belongs to plane matching
+        // in connect.cc, not to reachability. Family still holds: gidSameSubnet()
+        // rejects AF_INET against AF_INET6 before it looks at any prefix.
+        std::vector<uint8_t> localFamilies(kAgreedDevMaskBits, 0);
+        for (int dev : *out) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(dev, &props) != ncclSuccess || !props.name) continue;
+            unsigned families = 0;
+            if (!CanRouteCrossNode(props.name, &families)) continue;
+            localFamilies[dev] = static_cast<uint8_t>(families);
+        }
+
+        const int worldSize = MPIEnvironment::world_size;
+        std::vector<uint8_t> allFamilies(localFamilies.size() * worldSize, 0);
+        if (MPI_Allgather(localFamilies.data(), (int)localFamilies.size(), MPI_BYTE,
+                          allFamilies.data(), (int)localFamilies.size(), MPI_BYTE,
+                          MPI_COMM_WORLD) != MPI_SUCCESS) {
+            *reason = "MPI_Allgather of the per-device GID address families failed";
+            return false;
+        }
+
+        std::vector<int> sharedFamily;
+        int unknown = 0;
+        for (int dev : *out) {
+            bool anyComparable = false;
+            bool anyDisjoint   = false;
+            for (int r = 0; r < worldSize; ++r) {
+                if (r == MPIEnvironment::world_rank) continue;
+                const uint8_t peer = allFamilies[r * kAgreedDevMaskBits + dev];
+                // An empty set at either end -- an IB link, whose GIDs say nothing
+                // about routability, or a port whose GIDs sysfs wrote in a form this
+                // parser does not know -- leaves that pair uncomparable. A slot no
+                // peer could be compared against is kept, which is the behaviour
+                // before this check existed.
+                if (localFamilies[dev] == 0 || peer == 0) continue;
+                anyComparable = true;
+                if ((localFamilies[dev] & peer) == 0) anyDisjoint = true;
+            }
+            if (!anyComparable) unknown++;
+            if (!anyDisjoint) sharedFamily.push_back(dev);
+        }
+
+        if (sharedFamily.empty()) {
+            // An uncomparable slot (localFamilies[dev] == 0 or peer == 0 on every
+            // peer) never sets anyDisjoint, so it is never excluded here -- it
+            // would still be sitting in sharedFamily if any such slot existed.
+            // Empty therefore means every agreed slot was comparable *and*
+            // disjoint: not a parser guess, but AF_INET-vs-AF_INET6 on every one
+            // of them, which the plugin cannot connect regardless of
+            // NCCL_IB_GID_INDEX or anything else it picks. Restoring the
+            // index-symmetric list here would send the threaded suites into
+            // connect/accept retries against devices already proven not to pair,
+            // instead of the synchronized skip this check exists to produce.
+            *reason = "every agreed device index has disjoint GID address families across "
+                      "ranks (AF_INET on one side, AF_INET6 on the other), so none of them "
+                      "can connect";
+            out->clear();
+            return false;
+        }
+        if (sharedFamily.size() != out->size()) {
+            TEST_INFO("Rank %d: %zu of %zu agreed device index(es) dropped for having no GID "
+                      "address family in common across ranks (%d uncomparable and kept)",
+                      MPIEnvironment::world_rank, out->size() - sharedFamily.size(), out->size(),
+                      unknown);
+        }
+        *out = sharedFamily;
+        return true;
+    }
+
+    int ResolveWorkerDev(const ThreadDevPolicy& policy, const std::vector<int>& physical,
+                         int slotIdx) {
+        if (!policy.spread) return policy.dev;
+        return physical[slotIdx % physical.size()];
+    }
+
     // Mirrors the normal rccl-tests -t execution model: contexts and
     // communicators are established by the main thread, then workers drive
     // independent comms concurrently. MPI is used only between phases.
-    void RunMultiThreadedIndependent(int dev, int nThreads,
-                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+    //
+    // connsPerWorker > 1 gives every worker several independent connections,
+    // which a body needs when it has to prove that state from one connection
+    // does not leak into a fresh one.
+    void RunMultiThreadedIndependentGroups(
+        ThreadDevPolicy policy, int nThreads, int connsPerWorker,
+        std::function<ThreadResult(int, std::vector<ConnectionPair*>&)> body) {
         const int rank     = MPIEnvironment::world_rank;
         const int peerRank = (rank + 1) % 2;
-        std::vector<ThreadConnection> connections(nThreads);
-        std::vector<ThreadResult> initResults(nThreads);
+        const int nSlots   = nThreads * connsPerWorker;
+        std::vector<int> physical;
+        if (policy.spread) {
+            std::string reason;
+            // Both ranks reach the same verdict, so the skip cannot strand a peer.
+            if (!AgreedPhysicalDeviceIndices(&physical, &reason)) GTEST_SKIP() << reason;
+        }
+        std::vector<ThreadConnection> connections(nSlots);
+        std::vector<ThreadResult> initResults(nSlots);
 
-        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
-            if (InitNetIbCtx(&connections[threadIdx].ctx) != ncclSuccess
-                || connections[threadIdx].ctx == nullptr) {
-                initResults[threadIdx].ok = false;
-                initResults[threadIdx].msg = "InitNetIb failed or returned a null context";
+        g_workerDeregFailures.store(0, std::memory_order_relaxed);
+
+        for (int slot = 0; slot < nSlots; ++slot) {
+            if (InitNetIbCtx(&connections[slot].ctx) != ncclSuccess
+                || connections[slot].ctx == nullptr) {
+                initResults[slot].ok = false;
+                initResults[slot].msg = "InitNetIb failed or returned a null context";
             }
         }
         if (!SynchronizeThreadResults(initResults, "NetIB context initialization")) {
@@ -1078,11 +1554,11 @@ protected:
             return;
         }
 
-        std::vector<ThreadResult> setupResults(nThreads);
-        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
-            setupResults[threadIdx] = SetupConnectionForThread(
-                connections[threadIdx].ctx, dev, connections[threadIdx].pair, rank, peerRank,
-                threadIdx * kThreadTagStride);
+        std::vector<ThreadResult> setupResults(nSlots);
+        for (int slot = 0; slot < nSlots; ++slot) {
+            setupResults[slot] = SetupConnectionForThread(
+                connections[slot].ctx, ResolveWorkerDev(policy, physical, slot),
+                connections[slot].pair, rank, peerRank, slot * kThreadTagStride);
         }
         if (!SynchronizeThreadResults(setupResults, "NetIB connection setup")) {
             MPI_Barrier(MPI_COMM_WORLD);
@@ -1091,15 +1567,63 @@ protected:
             return;
         }
 
-        ThreadWorkerRun run = RunThreadWorkers(
-            nThreads, [&](int threadIdx) { return body(threadIdx, connections[threadIdx].pair); });
+        ThreadWorkerRun run = RunThreadWorkers(nThreads, [&](int threadIdx) {
+            std::vector<ConnectionPair*> pairs;
+            pairs.reserve(connsPerWorker);
+            for (int c = 0; c < connsPerWorker; ++c)
+                pairs.push_back(&connections[threadIdx * connsPerWorker + c].pair);
+            return body(threadIdx, pairs);
+        });
         VerifyThreadFanOut(run, nThreads);
         SynchronizeThreadResults(run.results, "NetIB threaded data path");
 
         MPI_Barrier(MPI_COMM_WORLD);
         TeardownThreadConnections(connections, rank);
+
+        // Reduced, so both ranks fail together and the message names the rank that
+        // saw it. A local-only check would fail on rank 1 alone, whose output the
+        // runner mutes, leaving a result mismatch with no visible reason.
+        const int localDeregFailures = g_workerDeregFailures.load(std::memory_order_relaxed);
+        int totalDeregFailures = 0;
+        if (MPI_Allreduce(&localDeregFailures, &totalDeregFailures, 1, MPI_INT, MPI_SUM,
+                          MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
+            // Unchecked, a failed reduction leaves the total unset and the check
+            // below passes or fails on whatever was on the stack.
+            ADD_FAILURE() << "MPI_Allreduce of the worker deregMr failures failed, so the "
+                             "count cannot be trusted (" << localDeregFailures
+                          << " on this rank)";
+            MPI_Barrier(MPI_COMM_WORLD);
+            return;
+        }
+        EXPECT_EQ(totalDeregFailures, 0)
+            << "a worker's deregMr was refused (" << localDeregFailures << " on this rank, "
+            << totalDeregFailures
+            << " across both), which would otherwise surface as an MR leak";
         MPI_Barrier(MPI_COMM_WORLD);
     }
+
+    void RunMultiThreadedIndependent(ThreadDevPolicy policy, int nThreads,
+                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunMultiThreadedIndependentGroups(
+            policy, nThreads, 1,
+            [&](int threadIdx, std::vector<ConnectionPair*>& pairs) {
+                return body(threadIdx, *pairs[0]);
+            });
+    }
+
+    void RunMultiThreadedIndependent(int dev, int nThreads,
+                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunMultiThreadedIndependent(ThreadDevPolicy::Fixed(dev), nThreads, body);
+    }
+
+    // How a threaded size sweep registers memory. Some serial bodies register the
+    // whole buffer once, others register exactly the current size on every step;
+    // on a fused device that second shape is the point of the test, since each
+    // registration fans out across both members' protection domains and caches.
+    // The threaded branch has to match whichever its serial body does, or it
+    // quietly covers less.
+    enum class SweepRegistration { Once, PerSize };
 
     // ===============================================================
     // Stress test infrastructure

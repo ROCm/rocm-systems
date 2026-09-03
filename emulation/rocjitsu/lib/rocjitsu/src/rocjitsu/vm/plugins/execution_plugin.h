@@ -13,6 +13,7 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -119,10 +120,11 @@ public:
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
   /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
+  /// @param physical_sgpr_count Physical SGPR allocation block size per wavefront.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
                                            uint32_t /*physical_vgpr_count*/,
-                                           uint32_t /*sgpr_count*/,
+                                           uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has halted.
@@ -171,9 +173,33 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
+  /// Called when an architectural scalar register is read during instruction execution.
+  /// @param wf Owning wavefront.
+  /// @param reg Logical register identity. The class distinguishes ordinary
+  ///        SGPRs from TTMPs without exposing their encoded selector values or
+  ///        physical storage layout.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
+    if (!wf || reg.cls != RegClass::SGPR)
+      return;
+    for (uint32_t offset = 0; offset < reg.width; ++offset)
+      onAmdgpuReadSgpr(wf, wf->sgpr_alloc().base + reg.index + offset);
+  }
+
+  /// Called when an architectural scalar register is written during instruction execution.
+  /// Memory completion and runtime initialization remain unobserved storage operations.
+  virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
+
   /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+
+  /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
+  /// The group samples this policy once when the plugin is added. The
+  /// conservative default preserves existing plugin behavior: callbacks
+  /// continue unless a plugin explicitly opts out.
+  virtual bool observes_sgpr_reads() const { return true; }
 
 private:
   friend class ExecutionPluginGroup;

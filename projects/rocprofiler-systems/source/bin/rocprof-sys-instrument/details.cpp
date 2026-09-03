@@ -12,7 +12,7 @@
 #include "common/path.hpp"
 #include "core/demangler.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <link.h>

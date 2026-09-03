@@ -73,6 +73,7 @@ execute_raw_sql_statements_impl(sqlite3*         conn,
 std::string
 extract_column_name(sqlite3_stmt* stmt, int32_t col);
 
+template <bool WarnOnError = true>
 int64_t
 extract_row_count(sqlite3* conn, std::string_view query);
 

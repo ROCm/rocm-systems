@@ -16,8 +16,8 @@ ROCm Systems Profiler can emit results in several output formats, selected with 
 timeline of events, while the aggregated formats summarize high-level results:
 
 * **ROCm Profiling Data (rocpd)**: A detailed trace stored as a SQLite3 database
-  (``.db``), selected with ``--output-format rocpd``. This will soon be the default
-  output format. You can view and analyze ``rocpd`` files with the
+  (``.db``). This is the default output format, and can also be requested explicitly
+  with ``--output-format rocpd``. You can view and analyze ``rocpd`` files with the
   `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_ tool.
 * **Perfetto**: A detailed trace stored as a protocol buffer (``.proto``), selected with
   ``--output-format proto``. Upload the Perfetto output files at

@@ -1,0 +1,268 @@
+{
+  "system_configurations": {
+    "name": "RCCL-GIN-rocSHMEM-Backends-MI300X-Mellanox-IB",
+    "description": "GIN rocSHMEM backends (GDA and SDMA) on MI300X over Mellanox IB. alltoall_perf (D3/D4) plus the full GinMPIDeviceTests suite run one-mpirun-per-test."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/shared/ompi}"
+  },
+  "env_variables": {
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "INFO"
+  },
+  "build_configuration": {
+    "install_flags": [
+      "-l",
+      "--debug",
+      "-t",
+      "--enable-mpi-tests",
+      "--enable-code-coverage",
+      "--rocshmem-gin",
+      "--prefix",
+      "${WORKDIR}/install"
+    ],
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "build_command": "make clean && cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON -DGPU_TARGETS=gfx942 -DRCCL_DIR=${WORKDIR}/install/lib/cmake/rccl -DRCCL_SOURCE_DIR=${WORKDIR} && cmake --build build -j$(nproc)"
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+
+    "gin_perf_base": {
+      "is_gtest": false,
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 1200,
+      "command_args": "-b 1 -e 512M -f 2 -g 1",
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1"
+      }
+    },
+    "gin_perf_gda": {
+      "extends": "gin_perf_base",
+      "env_variables": {
+        "NCCL_GIN_TYPE": "5"
+      },
+      "tests": [
+        { "name": "GIN_GDA_D3", "description": "GDA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
+        { "name": "GIN_GDA_D4", "description": "GDA alltoall, HybridAlltoAllKernel, LSA+GIN (-R 2 -D 4)", "command_args": "-R 2 -D 4" }
+      ]
+    },
+    "gin_perf_gda_1node": {
+      "extends": "gin_perf_base",
+      "description": "Single-node GDA alltoall (num_nodes=1, 8 ranks): same params as the multi-node GDA perf but all ranks packed on one node.",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "5"
+      },
+      "tests": [
+        { "name": "GIN_GDA_1N_D3", "description": "GDA alltoall single-node, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
+        { "name": "GIN_GDA_1N_D4", "description": "GDA alltoall single-node, HybridAlltoAllKernel, LSA+GIN (-R 2 -D 4)", "command_args": "-R 2 -D 4" }
+      ]
+    },
+    "gin_perf_sdma": {
+      "extends": "gin_perf_base",
+      "description": "SDMA is a single-node backend: all ranks are packed onto one node (num_nodes=1, 8 ranks).",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "6"
+      },
+      "tests": [
+        { "name": "GIN_SDMA_D3", "description": "SDMA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
+        { "name": "GIN_SDMA_D4", "description": "SDMA alltoall, HybridAlltoAllKernel, LSA+GIN (-R 2 -D 4)", "command_args": "-R 2 -D 4" }
+      ]
+    },
+    "gin_perf_sdma_internal": {
+      "extends": "gin_perf_base",
+      "description": "Collectives on the GIN-SDMA path. Single node, 8 ranks.",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "command_args": "-b 1 -e 4G -f 2 -g 1",
+      "env_variables": {
+        "NCCL_GIN_TYPE": "6"
+      },
+      "tests": [
+        { "name": "GIN_SDMA_INTERNAL", "description": "GIN-SDMA alltoall via ncclAlltoAll (-R 2)", "command_args": "-R 2" }
+      ]
+    },
+
+    "gin_devmpi_common": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "Put_BasicAndOffsets",      "description": "GIN device put with base + offset variants",            "test_filter": "GinMPIDeviceTests.Put_BasicAndOffsets" },
+        { "name": "Put_CrossNode",            "description": "GIN device put crossing the IB fabric",                 "test_filter": "GinMPIDeviceTests.Put_CrossNode" },
+        { "name": "PutValue_Inline",          "description": "GIN device inline put-value",                           "test_filter": "GinMPIDeviceTests.PutValue_Inline" },
+        { "name": "Signal_NoPayload",         "description": "GIN device signal, no payload",                         "test_filter": "GinMPIDeviceTests.Signal_NoPayload" },
+        { "name": "Signal_HighIdNoOverflow",  "description": "GIN device signal with high id, no overflow",           "test_filter": "GinMPIDeviceTests.Signal_HighIdNoOverflow" },
+        { "name": "WaitCounter_Local",        "description": "GIN device wait-counter, local",                        "test_filter": "GinMPIDeviceTests.WaitCounter_Local" },
+        { "name": "WaitCounterAndSignal",     "description": "GIN device wait-counter combined with signal",          "test_filter": "GinMPIDeviceTests.WaitCounterAndSignal" },
+        { "name": "Barrier_TwoRanks",         "description": "GIN device two-rank barrier",                           "test_filter": "GinMPIDeviceTests.Barrier_TwoRanks" },
+        {
+          "name": "BarrierSession_LsaOnly", "description": "ncclBarrierSession LSA-only (2 ranks/node, non-trivial LSA team)", "test_filter": "GinMPIDeviceTests.BarrierSession_LsaOnly",
+          "num_ranks": 4, "num_gpus": 2
+        },
+        {
+          "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
+          "num_ranks": 4, "num_gpus": 2
+        },
+        { "name": "SignalAdd_AndShadow",      "description": "GIN device signal-add and shadow counter",              "test_filter": "GinMPIDeviceTests.SignalAdd_AndShadow" },
+        { "name": "SymPtr_PutAndPutValue",    "description": "GIN symmetric-pointer put and put-value",               "test_filter": "GinMPIDeviceTests.SymPtr_PutAndPutValue" },
+        { "name": "Alltoall_PureReference",   "description": "GIN pure-reference alltoall kernel",                    "test_filter": "GinMPIDeviceTests.Alltoall_PureReference" },
+        { "name": "Alltoall_WorldGinBarrier", "description": "GIN alltoall on the world-team GIN barrier pool",       "test_filter": "GinMPIDeviceTests.Alltoall_WorldGinBarrierReference" },
+        {
+          "name": "AlltoallHybrid_Reference", "description": "GIN hybrid (LSA + GIN) alltoall reference (2 ranks/node)", "test_filter": "GinMPIDeviceTests.AlltoallHybrid_Reference",
+          "num_ranks": 4, "num_gpus": 2
+        },
+        {
+          "name": "Alltoall_SdmaInternal", "description": "GIN-SDMA alltoall via ncclAlltoAll (SDMA only, 8 ranks)", "test_filter": "GinMPIDeviceTests.Alltoall_SdmaInternal",
+          "num_ranks": 8, "num_gpus": 8
+        },
+        { "name": "MultiContext_AllFourRoute","description": "GIN multi-context, all four routes",                    "test_filter": "GinMPIDeviceTests.MultiContext_AllFourRoute" },
+        {
+          "name": "MultiContext_NonPowerOf2", "description": "GIN multi-context with non-power-of-2 context count (NCONNECTIONS=3, NCONTEXTS=3)", "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
+          "env_variables": { "NCCL_GIN_NCONNECTIONS": "3", "NCCL_GIN_NCONTEXTS": "3" }
+        },
+        { "name": "LargeBuffer_Sweep",        "description": "GIN large-buffer size sweep",                           "test_filter": "GinMPIDeviceTests.LargeBuffer_Sweep", "timeout": 300 },
+        {
+          "name": "Disable_Error", "description": "Negative: devCommCreate must reject GIN when NCCL_GIN_ENABLE=0", "test_filter": "GinMPIDeviceTests.Disable_Error",
+          "env_variables": { "NCCL_GIN_ENABLE": "0" }
+        },
+        {
+          "name": "Invalid_SignalPool", "description": "Negative: oversized signal pool rejected at devCommCreate", "test_filter": "GinMPIDeviceTests.Invalid_SignalPool",
+          "env_variables": { "NCCL_GIN_SIGNAL_POOL_SIZE": "0x40000000" }
+        },
+        {
+          "name": "Invalid_CounterPool", "description": "Negative: oversized counter pool rejected at devCommCreate", "test_filter": "GinMPIDeviceTests.Invalid_CounterPool",
+          "env_variables": { "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000" }
+        },
+        { "name": "Teardown_NoLeaks",         "description": "GIN teardown leaves no leaks",                          "test_filter": "GinMPIDeviceTests.Teardown_NoLeaks" },
+        { "name": "Init_Destroy_Stress",      "description": "GIN init/destroy stress loop",                          "test_filter": "GinMPIDeviceTests.Init_Destroy_Stress", "timeout": 300 },
+        { "name": "Alltoall_CrossNode",       "description": "GIN cross-node alltoall (self-skips unless >=16 ranks)", "test_filter": "GinMPIDeviceTests.Alltoall_CrossNode" },
+        { "name": "Properties_NLsaTeams",     "description": "GIN properties: number of LSA teams",                   "test_filter": "GinMPIDeviceTests.Properties_NLsaTeams" },
+        { "name": "MultiContext_Exclusive",   "description": "GIN multi-context exclusive contexts",                  "test_filter": "GinMPIDeviceTests.MultiContext_Exclusive" },
+        { "name": "VASignal_Put",             "description": "GIN VA-signal put",                                     "test_filter": "GinMPIDeviceTests.VASignal_Put" },
+        {
+          "name": "RailConnection_Create", "description": "GIN rail connection create; rail-only mode (NCCL_CROSS_NIC=0)", "test_filter": "GinMPIDeviceTests.RailConnection_Create",
+          "env_variables": { "NCCL_CROSS_NIC": "0" }
+        },
+        {
+          "name": "ReduceScatter_Symmetric", "description": "Symmetric-memory ReduceScatter sum (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric",
+          "num_ranks": 4, "num_gpus": 2
+        },
+        {
+          "name": "ReduceScatter_Symmetric_Avg", "description": "Symmetric-memory ReduceScatter avg (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric_Avg",
+          "num_ranks": 4, "num_gpus": 2
+        }
+      ]
+    },
+    "gin_devmpi_gda": {
+      "extends": "gin_devmpi_common",
+      "env_variables": {
+        "NCCL_GIN_TYPE": "5"
+      }
+    },
+    "gin_devmpi_sdma": {
+      "extends": "gin_devmpi_common",
+      "description": "SDMA is a single-node backend: every GinMPIDeviceTests case runs on a single node (num_nodes=1). Cross-node cases (Put_CrossNode/Alltoall_CrossNode/ReduceScatter_Symmetric*) self-skip.",
+      "num_nodes": 1,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "6"
+      }
+    },
+
+    "gin_a2a_eligibility": {
+      "extends": "default",
+      "description": "Host-only ncclAllToAllGinSdmaEligible unit tests, single process, no GPU.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        { "name": "A2A_Eligibility_Gates", "description": "All comm-state eligibility gates at default params", "test_filter": "GinAlltoAllEligibilityTest.*" },
+        {
+          "name": "A2A_Eligibility_Disabled", "description": "Negative: NCCL_GIN_A2A_ENABLE=0 makes the path ineligible", "test_filter": "GinAlltoAllEligibilityTest.A2ADisabledByParam",
+          "env_variables": { "NCCL_GIN_A2A_ENABLE": "0" }
+        },
+        {
+          "name": "A2A_Eligibility_MinBytes", "description": "Negative: 64 MiB floor rejects the 8 MiB/peer call", "test_filter": "GinAlltoAllEligibilityTest.BelowMinBytesParam",
+          "env_variables": { "NCCL_GIN_A2A_MIN_BYTES": "67108864" }
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "GIN alltoall - GDA",
+      "description": "alltoall_perf (D3/D4) on the GDA backend, 2 nodes x 8 GPUs",
+      "config": "gin_perf_gda",
+      "enabled": true
+    },
+    {
+      "name": "GIN alltoall - GDA (single node)",
+      "description": "alltoall_perf (D3/D4) on the GDA backend, single node x 8 GPUs",
+      "config": "gin_perf_gda_1node",
+      "enabled": true
+    },
+    {
+      "name": "GIN alltoall - SDMA",
+      "description": "alltoall_perf (D3/D4) on the SDMA backend, single node x 8 GPUs",
+      "config": "gin_perf_sdma",
+      "enabled": true
+    },
+    {
+      "name": "GIN collectives - SDMA (internal, single node)",
+      "description": "Collectives dispatched through the public NCCL API onto the GIN-SDMA path, single node x 8 GPUs",
+      "config": "gin_perf_sdma_internal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - GDA",
+      "description": "Every GinMPIDeviceTests case, one mpirun per test, on the GDA backend",
+      "config": "gin_devmpi_gda",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - SDMA (single node)",
+      "description": "Every GinMPIDeviceTests case, one mpirun per test, on the SDMA backend (single node)",
+      "config": "gin_devmpi_sdma",
+      "enabled": true
+    },
+    {
+      "name": "GIN alltoall eligibility (host-only)",
+      "description": "Host-only eligibility unit tests for the GIN-SDMA alltoall path",
+      "config": "gin_a2a_eligibility",
+      "enabled": true
+    }
+  ]
+
+}

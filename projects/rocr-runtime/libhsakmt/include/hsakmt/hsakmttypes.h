@@ -601,7 +601,13 @@ typedef struct _HsaMemFlags
             unsigned int Contiguous:    1; // Allocate contiguous VRAM
             unsigned int ExecuteBlit:   1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
             unsigned int QueueObject:   1; // AQL queue object, used in windows for CPU access to get the read pointer from amd_queue_t
-            unsigned int Reserved:      7;
+            unsigned int AlwaysMapped:  1; // default = 0; If 1: the caller is pinning this memory (hsaKmtRegisterMemory* on
+                                           // behalf of hsa_amd_memory_lock) and requires the GPU mapping to stay valid for
+                                           // the lifetime of the registration. Under the SVM API this sets
+                                           // HSA_SVM_FLAG_GPU_ALWAYS_MAPPED so KFD does not unmap the range from the GPU on
+                                           // MMU invalidation while a transfer is in flight. Ignored on the userptr BO path,
+                                           // which is already durable. Requires KFD interface minor version >= 11.
+            unsigned int Reserved:      6;
 
         } ui32;
         HSAuint32 Value;

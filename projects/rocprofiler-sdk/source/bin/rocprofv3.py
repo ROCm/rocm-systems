@@ -352,7 +352,12 @@ def get_att_paths(args):
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
     elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
-        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
+        # Return a list (not a bare str) so the caller iterates over paths and
+        # not over the individual characters of the string. Support a
+        # colon-separated list for consistency with LD_LIBRARY_PATH.
+        for itr in os.environ["ROCPROF_ATT_LIBRARY_PATH"].split(":"):
+            if itr and itr not in library_paths:
+                library_paths += [itr]
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
@@ -369,6 +374,11 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
     library_paths = get_att_paths(args)
 
     for path in library_paths:
+        # Skip entries that are not existing directories so a stray value (e.g.
+        # an empty string, a file, or a bad path) cannot become an os.walk()
+        # root and silently trigger a full "/" scan.
+        if not path or not os.path.isdir(path):
+            continue
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if att_lib_name in itr:
@@ -746,6 +756,32 @@ For attachment profiling of running processes:
         default=None,
         nargs="*",
         action="append",
+    )
+
+    kernel_replay_options = parser.add_argument_group("Kernel replay options (beta)")
+
+    kernel_replay_options.add_argument(
+        "--replay-mode",
+        help=(
+            "Select the counter-collection replay strategy. "
+            "'kernel' collects all counter groups within a single application run via in-process "
+            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "snapshot/restore between passes, instead of re-running the whole application per "
+            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "'application' (default) re-runs the whole application once per counter group."
+        ),
+        choices=("kernel", "application"),
+        default=None,
+    )
+
+    add_parser_bool_argument(
+        kernel_replay_options,
+        "--kernel-replay-beta-enabled",
+        help=(
+            "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
+            "behaviour may change in a future release. Required when --replay-mode kernel is "
+            "specified."
+        ),
     )
 
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
@@ -1378,6 +1414,38 @@ def has_set_attr(obj, key):
         return True
     else:
         return False
+
+
+def services_conflicting_with_kernel_replay(args, environ=None):
+    """Services that kernel replay cannot collect correctly in the same run.
+
+    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
+    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
+    picks a different group on each pass. Every other service is simply left enabled for the whole
+    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
+    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+
+    Returns the display names of the conflicting services, in the order they are reported.
+    """
+    environ = os.environ if environ is None else environ
+    conflicts = []
+
+    if getattr(args, "advanced_thread_trace", None):
+        conflicts.append("--att")
+
+    if (
+        getattr(args, "pc_sampling_beta_enabled", None)
+        or environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+    ):
+        conflicts.append("PC sampling")
+
+    # SPM is rejected alongside counter collection further down, but that check only looks at
+    # --pmc. Counter groups can also arrive from an input file, which is the form kernel replay
+    # takes, so name SPM here too rather than letting it through to fail inside the SDK.
+    if getattr(args, "spm", None):
+        conflicts.append("--spm")
+
+    return conflicts
 
 
 def patch_args(data):
@@ -2134,6 +2202,34 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+
+    if kernel_replay_mode:
+        if not getattr(args, "kernel_replay_beta_enabled", None):
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not args.pmc and not args.pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--replay-mode kernel cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+
+        # Route counter collection through the in-process kernel-replay service. The SDK derives
+        # the pass count from the number of counter groups via the tool's pass-count callback, so
+        # there is nothing else to communicate.
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -2476,6 +2572,35 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    # pmc_groups only ever arrives from an input file, so look for it there rather than on
+    # cmd_args, where it is never set.
+    input_has_counters = any(
+        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
+    )
+
+    replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
+    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        fatal_error(
+            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+            "feature via --kernel-replay-beta-enabled"
+        )
+    if replay_enabled and not (cli_has_pmc or input_has_counters):
+        fatal_error(
+            "--replay-mode kernel requires counter collection "
+            "(--pmc, input-file pmc, or pmc_groups)"
+        )
+
+    # Kernel replay replays each dispatch once per counter group within one application run, so
+    # the groups given on the command line are passes of a single run rather than the per-group
+    # child-process relaunch application replay uses. Normalize them to the list-of-lists shape
+    # process_args turns into ROCPROF_COUNTER_GROUPS. Input-file jobs are left alone: a job is a
+    # unit of configuration in its own right, so each one still runs as its own job with its own
+    # output configuration, kernel filters and ranges, and replay applies to the groups that job
+    # asks for.
+    if replay_enabled and cli_has_pmc:
+        cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
+        cli_multipass = False
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:
@@ -2580,6 +2705,10 @@ def main(argv=None):
             # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
             if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
                 all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            elif replay_enabled:
+                # Replay covers every command-line group inside one run, so they are one config
+                # here rather than one per group.
+                all_pass_configs.append({"pmc": cli_pmc_groups, "from_cli": True})
             else:
                 # Multiple --pmc flags: already a list of lists
                 for pmc_group in cli_pmc_groups:

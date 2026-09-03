@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
+#include <algorithm>
 #include <bit>
 #include <span>
 
@@ -22,55 +23,80 @@ WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDe
   vgprMemoryEvents.resize(vgprCount);
   sgprMemoryEvents.resize(sgprCount);
   sgprEventCount.resize(sgprCount, 0);
+  ttmpMemoryEvents.resize(REGISTER_SET_MAX_TTMPS);
+  ttmpEventCount.resize(REGISTER_SET_MAX_TTMPS, 0);
   for (auto &counts : regEventCount) {
     counts.resize(vgprCount, 0);
   }
 }
 
-void WaveRaceState::dispatch(PendingMemoryEvent event) {
-  if (event.isDualOffset) {
-    registerDualOffsetLdsEvent(event.pc, event.type, std::move(event.registers), event.execMask,
-                               event.waveSize, event.laneBaseAddresses, event.offset0,
-                               event.offset1);
-  } else if (!event.laneBaseAddresses.empty()) {
-    registerLdsEvent(event.pc, event.type, std::move(event.registers), event.execMask,
-                     event.waveSize, event.laneBaseAddresses, event.bytesPerLane, event.byteMask);
-  } else {
-    registerEvent(event.pc, event.type, std::move(event.registers), event.execMask, event.byteMask);
-  }
-}
-
-void WaveRaceState::dispatch(PendingWaitCount waitCount) {
-  if (waitCount.vmcnt >= 0) {
-    sWaitCntVmcnt(waitCount.vmcnt);
-  }
-  if (waitCount.lgkmcnt >= 0) {
-    sWaitCntLgkmcnt(waitCount.lgkmcnt);
-  }
+void WaveRaceState::dispatch(const PendingWaitCount &wait_count) {
+  for (const auto &update : wait_count.updates)
+    applyWaitCounter(update.type, update.threshold);
 }
 
 void WaveRaceState::registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds,
                                   uint64_t execMask, uint8_t byteMask) {
-  registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {});
+  registerEvent(pc, type, std::move(regIds), execMask, byteMask, defaultWaitCounterType(type));
+}
+
+void WaveRaceState::registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds,
+                                  uint64_t execMask, uint8_t byteMask,
+                                  amdgpu::WaitCounterType waitCounterType) {
+  registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {}, waitCounterType);
+}
+
+void WaveRaceState::registerScalarLoad(uint64_t pc, RegisterRef destination, uint64_t execMask,
+                                       amdgpu::WaitCounterType waitCounterType) {
+  const size_t limit = destination.cls == RegClass::SGPR   ? sgprMemoryEvents.size()
+                       : destination.cls == RegClass::TTMP ? ttmpMemoryEvents.size()
+                                                           : 0;
+  if (destination.width == 0)
+    return;
+  if (limit == 0) {
+    registerEvent(pc, MemoryEventType::GLOBAL_TO_SGPR, {}, execMask, 0xF, waitCounterType);
+    return;
+  }
+  if (destination.index >= limit || destination.width > limit - destination.index)
+    return;
+
+  std::vector<uint32_t> registers(destination.width);
+  for (uint32_t i = 0; i < destination.width; ++i)
+    registers[i] = destination.index + i;
+  registerEvent(pc,
+                destination.cls == RegClass::SGPR ? MemoryEventType::GLOBAL_TO_SGPR
+                                                  : MemoryEventType::GLOBAL_TO_TTMP,
+                std::move(registers), execMask, 0xF, waitCounterType);
 }
 
 void WaveRaceState::registerEventWithIntervals(uint64_t pc, MemoryEventType type,
                                                std::vector<uint32_t> regIds, uint64_t execMask,
-                                               uint8_t byteMask, IntervalSet ldsIntervals) {
+                                               uint8_t byteMask, IntervalSet ldsIntervals,
+                                               amdgpu::WaitCounterType waitCounterType) {
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
-  if (!toSgpr) {
+  bool toTtmp = isToTtmp(type);
+  const size_t register_limit = toSgpr   ? sgprMemoryEvents.size()
+                                : toTtmp ? ttmpMemoryEvents.size()
+                                         : vgprMemoryEvents.size();
+  if (std::any_of(regIds.begin(), regIds.end(),
+                  [register_limit](uint32_t reg) { return reg >= register_limit; }))
+    return;
+  if (!toSgpr && !toTtmp) {
     for (auto reg : regIds) {
       regEventCountInc(type, reg);
     }
   }
 
   auto eventId = detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
-                                           std::move(ldsIntervals));
+                                           std::move(ldsIntervals), waitCounterType);
   for (uint32_t reg : detector->events().registers(eventId)) {
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
       sgprEventCount[reg]++;
+    } else if (toTtmp) {
+      ttmpMemoryEvents[reg].push_back(eventId);
+      ttmpEventCount[reg]++;
     } else {
       vgprMemoryEvents[reg].push_back(eventId);
     }
@@ -82,6 +108,15 @@ void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
                                      std::vector<uint32_t> registers, uint64_t execMask,
                                      int waveSize, std::span<const uint32_t> laneBaseAddresses,
                                      int bytesPerLane, uint8_t byteMask) {
+  registerLdsEvent(pc, type, std::move(registers), execMask, waveSize, laneBaseAddresses,
+                   bytesPerLane, byteMask, defaultWaitCounterType(type));
+}
+
+void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
+                                     std::vector<uint32_t> registers, uint64_t execMask,
+                                     int waveSize, std::span<const uint32_t> laneBaseAddresses,
+                                     int bytesPerLane, uint8_t byteMask,
+                                     amdgpu::WaitCounterType waitCounterType) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     int addr = static_cast<int>(laneBaseAddresses[lane]);
@@ -89,7 +124,7 @@ void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
-                             std::move(intervals));
+                             std::move(intervals), waitCounterType);
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
@@ -97,6 +132,16 @@ void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type
                                                int waveSize,
                                                std::span<const uint32_t> laneBaseAddresses,
                                                int32_t offset0, int32_t offset1) {
+  registerDualOffsetLdsEvent(pc, type, std::move(registers), execMask, waveSize, laneBaseAddresses,
+                             offset0, offset1, defaultWaitCounterType(type));
+}
+
+void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
+                                               std::vector<uint32_t> registers, uint64_t execMask,
+                                               int waveSize,
+                                               std::span<const uint32_t> laneBaseAddresses,
+                                               int32_t offset0, int32_t offset1,
+                                               amdgpu::WaitCounterType waitCounterType) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     uint32_t vAddr = laneBaseAddresses[lane];
@@ -106,17 +151,22 @@ void WaveRaceState::registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type
     intervals.append(intAddr1, intAddr1 + 8);
   });
   intervals.finalize();
-  registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF, std::move(intervals));
+  registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF, std::move(intervals),
+                             waitCounterType);
 }
 
 void WaveRaceState::retireEventRegisters(EventId eventId) {
   ProfileScope ps(*profiler_, "retireEventRegisters");
   auto eventType = detector->events().type(eventId);
   bool toSgpr = isToSgpr(eventType);
+  bool toTtmp = isToTtmp(eventType);
   for (uint32_t regId : detector->events().registers(eventId)) {
     if (toSgpr) {
       removeFromUnorderedList(sgprMemoryEvents[regId], eventId);
       sgprEventCount[regId]--;
+    } else if (toTtmp) {
+      removeFromUnorderedList(ttmpMemoryEvents[regId], eventId);
+      ttmpEventCount[regId]--;
     } else {
       removeFromUnorderedList(getVgprMemoryEvents(regId), eventId);
       regEventCountDec(eventType, regId);
@@ -124,10 +174,10 @@ void WaveRaceState::retireEventRegisters(EventId eventId) {
   }
 }
 
-template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTargetType) {
+template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTargetEvent) {
   int total = 0;
   for (auto eid : waveMemoryEvents)
-    if (isTargetType(detector->events().type(eid)))
+    if (isTargetEvent(eid))
       total++;
   int toRetire = total - limit;
   if (toRetire <= 0)
@@ -137,7 +187,7 @@ template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTa
   size_t write = 0;
   for (size_t read = 0; read < waveMemoryEvents.size(); ++read) {
     EventId eid = waveMemoryEvents[read];
-    if (isTargetType(detector->events().type(eid)) && retired < toRetire) {
+    if (isTargetEvent(eid) && retired < toRetire) {
       retired++;
       retireEventRegisters(eid);
       detector->markEventWaveComplete(eid);
@@ -153,17 +203,28 @@ template <typename Pred> void WaveRaceState::resolveWaitCnt(int limit, Pred isTa
   waveMemoryEvents.resize(write);
 }
 
-void WaveRaceState::sWaitCntVmcnt(int vmcnt) {
-  resolveWaitCnt(vmcnt, [](MemoryEventType type) {
-    return type == MemoryEventType::GLOBAL_TO_VGPR || type == MemoryEventType::VGPR_TO_GLOBAL ||
-           type == MemoryEventType::GLOBAL_TO_LDS;
-  });
-}
+void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold) {
+  if (threshold < 0)
+    return;
 
-void WaveRaceState::sWaitCntLgkmcnt(int lgkmcnt) {
-  resolveWaitCnt(lgkmcnt, [](MemoryEventType type) {
-    return type == MemoryEventType::LDS_TO_VGPR || type == MemoryEventType::VGPR_TO_LDS ||
-           type == MemoryEventType::GLOBAL_TO_SGPR;
+  // Scalar-memory operations are not guaranteed to complete in issue order.
+  // A nonzero scalar or combined wait therefore cannot identify a particular
+  // scalar destination as complete. DS operations are ordered only within an
+  // operation class, so a combined LGKM wait can retire events older than its
+  // remaining-operation bound independently for DS reads and DS writes.
+  if (threshold != 0 &&
+      (type == amdgpu::WaitCounterType::LGKMCNT || type == amdgpu::WaitCounterType::KMCNT)) {
+    if (type == amdgpu::WaitCounterType::LGKMCNT)
+      for (MemoryEventType ds_type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS})
+        resolveWaitCnt(threshold, [this, type, ds_type](EventId event_id) {
+          return amdgpu::wait_counter_covers(type, detector->events().waitCounterType(event_id)) &&
+                 detector->events().type(event_id) == ds_type;
+        });
+    return;
+  }
+
+  resolveWaitCnt(threshold, [this, type](EventId event_id) {
+    return amdgpu::wait_counter_covers(type, detector->events().waitCounterType(event_id));
   });
 }
 
@@ -236,14 +297,35 @@ bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
   return false;
 }
 
-void WaveRaceState::checkSgprRead(int reg) const {
-  if (sgprEventCount[reg] == 0) {
+void WaveRaceState::checkScalarRead(RegisterRef ref) const {
+  const std::vector<std::vector<EventId>> *events = nullptr;
+  const std::vector<int> *counts = nullptr;
+  RaceViolation::Space space;
+  MemoryEventType type;
+  if (ref.cls == RegClass::SGPR) {
+    events = &sgprMemoryEvents;
+    counts = &sgprEventCount;
+    space = RaceViolation::Space::SGPR;
+    type = MemoryEventType::GLOBAL_TO_SGPR;
+  } else if (ref.cls == RegClass::TTMP) {
+    events = &ttmpMemoryEvents;
+    counts = &ttmpEventCount;
+    space = RaceViolation::Space::TTMP;
+    type = MemoryEventType::GLOBAL_TO_TTMP;
+  } else {
     return;
   }
-  for (EventId eid : sgprMemoryEvents[reg]) {
-    if (isToSgpr(detector->events().type(eid))) {
-      detector->getRaceHandler()({RaceViolation::Space::SGPR, reg, waveId.value, -1, false,
-                                  detector->getWorkgroupId(), eid});
+
+  if (ref.width == 0 || ref.index >= events->size() || ref.width > events->size() - ref.index)
+    return;
+  for (uint32_t offset = 0; offset < ref.width; ++offset) {
+    const uint32_t index = ref.index + offset;
+    if ((*counts)[index] == 0)
+      continue;
+    for (EventId eid : (*events)[index]) {
+      if (detector->events().type(eid) == type)
+        detector->getRaceHandler()({space, static_cast<int>(index), waveId.value, -1, false,
+                                    detector->getWorkgroupId(), eid});
     }
   }
 }

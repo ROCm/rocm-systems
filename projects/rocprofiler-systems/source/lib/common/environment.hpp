@@ -7,7 +7,7 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "logger/debug.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>

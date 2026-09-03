@@ -217,6 +217,23 @@ TEST(ChannelDefaults, Gfx950_RequestedBelow64IsHonored)
         {{"NCCL_MAX_P2P_NCHANNELS", "32"}});
 }
 
+// Single-node doubling raises p2pnChannelsPerPeer; a user max of 1 must still win.
+TEST(ChannelDefaults, Gfx1250_Requested1CapsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ChannelDefaults_Gfx1250_Requested1",
+        []()
+        {
+            const ResolvedChannels r =
+              ResolveP2pChannels("gfx1250", /*nRanks=*/4, kDefaultCollChannels, /*nNodes=*/1,
+                                 /*allRanksLocal=*/true);
+            EXPECT_EQ(r.p2pnChannels, 1);
+            EXPECT_EQ(r.p2pnChannelsPerPeer, 1);
+            ExpectPoolInvariant(r);
+        },
+        {{"NCCL_MAX_P2P_NCHANNELS", "1"}});
+}
+
 TEST(ChannelDefaults, Gfx1250_RequestedOverridesArchDefault)
 {
     RUN_ISOLATED_TEST_WITH_ENV(

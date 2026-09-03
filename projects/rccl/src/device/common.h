@@ -95,6 +95,10 @@ struct ncclShmemData {
   uint64_t faults;
 #endif
   uint64_t barrier_pat;
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+  // A separate __shared__ should work better as it does not instantiate this for LL and LL128
+  alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
+#endif
 };
 
 #ifdef RCCL_DEVICE_LINKER
@@ -108,6 +112,12 @@ extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2
 extern __shared__ ulong2
   ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
 #endif
+#endif
+
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+__device__ inline void* ncclTdmStageForWarp(int warp) {
+  return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
+}
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION

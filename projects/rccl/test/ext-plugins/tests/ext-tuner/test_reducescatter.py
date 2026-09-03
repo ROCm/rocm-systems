@@ -8,6 +8,16 @@ import os
 import subprocess
 import pytest
 
+# Like AllGather, RCCL only routes ReduceScatter through the tuner when the rank
+# count is not a multiple of 8: rcclUseReduceScatterDirect() gates Direct
+# ReduceScatter on `comm->nRanks % 8`, so at 8 ranks on a single node RCCL picks
+# a specialized ReduceScatter that never calls pluginGetCollInfo(). Measured on
+# MI350X: 8 ranks yields zero tuner callbacks, while 4 ranks exercises the tuner
+# normally. These tests therefore run at 4 ranks -- at 8 they cannot observe the
+# plugin at all, so "no config applied" would hold vacuously rather than because
+# the plugin decided so.
+REDUCESCATTER_TUNER_RANKS = "4"
+
 @pytest.mark.ext_tuner
 @pytest.mark.reducescatter
 def test_valid_config_with_wildcards(paths):
@@ -29,10 +39,7 @@ def test_valid_config_with_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -85,10 +92,7 @@ def test_valid_config_without_wildcards(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -124,7 +128,10 @@ def test_valid_config_without_wildcards(paths):
 @pytest.mark.ext_tuner
 @pytest.mark.reducescatter
 def test_no_matching_config(paths):
-    """Test CSV plugin behavior with no matching configurations"""
+    """Test CSV plugin behavior with no matching configurations
+
+    Runs at 4 ranks: see REDUCESCATTER_TUNER_RANKS.
+    """
 
     env = os.environ.copy()
     env.update({
@@ -138,14 +145,11 @@ def test_no_matching_config(paths):
     })
 
     args = [
-        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", REDUCESCATTER_TUNER_RANKS,
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -198,10 +202,7 @@ def test_incorrect_values_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -255,10 +256,7 @@ def test_unsupported_algo_proto_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -294,7 +292,11 @@ def test_unsupported_algo_proto_config(paths):
 @pytest.mark.ext_tuner
 @pytest.mark.reducescatter
 def test_singlenode_config(paths):
-    """Test CSV plugin with single-node configuration"""
+    """Test CSV plugin with single-node configuration
+
+    Runs at 4 ranks: see REDUCESCATTER_TUNER_RANKS. The reducescatter rows of
+    singlenode_config.conf are pinned to nodes=1,ranks=4 to match.
+    """
 
     env = os.environ.copy()
     env.update({
@@ -308,14 +310,11 @@ def test_singlenode_config(paths):
     })
 
     args = [
-        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
+        f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", REDUCESCATTER_TUNER_RANKS,
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",
-        "-e", "128M",
-        "-f", "2",
-        "-g", "1",
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")
@@ -392,10 +391,7 @@ def test_multinode_config(paths):
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_scatter_perf",
-        "-b", "8",       
-        "-e", "128M",      
-        "-f", "2",       
-        "-g", "1",       
+        *paths.TUNER_PERF_ARGS,
     ]
 
     reducescatter_log_dir = os.path.join(paths.LOGDIR, "reducescatter_csv_plugin_test_logs")

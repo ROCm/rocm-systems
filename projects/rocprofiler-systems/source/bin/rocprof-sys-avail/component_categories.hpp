@@ -7,7 +7,7 @@
 #include "core/demangler.hpp"
 #include "defines.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <timemory/components/types.hpp>
 #include <timemory/enum.h>

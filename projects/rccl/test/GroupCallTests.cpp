@@ -609,10 +609,12 @@ namespace RcclUnitTesting
         testBed.DestroyComms();
       }
 
+      // Finalize inside the loop: pooled workers snapshot env at fork, so the
+      // next channel count needs a freshly-forked pool to be seen.
+      testBed.Finalize();
       unsetenv("NCCL_MIN_NCHANNELS");
       unsetenv("NCCL_MAX_NCHANNELS");
     }
-    testBed.Finalize();
   }
 
   // Fused broadcast with element counts that are not multiples of the protocol grain size

@@ -343,7 +343,11 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     };
 
     const RdmaResourceCounts before = CaptureRdmaResources();
-    RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+    // Spread across the NICs with a routable GID rather than piling every worker
+    // onto device 0: this is the plain independent-connection path, so there is no
+    // reason to serialize it on one device's resources.
+    RunMultiThreadedIndependent(ThreadDevPolicy::Spread(), nThreads,
+                                [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
         return runSendRecv(threadIdx, pair);
     });
     MPI_Barrier(MPI_COMM_WORLD);
@@ -729,7 +733,10 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     };
 
     const RdmaResourceCounts before = CaptureRdmaResources();
-    RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+    // Spread, for the same reason as SimpleSendRecv: independent connections have no
+    // business sharing one device's queue pairs and completion queue here.
+    RunMultiThreadedIndependent(ThreadDevPolicy::Spread(), nThreads,
+                                [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
         return runSequentialTransfers(threadIdx, pair.sendComm, pair.recvComm);
     });
     MPI_Barrier(MPI_COMM_WORLD);

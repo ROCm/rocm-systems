@@ -1732,6 +1732,22 @@ bool Device::populateOCLDeviceConstants() {
       (amd::device::getValueFromIsaMeta(isaName, "AddressableNumSGPRs", sgprValue))
       ? (atoi(sgprValue.c_str()))
       : 0;
+
+  std::string sgprAllocGranule, trapHandlerEnabled;
+  info_.sgprAllocGranularity_ =
+      amd::device::getValueFromIsaMeta(isaName, "SGPRAllocGranule", sgprAllocGranule)
+      ? atoi(sgprAllocGranule.c_str())
+      : 0;
+  // Comgr reports whether a trap handler is present, but not the size of the
+  // SGPR block it reserves per wave, which is arch-independent.
+  constexpr uint32_t kTrapNumSgprs = 16;  // LLVM IsaInfo::TRAP_NUM_SGPRS
+  info_.sgprTrapHandlerReserve_ =
+      (amd::device::getValueFromIsaMeta(isaName, "TrapHandlerEnabled", trapHandlerEnabled) &&
+       atoi(trapHandlerEnabled.c_str()) != 0)
+      ? kTrapNumSgprs
+      : 0;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "sgprAllocGranule=%u, sgprTrapHandlerReserve=%u",
+          info_.sgprAllocGranularity_, info_.sgprTrapHandlerReserve_);
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
     info_.imageSupport_ =
@@ -3167,16 +3183,14 @@ size_t Device::PersistingL2CacheSizeMax() const {
 
 // ================================================================================================
 bool Device::UpdatePersistingL2CacheSizeCurrent(size_t size) const {
-  if (size > std::numeric_limits<uint32_t>::max()) {
-    LogPrintfError("Persisting L2 cache size %zu exceeds uint32_t range", size);
-    return false;
-  }
   const size_t max_size = PersistingL2CacheSizeMax();
   if (size > max_size) {
     LogPrintfError("Persisting L2 cache size %zu exceeds device max %zu", size, max_size);
     return false;
   }
-  uint32_t cache_size = static_cast<uint32_t>(size);
+  // HSA API expects size_t* (not uint32_t*) per hsa_ext_amd.h documentation
+  // Make a mutable copy since HSA API takes non-const void*
+  size_t cache_size = size;
   hsa_status_t ret = Hsa::agent_set_attribute(bkendDevice_,
       HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, &cache_size);
   if (HSA_STATUS_SUCCESS != ret) {
@@ -3620,8 +3634,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3964,8 +3982,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }
@@ -4142,26 +4159,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
 
-      // Prepare this signal for profiling: mark it as active and classify
-      // the packet type so checkGpuTime → addTimestamps only fires for
-      // kernel dispatches (not synthetic barriers).
+      // Prepare this signal for profiling. The dispatch path assigns this
+      // launch's slot only when the actual carrier is a kernel dispatch.
       ps->flags_.done_ = false;
-      // Record the queue this patched dispatch signal runs on (resolved from the
-      // owning segment's stream at launch) so profiling attributes it to the
-      // right stream rather than the graph launch stream.
-      ps->queue_index_ = patch.queue_index;
-      uint16_t hdr;
-      memcpy(&hdr, patch.packet, sizeof(hdr));
-      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
-      // A kernel dispatch could be a vendor-specific ext-kernel-dispatch
-      // packet, identified by amd_format (byte 2).  Classify it as a dispatch so
-      // the patched last-node completion signal contributes its GPU timing like
-      // every other graph kernel node.
-      const uint8_t amdFormat = patch.packet[2];
-      ps->flags_.isPacketDispatch_ =
-          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
-          (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+      ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);

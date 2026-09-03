@@ -10,8 +10,6 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

@@ -151,7 +151,14 @@ add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val)
         return _dbg;
     };
 
-    if constexpr(std::is_same<value_type, std::string_view>::value)
+    if constexpr(mpl::is_optional<value_type>::value)
+    {
+        if(_val.has_value())
+        {
+            add_perfetto_annotation(ctx, std::forward<Np>(_name), *_val);
+        }
+    }
+    else if constexpr(std::is_same<value_type, std::string_view>::value)
     {
         _get_dbg()->set_string_value(_val.data());
     }

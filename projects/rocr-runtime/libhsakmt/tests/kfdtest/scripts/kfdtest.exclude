@@ -40,12 +40,17 @@ FILTER[core]=\
 # using wallclock to measure performance is always risky, there are just too many ASICs
 # where this test is failing. Ideally we'll get better CU Masking coverage via rocrtst
 #
+# These CU Masking tests are excluded on all ASICs by default (via BLACKLIST_ALL_ASICS).
+# ASICs where they are expected to pass (e.g. gfx1250) use BLACKLIST_ALL_ASICS_NO_CU_MASK
+# instead, so the tests are still executed for those profiles.
+CU_MASKING_BLACKLIST=\
+"KFDQMTest.BasicCuMaskingLinear:"\
+"KFDQMTest.BasicCuMaskingEven"
+
 # The CheckZeroInitializationVram test is no longer expected to pass as KFD no longer
 # clears memory at allocation time.
 PERMANENT_BLACKLIST_ALL_ASICS=\
 "-${FILTER[pm]}:"\
-"KFDQMTest.BasicCuMaskingLinear:"\
-"KFDQMTest.BasicCuMaskingEven:"\
 "RDMATest.GPUDirect:"\
 "KFDLocalMemoryTest.CheckZeroInitializationVram"
 
@@ -74,9 +79,15 @@ TEMPORARY_BLACKLIST_ALL_ASICS=\
 "KFDDBGTest.SuspendQueues:"\
 "KFDDBGTest.HitAddressWatch"
 
-BLACKLIST_ALL_ASICS=\
+# Base all-ASIC blacklist without the CU masking tests. Profiles for ASICs that are
+# expected to pass CU masking (e.g. gfx1250) build on this instead of BLACKLIST_ALL_ASICS.
+BLACKLIST_ALL_ASICS_NO_CU_MASK=\
 "$PERMANENT_BLACKLIST_ALL_ASICS:"\
 "$TEMPORARY_BLACKLIST_ALL_ASICS"
+
+BLACKLIST_ALL_ASICS=\
+"$BLACKLIST_ALL_ASICS_NO_CU_MASK:"\
+"$CU_MASKING_BLACKLIST"
 
 # SDMA-based tests (KFDIPCTest.BasicTest, KFDQM.*Sdma*, KFDMemoryTest.MMBench) are all
 # disabled on non-Hawaii due to SDMA instability - SWDEV-101666
@@ -356,10 +367,9 @@ FILTER[gfx1201]=\
 "$BLACKLIST_GFX12"
 
 FILTER[gfx1250]=\
-"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_ALL_ASICS_NO_CU_MASK:"\
 "$BLACKLIST_GFX12:"\
 "KFDEventTest.SignalInvalidEvent:"\
-"KFDQMTest.ExtendedCuMasking:"\
 "KFDQMTest.MultipleCpQueuesStressDispatch:"\
 "KFDCWSRTest.InternalRegTest:"\
 "KFDEvictTest.QueueTest:"\
@@ -367,8 +377,7 @@ FILTER[gfx1250]=\
 "KFDRASTest.*:"\
 "KFDExceptionTest.AddressFault:"\
 "KFDQMTest.GpuMemCopyTest:"\
-"KFDDBGTest.HitTrapOnWaveStartEndEvent:"\
-"KFDNegativeTest.*"
+"KFDDBGTest.HitTrapOnWaveStartEndEvent"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\

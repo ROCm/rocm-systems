@@ -423,6 +423,121 @@ class GDAContext : public Context {
   __device__ void internal_getmem_nbi_wave(void *dest, const void *source,
       size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
 
+  __device__ void tile_finish_put(int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void tile_finish_get(int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Post a single NBI put/get chunk from every participating lane.
+   *
+   * All lanes of the wave that reach the call share @p qp_index, so they post
+   * through the wave-collective path (put_nbi/get_nbi with an ActiveWFInfo
+   * built from the current execution mask). That path elects one lane to take
+   * the SQ lock and reserve slots for the whole group, then each lane fills its
+   * own WQE. Lanes that already fell out of a striped loop are simply absent
+   * from the group, so unequal per-lane chunk counts are fine.
+   *
+   * These must not use the *_single posters: those take the SQ lock per lane
+   * and advance the SQ producer non-atomically, which is only valid when every
+   * active lane holds a *different* QP. With one QP per wave the lock holder
+   * cannot make progress until its peers leave the spin loop, so the wave
+   * deadlocks.
+   *
+   * @p pe must be wave-uniform here (it is, since it also selects the shared
+   * QP), so the collective group spans every active lane.
+   */
+  __device__ void tile_put_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int pe, int qp_index);
+  __device__ void tile_get_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int pe, int qp_index);
+  __device__ int tile_qp_index_for_worker(int pe, int worker_id,
+                                          int worker_count);
+  __device__ void tile_quiet_gda_workers(int pe, int worker_id, int worker_count,
+                                         int wave_qp_index);
+  __device__ void tile_put_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int pe, int qp_index,
+                                             int worker_id, int worker_count);
+  __device__ void tile_get_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int pe, int qp_index,
+                                             int worker_id, int worker_count);
+
+  /**
+   * @brief Post NBI puts for contiguous rows, striped across workers.
+   *
+   * Workers may diverge when num_rows is not a multiple of worker_count; each
+   * round posts as a collective over whichever lanes are still in the loop.
+   * Does not quiet; caller must quiet_single (or tile_finish_put) after a
+   * wave/block barrier.
+   * Strides are in bytes between consecutive rows.
+   */
+  __device__ void tile_put_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI puts for contiguous columns, striped across workers.
+   * Strides are in bytes between consecutive columns.
+   */
+  __device__ void tile_put_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI gets for contiguous rows, striped across workers.
+   */
+  __device__ void tile_get_rows_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_row_stride_bytes,
+                                    size_t src_row_stride_bytes,
+                                    size_t num_rows, size_t row_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  /**
+   * @brief Post NBI gets for contiguous columns, striped across workers.
+   */
+  __device__ void tile_get_cols_nbi(char *dst_base, const char *src_base,
+                                    size_t dst_col_stride_bytes,
+                                    size_t src_col_stride_bytes,
+                                    size_t num_cols, size_t col_bytes,
+                                    int pe, int qp_index, int worker_id,
+                                    int worker_count);
+
+  __device__ void tile_put_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+  __device__ void tile_get_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int pe,
+                                          int qp_index, int worker_id,
+                                          int worker_count);
+
+  __device__ void tile_put_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
+  __device__ void tile_get_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
+
   __device__
   void internal_quiet(ActiveWFInfo &wf_info);
 
@@ -474,7 +589,7 @@ class GDAContext : public Context {
 
  public:
   /**************************************************************************
-   ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
+   ****************** TILE API METHODS **************************************
    *************************************************************************/
 
   // RMA PUT operations - Type-erased interface
@@ -591,6 +706,43 @@ class GDAContext : public Context {
                                     const size_t* dst_strides, const size_t* src_strides,
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_impl(rocshmem_team_t team,
+                                        const void* src_data,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root, size_t segment_start,
+                                        size_t segment_elems,
+                                        size_t segment_capacity,
+                                        int worker_id, int worker_count);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed(rocshmem_team_t team, void* dst_data,
+                                   const void* src_data,
+                                   const size_t* dst_strides,
+                                   const size_t* src_strides,
+                                   const size_t* start_coord,
+                                   const size_t* boundary, int ndim, int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wave(rocshmem_team_t team, void* dst_data,
+                                        const void* src_data,
+                                        const size_t* dst_strides,
+                                        const size_t* src_strides,
+                                        const size_t* start_coord,
+                                        const size_t* boundary, int ndim,
+                                        int root);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int tile_reduce_typed_wg(rocshmem_team_t team, void* dst_data,
+                                      const void* src_data,
+                                      const size_t* dst_strides,
+                                      const size_t* src_strides,
+                                      const size_t* start_coord,
+                                      const size_t* boundary, int ndim,
+                                      int root);
 
   // Rooted SUM Reduction operations
   // Rooted MAX Reduction operations

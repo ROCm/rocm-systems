@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -35,10 +36,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,6 +54,9 @@
 #include <vector>
 
 namespace rocjitsu {
+namespace test {
+class ComputeUnitTestAccess;
+}
 namespace amdgpu {
 
 class CommandProcessor;
@@ -94,7 +100,8 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    rj_code_arch_t arch; ///< ISA architecture (determines wave size, decoder).
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete GPU target.
     uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
@@ -242,7 +249,18 @@ public:
   }
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
-  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+  /// @brief Mark a debug session as attached to or detached from this CU.
+  /// @details Every transition publishes an I$ invalidation. A debugger writes
+  /// breakpoints straight into code memory with none of the maintenance that
+  /// invalidates the I$, and it can do so without any wave on this CU issuing
+  /// during the session -- attach, plant a breakpoint on a stopped wave, detach.
+  /// The invalidation is only published here, not applied: this runs on the
+  /// ioctl thread, and the I$ is lock-free precisely because the CU's own thread
+  /// is its sole accessor. That thread consumes it at its next fetch.
+  void set_debug_active(bool active) {
+    if (debug_active_.exchange(active, std::memory_order_relaxed) != active)
+      inst_cache_debug_epoch_.fetch_add(1, std::memory_order_release);
+  }
   bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
@@ -306,6 +324,7 @@ public:
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
   }
 
   /// @brief Return the execution plugin group.
@@ -320,6 +339,20 @@ public:
   /// @brief Return the total number of wavefront slots.
   /// @returns Total hardware wavefront slot count.
   uint32_t num_wf_slots() const { return config_.num_wf_slots; }
+
+  /// @brief Record this CU's physical location within its XCC.
+  /// @param shader_engine_id Zero-based shader-engine index within the XCC.
+  /// @param cu_index Zero-based CU index within the shader engine.
+  void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
+    shader_engine_id_ = shader_engine_id;
+    scratch_scoreboard_base_ = cu_index * config_.num_wf_slots;
+  }
+
+  /// @brief Return this CU's physical shader-engine index.
+  uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the first scratch scoreboard slot owned by this CU.
+  uint32_t scratch_scoreboard_base() const { return scratch_scoreboard_base_; }
 
   /// @brief Access a wavefront slot by index (always non-null).
   /// @param idx Zero-based wavefront slot index.
@@ -344,6 +377,9 @@ public:
 
   /// @brief Return the L1 Vector Cache (V$).
   L1VectorCache &l1_vector() { return l1_vector_; }
+
+  /// @brief Return the per-CU instruction cache (I$).
+  InstructionCache &instruction_cache() { return inst_cache_; }
 
   /// @brief Return the shared L2 cache.
   L2Cache *l2() const { return l2_; }
@@ -398,6 +434,7 @@ public:
     });
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
     l2_->flush_all(vmid);
   }
 
@@ -405,6 +442,7 @@ public:
     (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
@@ -507,31 +545,126 @@ public:
   /// @returns Index of the next wavefront slot to schedule.
   uint64_t cycle_count() const { return cycle_counter_; }
 
+  /// @brief Return the physical SGPR allocation block size per wavefront.
+  uint32_t sgpr_allocation_block_size() const { return config_.sgprs_per_wf; }
+
+  /// @brief Test whether a physical SGPR range is contained in a wavefront's
+  /// fixed simulator storage block.
+  /// @details This is an isolation boundary, not the descriptor-derived
+  /// architectural allocation extent recorded in `wf.sgpr_alloc().count`.
+  [[nodiscard]] bool owns_sgpr_range(const Wavefront &wf, uint32_t physical_base,
+                                     uint32_t physical_count) const {
+    return &wf.raw_cu() == this && wf.sgpr_alloc().count != 0 &&
+           RegAllocation{wf.sgpr_alloc().base, sgpr_allocation_block_size()}.contains(
+               physical_base, physical_count);
+  }
+
+  /// @brief Test whether a physical VGPR range is contained in a wavefront's
+  /// fixed simulator storage block.
+  /// @details This is an isolation boundary, not the descriptor-derived
+  /// architectural allocation extent recorded in `wf.vgpr_alloc().count`.
+  [[nodiscard]] bool owns_vgpr_range(const Wavefront &wf, uint32_t physical_base,
+                                     uint32_t physical_count) const {
+    return &wf.raw_cu() == this && wf.vgpr_alloc().count != 0 &&
+           RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(
+               physical_base, physical_count);
+  }
+
+private:
+  // RegisterAccess is the instruction-facing register boundary. These
+  // ownership and SGPR access helpers validate the complete operation, fire
+  // callbacks, and only then expose or modify storage.
+  friend class RegisterAccess;
+
+  /// @brief Resolve one owner for a complete physical SGPR range.
+  /// @details Returns null for empty, unallocated, out-of-file, or mixed-owner
+  /// ranges. CU-bound RegisterAccess uses this compatibility path; wave-bound
+  /// access keeps its explicit owner instead.
+  [[nodiscard]] const Wavefront *sgpr_owner_for_range(uint32_t physical_base,
+                                                      uint32_t physical_count) const {
+    if (physical_count == 0 || physical_base >= sgpr_file_.total_regs() ||
+        physical_count > sgpr_file_.total_regs() - physical_base)
+      return nullptr;
+    const Wavefront *owner = sgpr_owner(physical_base);
+    if (!owner || !owns_sgpr_range(*owner, physical_base, physical_count))
+      return nullptr;
+    return owner;
+  }
+
+  /// @brief Resolve one owner for a complete physical VGPR range.
+  /// @details Returns null for empty, unallocated, out-of-file, or mixed-owner
+  /// ranges. Implemented by the concrete CU that owns the typed VGPR file.
+  [[nodiscard]] virtual const Wavefront *vgpr_owner_for_range(uint32_t physical_base,
+                                                              uint32_t physical_count) const = 0;
+
+  [[nodiscard]] uint32_t read_sgpr(const Wavefront &wf, uint32_t reg_idx) const {
+    if (!owns_sgpr_range(wf, reg_idx, 1))
+      return 0;
+    notify_scalar_register_read(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
+    return sgpr_file_[reg_idx];
+  }
+
+  void write_sgpr(const Wavefront &wf, uint32_t reg_idx, uint32_t val) {
+    if (!owns_sgpr_range(wf, reg_idx, 1))
+      return;
+    plugin_group_->onAmdgpuWriteScalarRegister(
+        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
+    sgpr_file_[reg_idx] = val;
+  }
+
+  void write_sgpr64(const Wavefront &wf, uint32_t reg_idx, uint64_t val) {
+    if (!owns_sgpr_range(wf, reg_idx, 2))
+      return;
+    plugin_group_->onAmdgpuWriteScalarRegister(
+        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
+    sgpr_file_[reg_idx] = static_cast<uint32_t>(val);
+    sgpr_file_[reg_idx + 1] = static_cast<uint32_t>(val >> 32);
+  }
+
+  void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
+    if (observes_sgpr_reads_)
+      plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
+  }
+
+  void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
+    plugin_group_->onAmdgpuWriteScalarRegister(&wf, reg);
+  }
+
+public:
   /// @brief Read a scalar register from the physical SGPR file.
-  /// @details This is the VM-level scalar register accessor. It notifies the
-  /// plugin group of an SGPR read when the physical register is currently owned
-  /// by a wavefront. Instruction operand implementations use this to implement
-  /// scalar operand semantics. VGPR reads from instruction emulators should not
-  /// use the analogous CU physical VGPR accessors directly; use Operand or
-  /// RegisterAccess APIs instead.
+  /// @details VM/diagnostic compatibility accessor. It notifies the plugin
+  /// group when the physical register is currently owned by a wavefront.
+  /// Instruction code should use Operand or RegisterAccess so complete-range
+  /// ownership and the explicit executing wave are preserved.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   // TODO(newling) consider cmake flag to build without plugins, this call
   // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]) {
-      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
-    }
+    if (reg_idx >= sgpr_file_.total_regs())
+      return 0;
+    if (observes_sgpr_reads_)
+      if (auto *wf = sgpr_owner(reg_idx))
+        return read_sgpr(*wf, reg_idx);
     return sgpr_file_[reg_idx];
   }
 
+  /// @brief Read raw SGPR storage without producing an observation callback.
+  uint32_t read_sgpr_storage(uint32_t reg_idx) const {
+    return reg_idx < sgpr_file_.total_regs() ? sgpr_file_[reg_idx] : 0;
+  }
+
   /// @brief Write a scalar register in the physical SGPR file.
-  /// @details VM-level scalar register write used for scalar operand
-  /// destinations and dispatch/runtime state setup. This does not imply a VGPR
-  /// read and does not participate in VGPR read observation.
+  /// @details Raw VM-level write used for memory completion and dispatch/runtime
+  /// state setup. It deliberately does not fire an instruction callback.
+  /// Instruction code must use wave-bound RegisterAccess.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
-  void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
+  void write_sgpr(uint32_t reg_idx, uint32_t val) {
+    if (reg_idx < sgpr_file_.total_regs())
+      sgpr_file_[reg_idx] = val;
+  }
 
   /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
   /// @details Low-level notification primitive used by RegisterAccess and the
@@ -540,7 +673,7 @@ public:
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0)
+    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
@@ -551,7 +684,7 @@ public:
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
-    if (wf && lane_mask != 0 && byte_mask != 0)
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
@@ -561,22 +694,22 @@ public:
   void notify_scalar_lane_vgpr_write(
       const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && byte_mask != 0)
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
   /// @brief Notify plugins that lanes of a physical VGPR were read.
   /// @details Resolves the owning wavefront from the physical register index.
-  /// Intended for RegisterAccess and CU internals, not as a direct instruction
-  /// emulator API.
+  /// Transitional single-register compatibility path for CU internals.
+  /// Instruction helpers should retain their explicit wave in RegisterAccess.
   virtual void
   notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                           uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
 
   /// @brief Notify plugins that lanes of a physical VGPR were written.
   /// @details Resolves the owning wavefront from the physical register index.
-  /// Intended for RegisterAccess and CU internals, not as a direct instruction
-  /// emulator API.
+  /// Transitional single-register compatibility path for CU internals.
+  /// Instruction helpers should retain their explicit wave in RegisterAccess.
   virtual void
   notify_vgpr_write_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                            uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
@@ -707,6 +840,19 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Replace the concrete decoder in scheduler-level tests.
+  /// @details Some concrete targets intentionally remain unavailable to full
+  /// simulator configuration while individual instructions acquire execution
+  /// support. This seam lets a production-topology test exercise fetch, decode,
+  /// issue, and completion for such an instruction without weakening target
+  /// capability validation. The CU must be idle when its decoder is replaced.
+  void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
+    assert(decoder != nullptr);
+    assert(!has_active_wfs());
+    decoder->enable_pool();
+    decoder_ = std::move(decoder);
+  }
+
   /// @brief Return the completer port (receives dispatch requests from CP).
   /// @returns Pointer to the completer port.
   simdojo::Port *cpl_port() { return cpl_; }
@@ -749,6 +895,17 @@ protected:
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
 
+  /// @brief Apply any I$ invalidation a debug attach or detach published.
+  /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
+  /// See set_debug_active() for why the transition cannot invalidate directly.
+  void sync_inst_cache_debug_epoch() {
+    const uint64_t epoch = inst_cache_debug_epoch_.load(std::memory_order_acquire);
+    if (epoch == inst_cache_debug_epoch_seen_)
+      return;
+    inst_cache_.invalidate_all();
+    inst_cache_debug_epoch_seen_ = epoch;
+  }
+
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
@@ -766,6 +923,8 @@ protected:
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  uint32_t shader_engine_id_ = 0;
+  uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
@@ -815,6 +974,16 @@ protected:
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
+  InstructionCache inst_cache_;
+  /// @brief Debug attach/detach transitions seen by set_debug_active().
+  std::atomic<uint64_t> inst_cache_debug_epoch_{0};
+  /// @brief The epoch this CU's thread has already invalidated the I$ for.
+  uint64_t inst_cache_debug_epoch_seen_ = 0;
+  /// @brief Dispatch whose launch invalidation the I$ has already taken.
+  /// @details Held as 64 bits so the initial value is outside the 32-bit
+  /// dispatch-ID space and the first dispatch, including ID 0, still
+  /// invalidates.
+  uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
@@ -857,20 +1026,45 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  bool observes_sgpr_reads_ = false;
 
-  /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
-  /// Populated at dispatch_wf time. Null entries mean "not allocated".
-  std::vector<Wavefront *> sgpr_to_wave_;
-  /// Populated by the ISA-specific subclass (which owns the VGPR file).
-  virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
+  /// @brief Resolve the owner of a physical SGPR from its allocation block.
+  /// @details Power-of-two block sizes use a shift on the instruction read path;
+  /// other target configurations retain exact division semantics.
+  Wavefront *sgpr_owner(uint32_t reg_idx) const {
+    const uint32_t block = sgpr_block_shift_ != kVariableSgprBlockShift
+                               ? reg_idx >> sgpr_block_shift_
+                               : reg_idx / config_.sgprs_per_wf;
+    const auto &allocation = sgpr_block_owners_[block];
+    return reg_idx < allocation.end ? allocation.owner : nullptr;
+  }
+
+  static constexpr uint32_t kVariableSgprBlockShift = std::numeric_limits<uint32_t>::max();
+  struct SgprBlockOwner {
+    Wavefront *owner = nullptr;
+    uint32_t end = 0;
+  };
+  /// Reverse lookup: SGPR allocation block -> owning wavefront for instruction
+  /// observation. One entry per hardware wave slot replaces one pointer per
+  /// physical SGPR, while end preserves the physical allocation-block boundary.
+  std::vector<SgprBlockOwner> sgpr_block_owners_;
+  uint32_t sgpr_block_shift_ = kVariableSgprBlockShift;
+  /// Record or clear the owner of one VGPR allocation block.
+  /// @param base Allocation-block-aligned physical VGPR base.
+  /// @param wf Owning wavefront, or nullptr when the block is freed.
+  virtual void set_vgpr_block_owner(uint32_t base, Wavefront *wf) = 0;
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
+inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
+  return raw_cu().instruction_cache();
+}
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
 inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
@@ -897,12 +1091,6 @@ inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t m
 }
 inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
-}
-inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
-  return raw_cu().read_sgpr(reg_idx);
-}
-inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t value) {
-  raw_cu().write_sgpr(reg_idx, value);
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -1035,7 +1223,6 @@ public:
         Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
     vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
     vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
-    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -1043,6 +1230,8 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+      return 0;
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
   }
@@ -1050,28 +1239,46 @@ public:
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
   const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
-    return reg_idx < vgpr_to_wave_.size() ? vgpr_to_wave_[reg_idx] : nullptr;
+    if (vgprs_per_block_ == 0)
+      return nullptr;
+    const size_t block = reg_idx / vgprs_per_block_;
+    return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
   }
 
-  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
-    std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
+private:
+  const Wavefront *vgpr_owner_for_range(uint32_t physical_base,
+                                        uint32_t physical_count) const override {
+    if (physical_count == 0 || physical_base >= vgpr_file_.total_regs() ||
+        physical_count > vgpr_file_.total_regs() - physical_base)
+      return nullptr;
+    const Wavefront *owner = vgpr_owner(physical_base);
+    return owner && this->owns_vgpr_range(*owner, physical_base, physical_count) ? owner : nullptr;
+  }
+
+public:
+  void set_vgpr_block_owner(uint32_t base, Wavefront *wf) override {
+    assert(vgprs_per_block_ != 0 && base % vgprs_per_block_ == 0);
+    const size_t block = base / vgprs_per_block_;
+    assert(block < this->config_.num_wf_slots);
+    vgpr_block_owners_[block] = wf;
   }
 
   /// @brief Write a value to the VGPR file.
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
-    vgpr_file_[reg_idx][lane] = val;
+    if (reg_idx < vgpr_file_.total_regs() && lane < Isa::WF_SIZE_MAX)
+      vgpr_file_[reg_idx][lane] = val;
   }
 
   /// @returns Const pointer to one VGPR's raw lane data.
@@ -1109,7 +1316,7 @@ protected:
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override {
     vgpr_file_.free(base);
-    fill_vgpr_to_wave(base, vgprs_per_block_, nullptr);
+    set_vgpr_block_owner(base, nullptr);
   }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
@@ -1134,12 +1341,17 @@ protected:
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
   void execute_instruction(Instruction *inst, Wavefront &wf) override {
     assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
     inst->execute(*inst, &wf);
   }
 
 private:
   VgprFile vgpr_file_{"vgpr"};
-  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  /// One owner per register-file allocation block. Every VGPR in a block has
+  /// the same owner, so a per-register reverse map would duplicate each pointer
+  /// @c vgprs_per_block_ times. The array is sized by wave slots because the
+  /// register file currently contains exactly one allocation block per slot.
+  std::array<Wavefront *, Isa::MAX_WF_SLOTS> vgpr_block_owners_{};
   uint32_t vgprs_per_block_ = 0;
 };
 

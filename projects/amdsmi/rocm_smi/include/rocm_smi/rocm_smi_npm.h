@@ -1,7 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- * See LICENSE file for full license text.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_NPM_H_
 #define ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_NPM_H_

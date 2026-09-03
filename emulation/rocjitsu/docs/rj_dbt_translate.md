@@ -55,8 +55,8 @@ Options:
 - `--list-code-objects`: list extractable code objects and exit.
 - `--help`: print command-line help.
 
-Supported target names are `gfx942`, `gfx950`, `gfx1200`, `gfx1201`, and
-`gfx1250`.
+Supported target names are `gfx942`, `gfx950`, `gfx1200`, `gfx1201`, `gfx1250`,
+and `gfx1251`.
 
 ## Output
 

@@ -77,13 +77,153 @@ TEST(RaceDetector, Sgpr_WithWaitcnt) {
 
 TEST(RaceDetector, Sgpr_PartialWaitcnt) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1); // oldest
-  b.scalarLoad(/*wave=*/0, /*sgprBase=*/5, /*numRegs=*/1); // newest
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);      // drain oldest (s4)
-  b.checkSgprRead(/*wave=*/0, /*reg=*/4);                  // safe
-  EXPECT_FALSE(b.hasSgprRace(4));
-  b.checkSgprRead(/*wave=*/0, /*reg=*/5); // RACE
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/5, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);
+
+  // Scalar-memory loads can complete out of order, so a nonzero wait does not
+  // identify either destination as complete.
+  b.checkSgprRead(/*wave=*/0, /*reg=*/4);
+  EXPECT_TRUE(b.hasSgprRace(4));
+  b.clearViolations();
+  b.checkSgprRead(/*wave=*/0, /*reg=*/5);
   EXPECT_TRUE(b.hasSgprRace(5));
+}
+
+TEST(RaceDetector, SgprAndLds_PartialCombinedWaitRetiresOnlyProvablyCompletedDs) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/3);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);
+
+  b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasVgprRace(2));
+  b.checkVgprRead(/*wave=*/0, /*reg=*/3, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(3));
+  b.clearViolations();
+  b.checkSgprRead(/*wave=*/0, /*reg=*/4);
+  EXPECT_TRUE(b.hasSgprRace(4));
+}
+
+TEST(RaceDetector, SgprAndLds_PartialCombinedWaitDoesNotOverRetireDsAtBoundary) {
+  // lgkmcnt(2) permits both DS reads to remain after the scalar load completes,
+  // so neither ordered DS destination is provably safe yet.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/3);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/2);
+
+  b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(2));
+  b.clearViolations();
+  b.checkVgprRead(/*wave=*/0, /*reg=*/3, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(3));
+  b.clearViolations();
+  b.checkSgprRead(/*wave=*/0, /*reg=*/4);
+  EXPECT_TRUE(b.hasSgprRace(4));
+}
+
+TEST(RaceDetector, SgprAndLds_PartialCombinedWaitUsesDsOrderAcrossInterleaving) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4, /*vgprDst=*/3);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);
+
+  b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasVgprRace(2));
+  b.checkVgprRead(/*wave=*/0, /*reg=*/3, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(3));
+  b.clearViolations();
+  b.checkSgprRead(/*wave=*/0, /*reg=*/4);
+  EXPECT_TRUE(b.hasSgprRace(4));
+}
+
+TEST(RaceDetector, SgprAndLds_PartialCombinedWaitDoesNotOrderDifferentDsClasses) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);
+
+  // The read and write may complete in either order, so neither operation is
+  // individually known to be complete even though at most one remains.
+  b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(2));
+  b.clearViolations();
+  b.barrier();
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, SgprAndLds_PartialCombinedWaitMakesOldestDsWriteBarrierEligible) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/4, /*numRegs=*/1);
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/1);
+  b.barrier();
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasLdsRace(0));
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+  b.clearViolations();
+  b.checkSgprRead(/*wave=*/0, /*reg=*/4);
+  EXPECT_TRUE(b.hasSgprRace(4));
+}
+
+TEST(RaceDetector, Ttmp_MissingWaitcnt) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/2, /*numRegs=*/2);
+  b.checkTtmpRead(/*wave=*/0, /*reg=*/3);
+  EXPECT_TRUE(b.hasTtmpRace(3));
+}
+
+TEST(RaceDetector, Ttmp_WithWaitcnt) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/2, /*numRegs=*/2);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.checkTtmpRead(/*wave=*/0, /*reg=*/3);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, Ttmp_KmcntRetiresOnlyScalarCounterDomain) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/2, /*numRegs=*/1, rocjitsu::amdgpu::WaitCounterType::KMCNT);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/3,
+            /*byteMask=*/0xF, rocjitsu::amdgpu::WaitCounterType::DSCNT);
+
+  b.waitKmcnt(/*wave=*/0, /*kmcnt=*/0);
+  b.checkTtmpRead(/*wave=*/0, /*reg=*/2);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkVgprRead(/*wave=*/0, /*reg=*/3, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(3));
+}
+
+TEST(RaceDetector, Ttmp_PartialKmcntKeepsUnorderedScalarLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/2, /*numRegs=*/1, rocjitsu::amdgpu::WaitCounterType::KMCNT);
+  b.scalarStore(/*wave=*/0, rocjitsu::amdgpu::WaitCounterType::KMCNT);
+
+  b.waitKmcnt(/*wave=*/0, /*kmcnt=*/1);
+  b.checkTtmpRead(/*wave=*/0, /*reg=*/2);
+  EXPECT_TRUE(b.hasTtmpRace(2));
+
+  b.clearViolations();
+  b.waitKmcnt(/*wave=*/0, /*kmcnt=*/0);
+  b.checkTtmpRead(/*wave=*/0, /*reg=*/2);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, RejectsOutOfRangeScalarLoadDestination) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ttmpLoad(/*wave=*/0, /*ttmpBase=*/15, /*numRegs=*/2);
+  b.scalarLoad(/*wave=*/0, /*sgprBase=*/7, /*numRegs=*/2);
+  EXPECT_EQ(b.events().totalAllocated(), 0);
 }
 
 // ---- LDS cross-wave races ----

@@ -83,9 +83,10 @@
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
+ * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 31
+#define HSA_AMD_INTERFACE_VERSION_MINOR 32
 
 #ifdef __cplusplus
 extern "C" {
@@ -4287,6 +4288,37 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                      uint32_t num_dep_signals,
                                                      const hsa_signal_t* dep_signals,
                                                      hsa_signal_t completion_signal);
+
+/**
+ * @brief Discards a batch of SVM memory ranges and prefetches them to a GPU agent.
+ * Combines discard and prefetch into a single operation.
+ *
+ * @param[in] ptrs            Array of @p count SVM range pointers to discard and prefetch.
+ *                            Must not be NULL.
+ * @param[in] sizes           Array of @p count range sizes in bytes. Must not be NULL.
+ * @param[in] count           Number of ranges. Must not be 0.
+ * @param[in] dst_agents      Array of @p num_dst_agents destination GPU agents.
+ *                            Must not be NULL. All entries must be valid GPU agents.
+ * @param[in] num_dst_agents  Number of entries in @p dst_agents. Must not be 0.
+ * @param[in] num_dep_signals Number of dependency signals. Can be 0.
+ * @param[in] dep_signals     Dependency signals to wait on before starting. Can be NULL
+ *                            when @p num_dep_signals is 0.
+ * @param[in] completion_signal Signal decremented on completion. May be null.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Operation scheduled successfully.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime not initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT An entry in @p dst_agents is not a valid
+ *         GPU agent.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs, @p sizes, @p dst_agents
+ *         is NULL; @p count or @p num_dst_agents is 0; @p dep_signals and @p num_dep_signals are
+ *         inconsistent; or a pointer was not allocated with hsa_amd_vmem_address_reserve.
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED XNACK is not enabled on this system.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
 
 /** @} */
 

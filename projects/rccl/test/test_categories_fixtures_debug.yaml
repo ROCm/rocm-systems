@@ -17,6 +17,7 @@ test_categories:
       - "ParameterApiTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
+      - "PatAGAlgorithmTests.*"
       - "Rcclwrap.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"

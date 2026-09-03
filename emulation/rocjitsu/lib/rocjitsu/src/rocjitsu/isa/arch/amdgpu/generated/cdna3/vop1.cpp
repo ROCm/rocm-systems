@@ -2811,14 +2811,10 @@ VClrexcpVop1::VClrexcpVop1(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVClrexcpVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       "v_clrexcp_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_CLREXCP does not support DPP";
   return std::make_unique<VClrexcpVop1>(opcode);
 }
 } // namespace detail
@@ -4470,16 +4466,10 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVSwapB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       "v_swap_b32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_SWAP_B32 does not support DPP";
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
-    return emit_error.emit() << "V_SWAP_B32 does not support SDWA";
   return std::make_unique<VSwapB32Vop1>(opcode);
 }
 } // namespace detail

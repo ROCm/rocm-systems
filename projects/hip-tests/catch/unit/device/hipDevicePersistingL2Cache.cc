@@ -64,9 +64,8 @@ HIP_TEST_CASE(Unit_hipDeviceLimit_PersistingL2Cache_Comprehensive) {
   SECTION("Query device property and max size") {
     // Verify persistingL2CacheMaxSize is populated and reasonable
     REQUIRE(maxSize > 0);
-    REQUIRE(maxSize <= props.l2CacheSize);
-
-    INFO("Max L2 reservation: " << maxSize << " bytes");
+    // Note: persistingL2CacheMaxSize (per-AID) can exceed l2CacheSize (per-XCC)
+    INFO("Max L2 reservation: " << maxSize << " bytes, L2 size: " << props.l2CacheSize << " bytes");
   }
 
   SECTION("Get current size") {

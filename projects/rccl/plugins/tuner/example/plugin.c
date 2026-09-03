@@ -367,9 +367,6 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
                      collTypeToString(collType), nBytes, numPipeOps, regBuff, ctx->numConfigs);
   }
 
-  // Cast the collCostTable pointer to a 2D array to fix the segmentation fault
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-
   // Look for matching configuration
   for (int i = 0; i < ctx->numConfigs; i++) {
     TuningConfig* config = &ctx->configs[i];
@@ -442,7 +439,12 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
       }
     } else {
       if (ctx->logFunction) {
-        ctx->logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
+        // TRACE, like the other per-config diagnostics above: this fires once
+        // per config per collective, so at INFO a config file that matches
+        // nothing turned a single test into tens of MB of log (a 30-config file
+        // over a size sweep produced 265k of these lines / 57 MB). The
+        // per-callback outcome is still reported at INFO below.
+        ctx->logFunction(NCCL_LOG_TRACE, NCCL_TUNING, __FILE__, __LINE__,
                          "TUNER/ExamplePlugin: Config does not match - collType match=%d, size match=%d, nodes match=%d, ranks match=%d, pipeOps match=%d, regBuff match=%d",
                          config->collType == collType,
                          (nBytes >= config->minBytes && nBytes <= config->maxBytes),

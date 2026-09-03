@@ -1750,6 +1750,38 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
 //   anchor at offset 4, return_target   = 4 + 4 = 8
 //==============================================================================
 
+TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
+  constexpr uint32_t kGfx1250Nop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SetPcS30 = 0xBE80481Eu;
+  // Public LLVM gfx1251_asm_vop3p.s encoding for
+  // v_pk_add_nc_u64 v[4:7], v[8:11], v[12:15].
+  constexpr std::array<uint32_t, 2> kGfx1251OnlyInstruction{0xCC4C4004u, 0x1A021908u};
+
+  auto target = make_amdgpu_kernel_elf({kGfx1250Nop, kGfx1250Nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto probe = make_amdgpu_probe_elf(
+      "rj_gfx1251_probe",
+      {kGfx1251OnlyInstruction[0], kGfx1251OnlyInstruction[1], kGfx1250SetPcS30},
+      EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA5);
+  InstrumentationPoint point;
+  point.anchor_offset = 4;
+  point.probe_obj = &probe_obj;
+  point.probe_symbol = "rj_gfx1251_probe";
+  instrumentor.add_point(point);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});

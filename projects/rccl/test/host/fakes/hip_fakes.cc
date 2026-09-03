@@ -16,10 +16,13 @@
 #include <cstring>
 #include <functional>
 
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "fail_loud.h"   // FailLoud: the one abort-on-unreachable spelling
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
+#include "hip_profile_interceptor_fakes.h"  // X-list of the profile-runtime HIP entry points
 
 // ===========================================================================
 // Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
@@ -120,6 +123,17 @@ static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, uns
 std::function<hipError_t(void**, std::size_t, unsigned)>
     g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
 
+static hipError_t DefaultHipHostMalloc(void** ptr, std::size_t size, unsigned)
+{
+    if (ptr) {
+        *ptr = std::malloc(size);
+        return *ptr ? hipSuccess : hipErrorOutOfMemory;
+    }
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(void**, std::size_t, unsigned)>
+    g_hipHostMalloc = DefaultHipHostMalloc;
+
 static hipError_t DefaultHipFree(void* ptr)
 {
     std::free(ptr);
@@ -181,6 +195,7 @@ void ResetHipFakes()
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
+    g_hipHostMalloc                 = DefaultHipHostMalloc;
     g_hipFree                       = DefaultHipFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
@@ -296,12 +311,15 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void*) { return hipErrorInvalidValue; }
-
-hipError_t hipHostMalloc(void** ptr, size_t, unsigned int)
+hipError_t hipHostFree(void* ptr)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    std::free(ptr);
+    return hipSuccess;
+}
+
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
+{
+    return g_hipHostMalloc(ptr, size, flags);
 }
 
 hipError_t hipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }
@@ -419,9 +437,13 @@ hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInv
 hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
-// init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600
-// after hipify; the ROCm header remaps the unversioned name to this symbol.
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device)
+// We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
+// rather than the unversioned hipGetDeviceProperties. Callers write
+// hipGetDeviceProperties in source, but the HIP header (post rocm-systems
+// #10358) provides a `static inline hipGetDeviceProperties` wrapper that
+// delegates to hipGetDevicePropertiesR0600, so every call site inlines down to
+// a reference to that R0600 symbol -- which is what our fake must supply.
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
@@ -448,3 +470,22 @@ hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
 }
 hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
+
+// ---- HIP entry points ROCm's profile runtime also defines -------------------
+// These MUST stay defined even though no microtest calls them. Left undefined,
+// -fprofile-instr-generate lets the linker satisfy them from the INTERCEPTOR in
+// libclang_rt.profile, which drags in __interception/__sanitizer deps that ship
+// in no archive. See hip_profile_interceptor_fakes.h for the full chain.
+//
+// Aborting rather than returning hipErrorInvalidValue: a host-only microtest
+// that reaches a kernel launch or module load is broken, not merely unexercised.
+
+// extern "C" is stated rather than inherited from the HIP declaration: if a
+// future SDK drops one of these, the definition still emits the C symbol the
+// linker needs instead of silently emitting a mangled one.
+extern "C" {
+#define RCCL_DEFINE_HIP_STUB(name, params) \
+  hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
+RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
+#undef RCCL_DEFINE_HIP_STUB
+}  // extern "C"
