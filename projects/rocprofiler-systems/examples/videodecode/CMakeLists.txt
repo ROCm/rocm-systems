@@ -98,7 +98,11 @@ else()
 endif()
 
 # Copy video files to build directory
-file(GLOB_RECURSE video_files "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4")
+file(
+    GLOB_RECURSE video_files
+    "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4"
+    "${rocdecode_ROOT_DIR}/share/rocdecode/video/*AV1*.mp4"
+)
 if(video_files)
     if(NOT EXISTS "${CMAKE_BINARY_DIR}/videos")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
@@ -107,12 +111,12 @@ if(video_files)
 else()
     videodecode_message(
         AUTHOR_WARNING
-        "${rocdecode_ROOT_DIR}/share/rocdecode/video contains no H26x MP4 files; "
+        "${rocdecode_ROOT_DIR}/share/rocdecode/video contains no H264/H265/AV1 MP4 files; "
         "falling back to bundled sample videos"
     )
     # Fall back to the sample videos bundled with rocprofiler-systems so that
     # the videodecode tests can run even on non-test ROCm builds that do not
-    # ship the rocdecode H264/H265 video dataset.
+    # ship the rocdecode H264/H265/AV1 video dataset.
     set(_fallback_dir "${CMAKE_CURRENT_LIST_DIR}/sample_videos")
     if(EXISTS "${_fallback_dir}")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
