@@ -72,6 +72,11 @@ jobs:
       # Runtime-only build: everything outside these two stages, math-libs
       # included, is dropped from the build graph.
       build_stages: "compiler-runtime,runtime-tests"
+      # Declares this workflow an automatic presubmit gate, which is what makes
+      # host-asan eligible for a sandbox test runner outside of nightly. Kept
+      # separate from build_stages so that narrowing the build graph does not by
+      # itself claim ASAN runner capacity.
+      presubmit: true
       # The sanity check currently reports a LeakSanitizer failure originating
       # in libamdhip64, which would otherwise hide every hip-tests and rocrtst
       # result behind it. Sanity still runs and still reports its own status.
