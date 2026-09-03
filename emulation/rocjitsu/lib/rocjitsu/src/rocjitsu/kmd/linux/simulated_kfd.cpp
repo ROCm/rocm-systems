@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/command_processor_queue_backend.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -458,6 +459,11 @@ const SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) const {
 }
 
 SimulatedKfd::~SimulatedKfd() {
+  // CPs may outlive this frontend. Revoke callback admission and drain any
+  // callback already executing before touching the state captured by them.
+  for (auto &gpu : gpus_)
+    gpu.interrupt_subscription.reset();
+
   debug_session_reaper_.request_stop();
   debug_session_reaper_.join();
 
@@ -697,19 +703,20 @@ void SimulatedKfd::init_command_processors_locked() {
     // must be what the runtime and the debugger were told.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
+    g.interrupt_subscription =
+        amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
+          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+          auto it = event_dispatch_.find(process_id);
+          if (it != event_dispatch_.end()) {
+            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                             " found=true");
+            it->second->signal_interrupt(event_id);
+          } else {
+            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                             " found=false");
+          }
+        });
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
-      cp->set_interrupt_callback([this](uint32_t process_id, uint32_t event_id) {
-        std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-        auto it = event_dispatch_.find(process_id);
-        if (it != event_dispatch_.end()) {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=true");
-          it->second->signal_interrupt(event_id);
-        } else {
-          util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                           " found=false");
-        }
-      });
       cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
         std::lock_guard<std::mutex> plk(process_mutex_);
         for (auto &[fd, proc] : processes_) {
@@ -756,6 +763,44 @@ void SimulatedKfd::init_command_processors_locked() {
   }
 }
 
+bool SimulatedKfd::register_process_address_spaces(KfdProcess &proc, pid_t client_pid,
+                                                   bool passthrough) {
+  for (uint32_t ordinal = 0; ordinal < gpus_.size(); ++ordinal) {
+    auto &gpu = gpus_[ordinal];
+    auto *memory = gpu.soc ? gpu.soc->memory() : nullptr;
+    if (memory == nullptr)
+      continue;
+
+    memory->register_process(proc.process_id(), &proc.page_table_, &proc.page_table_mutex_,
+                             proc.page_table_generation(), proc.page_table_request_mutex());
+    auto &gpu_state = proc.gpu(ordinal);
+    gpu_state.address_space = gpu.soc->gpu_vm().register_legacy(proc.process_id());
+    if (!gpu_state.address_space) {
+      for (uint32_t registered = 0; registered <= ordinal; ++registered) {
+        auto &registered_gpu = gpus_[registered];
+        if (registered_gpu.soc == nullptr)
+          continue;
+        auto &registered_state = proc.gpu(registered);
+        if (registered_state.address_space) {
+          (void)registered_gpu.soc->gpu_vm().unregister_address_space(
+              registered_state.address_space);
+          registered_state.address_space = {};
+        }
+        if (auto *registered_memory = registered_gpu.soc->memory())
+          registered_memory->unregister_process(proc.process_id());
+      }
+      return false;
+    }
+
+    memory->set_memory_fault_reporter(fault_reporter_for(gpu));
+    if (client_pid > 0)
+      memory->set_process_client_pid(proc.process_id(), client_pid);
+    if (passthrough)
+      memory->set_passthrough(true);
+  }
+  return true;
+}
+
 int SimulatedKfd::open() {
   static std::once_flag raise_nofile_flag;
   std::call_once(raise_nofile_flag, [] {
@@ -787,15 +832,8 @@ int SimulatedKfd::open() {
   // point), so the stale value is unobservable until exec replaces the image.
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
-  for (auto &g : gpus_) {
-    if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-      mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                            proc->page_table_generation(), proc->page_table_request_mutex());
-      mem->set_memory_fault_reporter(fault_reporter_for(g));
-      if (!daemon_mode_)
-        mem->set_passthrough(true);
-    }
-  }
+  if (!register_process_address_spaces(*proc, 0, !daemon_mode_))
+    return -1;
   processes_[pid] = proc;
   local_process_id_ = pid;
 
@@ -887,15 +925,8 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     if (client_pid > 0)
       proc->set_client_pid(client_pid);
     proc->event_state_.reset();
-    for (auto &g : gpus_) {
-      if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
-        mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                              proc->page_table_generation(), proc->page_table_request_mutex());
-        mem->set_memory_fault_reporter(fault_reporter_for(g));
-        if (client_pid > 0)
-          mem->set_process_client_pid(pid, client_pid);
-      }
-    }
+    if (!register_process_address_spaces(*proc, client_pid, false))
+      return 0;
     processes_[pid] = proc;
 
     {
@@ -1014,6 +1045,7 @@ void SimulatedKfd::close_all_processes() {
 int SimulatedKfd::close(uint32_t process_id) {
   std::shared_ptr<KfdProcess> extracted;
   std::vector<uint32_t> queue_ids;
+  std::vector<KfdProcess::QueueDoorbellInfo> queues;
 
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
@@ -1101,11 +1133,6 @@ int SimulatedKfd::close(uint32_t process_id) {
     event_dispatch_.erase(process_id);
   }
 
-  for (auto &g : gpus_) {
-    if (auto *mem = g.soc ? g.soc->memory() : nullptr)
-      mem->unregister_process(process_id);
-  }
-
   const bool trace_enabled = vm_trace_enabled();
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
@@ -1117,6 +1144,12 @@ int SimulatedKfd::close(uint32_t process_id) {
     queue_ids.assign(proc.active_queue_ids_.begin(), proc.active_queue_ids_.end());
     proc.active_queue_ids_.clear();
     proc.queue_snapshot_map_.clear();
+    queues.reserve(proc.queue_doorbell_map_.size());
+    for (const auto &[queue_id, queue] : proc.queue_doorbell_map_) {
+      (void)queue_id;
+      queues.push_back(queue);
+    }
+    proc.queue_doorbell_map_.clear();
 
     if (trace_enabled)
       leaked_handles.reserve(proc.allocations_.size());
@@ -1143,12 +1176,22 @@ int SimulatedKfd::close(uint32_t process_id) {
     proc.allocations_.clear();
   }
 
-  for (uint32_t qid : queue_ids) {
-    for (auto &g : gpus_)
-      if (g.soc)
-        g.soc->for_each_cp([qid, process_id](amdgpu::CommandProcessor *cp) {
-          cp->unregister_queue(qid, process_id);
-        });
+  for (const KfdProcess::QueueDoorbellInfo &queue : queues) {
+    if (queue.gpu_ordinal < gpus_.size() && gpus_[queue.gpu_ordinal].soc)
+      (void)gpus_[queue.gpu_ordinal].soc->queue_service().destroy(queue.queue_handle);
+  }
+
+  for (uint32_t ordinal = 0; ordinal < gpus_.size(); ++ordinal) {
+    auto &gpu = gpus_[ordinal];
+    if (gpu.soc == nullptr)
+      continue;
+    auto &gpu_state = proc.gpu(ordinal);
+    if (gpu_state.address_space) {
+      (void)gpu.soc->gpu_vm().unregister_address_space(gpu_state.address_space);
+      gpu_state.address_space = {};
+    }
+    if (auto *mem = gpu.soc->memory())
+      mem->unregister_process(process_id);
   }
 
   // Doorbell mappings live in gpu_state_, not allocations_. Snapshot and clear
@@ -2257,7 +2300,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // op_mutex_ already serializes all ioctls for this process, so no concurrent
   // ioctl can observe the partially-registered queue in the window between the
   // unlock and register_queue().
-  amdgpu::HwQueue hw{};
+  amdgpu::QueueCreateInfo queue_info{};
   uint32_t queue_id = 0;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -2308,25 +2351,34 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
           .store(~uint64_t(0), std::memory_order_release);
     }
 
-    hw.process_id = proc.process_id();
-    hw.queue_id = queue_id;
-    hw.ring_base_va = args->ring_base_address;
-    hw.ring_size = args->ring_size;
-    hw.read_ptr_va = args->read_pointer_address;
-    hw.write_ptr_va = args->write_pointer_address;
-    hw.doorbell_offset = db_offset;
+    queue_info.address_space = gs.address_space;
+    queue_info.interrupt_sink = gpu->interrupt_subscription.sink();
+    queue_info.backend = amdgpu::make_command_processor_queue_backend(*target_cp);
+    queue_info.process_id = proc.process_id();
+    queue_info.queue_id = queue_id;
+    queue_info.ring_base_va = args->ring_base_address;
+    queue_info.ring_size = args->ring_size;
+    queue_info.read_ptr_va = args->read_pointer_address;
+    queue_info.write_ptr_va = args->write_pointer_address;
+    queue_info.doorbell_offset = db_offset;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
     // page before creating queues, and queue creation for a process is single-
     // threaded (serialized by op_mutex_), so no concurrent dispatch_mmap re-maps
     // the doorbell in the unlock->register window.
     assert(gs.doorbell_views.empty() || gs.doorbell_monitor_page);
-    hw.doorbell_base = gs.doorbell_monitor_page;
-    hw.last_doorbell = ~uint64_t(0);
-    hw.host_accessible = true;
-    hw.is_sdma = (args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
-                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
-                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID);
+    queue_info.doorbell_base = gs.doorbell_monitor_page;
+    queue_info.last_doorbell = ~uint64_t(0);
+    queue_info.host_accessible = true;
+    const bool is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
+                         args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+                         args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
+    queue_info.kind = is_sdma ? amdgpu::QueueKind::Sdma : amdgpu::QueueKind::Compute;
+    // Queue creation initializes both SDMA pointers to zero below. Preserve that
+    // device-side cursor explicitly so execution does not depend on reading the
+    // writeback destination before the first packet can retire.
+    if (is_sdma)
+      queue_info.initial_read_pointer = 0;
     // The topology advertises every XCD's compute units as one agent, so a
     // compute dispatch must be able to reach all of them. Without this a
     // single-queue application would only ever use the XCD that
@@ -2336,27 +2388,28 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // per-engine and are not spread, but an unrecognized queue_type is not
     // thereby a compute queue, and device-wide replication should not be what an
     // unsupported value silently acquires.
-    hw.xcd_fanout = (args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE ||
-                     args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
+    queue_info.xcd_fanout = (args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE ||
+                             args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!hw.is_sdma)
-      hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
-    if (!hw.is_sdma && args->ctx_save_restore_address != 0) {
+    if (!is_sdma)
+      queue_info.queue_desc_va =
+          args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    if (!is_sdma && args->ctx_save_restore_address != 0) {
       constexpr uint32_t kErrorReasonOffset = 6 * sizeof(uint32_t);
       constexpr uint32_t kErrorEventIdOffset = kErrorReasonOffset + sizeof(uint64_t);
-      hw.exception_status_va = target_cp->read_process_memory64(
+      queue_info.exception_status_va = target_cp->read_process_memory64(
           args->ctx_save_restore_address + kErrorReasonOffset, proc.process_id());
-      hw.exception_event_id = static_cast<uint32_t>(target_cp->read_process_memory64(
+      queue_info.exception_event_id = static_cast<uint32_t>(target_cp->read_process_memory64(
           args->ctx_save_restore_address + kErrorEventIdOffset, proc.process_id()));
     }
-    if (hw.is_sdma && !daemon_mode_) {
+    if (is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
       auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
       util::Logger::vm("SDMA wptr before init: addr=0x", std::hex, args->write_pointer_address,
                        " val=", std::dec, *wptr, " rptr val=", *rptr);
       *wptr = 0;
       *rptr = 0;
-    } else if (hw.is_sdma && daemon_mode_) {
+    } else if (is_sdma && daemon_mode_) {
       auto *mem = gpu->soc ? gpu->soc->memory() : nullptr;
       if (mem) {
         mem->write64(args->write_pointer_address, 0, proc.process_id());
@@ -2366,18 +2419,27 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
     args->queue_id = queue_id;
     args->doorbell_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(gpu->gpu_id) | db_offset;
-    proc.active_queue_ids_.push_back(queue_id);
-    proc.queue_doorbell_map_[queue_id] = {ord, db_offset};
   }
 
-  // Register with the CP OUTSIDE alloc_mutex_ (see note above).
-  target_cp->register_queue(std::move(hw));
+  // Register with the shared queue service OUTSIDE alloc_mutex_ (see note above).
+  const amdgpu::QueueHandle queue_handle = gpu->soc->queue_service().create(queue_info);
+  if (!queue_handle) {
+    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    proc.gpu(gpu_ordinal(args->gpu_id)).free_doorbell_offsets.push_back(queue_info.doorbell_offset);
+    return -EINVAL;
+  }
 
   // Publish debug metadata only after CP registration. A cross-process debugger
   // does not hold the target's op_mutex_, so publishing it earlier could expose
   // a queue that the command processor cannot service yet.
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    proc.active_queue_ids_.push_back(queue_id);
+    proc.queue_doorbell_map_[queue_id] = {
+        .gpu_ordinal = gpu_ordinal(args->gpu_id),
+        .doorbell_offset = queue_info.doorbell_offset,
+        .queue_handle = queue_handle,
+    };
     proc.queue_snapshot_map_[queue_id] = {
         .ring_base_address = args->ring_base_address,
         .write_pointer_address = args->write_pointer_address,
@@ -2398,40 +2460,43 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_update_queue_args *>(arg);
-  for (auto &g : gpus_)
-    if (g.soc)
-      g.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-        cp->update_queue(args->queue_id, proc.process_id(), args->ring_base_address,
-                         args->ring_size, args->queue_percentage);
-      });
+  std::optional<KfdProcess::QueueDoorbellInfo> queue;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
+    if (const auto found = proc.queue_doorbell_map_.find(args->queue_id);
+        found != proc.queue_doorbell_map_.end()) {
+      queue = found->second;
+    }
     if (auto it = proc.queue_snapshot_map_.find(args->queue_id);
         it != proc.queue_snapshot_map_.end()) {
       it->second.ring_base_address = args->ring_base_address;
       it->second.ring_size = args->ring_size;
     }
   }
+  if (queue && queue->gpu_ordinal < gpus_.size() && gpus_[queue->gpu_ordinal].soc) {
+    (void)gpus_[queue->gpu_ordinal].soc->queue_service().update(
+        queue->queue_handle, args->ring_base_address, args->ring_size, args->queue_percentage);
+  }
   return 0;
 }
 
 int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_destroy_queue_args *>(arg);
-  for (auto &g : gpus_)
-    if (g.soc)
-      g.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
-        cp->unregister_queue(args->queue_id, proc.process_id());
-      });
+  std::optional<KfdProcess::QueueDoorbellInfo> queue;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
     std::erase(proc.active_queue_ids_, args->queue_id);
     proc.queue_snapshot_map_.erase(args->queue_id);
     auto it = proc.queue_doorbell_map_.find(args->queue_id);
     if (it != proc.queue_doorbell_map_.end()) {
+      queue = it->second;
       auto &gs = proc.gpu(it->second.gpu_ordinal);
       gs.free_doorbell_offsets.push_back(it->second.doorbell_offset);
       proc.queue_doorbell_map_.erase(it);
     }
+  }
+  if (queue && queue->gpu_ordinal < gpus_.size() && gpus_[queue->gpu_ordinal].soc) {
+    (void)gpus_[queue->gpu_ordinal].soc->queue_service().destroy(queue->queue_handle);
   }
   // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
   // all type-0 events. This wakes ROCR's signal threads blocked on queue events.

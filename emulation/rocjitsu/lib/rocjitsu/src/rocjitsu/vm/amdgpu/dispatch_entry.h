@@ -12,6 +12,8 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
 #include <array>
@@ -23,6 +25,8 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class GpuVmAccess;
 
 struct WorkgroupCoord {
   uint32_t x = 0;
@@ -57,6 +61,74 @@ enum class DispatchPacketKind : uint8_t {
   Kernel,
   /// @brief A packet that runs no shader: barrier, barrier-value, PM4 IB.
   NonKernel,
+};
+
+/// @brief Durable stages of one dispatch's guest-visible retirement.
+///
+/// A translated backing may temporarily report Unavailable after an earlier
+/// publication step has already committed.  Keeping the exact next stage on
+/// the dispatch prevents a retry from repeating the signal decrement or a
+/// plugin callback.
+enum class CompletionPublicationPhase : uint8_t {
+  ExecutionEnd,
+  CaptureAccess,
+  ReadMailboxPointer,
+  ReadEventId,
+  StoreStartTimestamp,
+  StoreEndTimestamp,
+  DecrementSignal,
+  StoreMailbox,
+  DeliverInterrupt,
+  Complete,
+};
+
+struct CompletionPublicationState {
+  CompletionPublicationPhase phase = CompletionPublicationPhase::ExecutionEnd;
+  std::shared_ptr<GpuVmAccess> access;
+  uint64_t start_timestamp = 0;
+  uint64_t end_timestamp = 0;
+  uint64_t mailbox_pointer = 0;
+  uint64_t compare_expected = 0;
+  uint64_t signal_old_value = 0;
+  uint64_t signal_new_value = 0;
+  uint32_t event_id = 0;
+};
+
+/// @brief Durable stages of the queue-inactive notification emitted after the
+/// final dispatch retires.
+enum class QueueIdlePublicationPhase : uint8_t {
+  Inactive,
+  CaptureAccess,
+  ReadSignalHandle,
+  StoreIdleStatus,
+  ReadMailboxPointer,
+  ReadEventId,
+  StoreMailbox,
+  DeliverEventInterrupt,
+  DeliverGenericInterrupt,
+  Complete,
+};
+
+struct QueueIdlePublicationState {
+  QueueIdlePublicationPhase phase = QueueIdlePublicationPhase::Inactive;
+  std::shared_ptr<GpuVmAccess> access;
+  AddressSpaceHandle address_space;
+  InterruptSink interrupt_sink;
+  uint64_t queue_desc_va = 0;
+  uint64_t signal_address = 0;
+  uint64_t mailbox_pointer = 0;
+  uint32_t event_id = 0;
+  uint32_t process_id = 0;
+  uint32_t queue_id = 0;
+  /// Queue activity generation for which this empty transition was observed.
+  uint64_t activity_generation = 0;
+
+  [[nodiscard]] bool active() const {
+    return phase != QueueIdlePublicationPhase::Inactive &&
+           phase != QueueIdlePublicationPhase::Complete;
+  }
+
+  void reset() { *this = {}; }
 };
 
 /// @brief Grid-wide retirement state shared by every shard of one dispatch.
@@ -94,6 +166,14 @@ struct GridCompletion {
   [[nodiscard]] bool claim_execution_begin() {
     return !execution_begun.test_and_set(std::memory_order_relaxed);
   }
+
+  /// @brief Publish a terminal fault shared by every XCD shard.
+  void mark_faulted() { terminal_faulted.store(true, std::memory_order_release); }
+
+  /// @brief Whether any shard reported a terminal fault for this grid.
+  [[nodiscard]] bool faulted() const { return terminal_faulted.load(std::memory_order_acquire); }
+
+  std::atomic<bool> terminal_faulted{false};
 };
 
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
@@ -101,6 +181,8 @@ struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
+  AddressSpaceHandle address_space;
+  InterruptSink interrupt_sink;
   uint32_t process_id = 0;
 
   /// AQL ring packet id (queue read index at which this dispatch's packet was
@@ -191,6 +273,10 @@ struct DispatchEntry {
   /// Set once this shard has published its retired workgroups to grid_completion,
   /// so a repeated drain cannot double-count them.
   bool grid_share_published = false;
+  /// @brief Terminal execution fault; suppresses normal retirement publication.
+  bool terminal_faulted = false;
+  /// Guest-visible completion publication retained across transient VM stalls.
+  CompletionPublicationState completion_publication{};
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
@@ -211,6 +297,10 @@ struct DispatchEntry {
     if (grid_completion)
       return grid_completion->grid_retired();
     return fully_completed();
+  }
+
+  [[nodiscard]] bool grid_faulted() const {
+    return terminal_faulted || (grid_completion && grid_completion->faulted());
   }
 
   /// @returns True for packets that run no shader at all (barrier, barrier-value,
@@ -447,20 +537,37 @@ struct HwQueueState {
   /// kernel and the non-kernel packet behind it; production queues must not retain
   /// an unbounded history after entries retire.
   std::array<DispatchPacketKind, 2> first_accepted_entry_kinds{};
+  AddressSpaceHandle first_accepted_address_space;
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
   uint64_t queue_desc_va = 0;
+  AddressSpaceHandle address_space;
+  InterruptSink interrupt_sink;
   /// True on a peer XCD's replica of a fanned-out queue. Such a replica never
   /// reads the ring and never owns the queue's idle signal; it only receives
   /// dispatch shards from the XCD that does.
   bool fanout_replica = false;
+  /// Incremented at the single entry-admission point. Idle publication may
+  /// only continue while this generation still describes an empty queue.
+  uint64_t activity_generation = 0;
+  /// Queue-inactive publication survives after the last entry has been popped.
+  QueueIdlePublicationState idle_publication{};
+  /// A guest-visible completion or idle publication is waiting for its backing
+  /// transport. The CP may keep servicing other queues, but must not admit or
+  /// advance this queue until the journal can resume in order.
+  bool publication_retry_pending = false;
 
   /// @brief Append an entry, maintaining accepted_entries.
   /// @details The single ordered push site, so the acceptance count tracks the number
   /// of pushed entries. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
+    ++activity_generation;
+    if (activity_generation == 0)
+      ++activity_generation;
     if (accepted_entries < first_accepted_entry_kinds.size())
       first_accepted_entry_kinds[accepted_entries] = entry.kind;
+    if (accepted_entries == 0)
+      first_accepted_address_space = entry.address_space;
     entries.push_back(std::move(entry));
     ++accepted_entries;
   }

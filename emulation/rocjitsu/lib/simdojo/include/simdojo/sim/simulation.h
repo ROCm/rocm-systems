@@ -311,6 +311,16 @@ public:
   /// @returns The latest processed simulation tick.
   Tick global_time() const { return current_time_.load(std::memory_order_acquire); }
 
+  /// @brief Report whether another event should run before a cooperative handler advances farther.
+  ///
+  /// @details This is an owning-partition-thread query for long-running functional handlers. It
+  /// observes both already queued work through @p horizon and newly injected asynchronous work,
+  /// allowing the handler to yield without reducing its uncontended fast-path quantum.
+  /// @param partition_id Partition whose ready work should be inspected.
+  /// @param horizon Latest timestamp the caller would reach if it continued.
+  /// @returns true when another event should be given an opportunity to run.
+  bool cooperative_yield_pending(PartitionID partition_id, Tick horizon) const;
+
   /// @brief Access the pacing controller.
   /// @returns Const reference to the PacingController.
   const PacingController &pacer() const { return pacer_; }

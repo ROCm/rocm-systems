@@ -5,7 +5,13 @@
 
 #include <sys/mman.h>
 
+#include <algorithm>
 #include <limits>
+#include <optional>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -24,20 +30,267 @@ constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
+class TransientAqlAddressSpace final : public amdgpu::AddressSpaceTranslator,
+                                       public amdgpu::PhysicalMemoryAccess {
+public:
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind) const override {
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::System,
+                        .address = address,
+                        .contiguous_bytes = bytes_.size() - address,
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (address == tracked_read_address_)
+      ++tracked_read_attempts_;
+    if (next_read_outcome_ && address == next_read_outcome_->address) {
+      const amdgpu::VmAccessOutcome outcome = next_read_outcome_->outcome;
+      next_read_outcome_.reset();
+      return outcome;
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+      return amdgpu::VmAccessOutcome::Faulted;
+    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t address,
+                                std::span<const std::byte> bytes) override {
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+      return amdgpu::VmAccessOutcome::Faulted;
+    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<ptrdiff_t>(address));
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::AtomicLoadResult atomic_load(amdgpu::VmMemoryDomain, uint64_t address,
+                                       uint32_t width) override {
+    atomic_load_addresses_.push_back(address);
+    if (next_atomic_load_outcome_ && address == next_atomic_load_outcome_->address) {
+      const amdgpu::VmAccessOutcome outcome = next_atomic_load_outcome_->outcome;
+      next_atomic_load_outcome_.reset();
+      return {.outcome = outcome};
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted};
+    uint64_t value = 0;
+    std::memcpy(&value, bytes_.data() + address, width);
+    return {.outcome = amdgpu::VmAccessOutcome::Complete, .value = value};
+  }
+
+  amdgpu::VmAccessOutcome atomic_store(amdgpu::VmMemoryDomain, uint64_t address, uint32_t width,
+                                       uint64_t value) override {
+    if (address == tracked_atomic_store_address_)
+      ++tracked_atomic_store_attempts_;
+    if (fail_atomic_store_at_ && address == *fail_atomic_store_at_) {
+      fail_atomic_store_at_.reset();
+      return amdgpu::VmAccessOutcome::Unavailable;
+    }
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+      return amdgpu::VmAccessOutcome::Faulted;
+    std::memcpy(bytes_.data() + address, &value, width);
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  template <typename T> void store(uint64_t address, const T &value) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    std::memcpy(bytes_.data() + address, &value, sizeof(value));
+  }
+
+  uint64_t load_u64(uint64_t address) const {
+    uint64_t value = 0;
+    std::memcpy(&value, bytes_.data() + address, sizeof(value));
+    return value;
+  }
+
+  void fail_next_read_at(uint64_t address) {
+    return_next_read_at(address, amdgpu::VmAccessOutcome::Unavailable);
+  }
+  void return_next_read_at(uint64_t address, amdgpu::VmAccessOutcome outcome) {
+    tracked_read_address_ = address;
+    next_read_outcome_ = ReadFailure{.address = address, .outcome = outcome};
+  }
+  void fail_next_atomic_store_at(uint64_t address) {
+    tracked_atomic_store_address_ = address;
+    fail_atomic_store_at_ = address;
+  }
+  void return_next_atomic_load_at(uint64_t address, amdgpu::VmAccessOutcome outcome) {
+    next_atomic_load_outcome_ = AtomicLoadFailure{.address = address, .outcome = outcome};
+  }
+  uint32_t atomic_load_attempts_at(uint64_t address) const {
+    return static_cast<uint32_t>(
+        std::count(atomic_load_addresses_.begin(), atomic_load_addresses_.end(), address));
+  }
+  uint32_t tracked_read_attempts() const { return tracked_read_attempts_; }
+  uint32_t tracked_atomic_store_attempts() const { return tracked_atomic_store_attempts_; }
+
+private:
+  struct ReadFailure {
+    uint64_t address;
+    amdgpu::VmAccessOutcome outcome;
+  };
+
+  struct AtomicLoadFailure {
+    uint64_t address;
+    amdgpu::VmAccessOutcome outcome;
+  };
+
+  std::array<std::byte, 4096> bytes_{};
+  std::optional<ReadFailure> next_read_outcome_;
+  std::optional<uint64_t> fail_atomic_store_at_;
+  std::optional<AtomicLoadFailure> next_atomic_load_outcome_;
+  std::vector<uint64_t> atomic_load_addresses_;
+  uint64_t tracked_read_address_ = std::numeric_limits<uint64_t>::max();
+  uint64_t tracked_atomic_store_address_ = std::numeric_limits<uint64_t>::max();
+  uint32_t tracked_read_attempts_ = 0;
+  uint32_t tracked_atomic_store_attempts_ = 0;
+};
+
+class TransientAqlQueueForTest {
+public:
+  explicit TransientAqlQueueForTest(Gfx1250Sim &sim) : sim_(sim) {
+    hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+    backing_ = std::make_shared<TransientAqlAddressSpace>();
+    backing_->store(kRingVa, packet);
+    backing_->store(kReadPointerVa, uint64_t{0});
+    backing_->store(kWritePointerVa, uint64_t{1});
+    backing_->store(kDoorbellVa, uint64_t{1});
+    address_space_ = sim_.soc->gpu_vm().register_translated(kProcessId, backing_, backing_);
+    if (!address_space_)
+      throw std::runtime_error("cannot register transient AQL test address space");
+
+    amdgpu::HwQueue queue{};
+    queue.address_space = address_space_;
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = kRingVa;
+    queue.ring_size = sizeof(packet);
+    queue.read_ptr_va = kReadPointerVa;
+    queue.write_ptr_va = kWritePointerVa;
+    queue.doorbell_va = kDoorbellVa;
+    queue.host_accessible = false;
+    if (sim_.cp()->register_queue(std::move(queue)) == 0)
+      throw std::runtime_error("cannot register transient AQL test queue");
+  }
+
+  ~TransientAqlQueueForTest() {
+    sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
+  }
+
+  void fail_next_packet_read() { backing_->fail_next_read_at(kRingVa); }
+  void fail_next_read_pointer_store() { backing_->fail_next_atomic_store_at(kReadPointerVa); }
+  void fail_next_write_pointer_load(amdgpu::VmAccessOutcome outcome) {
+    backing_->return_next_atomic_load_at(kWritePointerVa, outcome);
+  }
+  void fail_next_dependency_value_load(amdgpu::VmAccessOutcome outcome) {
+    backing_->return_next_atomic_load_at(kSignalValueVa, outcome);
+  }
+  void fail_next_kernel_descriptor_read(amdgpu::VmAccessOutcome outcome) {
+    backing_->return_next_read_at(kKernelObjectVa, outcome);
+  }
+  void set_barrier_dependency(int64_t value, uint64_t completion_signal = 0) {
+    hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_BARRIER_AND;
+    packet.dep_signal[0].handle = kSignalVa;
+    packet.completion_signal.handle = completion_signal;
+    backing_->store(kRingVa, packet);
+    backing_->store(kSignalValueVa, value);
+  }
+  void set_kernel_dispatch() {
+    using namespace rocr::llvm::amdhsa;
+    kernel_descriptor_t descriptor{};
+    descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                    1);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                    12);
+    backing_->store(kKernelObjectVa, descriptor);
+    backing_->store(kKernelObjectVa + sizeof(descriptor), S_ENDPGM_GFX12);
+
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.workgroup_size_x = 1;
+    packet.workgroup_size_y = 1;
+    packet.workgroup_size_z = 1;
+    packet.grid_size_x = 1;
+    packet.grid_size_y = 1;
+    packet.grid_size_z = 1;
+    packet.kernel_object = kKernelObjectVa;
+    backing_->store(kRingVa, packet);
+  }
+  uint64_t read_pointer() const { return backing_->load_u64(kReadPointerVa); }
+  uint32_t write_pointer_load_attempts() const {
+    return backing_->atomic_load_attempts_at(kWritePointerVa);
+  }
+  uint32_t dependency_value_load_attempts() const {
+    return backing_->atomic_load_attempts_at(kSignalValueVa);
+  }
+  uint32_t dependency_handle_load_attempts() const {
+    return backing_->atomic_load_attempts_at(kRingVa +
+                                             offsetof(hsa_barrier_and_packet_t, dep_signal));
+  }
+  uint32_t completion_handle_load_attempts() const {
+    return backing_->atomic_load_attempts_at(kRingVa +
+                                             offsetof(hsa_barrier_and_packet_t, completion_signal));
+  }
+  uint32_t kernel_descriptor_read_attempts() const { return backing_->tracked_read_attempts(); }
+  uint32_t packet_read_attempts() const { return backing_->tracked_read_attempts(); }
+  uint32_t read_pointer_store_attempts() const { return backing_->tracked_atomic_store_attempts(); }
+  std::size_t accepted_entries() const {
+    return sim_.cp()->accepted_entry_count_for_test(kQueueId, kProcessId);
+  }
+  bool faulted() const { return sim_.cp()->queue_faulted_for_test(kQueueId, kProcessId); }
+
+  void step() {
+    sim_.engine->schedule_event_now(sim_.cp()->doorbell_event());
+    if (!sim_.engine->step())
+      throw std::runtime_error("transient AQL test did not execute a doorbell event");
+  }
+
+private:
+  static constexpr uint32_t kProcessId = 1252;
+  static constexpr uint32_t kQueueId = 1252;
+  static constexpr uint64_t kReadPointerVa = 0x80;
+  static constexpr uint64_t kWritePointerVa = 0x88;
+  static constexpr uint64_t kDoorbellVa = 0x90;
+  static constexpr uint64_t kRingVa = 0x100;
+  static constexpr uint64_t kSignalVa = 0x200;
+  static constexpr uint64_t kSignalValueVa = kSignalVa + 8;
+  static constexpr uint64_t kKernelObjectVa = 0x300;
+
+  Gfx1250Sim &sim_;
+  std::shared_ptr<TransientAqlAddressSpace> backing_;
+  amdgpu::AddressSpaceHandle address_space_;
+};
+
 class HostSdmaQueueForTest {
 public:
   explicit HostSdmaQueueForTest(Gfx1250Sim &sim, uint64_t initial_doorbell = 0,
                                 uint64_t last_doorbell = 0)
       : sim_(sim), doorbells_{initial_doorbell} {
     sim_.memory->set_passthrough(true);
+    address_space_ = sim_.soc->gpu_vm().register_legacy(kProcessId);
+    if (!address_space_)
+      throw std::runtime_error("cannot register the SDMA test address space");
 
     amdgpu::HwQueue queue{};
+    queue.address_space = address_space_;
     queue.process_id = kProcessId;
     queue.queue_id = kQueueId;
     queue.ring_base_va = reinterpret_cast<uint64_t>(ring_.data());
     queue.ring_size = static_cast<uint32_t>(ring_.size() * sizeof(uint32_t));
     queue.read_ptr_va = reinterpret_cast<uint64_t>(&read_idx_);
     queue.write_ptr_va = reinterpret_cast<uint64_t>(&write_idx_);
+    queue.initial_read_pointer = read_idx_;
     queue.doorbell_base = doorbells_.data();
     queue.doorbell_offset = 0;
     queue.last_doorbell = last_doorbell;
@@ -46,7 +299,10 @@ public:
     sim_.cp()->register_queue(std::move(queue));
   }
 
-  ~HostSdmaQueueForTest() { sim_.cp()->unregister_queue(kQueueId, kProcessId); }
+  ~HostSdmaQueueForTest() {
+    sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
+  }
 
   uint32_t *ring() { return ring_.data(); }
 
@@ -62,10 +318,14 @@ public:
   }
 
 private:
+  // These buffers are ordinary pointers in this process. Keep the legacy
+  // routing VMID at zero while still requiring a real, nonzero GpuVm handle;
+  // nonzero VMIDs are reserved for fixtures with an explicit KFD page table.
   static constexpr uint32_t kProcessId = 0;
   static constexpr uint32_t kQueueId = 1250;
 
   Gfx1250Sim &sim_;
+  amdgpu::AddressSpaceHandle address_space_;
   std::array<uint32_t, 64> ring_{};
   alignas(8) uint64_t read_idx_ = 0;
   alignas(8) uint64_t write_idx_ = 0;
@@ -74,9 +334,13 @@ private:
 
 class TranslatedSdmaQueueForTest {
 public:
-  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim), process_(kProcessId) {
+  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim, amdgpu::InterruptSink interrupt_sink = {})
+      : sim_(sim), process_(kProcessId), interrupt_sink_(std::move(interrupt_sink)) {
     sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_,
                                   process_.page_table_generation());
+    address_space_ = sim_.soc->gpu_vm().register_legacy(kProcessId);
+    if (!address_space_)
+      throw std::runtime_error("cannot register the translated SDMA test address space");
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -91,12 +355,16 @@ public:
 
   void register_queue(uint64_t read_ptr_va) {
     amdgpu::HwQueue queue{};
+    queue.address_space = address_space_;
+    queue.interrupt_sink = interrupt_sink_;
     queue.process_id = kProcessId;
     queue.queue_id = kQueueId;
     queue.ring_base_va = kRingVa;
     queue.ring_size = static_cast<uint32_t>(ring_.size() * sizeof(ring_[0]));
     queue.read_ptr_va = read_ptr_va;
     queue.write_ptr_va = kQueueStateVa + sizeof(queue_state_[0]);
+    queue.initial_read_pointer =
+        std::atomic_ref<uint64_t>(queue_state_[0]).load(std::memory_order_acquire);
     queue.doorbell_base = doorbells_.data();
     queue.doorbell_offset = 0;
     queue.host_accessible = true;
@@ -106,6 +374,7 @@ public:
 
   ~TranslatedSdmaQueueForTest() {
     sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
     sim_.memory->unregister_process(kProcessId);
   }
 
@@ -178,6 +447,8 @@ private:
 
   Gfx1250Sim &sim_;
   KfdProcess process_;
+  amdgpu::AddressSpaceHandle address_space_;
+  amdgpu::InterruptSink interrupt_sink_;
   alignas(4096) std::array<uint32_t, 1024> ring_{};
   alignas(4096) std::array<uint64_t, 512> queue_state_{};
   alignas(4096) std::array<uint8_t, 8192> src_{};
@@ -210,6 +481,373 @@ TEST(Gfx1250SdmaTest, UnrungDoorbellSentinelDoesNotAdvanceAnEmptyQueue) {
   EXPECT_EQ(queue.read_idx(), 0u);
 }
 
+TEST(Gfx1250SdmaTest, LegacyQueueStartsFromPublishedReadCursorWhenNoMqdCursorExists) {
+  constexpr uint32_t kProcessId = 1249;
+  constexpr uint32_t kQueueId = 1249;
+  constexpr uint64_t kReadPointerVa = 0x80;
+  constexpr uint64_t kWritePointerVa = 0x88;
+  constexpr uint64_t kRingVa = 0x100;
+  constexpr uint64_t kSignalVa = 0x200;
+  constexpr uint64_t kInitialReadPointer = sizeof(uint32_t);
+  constexpr uint64_t kWritePointer = kInitialReadPointer + 4 * sizeof(uint32_t);
+  constexpr uint32_t kFenceValue = 0xC0FFEE12u;
+
+  Gfx1250Sim sim;
+  auto backing = std::make_shared<TransientAqlAddressSpace>();
+  backing->store(kRingVa, uint32_t{0xff});
+  std::array<uint32_t, 4> packet{};
+  packet[0] = kSdmaOpFence;
+  write_sdma_qword_va(packet.data(), 1, 2, kSignalVa);
+  packet[3] = kFenceValue;
+  backing->store(kRingVa + kInitialReadPointer, packet);
+  backing->store(kReadPointerVa, kInitialReadPointer);
+  backing->store(kWritePointerVa, kWritePointer);
+  backing->store(kSignalVa, uint64_t{0});
+  const amdgpu::AddressSpaceHandle address_space =
+      sim.soc->gpu_vm().register_translated(kProcessId, backing, backing);
+  ASSERT_TRUE(address_space);
+
+  std::array<uint64_t, 1> doorbell{kWritePointer};
+
+  amdgpu::HwQueue queue{};
+  queue.address_space = address_space;
+  queue.process_id = kProcessId;
+  queue.queue_id = kQueueId;
+  queue.ring_base_va = kRingVa;
+  queue.ring_size = 64;
+  queue.read_ptr_va = kReadPointerVa;
+  queue.write_ptr_va = kWritePointerVa;
+  queue.doorbell_base = doorbell.data();
+  queue.last_doorbell = 0;
+  queue.host_accessible = true;
+  queue.is_sdma = true;
+  ASSERT_NE(sim.cp()->register_queue(std::move(queue)), 0u);
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(backing->load_u64(kReadPointerVa), kWritePointer);
+  EXPECT_EQ(static_cast<uint32_t>(backing->load_u64(kSignalVa)), kFenceValue);
+  EXPECT_FALSE(sim.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+
+  sim.cp()->unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(sim.soc->gpu_vm().unregister_address_space(address_space));
+}
+
+TEST(Gfx1250SdmaTest, VfioQueueUsesDoorbellWithoutTranslatingMqdWritePointer) {
+  constexpr uint32_t kProcessId = 1253;
+  constexpr uint32_t kQueueId = 1253;
+  constexpr uint64_t kReadPointerVa = 0x80;
+  constexpr uint64_t kWritePointerVa = 0x88;
+  constexpr uint64_t kDoorbellVa = 0x90;
+  constexpr uint64_t kRingVa = 0x100;
+  constexpr uint64_t kSignalVa = 0x200;
+  constexpr uint32_t kFenceValue = 0xC001D00Du;
+  constexpr uint64_t kWritePointer = 4 * sizeof(uint32_t);
+
+  Gfx1250Sim sim;
+  auto backing = std::make_shared<TransientAqlAddressSpace>();
+  std::array<uint32_t, 4> packet{};
+  packet[0] = kSdmaOpFence;
+  write_sdma_qword_va(packet.data(), 1, 2, kSignalVa);
+  packet[3] = kFenceValue;
+  backing->store(kRingVa, packet);
+  backing->store(kReadPointerVa, uint64_t{0});
+  backing->store(kWritePointerVa, kWritePointer);
+  backing->store(kSignalVa, uint64_t{0});
+  backing->return_next_atomic_load_at(kWritePointerVa, amdgpu::VmAccessOutcome::Faulted);
+
+  const amdgpu::AddressSpaceHandle address_space =
+      sim.soc->gpu_vm().register_translated(kProcessId, backing, backing);
+  ASSERT_TRUE(address_space);
+
+  amdgpu::HwQueue queue{};
+  queue.address_space = address_space;
+  queue.process_id = kProcessId;
+  queue.queue_id = kQueueId;
+  queue.ring_base_va = kRingVa;
+  queue.ring_size = 64;
+  queue.read_ptr_va = kReadPointerVa;
+  queue.write_ptr_va = kWritePointerVa;
+  queue.doorbell_va = kDoorbellVa;
+  queue.last_doorbell = kWritePointer;
+  queue.host_accessible = false;
+  queue.is_sdma = true;
+  ASSERT_NE(sim.cp()->register_queue(std::move(queue)), 0u);
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(backing->load_u64(kReadPointerVa), kWritePointer);
+  EXPECT_EQ(static_cast<uint32_t>(backing->load_u64(kSignalVa)), kFenceValue);
+  EXPECT_EQ(backing->atomic_load_attempts_at(kWritePointerVa), 0u);
+  EXPECT_FALSE(sim.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+
+  sim.cp()->unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(sim.soc->gpu_vm().unregister_address_space(address_space));
+}
+
+TEST(Gfx1250SdmaTest, VfioQueueStartsFromMqdReadCursorNotWritebackMemory) {
+  constexpr uint32_t kProcessId = 1254;
+  constexpr uint32_t kQueueId = 1254;
+  constexpr uint64_t kReadPointerVa = 0x80;
+  constexpr uint64_t kWritePointerVa = 0x88;
+  constexpr uint64_t kRingVa = 0x100;
+  constexpr uint64_t kSignalVa = 0x200;
+  constexpr uint64_t kInitialReadPointer = sizeof(uint32_t);
+  constexpr uint32_t kFenceValue = 0x1A17C0DEu;
+  constexpr uint64_t kWritePointer = kInitialReadPointer + 4 * sizeof(uint32_t);
+
+  Gfx1250Sim sim;
+  auto backing = std::make_shared<TransientAqlAddressSpace>();
+  std::array<uint32_t, 4> packet{};
+  packet[0] = kSdmaOpFence;
+  write_sdma_qword_va(packet.data(), 1, 2, kSignalVa);
+  packet[3] = kFenceValue;
+  backing->store(kRingVa + kInitialReadPointer, packet);
+  // RPTR memory is a writeback destination, not the engine's source of truth.
+  backing->store(kReadPointerVa, uint64_t{0});
+  backing->store(kWritePointerVa, kWritePointer);
+  backing->store(kSignalVa, uint64_t{0});
+
+  const amdgpu::AddressSpaceHandle address_space =
+      sim.soc->gpu_vm().register_translated(kProcessId, backing, backing);
+  ASSERT_TRUE(address_space);
+
+  amdgpu::HwQueue queue{};
+  queue.address_space = address_space;
+  queue.process_id = kProcessId;
+  queue.queue_id = kQueueId;
+  queue.ring_base_va = kRingVa;
+  queue.ring_size = 64;
+  queue.read_ptr_va = kReadPointerVa;
+  queue.write_ptr_va = kWritePointerVa;
+  queue.initial_read_pointer = kInitialReadPointer;
+  queue.doorbell_va = kWritePointerVa;
+  queue.last_doorbell = kWritePointer;
+  queue.host_accessible = false;
+  queue.is_sdma = true;
+  ASSERT_NE(sim.cp()->register_queue(std::move(queue)), 0u);
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(backing->load_u64(kReadPointerVa), kWritePointer);
+  EXPECT_EQ(static_cast<uint32_t>(backing->load_u64(kSignalVa)), kFenceValue);
+  EXPECT_FALSE(sim.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+
+  sim.cp()->unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(sim.soc->gpu_vm().unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinctOwners) {
+  Gfx1250Sim sim;
+  sim.memory->set_passthrough(true);
+  constexpr uint32_t kProcessId = 71;
+  alignas(uint64_t) uint64_t first_status = 0;
+  alignas(uint64_t) uint64_t second_status = 0;
+  uint32_t first_calls = 0;
+  uint32_t second_calls = 0;
+  amdgpu::InterruptSubscription first_owner([&](uint32_t process_id, uint32_t event_id) {
+    EXPECT_EQ(process_id, kProcessId);
+    EXPECT_EQ(event_id, 17u);
+    ++first_calls;
+    first_status = 0;
+  });
+  amdgpu::InterruptSubscription second_owner([&](uint32_t process_id, uint32_t event_id) {
+    EXPECT_EQ(process_id, kProcessId);
+    EXPECT_EQ(event_id, 29u);
+    ++second_calls;
+    second_status = 0;
+  });
+
+  auto register_queue = [&](uint32_t queue_id, uint64_t &exception_status, uint32_t event_id,
+                            const amdgpu::InterruptSink &interrupt_sink) {
+    amdgpu::HwQueue queue{};
+    queue.address_space = {};
+    queue.interrupt_sink = interrupt_sink;
+    queue.process_id = kProcessId;
+    queue.queue_id = queue_id;
+    queue.ring_size = 4096;
+    queue.exception_status_va = reinterpret_cast<uint64_t>(&exception_status);
+    queue.exception_event_id = event_id;
+    (void)sim.cp()->register_queue(std::move(queue));
+  };
+  register_queue(17, first_status, 17, first_owner.sink());
+  register_queue(29, second_status, 29, second_owner.sink());
+
+  EXPECT_TRUE(sim.cp()->signal_queue_exception(17, kProcessId, 0x11));
+  EXPECT_EQ(first_calls, 1u);
+  EXPECT_EQ(second_calls, 0u);
+  EXPECT_TRUE(sim.cp()->signal_queue_exception(29, kProcessId, 0x22));
+  EXPECT_EQ(first_calls, 1u);
+  EXPECT_EQ(second_calls, 1u);
+
+  first_owner.reset();
+  EXPECT_TRUE(sim.cp()->signal_queue_exception(29, kProcessId, 0x33));
+  EXPECT_EQ(first_calls, 1u);
+  EXPECT_EQ(second_calls, 2u);
+
+  sim.cp()->unregister_queue(17, kProcessId);
+  sim.cp()->unregister_queue(29, kProcessId);
+}
+
+TEST(CommandProcessorAqlTest, UnavailablePacketReadDoesNotAdvancePastUnfetchedWork) {
+  Gfx1250Sim sim;
+  TransientAqlQueueForTest queue(sim);
+  queue.fail_next_packet_read();
+
+  queue.step();
+  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.accepted_entries(), 1u);
+  EXPECT_EQ(queue.packet_read_attempts(), 2u) << "the failed packet was skipped instead of retried";
+  EXPECT_FALSE(queue.faulted());
+}
+
+TEST(CommandProcessorAqlTest, UnavailableReadPointerPublicationRetriesWithoutRefetch) {
+  Gfx1250Sim sim;
+  TransientAqlQueueForTest queue(sim);
+  queue.fail_next_read_pointer_store();
+
+  queue.step();
+  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.accepted_entries(), 1u)
+      << "a publication retry fetched the already-committed packet again";
+  EXPECT_EQ(queue.read_pointer_store_attempts(), 2u);
+  EXPECT_FALSE(queue.faulted());
+}
+
+TEST(CommandProcessorAqlTest, UnavailableWritePointerReadRetriesWithoutLosingPacket) {
+  Gfx1250Sim sim;
+  TransientAqlQueueForTest queue(sim);
+  queue.fail_next_write_pointer_load(amdgpu::VmAccessOutcome::Unavailable);
+
+  queue.step();
+  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.accepted_entries(), 1u);
+  EXPECT_EQ(queue.write_pointer_load_attempts(), 2u);
+  EXPECT_FALSE(queue.faulted());
+}
+
+TEST(CommandProcessorAqlTest, TerminalWritePointerReadFaultsQueue) {
+  for (const amdgpu::VmAccessOutcome outcome :
+       {amdgpu::VmAccessOutcome::Faulted, amdgpu::VmAccessOutcome::Malformed}) {
+    Gfx1250Sim sim;
+    TransientAqlQueueForTest queue(sim);
+    queue.fail_next_write_pointer_load(outcome);
+
+    queue.step();
+    EXPECT_EQ(queue.read_pointer(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.accepted_entries(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.write_pointer_load_attempts(), 1u) << static_cast<int>(outcome);
+    EXPECT_TRUE(queue.faulted()) << static_cast<int>(outcome);
+  }
+}
+
+TEST(CommandProcessorAqlTest, UnavailableDependencyReadRetriesFetchedPacket) {
+  Gfx1250Sim sim;
+  TransientAqlQueueForTest queue(sim);
+  queue.set_barrier_dependency(0);
+  queue.fail_next_dependency_value_load(amdgpu::VmAccessOutcome::Unavailable);
+
+  queue.step();
+  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.accepted_entries(), 1u);
+  EXPECT_EQ(queue.dependency_value_load_attempts(), 2u);
+  EXPECT_EQ(queue.dependency_handle_load_attempts(), 0u);
+  EXPECT_EQ(queue.completion_handle_load_attempts(), 0u);
+  EXPECT_FALSE(queue.faulted());
+}
+
+TEST(CommandProcessorAqlTest, TerminalDependencyReadFaultsQueue) {
+  for (const amdgpu::VmAccessOutcome outcome :
+       {amdgpu::VmAccessOutcome::Faulted, amdgpu::VmAccessOutcome::Malformed}) {
+    Gfx1250Sim sim;
+    TransientAqlQueueForTest queue(sim);
+    queue.set_barrier_dependency(0);
+    queue.fail_next_dependency_value_load(outcome);
+
+    queue.step();
+    EXPECT_EQ(queue.read_pointer(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.accepted_entries(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.dependency_value_load_attempts(), 1u) << static_cast<int>(outcome);
+    EXPECT_TRUE(queue.faulted()) << static_cast<int>(outcome);
+  }
+}
+
+TEST(CommandProcessorAqlTest, UnavailableKernelDescriptorReadRetriesBeforeAdmission) {
+  Gfx1250Sim sim;
+  TransientAqlQueueForTest queue(sim);
+  queue.set_kernel_dispatch();
+  queue.fail_next_kernel_descriptor_read(amdgpu::VmAccessOutcome::Unavailable);
+
+  queue.step();
+  EXPECT_EQ(queue.read_pointer(), 1u);
+  EXPECT_EQ(queue.accepted_entries(), 1u);
+  EXPECT_EQ(queue.kernel_descriptor_read_attempts(), 2u);
+  EXPECT_FALSE(queue.faulted());
+}
+
+TEST(CommandProcessorAqlTest, TerminalKernelDescriptorReadFaultsBeforeAdmission) {
+  for (const amdgpu::VmAccessOutcome outcome :
+       {amdgpu::VmAccessOutcome::Faulted, amdgpu::VmAccessOutcome::Malformed}) {
+    Gfx1250Sim sim;
+    TransientAqlQueueForTest queue(sim);
+    queue.set_kernel_dispatch();
+    queue.fail_next_kernel_descriptor_read(outcome);
+
+    queue.step();
+    EXPECT_EQ(queue.read_pointer(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.accepted_entries(), 0u) << static_cast<int>(outcome);
+    EXPECT_EQ(queue.kernel_descriptor_read_attempts(), 1u) << static_cast<int>(outcome);
+    EXPECT_TRUE(queue.faulted()) << static_cast<int>(outcome);
+  }
+}
+
+TEST(Gfx1250SdmaTest, StaleAddressSpaceCannotExecuteThroughLegacyBacking) {
+  Gfx1250Sim sim;
+  sim.memory->set_passthrough(true);
+
+  constexpr uint32_t kProcessId = 1252;
+  const amdgpu::AddressSpaceHandle stale = sim.soc->gpu_vm().register_legacy(kProcessId);
+  ASSERT_TRUE(stale);
+  ASSERT_TRUE(sim.soc->gpu_vm().unregister_address_space(stale));
+
+  constexpr uint32_t kQueueId = 1252;
+  alignas(8) std::array<uint32_t, 16> ring{};
+  alignas(8) uint64_t read_idx = 0;
+  alignas(8) uint64_t write_idx = 7 * sizeof(uint32_t);
+  std::array<uint64_t, 1> doorbells{write_idx};
+  std::array<uint8_t, 32> source{};
+  std::array<uint8_t, 32> destination{};
+  for (size_t index = 0; index < source.size(); ++index)
+    source[index] = static_cast<uint8_t>(index + 1);
+
+  ring[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  ring[1] = static_cast<uint32_t>(source.size() - 1);
+  write_sdma_qword_address(ring.data(), 3, 4, source.data());
+  write_sdma_qword_address(ring.data(), 5, 6, destination.data());
+
+  amdgpu::HwQueue queue{};
+  queue.address_space = stale;
+  queue.process_id = kProcessId;
+  queue.queue_id = kQueueId;
+  queue.ring_base_va = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = static_cast<uint32_t>(ring.size() * sizeof(uint32_t));
+  queue.read_ptr_va = reinterpret_cast<uint64_t>(&read_idx);
+  queue.write_ptr_va = reinterpret_cast<uint64_t>(&write_idx);
+  queue.doorbell_base = doorbells.data();
+  queue.host_accessible = true;
+  queue.is_sdma = true;
+  (void)sim.cp()->register_queue(std::move(queue));
+
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_EQ(read_idx, 0u);
+  EXPECT_TRUE(std::ranges::all_of(destination, [](uint8_t value) { return value == 0; }))
+      << "a stale nonzero handle fell back to the legacy passthrough store";
+
+  sim.cp()->unregister_queue(kQueueId, kProcessId);
+}
+
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   Gfx1250Sim sim;
   HostSdmaQueueForTest queue(sim);
@@ -229,6 +867,10 @@ TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   EXPECT_EQ(queue.read_idx(), 0u);
 
   std::atomic_ref<uint64_t>(value).store(0, std::memory_order_release);
+  uint64_t observed = UINT64_MAX;
+  ASSERT_EQ(sim.memory->atomic_load(reinterpret_cast<uint64_t>(&value), sizeof(value), observed, 0),
+            amdgpu::CopyOutcome::Complete);
+  ASSERT_EQ(observed, 0u);
   sim.engine->schedule_event_now(sim.cp()->doorbell_event());
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 8u * sizeof(uint32_t));
@@ -375,12 +1017,12 @@ TEST(Gfx1250SdmaTest, ConstFillWritesMappedPrefixAndAdvances) {
 // part fabricated, and a half-read event id names some other event.
 TEST(Gfx1250SdmaTest, ClippedSignalMetadataHaltsWithoutDecrementing) {
   Gfx1250Sim sim;
-  TranslatedSdmaQueueForTest queue(sim);
   constexpr int64_t kSignalStart = 5;
 
   std::atomic<uint32_t> notified{0};
-  sim.cp()->set_interrupt_callback(
+  amdgpu::InterruptSubscription interrupt_subscription(
       [&](uint32_t, uint32_t event_id) { notified.store(event_id, std::memory_order_release); });
+  TranslatedSdmaQueueForTest queue(sim, interrupt_subscription.sink());
 
   // Back the signal value but stop the mapping before the mailbox and event id,
   // so the record the completion path must read is clipped.

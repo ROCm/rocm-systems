@@ -15,6 +15,10 @@ namespace rocjitsu {
 
 void SoC::set_memory(amdgpu::GpuMemory *m) {
   memory_ = m;
+  gpu_vm_.set_memory(m);
+  for (auto *xcd : xcds_)
+    if (auto *cp = xcd->command_processor())
+      cp->set_gpu_vm(&gpu_vm_);
   // Create a standalone HBM controller for the config-loader path where the
   // parameterized constructor (which creates it) was not used.
   if (m && !hbm_standalone_ && iods_.empty())
@@ -39,13 +43,14 @@ void SoC::wire_backing(simdojo::Topology &topo) {
 
 SoC::SoC(std::string name, const Config &config)
     : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
-      exec_mode_(config.exec_mode) {
+      exec_mode_(config.exec_mode), gpu_vm_(nullptr), queue_service_(gpu_vm_) {
   set_weight(0); // Structural container, not a work-producing component.
   auto soc_name = this->name();
 
   // GPU memory is shared across all XCDs.
   auto mem = std::make_unique<amdgpu::GpuMemory>("vram");
   memory_ = mem.get();
+  gpu_vm_.set_memory(memory_);
   add_child(std::move(mem));
 
   if (config.num_iods > 0) {
@@ -114,7 +119,12 @@ void SoC::initialize() {
     std::vector<amdgpu::CommandProcessor *> cps;
     cps.reserve(xcds_.size());
     for (auto *xcd_ptr : xcds_)
-      cps.push_back(xcd_ptr->command_processor());
+      if (auto *cp = xcd_ptr->command_processor()) {
+        cp->set_gpu_vm(&gpu_vm_);
+        cps.push_back(cp);
+      } else {
+        cps.push_back(nullptr);
+      }
     if (std::find(cps.begin(), cps.end(), nullptr) == cps.end()) {
       for (uint32_t i = 0; i < cps.size(); ++i)
         cps[i]->set_xcd_topology(i, cps);

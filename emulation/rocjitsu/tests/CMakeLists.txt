@@ -418,6 +418,9 @@ add_executable(
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     gpu_vm_translation_test.cpp
+    gpu_vm_service_test.cpp
+    gpu_vm_pipeline_test.cpp
+    completion_tracker_test.cpp
     pm4_bootstrap_executor_test.cpp
     sdma_executor_test.cpp
     sdma_queue_runner_test.cpp

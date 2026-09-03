@@ -25,7 +25,9 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/sdma_queue_runner.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
@@ -59,14 +61,27 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+class GpuVm;
+class GpuVmAccess;
+enum class VmAccessOutcome : uint8_t;
+struct AtomicLoadResult;
+
 /// @brief Description of an AQL hardware queue registered with the CP.
 struct HwQueue {
+  AddressSpaceHandle address_space;
+  InterruptSink interrupt_sink{};
+  /// @brief CP-local lifetime identity; never reused during this CP lifetime.
+  uint64_t registration_id = 0;
   uint32_t process_id = 0;
   uint32_t queue_id = 0;
   uint64_t ring_base_va = 0;
   uint32_t ring_size = 0;
   uint64_t read_ptr_va = 0;
   uint64_t write_ptr_va = 0;
+  /// Optional initial device-side ring cursor. SDMA advances this independently
+  /// and publishes completed progress to read_ptr_va. Legacy queues leave this
+  /// unset and initialize from read_ptr_va.
+  std::optional<uint64_t> initial_read_pointer = std::nullopt;
   uint32_t doorbell_offset = 0;
   void *doorbell_base = nullptr;
   uint64_t doorbell_va = 0;
@@ -94,6 +109,13 @@ struct HwQueue {
   /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
   /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
   uint64_t fetch_cursor = 0;
+  /// Stable VM snapshot retained while publishing an AQL read pointer stalls.
+  /// Packets through @ref pending_read_pointer are already committed, so a
+  /// retry must publish through the same address-space generation without
+  /// fetching those packets again.
+  std::shared_ptr<GpuVmAccess> read_pointer_publication_access{};
+  uint64_t pending_read_pointer = 0;
+  bool read_pointer_publication_pending = false;
   /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
   /// multi-XCD part does when it runs as a single partition. Set by the queue
   /// creation path that models such a device; registering the queue replicates it
@@ -103,12 +125,6 @@ struct HwQueue {
   /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
   /// that owns the queue.
   bool fanout_replica = false;
-};
-
-enum class SdmaPacketDialect {
-  Legacy,
-  Gfx11Plus,
-  Gfx1250,
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -124,18 +140,15 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
-    // Bind the doorbell handler at construction, not in startup(): register_queue()
-    // may start the doorbell poll thread (which fires doorbell_event_ via
-    // schedule_event_now) as soon as a host-accessible queue is registered, which can
-    // happen before startup() runs. Binding here removes that ordering hazard — a
-    // handlerless doorbell_event_ would be silently dropped by the engine.
-    doorbell_event_.set_handler(
-        [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
-  }
-  ~CommandProcessor() override { stop_doorbell_monitor(); }
+  explicit CommandProcessor(std::string name);
+  ~CommandProcessor() override;
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
+  void set_gpu_vm(GpuVm *gpu_vm) {
+    gpu_vm_ = gpu_vm;
+    for (auto *cu : cus_)
+      cu->set_gpu_vm(gpu_vm);
+  }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
@@ -152,9 +165,6 @@ public:
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);
-
-  using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
-  void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
   void set_scratch_backing_resolver(ScratchBackingResolver cb) {
@@ -191,8 +201,12 @@ public:
     scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
   }
 
-  void register_queue(HwQueue queue);
+  /// @brief Register a queue and return its CP-local lifetime identity.
+  uint64_t register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
+
+  /// @brief Enqueue a doorbell for a specific queue registration without waiting on execution.
+  void notify_queue_doorbell(uint64_t registration_id, uint64_t value);
 
   /// @brief Take one XCD's share of a dispatch fanned out by a peer XCD.
   ///
@@ -234,6 +248,7 @@ public:
     scratch_waves_per_se_ =
         std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
     cu->set_command_processor(this);
+    cu->set_gpu_vm(gpu_vm_);
     cu->set_on_idle([this]() { on_cu_idle(); });
   }
 
@@ -244,6 +259,13 @@ public:
 
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
+
+  /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
+  /// @details The caller must have released the CU wave-state lock. The owning
+  /// queue and every fan-out replica are halted, resident work is cancelled,
+  /// and normal dispatch completion is suppressed.
+  void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
+                                VmAccessOutcome outcome);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
@@ -293,6 +315,43 @@ public:
   [[nodiscard]] size_t registered_queue_count_for_test() const {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     return hw_queues_.size();
+  }
+
+  /// @brief Address-space identity retained by one registered queue.
+  /// @details Test-only. Numeric process ids remain routing metadata and cannot
+  /// prove that queue fan-out preserved the generation-safe VM identity.
+  [[nodiscard]] AddressSpaceHandle queue_address_space_for_test(uint32_t queue_id,
+                                                                uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue =
+        std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+          return candidate.queue_id == queue_id && candidate.process_id == process_id;
+        });
+    return queue == hw_queues_.end() ? AddressSpaceHandle{} : queue->address_space;
+  }
+
+  /// @brief Address-space identity carried by the first accepted queue entry.
+  /// @details Test-only. The bounded history in HwQueueState lets fan-out tests
+  /// inspect an entry after it has retired without retaining production work.
+  [[nodiscard]] AddressSpaceHandle first_accepted_address_space_for_test(uint32_t queue_id,
+                                                                         uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? AddressSpaceHandle{} : qs->first_accepted_address_space;
+  }
+
+  template <typename Fn> void with_queue_lock_for_test(Fn &&fn) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    std::forward<Fn>(fn)();
+  }
+
+  void drain_doorbell_inbox_for_test() { drain_doorbell_inbox(); }
+
+  [[nodiscard]] std::optional<uint64_t>
+  queue_last_doorbell_for_test(uint64_t registration_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue = std::ranges::find(hw_queues_, registration_id, &HwQueue::registration_id);
+    return queue == hw_queues_.end() ? std::nullopt : std::optional<uint64_t>(queue->last_doorbell);
   }
 
   /// @brief Host-accessible queues this CP polls, excluding fan-out replicas.
@@ -369,14 +428,50 @@ public:
     return queue != hw_queues_.end() && queue->runtime_suspended;
   }
 
+  [[nodiscard]] bool queue_faulted_for_test(uint32_t queue_id, uint32_t process_id) const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto queue = std::ranges::find_if(hw_queues_, [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->faulted;
+  }
+
+  [[nodiscard]] bool has_dispatch_for_test(uint32_t queue_id, uint32_t process_id,
+                                           uint64_t dispatch_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *state = find_queue_state(queue_id, process_id);
+    return state != nullptr &&
+           std::ranges::any_of(state->entries, [dispatch_id](const DispatchEntry &entry) {
+             return entry.dispatch_id == dispatch_id;
+           });
+  }
+
+  void drain_fanout_inbox_for_test() {
+    drain_dispatch_fault_inbox();
+    drain_fanout_inbox();
+  }
+
   /// @brief Test-only count of executed command-processor doorbell passes.
   [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
     return doorbell_handle_count_.load(std::memory_order_relaxed);
   }
 
 private:
+  struct DispatchLaunchMetadata {
+    std::array<uint32_t, 4> scratch_resource_descriptor{};
+    uint64_t write_dispatch_id = 0;
+  };
+
+  struct KernelDescriptorReadResult {
+    VmAccessOutcome outcome;
+    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+  };
+
   struct ClusterWorkgroupPlacement;
   struct ClusterBarrierState;
+  struct SdmaQueueRuntime {
+    std::unique_ptr<SdmaQueueRunner> runner;
+  };
 
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
@@ -405,9 +500,6 @@ private:
   /// @brief Fetch AQL packets from a single HW queue.
   void fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
 
-  /// @brief Process SDMA packets from an SDMA queue's ring buffer.
-  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx, simdojo::Tick now);
-
   /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
   /// @details Emulated SDMA and CP writes land directly in the backing store,
   /// bypassing the cache hierarchy. Real SDMA does not snoop GL2, so stale
@@ -431,12 +523,15 @@ private:
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
-  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
-                          uint64_t aql_packet_id = 0, ClusterDispatchShape cluster_shape = {});
+  [[nodiscard]] VmAccessOutcome process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
+                                                   const HwQueue &queue, uint64_t pkt_addr,
+                                                   uint32_t queue_packet_id, HwQueueState &qs,
+                                                   uint64_t aql_packet_id = 0,
+                                                   ClusterDispatchShape cluster_shape = {});
 
-  rocr::llvm::amdhsa::kernel_descriptor_t
-  read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
+  [[nodiscard]] KernelDescriptorReadResult read_kernel_descriptor(AddressSpaceHandle address_space,
+                                                                  uint64_t kernel_object,
+                                                                  uint32_t vmid) const;
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
 
@@ -455,7 +550,7 @@ private:
   /// the one before it. Packets that run no shader are copied across as well, by
   /// replicate_non_kernel_entry(), so a replica's entry list is the owner's whole
   /// sequence rather than a subsequence of it.
-  void fan_out_dispatch(DispatchEntry &dp);
+  void fan_out_dispatch(DispatchEntry &dp, const DispatchLaunchMetadata &launch_metadata);
 
   /// @brief Give every peer XCD a copy of a packet that runs no shader.
   ///
@@ -471,10 +566,21 @@ private:
   /// XCD that read it keeps that duty, exactly as it does for a kernel shard.
   void replicate_non_kernel_entry(const DispatchEntry &dp);
 
+  void accept_fanout_shard(DispatchEntry shard, DispatchLaunchMetadata launch_metadata);
+
   /// @brief Move shards handed over by peer XCDs into their queue states.
   /// @details Runs on this CP's own thread, under hw_queue_mutex_. Kept separate
   /// from accept_fanout_shard() so that no CP ever takes a peer's hw_queue_mutex_.
   void drain_fanout_inbox();
+
+  struct DispatchFaultNotification {
+    uint32_t queue_id = 0;
+    uint32_t process_id = 0;
+    uint64_t dispatch_id = 0;
+    VmAccessOutcome outcome;
+  };
+  void accept_dispatch_fault(DispatchFaultNotification fault);
+  void drain_dispatch_fault_inbox();
 
   /// @brief Schedule a doorbell on every XCD of the SoC, this one included.
   /// @details Used when a dispatch retires device-wide: the XCD holding the
@@ -528,6 +634,14 @@ private:
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
+  /// @brief Drain completed entries and preserve retry/terminal VM outcomes.
+  /// @details Caller must hold @ref hw_queue_mutex_.
+  /// @returns False when terminal state must stop this processing pass. A
+  /// transient retry is recorded on only the affected HwQueueState so unrelated
+  /// queues remain runnable.
+  [[nodiscard]] bool drain_completions();
+  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
+                            VmAccessOutcome outcome);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -581,21 +695,14 @@ private:
     return false;
   }
 
-  bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
-           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
-  }
-
-  // gfx1250 widens the GCR packet to 6 dwords; gfx11/12 keep the 5-dword layout.
-  bool uses_gfx1250_gcr_packet() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
-  }
-
   GpuMemory *memory_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
   std::vector<ShaderProcessorInput *> spis_;
   std::vector<L2Cache *> l2_caches_;
   std::vector<HwQueue> hw_queues_;
   std::vector<HwQueueState> new_queue_states_;
+  std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
+  std::unordered_map<uint64_t, SdmaQueueRuntime> sdma_queue_runtimes_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
 
@@ -612,6 +719,20 @@ private:
   // the cross-CP lock cycle it exists to avoid.
   std::mutex fanout_inbox_mutex_;
   std::vector<DispatchEntry> fanout_inbox_;
+  std::unordered_map<uint32_t, DispatchLaunchMetadata> fanout_launch_metadata_inbox_;
+
+  // Terminal faults cross XCDs through a leaf inbox just like fan-out shards.
+  // A CU or peer never acquires another CP's queue mutex directly.
+  std::mutex dispatch_fault_inbox_mutex_;
+  std::vector<DispatchFaultNotification> dispatch_fault_inbox_;
+
+  struct DoorbellNotification {
+    uint64_t registration_id = 0;
+    uint64_t value = 0;
+  };
+  std::mutex doorbell_inbox_mutex_;
+  std::vector<DoorbellNotification> doorbell_inbox_;
+  uint64_t next_queue_registration_id_ = 1;
 
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
@@ -671,17 +792,21 @@ private:
 
   friend class ComputeUnitCore;
 
-  /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
-  uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
+  /// @brief Read a uint64 through the queue's lifetime-safe GPU address space.
+  [[nodiscard]] AtomicLoadResult read_gpu_u64(AddressSpaceHandle address_space, uint64_t va,
+                                              uint32_t vmid) const;
 
-  /// @brief Read a uint32 from GPU virtual address space via GpuMemory translation.
-  uint32_t read_gpu_u32(uint64_t va, uint32_t vmid) const;
+  /// @brief Read a uint32 through the queue's lifetime-safe GPU address space.
+  [[nodiscard]] AtomicLoadResult read_gpu_u32(AddressSpaceHandle address_space, uint64_t va,
+                                              uint32_t vmid) const;
 
   /// @brief Read a block of bytes from GPU virtual address space into a buffer.
-  void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
+  [[nodiscard]] VmAccessOutcome read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
+                                               void *dst, size_t size, uint32_t vmid) const;
 
   /// @brief Write a block of bytes to GPU virtual address space from a buffer.
-  amdgpu::AccessOutcome write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+  [[nodiscard]] VmAccessOutcome write_gpu_block(AddressSpaceHandle address_space, uint64_t va,
+                                                const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
   /// @brief Stop and join the monitor only when no polled queue remains.
@@ -700,7 +825,6 @@ private:
   void ensure_doorbell_monitor();
   bool scan_doorbells();
 
-  InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
@@ -732,6 +856,7 @@ private:
   std::atomic<bool> stall_pending_{false};
 
   void doorbell_poll_loop(std::stop_token stop);
+  void drain_doorbell_inbox();
 
   // The doorbell monitor's lifecycle is serialized by its OWN mutex, deliberately
   // distinct from hw_queue_mutex_. Queue removal releases hw_queue_mutex_ before

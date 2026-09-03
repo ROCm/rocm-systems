@@ -3256,6 +3256,47 @@ TEST(CommandProcessorTest, DebugResumeWithOnlyResidentWorkDoesNotRescanQueue) {
   EXPECT_FALSE(f.cu()->has_active_wfs());
 }
 
+TEST(FunctionalSchedulingTest, ReadyComputeUnitsShareLongFunctionalQuanta) {
+  constexpr uint64_t kCodeAddress = 0x1000;
+
+  VmFixture f("cdna4", 2, 1);
+  std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum + 1, SOPP_S_NOP);
+  code.push_back(SOPP_S_ENDPGM);
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()),
+                      code.size() * sizeof(uint32_t), kCodeAddress);
+
+  for (uint32_t cu_idx = 0; cu_idx < 2; ++cu_idx) {
+    ASSERT_NE(f.cu(cu_idx)->dispatch_wf(cu_idx, kCodeAddress, 104, 256), nullptr);
+    f.cu(cu_idx)->schedule_work();
+  }
+
+  ASSERT_TRUE(f.engine->step());
+
+  for (uint32_t cu_idx = 0; cu_idx < 2; ++cu_idx) {
+    ASSERT_NE(f.cu(cu_idx)->wf(0), nullptr);
+    EXPECT_EQ(f.cu(cu_idx)->wf(0)->pc,
+              kCodeAddress + amdgpu::ComputeUnitCore::kFunctionalFairnessSlice * sizeof(uint32_t));
+  }
+}
+
+TEST(FunctionalSchedulingTest, UncontendedComputeUnitKeepsFullFunctionalQuantum) {
+  constexpr uint64_t kCodeAddress = 0x1000;
+
+  VmFixture f("cdna4", 1, 1);
+  std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum + 1, SOPP_S_NOP);
+  code.push_back(SOPP_S_ENDPGM);
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()),
+                      code.size() * sizeof(uint32_t), kCodeAddress);
+
+  ASSERT_NE(f.cu()->dispatch_wf(0, kCodeAddress, 104, 256), nullptr);
+  f.cu()->schedule_work();
+
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_NE(f.cu()->wf(0), nullptr);
+  EXPECT_EQ(f.cu()->wf(0)->pc,
+            kCodeAddress + amdgpu::ComputeUnitCore::kFunctionalQuantum * sizeof(uint32_t));
+}
+
 TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
   // The CP relies on can_accept_workgroup() gating, but the API contract must hold

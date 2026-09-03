@@ -56,7 +56,7 @@ public:
            uint64_t read_ptr_addr = DEFAULT_READ_PTR_ADDR,
            uint64_t write_ptr_addr = DEFAULT_WRITE_PTR_ADDR,
            uint64_t doorbell_addr = DEFAULT_DOORBELL_ADDR, bool xcd_fanout = false,
-           uint32_t queue_id = 1)
+           uint32_t queue_id = 1, amdgpu::AddressSpaceHandle address_space = {})
       : memory_(memory), cp_(cp), ring_addr_(ring_addr), ring_size_(ring_size),
         read_ptr_addr_(read_ptr_addr), write_ptr_addr_(write_ptr_addr),
         doorbell_addr_(doorbell_addr) {
@@ -66,6 +66,7 @@ public:
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), 8, doorbell_addr_);
 
     amdgpu::HwQueue hw{};
+    hw.address_space = address_space;
     hw.queue_id = queue_id;
     hw.ring_base_va = ring_addr_;
     hw.ring_size = ring_size_;
@@ -202,12 +203,14 @@ private:
 /// @param queue_id Must be distinct per fan-out queue; shards route by it.
 /// @param ring_addr Ring buffer base; the pointers are placed relative to it.
 /// @returns A registered fan-out queue.
-inline std::unique_ptr<AqlQueue>
-make_fanout_queue(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint32_t queue_id = 1,
-                  uint64_t ring_addr = AqlQueue::DEFAULT_RING_ADDR) {
+inline std::unique_ptr<AqlQueue> make_fanout_queue(amdgpu::GpuMemory *memory,
+                                                   amdgpu::CommandProcessor *cp,
+                                                   uint32_t queue_id = 1,
+                                                   uint64_t ring_addr = AqlQueue::DEFAULT_RING_ADDR,
+                                                   amdgpu::AddressSpaceHandle address_space = {}) {
   return std::make_unique<AqlQueue>(memory, cp, ring_addr, AqlQueue::DEFAULT_RING_SIZE,
                                     ring_addr + 0x10000, ring_addr + 0x10008, ring_addr + 0x10010,
-                                    /*xcd_fanout=*/true, queue_id);
+                                    /*xcd_fanout=*/true, queue_id, address_space);
 }
 
 } // namespace rocjitsu::test

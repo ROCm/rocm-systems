@@ -320,6 +320,8 @@ bool SimulationEngine::step() {
       running_ = false;
       return false;
     }
+    if (async_queues_[0]->pending.load(std::memory_order_acquire))
+      drain_async_events();
   }
 
   current_time_.store(step_tick, std::memory_order_release);
@@ -339,13 +341,13 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_events();
 
       // Single-threaded: drain all events in timestamp order.
-      // Drain async events at each tick boundary so that events from other
-      // threads (e.g. doorbell poll threads) are merged promptly instead of
-      // waiting for the main queue to empty — which may never happen when
-      // CU work events continuously reschedule.
-      //
-      // Within a tick, defer pushes so that handler reschedules don't
-      // interleave with pops (avoids O(N log N) heap churn per tick).
+      // Drain async events at each tick boundary and after every event that
+      // observes a pending async insertion. A same-tick batch can contain a
+      // small number of very expensive handlers (for example, functional CU
+      // quanta), so deferring an externally injected doorbell until the next
+      // tick can starve peer work for an unbounded amount of wall-clock time.
+      // The pending load keeps the ordinary event path lock-free; heap work is
+      // incurred only when a producer actually queued an async event.
       Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
         Tick next_tick = ctx.event_queue.next_event_time();
@@ -357,6 +359,8 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire))
           return;
+        if (async_queues_[0]->pending.load(std::memory_order_acquire))
+          drain_async_events();
       }
 
       // Queue drained now update global time for external observers.
@@ -479,6 +483,8 @@ void SimulationEngine::barrier_completion() {
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {
   ctx.event_queue.set_current_tick(entry.timestamp);
+  if (config_.num_threads == 1)
+    current_time_.store(entry.timestamp, std::memory_order_release);
 
   if (entry.event->has_handler())
     entry.event->execute(entry.timestamp, entry.message.get());
@@ -639,7 +645,7 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
   auto &aq = *async_queues_[pid];
   {
     std::lock_guard<std::mutex> qlock(aq.mutex);
-    aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message)});
+    aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message), true});
     aq.pending.store(true, std::memory_order_release);
   }
 
@@ -654,14 +660,26 @@ void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message>
   schedule_event_async(event, timestamp, std::move(message));
 }
 
+bool SimulationEngine::cooperative_yield_pending(PartitionID partition_id, Tick horizon) const {
+  assert(partition_id < contexts_.size() && "partition ID out of range");
+  assert(partition_id < async_queues_.size() && "async queue partition ID out of range");
+  if (async_queues_[partition_id]->pending.load(std::memory_order_acquire))
+    return true;
+  return contexts_[partition_id]->event_queue.next_event_time() <= horizon;
+}
+
 void SimulationEngine::drain_async_events() {
   for (uint32_t i = 0; i < async_queues_.size(); ++i) {
     auto &aq = *async_queues_[i];
     if (!aq.pending.load(std::memory_order_acquire))
       continue;
     std::lock_guard<std::mutex> lock(aq.mutex);
-    for (auto &e : aq.events)
+    const Tick floor = contexts_[i]->event_queue.current_tick();
+    for (auto &e : aq.events) {
+      if (e.timestamp < floor)
+        e.timestamp = floor;
       contexts_[i]->event_queue.push(std::move(e));
+    }
     aq.events.clear();
     aq.pending.store(false, std::memory_order_release);
   }

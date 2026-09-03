@@ -8,8 +8,10 @@
 #define ROCJITSU_VM_SOC_H_
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
+#include "rocjitsu/vm/amdgpu/queue_service.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
@@ -51,7 +53,8 @@ public:
 
   /// @brief Construct an empty SoC (children added externally by the config loader).
   explicit SoC(std::string name, amdgpu::GpuMemory *memory = nullptr)
-      : simdojo::CompositeComponent(std::move(name)), memory_(memory) {
+      : simdojo::CompositeComponent(std::move(name)), gpu_vm_(memory), queue_service_(gpu_vm_),
+        memory_(memory) {
     set_weight(0);
   }
 
@@ -185,6 +188,14 @@ public:
   /// @returns Const pointer to the GPU memory.
   const amdgpu::GpuMemory *memory() const { return memory_; }
 
+  /// @brief Return the shared GPU address-space service.
+  amdgpu::GpuVm &gpu_vm() { return gpu_vm_; }
+  const amdgpu::GpuVm &gpu_vm() const { return gpu_vm_; }
+
+  /// @brief Return the shared hardware-queue service.
+  amdgpu::QueueService &queue_service() { return queue_service_; }
+  const amdgpu::QueueService &queue_service() const { return queue_service_; }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -197,6 +208,8 @@ private:
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
+  amdgpu::GpuVm gpu_vm_;
+  amdgpu::QueueService queue_service_;
   std::vector<amdgpu::Xcd *> xcds_;
   std::vector<amdgpu::Iod *> iods_;
   amdgpu::GpuMemory *memory_ = nullptr;

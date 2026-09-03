@@ -177,6 +177,58 @@ private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
 };
 
+/// Injects a self-replenishing async stream from the first handler in a large
+/// same-tick batch. This models repeated host submissions arriving while
+/// already-scheduled CU quanta remain at that tick.
+class SameTickAsyncFairnessComponent : public Component {
+public:
+  SameTickAsyncFairnessComponent(std::string name, uint32_t batch_size, uint32_t async_count)
+      : Component(std::move(name)), batch_size_(batch_size), async_count_(async_count) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_now(&async_event_); });
+    batch_event_.set_handler([this](Tick, Message *) {
+      if (batch_events_processed_ == 0)
+        async_events_before_first_batch_event_ = async_events_processed_;
+      ++batch_events_processed_;
+    });
+    async_event_.set_handler([this](Tick tick, Message *) {
+      if (async_events_processed_ == 0) {
+        first_async_tick_ = tick;
+        batch_events_before_first_async_ = batch_events_processed_;
+      }
+      ++async_events_processed_;
+      if (async_events_processed_ < async_count_)
+        engine()->schedule_event_now(&async_event_);
+    });
+  }
+
+  void startup() override {
+    schedule_event(&inject_event_, 1);
+    for (uint32_t i = 0; i < batch_size_; ++i)
+      schedule_event(&batch_event_, 1);
+  }
+
+  Tick first_async_tick() const { return first_async_tick_; }
+  uint32_t async_events_processed() const { return async_events_processed_; }
+  uint32_t batch_events_processed() const { return batch_events_processed_; }
+  uint32_t batch_events_before_first_async() const { return batch_events_before_first_async_; }
+  uint32_t async_events_before_first_batch_event() const {
+    return async_events_before_first_batch_event_;
+  }
+
+private:
+  uint32_t batch_size_ = 0;
+  uint32_t async_count_ = 0;
+  uint32_t async_events_processed_ = 0;
+  uint32_t batch_events_processed_ = 0;
+  uint32_t batch_events_before_first_async_ = 0;
+  uint32_t async_events_before_first_batch_event_ = 0;
+  Tick first_async_tick_ = TICK_MAX;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event batch_event_{this, EventType::TIMER_CALLBACK};
+  Event async_event_{this, EventType::TIMER_CALLBACK};
+};
+
 /// Component that counts initialize()/startup()/shutdown() calls. Used to verify
 /// that shutdown() cleanup fires exactly once per initialized component, on both
 /// the normal shutdown path and the startup-failure unwind path. When given a
@@ -1198,6 +1250,50 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   }
 
   EXPECT_GE(injected_tick.load(), before);
+}
+
+TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
+  constexpr uint32_t kBatchSize = 1024;
+  constexpr uint32_t kAsyncCount = 32;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(
+      root->add_child(std::make_unique<SameTickAsyncFairnessComponent>("same-tick-fairness",
+                                                                       kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->first_async_tick(), 1u)
+      << "schedule_event_now moved simulation time backward";
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u)
+      << "an async event injected by the first handler waited behind the whole same-tick batch";
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents)
+      << "a self-replenishing async stream starved pre-existing same-tick local work";
+}
+
+TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
+  constexpr uint32_t kBatchSize = 32;
+  constexpr uint32_t kAsyncCount = EventQueue::kMaxConsecutiveAsyncEvents + 1;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(root->add_child(
+      std::make_unique<SameTickAsyncFairnessComponent>("step-fairness", kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ASSERT_TRUE(engine.step());
+
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u);
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents);
 }
 
 // ============================================================================

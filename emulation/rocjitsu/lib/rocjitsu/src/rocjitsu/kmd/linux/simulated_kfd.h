@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -27,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -276,6 +278,8 @@ public:
     uint32_t gpu_id = 0;
     /// Fault reporter bound to this device, so a violation names its own GPU.
     std::unique_ptr<GpuFaultReporter> fault_reporter;
+    /// One revocable route owned by this frontend and carried only by its queues.
+    amdgpu::InterruptSubscription interrupt_subscription;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -290,6 +294,12 @@ public:
   GpuFaultReporter *fault_reporter_for(GpuDevice &gpu);
 
 private:
+  /// @brief Publish one process to every GPU memory/VM service atomically.
+  /// @details The caller holds process_mutex_. A failed address-space
+  /// registration unwinds every memory and VM registration made for @p proc.
+  [[nodiscard]] bool register_process_address_spaces(KfdProcess &proc, pid_t client_pid,
+                                                     bool passthrough);
+
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
@@ -534,7 +544,11 @@ private:
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
-  uint32_t next_process_id_ = 1;
+  // Hardware-visible VMIDs/PASIDs share the SoC namespace even when tests or
+  // an embedder attach more than one KFD frontend to that SoC. A per-driver
+  // counter would let two live frontends publish the same numeric identity and
+  // silently replace each other's memory binding.
+  inline static std::atomic<uint32_t> next_process_id_{1};
 
   /// @brief Debugger sessions keyed by the target inferior's Linux pid.
   /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a

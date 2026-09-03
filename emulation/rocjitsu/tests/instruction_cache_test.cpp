@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -21,6 +22,7 @@
 namespace {
 
 using rocjitsu::amdgpu::GpuMemory;
+using rocjitsu::amdgpu::GpuVm;
 using rocjitsu::amdgpu::InstructionCache;
 namespace amdgpu = rocjitsu::amdgpu;
 
@@ -39,6 +41,55 @@ std::array<uint8_t, InstructionCache::kFetchBytes>
 fetch_at(InstructionCache &icache, const GpuMemory &memory, uint64_t pc, uint32_t vmid = 0) {
   std::array<uint8_t, InstructionCache::kFetchBytes> got{};
   icache.fetch(memory, pc, vmid, got.data());
+  return got;
+}
+
+class ExecutableAddressSpace final : public amdgpu::AddressSpaceTranslator,
+                                     public amdgpu::PhysicalMemoryAccess {
+public:
+  explicit ExecutableAddressSpace(uint8_t value)
+      : bytes_(InstructionCache::kLineSize * 2, static_cast<std::byte>(value)) {}
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind access) const override {
+    if (access != amdgpu::VmAccessKind::Read && access != amdgpu::VmAccessKind::Execute)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    if (address < kCodeBase || size == 0 || address - kCodeBase > bytes_.size() ||
+        size > bytes_.size() - (address - kCodeBase)) {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::System,
+                        .address = address - kCodeBase,
+                        .contiguous_bytes = bytes_.size() - (address - kCodeBase),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = false, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::System || address > bytes_.size() ||
+        bytes.size() > bytes_.size() - address) {
+      return amdgpu::VmAccessOutcome::Faulted;
+    }
+    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t,
+                                std::span<const std::byte>) override {
+    return amdgpu::VmAccessOutcome::Faulted;
+  }
+
+private:
+  std::vector<std::byte> bytes_;
+};
+
+std::array<uint8_t, InstructionCache::kFetchBytes>
+fetch_at(InstructionCache &icache, const amdgpu::GpuVmAccess &access, uint64_t pc = kCodeBase) {
+  std::array<uint8_t, InstructionCache::kFetchBytes> got{};
+  EXPECT_EQ(icache.fetch(access, pc, got.data()), amdgpu::VmAccessOutcome::Complete);
   return got;
 }
 
@@ -123,6 +174,30 @@ TEST(InstructionCacheTest, LinesDoNotAliasAcrossVmids) {
   const auto again1 = fetch_at(icache, memory, kCodeBase, 1);
   EXPECT_TRUE(std::equal(again1.begin(), again1.end(), vm1.begin()))
       << "the vmid 1 fetch did not cache its line";
+}
+
+TEST(InstructionCacheTest, TranslatedLinesDoNotAliasAcrossRootReplacement) {
+  GpuVm gpu_vm;
+  InstructionCache icache;
+  auto first = std::make_shared<ExecutableAddressSpace>(0x11);
+  const amdgpu::AddressSpaceHandle handle = gpu_vm.register_translated(7, first, first);
+  ASSERT_TRUE(handle);
+  const std::optional<amdgpu::GpuVmAccess> first_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(first_access);
+
+  const auto first_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(first_fetch, [](uint8_t byte) { return byte == 0x11; }));
+
+  auto replacement = std::make_shared<ExecutableAddressSpace>(0x22);
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, replacement, replacement));
+  const std::optional<amdgpu::GpuVmAccess> replacement_access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(replacement_access);
+  EXPECT_NE(first_access->cache_namespace(), replacement_access->cache_namespace());
+
+  const auto replacement_fetch = fetch_at(icache, *replacement_access);
+  EXPECT_TRUE(std::ranges::all_of(replacement_fetch, [](uint8_t byte) { return byte == 0x22; }));
+  const auto retained_old_fetch = fetch_at(icache, *first_access);
+  EXPECT_TRUE(std::ranges::all_of(retained_old_fetch, [](uint8_t byte) { return byte == 0x11; }));
 }
 
 // A working set larger than the cache must still read correctly once lines

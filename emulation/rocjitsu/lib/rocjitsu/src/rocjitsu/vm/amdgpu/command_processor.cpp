@@ -5,6 +5,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
@@ -37,6 +38,18 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 namespace amdgpu {
+
+CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {
+  // Bind the doorbell handler at construction, not in startup(): register_queue()
+  // may start the doorbell poll thread (which fires doorbell_event_ via
+  // schedule_event_now) as soon as a host-accessible queue is registered, which can
+  // happen before startup() runs. Binding here removes that ordering hazard — a
+  // handlerless doorbell_event_ would be silently dropped by the engine.
+  doorbell_event_.set_handler(
+      [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+}
+
+CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
@@ -290,16 +303,15 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // the legacy layout: kernarg at s[0:1].
   int flat_scratch_init_sgpr = -1;
   if (kcp != 0) {
+    const auto launch_metadata = dispatch_launch_metadata_.find(pkt.dispatch_id);
+    if (pkt.queue_ptr != 0 && launch_metadata == dispatch_launch_metadata_.end())
+      throw std::runtime_error("dispatch is missing captured launch metadata");
     uint32_t idx = 0;
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
       if (pkt.queue_ptr != 0) {
-        uint64_t srd_va = pkt.queue_ptr + offsetof(amd_queue_t, scratch_resource_descriptor);
-        const uint32_t srd0 = read_gpu_u32(srd_va + 0, pkt.process_id);
-        const uint32_t srd1 = read_gpu_u32(srd_va + 4, pkt.process_id);
-        cu->write_sgpr(sbase + idx + 0, srd0);
-        cu->write_sgpr(sbase + idx + 1, srd1);
-        cu->write_sgpr(sbase + idx + 2, read_gpu_u32(srd_va + 8, pkt.process_id));
-        cu->write_sgpr(sbase + idx + 3, read_gpu_u32(srd_va + 12, pkt.process_id));
+        for (uint32_t word = 0; word < 4; ++word)
+          cu->write_sgpr(sbase + idx + word,
+                         launch_metadata->second.scratch_resource_descriptor[word]);
       }
       idx += 4;
     }
@@ -321,11 +333,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       idx += 2;
     }
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID)) {
-      uint64_t dispatch_id = 0;
-      if (pkt.queue_ptr != 0) {
-        uint64_t wdi_va = pkt.queue_ptr + offsetof(amd_queue_t, write_dispatch_id);
-        dispatch_id = read_gpu_u64(wdi_va, pkt.process_id);
-      }
+      const uint64_t dispatch_id =
+          pkt.queue_ptr == 0 ? 0 : launch_metadata->second.write_dispatch_id;
       cu->write_sgpr(sbase + idx, static_cast<uint32_t>(dispatch_id));
       cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(dispatch_id >> 32));
       idx += 2;
@@ -549,13 +558,13 @@ void CommandProcessor::startup() {
            "CommandProcessor and its compute units must share one partition");
   // doorbell_event_'s handler is bound in the constructor (see there) so it is live
   // before register_queue() can start the poll thread; nothing to (re)bind here.
-  completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
+  completion_ = std::make_unique<CompletionTracker>(memory_, gpu_vm_, cus_);
   completion_->set_plugin_group(plugin_group_);
-  completion_->set_dispatch_retired_callback(
-      [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
+  completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
+    erase_cluster_workgroups(entry.dispatch_id);
+    dispatch_launch_metadata_.erase(entry.dispatch_id);
+  });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
-  if (interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
 }
 
 void CommandProcessor::shutdown() {
@@ -587,6 +596,11 @@ HwQueueState *CommandProcessor::find_queue_state(uint32_t queue_id, uint32_t pro
 }
 
 void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
+  accept_fanout_shard(std::move(shard), {});
+}
+
+void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
+                                           DispatchLaunchMetadata launch_metadata) {
   {
     util::Logger::cp([&](auto &os) {
       os << std::format("{}: FANOUT_SHARD d={} rank={}/{} wgs={}", name(), shard.dispatch_id,
@@ -599,6 +613,8 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
     // hw_queue_mutex_ is acquired while holding this one, and it is held only for
     // the push so a peer's engine thread never blocks on it for long.
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    if (!shard.is_non_kernel())
+      fanout_launch_metadata_inbox_.insert_or_assign(shard.dispatch_id, std::move(launch_metadata));
     fanout_inbox_.push_back(std::move(shard));
   }
   // Cross-thread and cross-partition safe: the engine buffers the event and drains
@@ -608,11 +624,33 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
     engine()->schedule_event_now(doorbell_event());
 }
 
+void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
+  {
+    std::lock_guard<std::mutex> lock(dispatch_fault_inbox_mutex_);
+    dispatch_fault_inbox_.push_back(fault);
+  }
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::drain_dispatch_fault_inbox() {
+  std::vector<DispatchFaultNotification> faults;
+  {
+    std::lock_guard<std::mutex> lock(dispatch_fault_inbox_mutex_);
+    faults.swap(dispatch_fault_inbox_);
+  }
+  for (const DispatchFaultNotification &fault : faults) {
+    (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id, fault.outcome);
+  }
+}
+
 void CommandProcessor::drain_fanout_inbox() {
   std::vector<DispatchEntry> inbox;
+  std::unordered_map<uint32_t, DispatchLaunchMetadata> launch_metadata;
   {
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
     inbox.swap(fanout_inbox_);
+    launch_metadata.swap(fanout_launch_metadata_inbox_);
   }
   // Real work arrived: the next wait this CP takes starts from a tight re-check.
   // Reset here rather than in accept_fanout_shard(), which runs on the OWNER's
@@ -626,8 +664,10 @@ void CommandProcessor::drain_fanout_inbox() {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   for (auto &shard : inbox) {
-    auto *qs = find_queue_state(shard.queue_id, shard.process_id);
-    if (!qs) {
+    const auto queue = std::ranges::find_if(hw_queues_, [&](const HwQueue &candidate) {
+      return candidate.queue_id == shard.queue_id && candidate.process_id == shard.process_id;
+    });
+    if (queue == hw_queues_.end()) {
       // The replica was destroyed between the owner handing this shard over and
       // this drain. Drop it, exactly as unregister_queue drops a share it never
       // published: these workgroups have not run and this XCD's caches have not
@@ -642,12 +682,26 @@ void CommandProcessor::drain_fanout_inbox() {
       // already-scheduled peer doorbell can drain concurrently.
       continue;
     }
+    // A terminal VM fault closes execution admission for the queue. A peer may
+    // already have emitted another shard before it observed the shared fault;
+    // dropping it here prevents future work from appearing behind the fault.
+    if (queue->faulted)
+      continue;
+    auto &qs = new_queue_states_[static_cast<size_t>(queue - hw_queues_.begin())];
     // Honour the packet's acquire fence on this XCD too. The owner invalidated
     // only its own CUs; this runs on our partition's thread, so ours are safe
     // to touch here and the peer ends up with the same view the owner has.
     if (shard.acquire_invalidate)
       flush_gpu_caches();
-    qs->push_entry(std::move(shard));
+    if (!shard.is_non_kernel()) {
+      const auto metadata = launch_metadata.find(shard.dispatch_id);
+      if (metadata == launch_metadata.end()) {
+        queue->faulted = true;
+        continue;
+      }
+      dispatch_launch_metadata_.insert_or_assign(shard.dispatch_id, std::move(metadata->second));
+    }
+    qs.push_entry(std::move(shard));
   }
 }
 
@@ -661,7 +715,8 @@ void CommandProcessor::wake_all_xcds() {
   }
 }
 
-void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
+void CommandProcessor::fan_out_dispatch(DispatchEntry &dp,
+                                        const DispatchLaunchMetadata &launch_metadata) {
   const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
   if (num_xcds <= 1)
     return;
@@ -680,7 +735,7 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
     // does that once the grid counter shows every share retired.
     shard.completion_signal = 0;
     shard.apply_shard(XcdShard(rank, num_xcds));
-    xcd_peers_[rank]->accept_fanout_shard(std::move(shard));
+    xcd_peers_[rank]->accept_fanout_shard(std::move(shard), launch_metadata);
   }
 
   dp.grid_completion = std::move(grid);
@@ -703,7 +758,7 @@ void CommandProcessor::replicate_non_kernel_entry(const DispatchEntry &dp) {
   }
 }
 
-void CommandProcessor::register_queue(HwQueue queue) {
+uint64_t CommandProcessor::register_queue(HwQueue queue) {
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
                       "doorbell_off={} is_sdma={} db_base={}",
@@ -715,10 +770,10 @@ void CommandProcessor::register_queue(HwQueue queue) {
   // queue. It must never read the ring or poll the doorbell, or the same packets
   // would be dispatched once per XCD.
   bool start_poll = queue.host_accessible && !queue.fanout_replica;
-  // Replicate onto the peer XCDs before taking the lock: accept_fanout_shard()
-  // and the peers' register_queue() take their own locks, and a shard can arrive
-  // only after this returns, so there is no window where a peer has work but no
-  // queue state.
+  // Replicate onto the peer XCDs without holding this CP's lock:
+  // accept_fanout_shard() and the peers' register_queue() take their own locks.
+  // A shard can arrive only after this function returns, so the owner may be
+  // committed last without exposing an incomplete topology.
   {
     // Checked before replicating, so a rejection cannot leave replicas behind on
     // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
@@ -732,26 +787,100 @@ void CommandProcessor::register_queue(HwQueue queue) {
                       "registered, and fan-out routes dispatch shards by that key",
                       name(), queue.queue_id, queue.process_id));
     }
+    queue.registration_id = next_queue_registration_id_++;
+    if (next_queue_registration_id_ == 0)
+      next_queue_registration_id_ = 1;
   }
   const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
   bool replicate = queue.xcd_fanout && num_xcds > 1;
+  std::vector<uint32_t> registered_peer_ranks;
   if (replicate) {
-    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
-      if (rank == xcd_rank_)
-        continue;
-      HwQueue replica = queue;
-      replica.xcd_fanout = false;
-      replica.fanout_replica = true;
-      xcd_peers_[rank]->register_queue(std::move(replica));
+    registered_peer_ranks.reserve(num_xcds - 1);
+    try {
+      for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+        if (rank == xcd_rank_)
+          continue;
+        HwQueue replica = queue;
+        replica.registration_id = 0;
+        replica.xcd_fanout = false;
+        replica.fanout_replica = true;
+        xcd_peers_[rank]->register_queue(std::move(replica));
+        registered_peer_ranks.push_back(rank);
+      }
+    } catch (...) {
+      for (const uint32_t rank : registered_peer_ranks)
+        xcd_peers_[rank]->unregister_queue(queue.queue_id, queue.process_id);
+      throw;
     }
   }
-  {
+  try {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    if (find_queue_state(queue.queue_id, queue.process_id) != nullptr) {
+      throw std::runtime_error(
+          std::format("duplicate queue registration on {}: queue_id={} process_id={} is already "
+                      "registered, and fan-out routes dispatch shards by that key",
+                      name(), queue.queue_id, queue.process_id));
+    }
     HwQueueState qs{};
     qs.queue_desc_va = queue.queue_desc_va;
+    qs.address_space = queue.address_space;
+    qs.interrupt_sink = queue.interrupt_sink;
     qs.fanout_replica = queue.fanout_replica;
-    hw_queues_.push_back(std::move(queue));
-    new_queue_states_.push_back(std::move(qs));
+    hw_queues_.push_back(queue);
+    try {
+      new_queue_states_.push_back(std::move(qs));
+      if (queue.is_sdma) {
+        if (gpu_vm_ == nullptr)
+          throw std::runtime_error("cannot register an SDMA queue without a GPU VM");
+        SdmaExecutorCallbacks callbacks{
+            .poll_register =
+                [](uint32_t, uint32_t, uint32_t, uint32_t) {
+                  // The legacy/interposer CP has no MMIO register surface. Its
+                  // historical functional model treats register polls as already
+                  // satisfied; PCI supplies a real register-backed callback.
+                  return VmAccessOutcome::Complete;
+                },
+            .write_register = {},
+            .deliver_interrupt =
+                [interrupt_sink = queue.interrupt_sink,
+                 process_id = queue.process_id](uint32_t event_id) {
+                  interrupt_sink.deliver(process_id, event_id);
+                  return VmAccessOutcome::Complete;
+                },
+            .maintain_caches =
+                [this](SdmaCacheOperation operation) {
+                  if (operation == SdmaCacheOperation::Invalidate)
+                    invalidate_gpu_caches();
+                  else
+                    flush_gpu_caches();
+                },
+            .timestamp =
+                [] {
+                  const auto now = std::chrono::steady_clock::now().time_since_epoch();
+                  return static_cast<uint64_t>(
+                      std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+                },
+        };
+        sdma_queue_runtimes_.emplace(
+            queue.registration_id,
+            SdmaQueueRuntime{.runner = std::make_unique<SdmaQueueRunner>(
+                                 *gpu_vm_,
+                                 SdmaQueueRunnerConfig{
+                                     .address_space = queue.address_space,
+                                     .ring_base = queue.ring_base_va,
+                                     .ring_bytes = queue.ring_size,
+                                     .read_pointer_address = queue.read_ptr_va,
+                                     .initial_cursor = queue.initial_read_pointer,
+                                 },
+                                 sdma_packet_dialect_, std::move(callbacks))});
+      }
+    } catch (...) {
+      sdma_queue_runtimes_.erase(queue.registration_id);
+      if (new_queue_states_.size() == hw_queues_.size())
+        new_queue_states_.pop_back();
+      hw_queues_.pop_back();
+      throw;
+    }
     // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
     // queues (no host-accessible queue anywhere on this CP) need the CP to own the
     // primary lifecycle. Gate on the same aggregate predicate as the teardown
@@ -768,6 +897,10 @@ void CommandProcessor::register_queue(HwQueue queue) {
       engine()->primary_release();
       is_primary_ = false;
     }
+  } catch (...) {
+    for (const uint32_t rank : registered_peer_ranks)
+      xcd_peers_[rank]->unregister_queue(queue.queue_id, queue.process_id);
+    throw;
   }
   // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
   // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
@@ -777,12 +910,45 @@ void CommandProcessor::register_queue(HwQueue queue) {
   // schedule_event_now() and need no monitor.
   if (start_poll)
     ensure_doorbell_monitor();
+  return queue.registration_id;
+}
+
+void CommandProcessor::notify_queue_doorbell(uint64_t registration_id, uint64_t value) {
+  if (registration_id == 0)
+    return;
+  {
+    // Transport callbacks never wait behind queue execution.  The owner thread
+    // validates the stable registration id when it drains this leaf inbox.
+    std::lock_guard lock(doorbell_inbox_mutex_);
+    doorbell_inbox_.push_back({.registration_id = registration_id, .value = value});
+  }
+  if (engine())
+    engine()->schedule_event_now(&doorbell_event_);
+}
+
+void CommandProcessor::drain_doorbell_inbox() {
+  std::vector<DoorbellNotification> notifications;
+  {
+    std::lock_guard lock(doorbell_inbox_mutex_);
+    notifications.swap(doorbell_inbox_);
+  }
+  if (notifications.empty())
+    return;
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (const DoorbellNotification &notification : notifications) {
+    const auto queue =
+        std::ranges::find(hw_queues_, notification.registration_id, &HwQueue::registration_id);
+    if (queue != hw_queues_.end())
+      queue->last_doorbell = notification.value;
+  }
 }
 
 bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
                                               uint64_t status) {
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
+  InterruptSink interrupt_sink;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
     auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
@@ -792,11 +958,11 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
       return false;
     exception_status_va = queue->exception_status_va;
     exception_event_id = queue->exception_event_id;
+    interrupt_sink = queue->interrupt_sink;
   }
 
   memory_->write64(exception_status_va, status, process_id);
-  if (interrupt_cb_)
-    interrupt_cb_(process_id, exception_event_id);
+  interrupt_sink.deliver(process_id, exception_event_id);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   while (memory_->read64(exception_status_va, process_id) == status &&
          std::chrono::steady_clock::now() < deadline)
@@ -838,6 +1004,9 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
     for (size_t i = 0; i < hw_queues_.size(); ++i) {
       if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
         drop_replicas = hw_queues_[i].xcd_fanout;
+        sdma_queue_runtimes_.erase(hw_queues_[i].registration_id);
+        for (const DispatchEntry &entry : new_queue_states_[i].entries)
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
         // Any shares still unpublished here are simply dropped. They cannot be
         // credited to the grid from this thread: publish_share is the release edge
         // that must follow this XCD's cache write-back, and flushing walks cus_,
@@ -884,12 +1053,30 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
   const bool suspended = queue_percentage == 0;
   bool changed = false;
   bool wake_command_processor = false;
+  bool update_replicas = false;
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     for (auto &q : hw_queues_) {
       if (q.queue_id == queue_id && q.process_id == process_id) {
+        const bool ring_changed = q.ring_base_va != ring_base_va || q.ring_size != ring_size;
         q.ring_base_va = ring_base_va;
         q.ring_size = ring_size;
+        if (ring_changed && q.is_sdma) {
+          if (const auto runtime = sdma_queue_runtimes_.find(q.registration_id);
+              runtime != sdma_queue_runtimes_.end()) {
+            // Reprogramming the ring cannot discard a partially committed
+            // packet and then allow it to be fetched again from an unchanged
+            // external read pointer. Fail closed if teardown did not first
+            // quiesce the queue; a clean idle rebind starts from the newly
+            // programmed read pointer on its next service pass.
+            SdmaQueueRunnerConfig config = runtime->second.runner->config();
+            config.ring_base = ring_base_va;
+            config.ring_bytes = ring_size;
+            config.initial_cursor.reset();
+            q.faulted = !runtime->second.runner->reconfigure(std::move(config));
+          }
+        }
+        update_replicas = q.xcd_fanout;
         changed = q.runtime_suspended != suspended;
         q.runtime_suspended = suspended;
         // Only consume the deferral once *no* reason still gates the queue.
@@ -901,6 +1088,14 @@ void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
           wake_command_processor = std::exchange(q.debug_work_deferred, false);
         break;
       }
+    }
+  }
+  if (update_replicas) {
+    const uint32_t num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (rank != xcd_rank_)
+        xcd_peers_[rank]->update_queue(queue_id, process_id, ring_base_va, ring_size,
+                                       queue_percentage);
     }
   }
   if (!changed)
@@ -1015,41 +1210,83 @@ void CommandProcessor::stop_doorbell_monitor_if_idle() {
   doorbell_running_ = false;
 }
 
-uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
+AtomicLoadResult CommandProcessor::read_gpu_u64(AddressSpaceHandle address_space, uint64_t va,
+                                                uint32_t vmid) const {
   uint64_t val = 0;
+  if (address_space) {
+    if (gpu_vm_ == nullptr)
+      return {.outcome = VmAccessOutcome::Faulted, .value = 0};
+    if ((va & (alignof(uint64_t) - 1)) != 0) {
+      const VmAccessOutcome outcome = read_gpu_block(address_space, va, &val, sizeof(val), vmid);
+      return {.outcome = outcome, .value = val};
+    }
+    const AtomicLoadResult atomic = gpu_vm_->atomic_load(address_space, va, sizeof(val));
+    return atomic;
+  }
+  if (memory_ == nullptr)
+    return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
   // Ring pointers and signal values are 64-bit locations the host publishes with a
   // single atomic store, so read them with a single atomic load where the mapping
   // allows it. The byte walk below can observe a half-updated value, and it also
   // leaves this CP with no ordering edge to the writer -- which is why the packets a
   // new write index publishes were being read unsynchronized as well.
   if (memory_->try_read_u64_atomic(va, &val, vmid))
-    return val;
+    return {.outcome = VmAccessOutcome::Complete, .value = val};
   // Fall back for a split, unaligned or page-crossing range: those cannot be read
   // atomically, and the byte walk resolves each byte's mapping independently.
   auto *dst = reinterpret_cast<uint8_t *>(&val);
   for (uint32_t i = 0; i < sizeof(val); ++i)
     dst[i] = memory_->read8(va + i, vmid);
-  return val;
+  return {.outcome = VmAccessOutcome::Complete, .value = val};
 }
 
-uint32_t CommandProcessor::read_gpu_u32(uint64_t va, uint32_t vmid) const {
+AtomicLoadResult CommandProcessor::read_gpu_u32(AddressSpaceHandle address_space, uint64_t va,
+                                                uint32_t vmid) const {
   uint32_t val = 0;
+  if (address_space) {
+    if (gpu_vm_ == nullptr)
+      return {.outcome = VmAccessOutcome::Faulted, .value = 0};
+    const VmAccessOutcome outcome = read_gpu_block(address_space, va, &val, sizeof(val), vmid);
+    return {.outcome = outcome, .value = val};
+  }
+  if (memory_ == nullptr)
+    return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
   auto *dst = reinterpret_cast<uint8_t *>(&val);
   for (uint32_t i = 0; i < sizeof(val); ++i)
     dst[i] = memory_->read8(va + i, vmid);
-  return val;
+  return {.outcome = VmAccessOutcome::Complete, .value = val};
 }
 
-void CommandProcessor::read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const {
+VmAccessOutcome CommandProcessor::read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
+                                                 void *dst, size_t size, uint32_t vmid) const {
+  if (address_space) {
+    if (gpu_vm_ == nullptr)
+      return VmAccessOutcome::Faulted;
+    return gpu_vm_->read(address_space, va,
+                         std::span<std::byte>(static_cast<std::byte *>(dst), size));
+  }
+  if (memory_ == nullptr)
+    return VmAccessOutcome::Unavailable;
   auto *p = static_cast<uint8_t *>(dst);
   for (size_t i = 0; i < size; ++i)
     p[i] = memory_->read8(va + i, vmid);
+  return VmAccessOutcome::Complete;
 }
 
-amdgpu::AccessOutcome CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size,
-                                                        uint32_t vmid) {
+VmAccessOutcome CommandProcessor::write_gpu_block(AddressSpaceHandle address_space, uint64_t va,
+                                                  const void *src, size_t size, uint32_t vmid) {
+  if (address_space) {
+    if (gpu_vm_ == nullptr)
+      return VmAccessOutcome::Faulted;
+    return gpu_vm_->write(address_space, va,
+                          std::span<const std::byte>(static_cast<const std::byte *>(src), size));
+  }
+  if (memory_ == nullptr)
+    return VmAccessOutcome::Unavailable;
   return memory_->write_block(va, std::span<const uint8_t>(static_cast<const uint8_t *>(src), size),
-                              vmid);
+                              vmid) == AccessOutcome::Complete
+             ? VmAccessOutcome::Complete
+             : VmAccessOutcome::Faulted;
 }
 
 /// @brief Scan all HW queues for doorbell changes; return true if any changed.
@@ -1072,7 +1309,14 @@ bool CommandProcessor::scan_doorbells() {
     } else {
       if (q.doorbell_va == 0)
         continue;
-      val = read_gpu_u64(q.doorbell_va, q.process_id);
+      const AtomicLoadResult loaded = read_gpu_u64(q.address_space, q.doorbell_va, q.process_id);
+      if (loaded.outcome == VmAccessOutcome::Unavailable)
+        continue;
+      if (loaded.outcome != VmAccessOutcome::Complete) {
+        q.faulted = true;
+        continue;
+      }
+      val = loaded.value;
     }
     if (val != q.last_doorbell) {
       util::Logger::cp([&](auto &os) {
@@ -1128,12 +1372,12 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     // signal. Re-broadcasting every ~10ms ensures late-created events see
     // the idle state within a bounded window.
     if (poll_count % 100 == 0) {
-      // Snapshot the idle queues' process ids under the lock, then fire interrupt_cb_
-      // OUTSIDE it. interrupt_cb_ is an external KFD-layer callback whose internal
+      // Snapshot the idle queues' process ids under the lock, then deliver interrupts
+      // OUTSIDE it. Subscribers are external frontend callbacks whose internal
       // locking is opaque to the CP; invoking it while holding hw_queue_mutex_ risks a
       // lock-order inversion if that callback ever takes a lock held elsewhere while
       // acquiring hw_queue_mutex_.
-      std::vector<uint32_t> idle_pids;
+      std::vector<std::pair<InterruptSink, uint32_t>> idle_queues;
       {
         std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
         for (size_t i = 0; i < hw_queues_.size(); ++i) {
@@ -1143,12 +1387,11 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
           if (hw_queues_[i].fanout_replica)
             continue;
           if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0)
-            idle_pids.push_back(hw_queues_[i].process_id);
+            idle_queues.emplace_back(hw_queues_[i].interrupt_sink, hw_queues_[i].process_id);
         }
       }
-      if (interrupt_cb_)
-        for (uint32_t pid : idle_pids)
-          interrupt_cb_(pid, 0);
+      for (const auto &[interrupt_sink, process_id] : idle_queues)
+        interrupt_sink.deliver(process_id, 0);
     }
 
     if (poll_count % 5000 == 1) {
@@ -1161,7 +1404,12 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
                                                       q.doorbell_offset))
                         .load(std::memory_order_acquire);
         } else if (!q.host_accessible && q.doorbell_va != 0) {
-          current = read_gpu_u64(q.doorbell_va, q.process_id);
+          const AtomicLoadResult loaded =
+              read_gpu_u64(q.address_space, q.doorbell_va, q.process_id);
+          if (loaded.outcome == VmAccessOutcome::Complete)
+            current = loaded.value;
+          else if (loaded.outcome != VmAccessOutcome::Unavailable)
+            q.faulted = true;
         }
         util::Logger::cp([&](auto &os) {
           os << std::format("{}: DOORBELL_POLL pid={} qid={} current={:#x} last={:#x} "
@@ -1182,7 +1430,7 @@ HwQueueState *CommandProcessor::schedule_next_queue() {
   for (size_t i = 0; i < new_queue_states_.size(); ++i) {
     size_t idx = (start + i) % new_queue_states_.size();
     auto &qs = new_queue_states_[idx];
-    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
+    if (hw_queues_[idx].faulted || hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
         hw_queues_[idx].runtime_suspended)
       continue;
     if (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1479,6 +1727,12 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
 uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
 
+  // A peer can publish the shared terminal-fault latch before this CP drains
+  // its fault inbox. Stop placement as soon as that publication is visible;
+  // the inbox drain will remove the entry and abort any waves already resident.
+  if (entry.grid_faulted())
+    return 0;
+
   // All waves in one workgroup currently land on one physical CU so the
   // existing barrier implementation remains local. WGP mode additionally
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
@@ -1562,6 +1816,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_aql_packet_id(entry.aql_packet_id);
       wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
+      wf->set_address_space(entry.address_space);
       wf->set_process_id(entry.process_id);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
@@ -1596,6 +1851,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   };
 
   while (entry.dispatched_wgs < entry.total_wgs) {
+    if (entry.grid_faulted())
+      break;
     if (entry.has_workgroup_clusters()) {
       assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
       // The SPI interface chooses one WG at a time and cannot reserve all peers
@@ -1631,6 +1888,16 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       committed_peers.reserve(plan.size());
       try {
         for (const auto &wg : plan) {
+          if (entry.grid_faulted()) {
+            for (const auto &[cu, gwg] : committed_peers) {
+              erase_cluster_workgroup(entry.dispatch_id, gwg);
+              cu->abort_workgroup(entry.dispatch_id, gwg);
+            }
+            const uint32_t rolled_back = static_cast<uint32_t>(committed_peers.size());
+            entry.dispatched_wgs -= rolled_back;
+            dispatched -= rolled_back;
+            return dispatched;
+          }
           ShaderProcessorInput::WorkgroupPlacement placement{
               wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
           if (!dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement))
@@ -1712,8 +1979,124 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
   mark_cluster_workgroup_complete(dispatch_id, wg_id);
   {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (completion_)
+    if (completion_) {
       completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
+      (void)drain_completions();
+    }
+  }
+}
+
+bool CommandProcessor::drain_completions() {
+  if (!completion_)
+    return true;
+
+  bool stop_processing = false;
+  bool retry_pending = false;
+  for (;;) {
+    const CompletionDrainResult result = completion_->drain_completions(new_queue_states_);
+    retry_pending |= result.retry_pending;
+    if (!result.terminal_fault)
+      break;
+
+    stop_processing = true;
+    const CompletionDrainFault &fault = *result.terminal_fault;
+    if (!fault.queue_idle) {
+      notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id, fault.outcome);
+      continue;
+    }
+
+    const auto queue = std::ranges::find_if(hw_queues_, [&](const HwQueue &candidate) {
+      return candidate.queue_id == fault.queue_id && candidate.process_id == fault.process_id;
+    });
+    if (queue != hw_queues_.end())
+      queue->faulted = true;
+  }
+
+  if (retry_pending) {
+    arm_stall_recheck(engine()->context(partition_id()).current_tick());
+  }
+  return !stop_processing;
+}
+
+bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
+                                            uint64_t dispatch_id, VmAccessOutcome outcome) {
+  bool found = false;
+  {
+    // A shard may still be in transit from its owner. Remove it under the leaf
+    // inbox lock without taking the queue lock, preserving the existing
+    // cross-CP lock ordering.
+    std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    const auto old_size = fanout_inbox_.size();
+    std::erase_if(fanout_inbox_, [&](DispatchEntry &entry) {
+      if (entry.queue_id != queue_id || entry.process_id != process_id ||
+          entry.dispatch_id != dispatch_id)
+        return false;
+      entry.terminal_faulted = true;
+      if (entry.grid_completion)
+        entry.grid_completion->mark_faulted();
+      fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
+      return true;
+    });
+    found = fanout_inbox_.size() != old_size;
+  }
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  const auto queue = std::ranges::find_if(hw_queues_, [&](const HwQueue &candidate) {
+    return candidate.queue_id == queue_id && candidate.process_id == process_id;
+  });
+  if (queue == hw_queues_.end())
+    return false;
+  const size_t queue_index = static_cast<size_t>(queue - hw_queues_.begin());
+  HwQueueState &state = new_queue_states_[queue_index];
+
+  size_t index = 0;
+  for (auto entry = state.entries.begin(); entry != state.entries.end();) {
+    if (entry->dispatch_id != dispatch_id) {
+      ++entry;
+      ++index;
+      continue;
+    }
+    found = true;
+    entry->terminal_faulted = true;
+    if (entry->grid_completion)
+      entry->grid_completion->mark_faulted();
+    if (index < state.next_dispatch_idx)
+      --state.next_dispatch_idx;
+    entry = state.entries.erase(entry);
+  }
+  if (!found)
+    return false;
+
+  dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
+  queue->faulted = true;
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+  });
+  erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
+  for (auto *cu : cus_)
+    cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  return true;
+}
+
+void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id,
+                                                uint64_t dispatch_id, VmAccessOutcome outcome) {
+  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable ||
+      dispatch_id > std::numeric_limits<uint32_t>::max())
+    return;
+
+  if (!fault_dispatch_local(queue_id, process_id, dispatch_id, outcome))
+    return;
+  // A fault can originate on any shard. Cross-XCD delivery uses a leaf inbox
+  // and the peer's event thread, exactly like dispatch fan-out, so this path
+  // never acquires another CP's queue mutex.
+  for (CommandProcessor *peer : xcd_peers_) {
+    if (peer != nullptr && peer != this) {
+      peer->accept_dispatch_fault({.queue_id = queue_id,
+                                   .process_id = process_id,
+                                   .dispatch_id = dispatch_id,
+                                   .outcome = outcome});
+    }
   }
 }
 
@@ -1728,13 +2111,14 @@ void CommandProcessor::on_cu_idle() {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
 
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
+  if (!drain_completions())
+    return;
 
   // Retire any non-kernel entries (barrier-kind packets) that are now at
   // the head, then drain again so a dependent kernel behind them can proceed.
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].faulted || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended || new_queue_states_[qi].publication_retry_pending)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1747,8 +2131,8 @@ void CommandProcessor::on_cu_idle() {
       ++qs.next_dispatch_idx;
     }
   }
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
+  if (!drain_completions())
+    return;
 
   // Continue dispatching pending workgroups onto the just-freed CU in this same
   // tick rather than deferring to a now+1 doorbell event. Deferring routed every
@@ -1762,7 +2146,8 @@ void CommandProcessor::on_cu_idle() {
   for (size_t i = 0; i < cus_.size(); ++i)
     was_idle[i] = cus_[i]->is_idle();
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].faulted || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended || new_queue_states_[qi].publication_retry_pending)
       continue;
     auto &qs = new_queue_states_[qi];
     if (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1794,8 +2179,8 @@ bool CommandProcessor::step() {
 
 void CommandProcessor::process_queues() {
   for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
-    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-        hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].faulted || hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended || new_queue_states_[qi].publication_retry_pending)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -1819,14 +2204,14 @@ void CommandProcessor::process_queues() {
   }
 }
 
-rocr::llvm::amdhsa::kernel_descriptor_t
-CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
-                                         [[maybe_unused]] bool host_accessible) {
+CommandProcessor::KernelDescriptorReadResult
+CommandProcessor::read_kernel_descriptor(AddressSpaceHandle address_space, uint64_t kernel_object,
+                                         uint32_t vmid) const {
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};
-  if (memory_)
-    read_gpu_block(kernel_object, &kd, sizeof(kd), vmid);
-  return kd;
+  const VmAccessOutcome outcome =
+      read_gpu_block(address_space, kernel_object, &kd, sizeof(kd), vmid);
+  return {.outcome = outcome, .descriptor = kd};
 }
 
 /// Scan backward from ptr to find the ELF header (\x7fELF) at a page boundary.
@@ -1840,15 +2225,18 @@ static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
   return nullptr;
 }
 
-void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
-                                          const HwQueue &queue, uint64_t pkt_addr,
-                                          uint32_t queue_packet_id, HwQueueState &qs,
-                                          uint64_t aql_packet_id,
-                                          ClusterDispatchShape cluster_shape) {
+VmAccessOutcome CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
+                                                     const HwQueue &queue, uint64_t pkt_addr,
+                                                     uint32_t queue_packet_id, HwQueueState &qs,
+                                                     uint64_t aql_packet_id,
+                                                     ClusterDispatchShape cluster_shape) {
   bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
-  kernel_descriptor_t kd =
-      read_kernel_descriptor(pkt.kernel_object, queue.process_id, host_accessible);
+  const KernelDescriptorReadResult descriptor =
+      read_kernel_descriptor(queue.address_space, pkt.kernel_object, queue.process_id);
+  if (descriptor.outcome != VmAccessOutcome::Complete)
+    return descriptor.outcome;
+  const kernel_descriptor_t &kd = descriptor.descriptor;
   uint32_t vgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   uint32_t sgpr_gran =
@@ -1877,11 +2265,49 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       util::ceil_div_or_one(pkt.grid_size_z, static_cast<uint32_t>(pkt.workgroup_size_z));
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
+  DispatchLaunchMetadata launch_metadata{};
+  uint64_t queue_ptr = 0;
+  uint64_t scratch_backing_addr = 0;
+  if (host_accessible) {
+    queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
+    if (AMDHSA_BITS_GET(kd.kernel_code_properties,
+                        KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+      const uint64_t descriptor_va = queue_ptr + offsetof(amd_queue_t, scratch_resource_descriptor);
+      const VmAccessOutcome outcome = read_gpu_block(
+          queue.address_space, descriptor_va, launch_metadata.scratch_resource_descriptor.data(),
+          sizeof(launch_metadata.scratch_resource_descriptor), queue.process_id);
+      if (outcome != VmAccessOutcome::Complete)
+        return outcome;
+    }
+    if (AMDHSA_BITS_GET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID)) {
+      const uint64_t dispatch_id_va = queue_ptr + offsetof(amd_queue_t, write_dispatch_id);
+      const AtomicLoadResult loaded =
+          read_gpu_u64(queue.address_space, dispatch_id_va, queue.process_id);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return loaded.outcome;
+      launch_metadata.write_dispatch_id = loaded.value;
+    }
+
+    const uint32_t private_segment_fixed_size =
+        std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+    if (private_segment_fixed_size > 0) {
+      const uint64_t scratch_loc_va =
+          queue_ptr + offsetof(amd_queue_t, scratch_backing_memory_location);
+      const AtomicLoadResult loaded =
+          read_gpu_u64(queue.address_space, scratch_loc_va, queue.process_id);
+      if (loaded.outcome != VmAccessOutcome::Complete)
+        return loaded.outcome;
+      scratch_backing_addr = loaded.value;
+    }
+  }
+
   DispatchEntry dp{};
   dp.dispatch_id = allocate_dispatch_id();
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.queue_packet_id = queue_packet_id;
+  dp.address_space = queue.address_space;
+  dp.interrupt_sink = queue.interrupt_sink;
   dp.process_id = queue.process_id;
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
   dp.kernel_entry_pc = entry_pc;
@@ -1940,11 +2366,11 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // The queue_ptr and dispatch_ptr are GPU VAs that the kernel reads via SMEM.
   if (host_accessible) {
     dp.dispatch_ptr = pkt_addr;
-    dp.queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
+    dp.queue_ptr = queue_ptr;
     if (dp.private_segment_fixed_size > 0) {
       uint64_t scratch_loc_va =
           dp.queue_ptr + offsetof(amd_queue_t, scratch_backing_memory_location);
-      dp.scratch_backing_addr = read_gpu_u64(scratch_loc_va, queue.process_id);
+      dp.scratch_backing_addr = scratch_backing_addr;
       if (dp.scratch_backing_addr == 0 && scratch_resolver_)
         dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
 
@@ -1986,9 +2412,11 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
         const uint32_t wavesize_mask =
             util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
         uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_field & wavesize_mask) << 12);
-        memory_->write64(scratch_loc_va, dp.scratch_backing_addr, queue.process_id);
-        memory_->write32(dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), tmpring,
-                         queue.process_id);
+        (void)write_gpu_block(queue.address_space, scratch_loc_va, &dp.scratch_backing_addr,
+                              sizeof(dp.scratch_backing_addr), queue.process_id);
+        (void)write_gpu_block(queue.address_space,
+                              dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), &tmpring,
+                              sizeof(tmpring), queue.process_id);
       }
     }
   }
@@ -2121,10 +2549,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   });
 
+  dispatch_launch_metadata_.insert_or_assign(dp.dispatch_id, launch_metadata);
   if (queue.xcd_fanout)
-    fan_out_dispatch(dp);
+    fan_out_dispatch(dp, launch_metadata);
 
   qs.push_entry(std::move(dp));
+  return VmAccessOutcome::Complete;
 }
 
 void CommandProcessor::arm_grid_wait_recheck() {
@@ -2185,18 +2615,77 @@ void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
   if (!memory_)
     return;
+  if (queue.faulted)
+    return;
   // A replica's work arrives as dispatch shards, not from the ring. Reading the
   // ring here would also advance a read pointer the owning XCD owns, and its
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
+  if (!queue.is_sdma && queue.read_pointer_publication_pending) {
+    if (!queue.read_pointer_publication_access) {
+      queue.faulted = true;
+      return;
+    }
+    const VmAccessOutcome outcome = queue.read_pointer_publication_access->atomic_store(
+        queue.read_ptr_va, sizeof(queue.pending_read_pointer), queue.pending_read_pointer);
+    if (outcome == VmAccessOutcome::Unavailable) {
+      arm_stall_recheck(now);
+      return;
+    }
+    queue.read_pointer_publication_pending = false;
+    queue.read_pointer_publication_access.reset();
+    if (outcome != VmAccessOutcome::Complete) {
+      queue.faulted = true;
+      return;
+    }
+  }
+  auto load_queue_pointer = [&](uint64_t address, uint64_t &value) {
+    const AtomicLoadResult loaded = read_gpu_u64(queue.address_space, address, queue.process_id);
+    if (loaded.outcome == VmAccessOutcome::Complete) {
+      value = loaded.value;
+      return true;
+    }
+    if (loaded.outcome == VmAccessOutcome::Unavailable)
+      arm_stall_recheck(now);
+    else
+      queue.faulted = true;
+    return false;
+  };
+  SdmaQueueRuntime *sdma_runtime = nullptr;
+  if (queue.is_sdma) {
+    const auto runtime = sdma_queue_runtimes_.find(queue.registration_id);
+    if (runtime == sdma_queue_runtimes_.end()) {
+      queue.faulted = true;
+      return;
+    }
+    sdma_runtime = &runtime->second;
+  }
+  auto load_read_pointer = [&](uint64_t &value) {
+    if (sdma_runtime != nullptr) {
+      value = sdma_runtime->runner->cursor();
+      return true;
+    }
+    return load_queue_pointer(queue.read_ptr_va, value);
+  };
   if (queue.debug_suspended || queue.runtime_suspended) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
     // was deferred. Compute queues count packets; SDMA queues count bytes.
-    const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
-    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    uint64_t write_idx = 0;
+    uint64_t read_idx = 0;
+    if (!load_read_pointer(read_idx))
+      return;
+    if (queue.is_sdma && !queue.host_accessible) {
+      // A VFIO SDMA doorbell carries the producer byte offset. Its MQD write-pointer
+      // address may itself live in the device GART aperture rather than the process
+      // address space used by the ring, so it is neither necessary nor correct to
+      // translate that address through the process page tables.
+      write_idx = queue.last_doorbell;
+    } else if (!load_queue_pointer(queue.write_ptr_va, write_idx)) {
+      return;
+    }
     const uint64_t fetch_idx = queue.is_sdma ? read_idx : std::max(read_idx, queue.fetch_cursor);
     queue.debug_work_deferred |= fetch_idx < write_idx;
     return;
@@ -2206,8 +2695,19 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
 
   // Read write and read indices. For KFD queues, pointers are in host memory
   // and can be read directly. For internal test queues, they're in GpuMemory.
-  uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
-  uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+  uint64_t write_idx = 0;
+  uint64_t read_idx = 0;
+  if (!load_read_pointer(read_idx))
+    return;
+  if (queue.is_sdma && !queue.host_accessible) {
+    // The MMIO doorbell is the authoritative producer pointer for a VFIO SDMA
+    // queue. The MQD write-pointer address can be a GART address that is not
+    // mapped in the process VM, so reading it through queue.address_space would
+    // manufacture a queue fault before the doorbell value can be consumed.
+    write_idx = queue.last_doorbell;
+  } else if (!load_queue_pointer(queue.write_ptr_va, write_idx)) {
+    return;
+  }
   util::Logger::vm([&](auto &os) {
     static uint64_t fetch_count = 0;
     if (write_idx != read_idx && ++fetch_count <= 50)
@@ -2231,9 +2731,19 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
                         queue.process_id, queue.queue_id, read_idx, write_idx,
                         write_idx - read_idx);
     });
-    if (read_idx >= write_idx)
+    if (read_idx >= write_idx && !sdma_runtime->runner->in_flight())
       return;
-    process_sdma_ring(queue, read_idx, write_idx, now);
+    switch (sdma_runtime->runner->service(write_idx)) {
+    case SdmaQueueServiceOutcome::Drained:
+      break;
+    case SdmaQueueServiceOutcome::Unavailable:
+      arm_stall_recheck(now);
+      break;
+    case SdmaQueueServiceOutcome::Faulted:
+    case SdmaQueueServiceOutcome::Malformed:
+      queue.faulted = true;
+      break;
+    }
     return;
   }
 
@@ -2266,10 +2776,15 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     uint64_t pkt_addr = queue.ring_base_va + slot * AQL_PACKET_SIZE;
 
     hsa_kernel_dispatch_packet_t pkt{};
-    {
-      auto *dst = reinterpret_cast<uint8_t *>(&pkt);
-      for (uint32_t i = 0; i < AQL_PACKET_SIZE; ++i)
-        dst[i] = memory_->read8(pkt_addr + i, queue.process_id);
+    const VmAccessOutcome packet_read =
+        read_gpu_block(queue.address_space, pkt_addr, &pkt, AQL_PACKET_SIZE, queue.process_id);
+    if (packet_read != VmAccessOutcome::Complete) {
+      process_limit = read_idx;
+      if (packet_read == VmAccessOutcome::Unavailable)
+        arm_stall_recheck(now);
+      else
+        queue.faulted = true;
+      break;
     }
 
     uint8_t pkt_type = pkt.header & 0xFF;
@@ -2313,12 +2828,20 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue, pkt_addr, slot, qs, read_idx);
+      const VmAccessOutcome outcome = process_aql_packet(pkt, queue, pkt_addr, slot, qs, read_idx);
+      if (outcome != VmAccessOutcome::Complete) {
+        process_limit = read_idx;
+        if (outcome == VmAccessOutcome::Unavailable)
+          arm_stall_recheck(now);
+        else
+          queue.faulted = true;
+        break;
+      }
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
-      constexpr uint32_t DEP_OFF = 8;
-      constexpr uint32_t SIG_OFF = 56;
       constexpr uint32_t SIG_VAL_OFF = 8;
       bool is_and = (pkt_type == HSA_PACKET_TYPE_BARRIER_AND);
+      hsa_barrier_and_packet_t barrier{};
+      std::memcpy(&barrier, &pkt, sizeof(barrier));
 
       // Non-blocking dependency check: if any dependency is unsatisfied,
       // stop fetching from this queue. The next doorbell event will retry.
@@ -2327,12 +2850,24 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
       bool deps_satisfied =
           is_and; // AND: assume true until a dep fails; OR: assume false until one passes
       bool has_deps = false;
+      bool dependency_access_failed = false;
       for (int dep = 0; dep < 5; ++dep) {
-        uint64_t dep_sig = read_gpu_u64(pkt_addr + DEP_OFF + dep * 8, queue.process_id);
+        const uint64_t dep_sig = barrier.dep_signal[dep].handle;
         if (dep_sig == 0)
           continue;
         has_deps = true;
-        auto v = static_cast<int64_t>(read_gpu_u64(dep_sig + SIG_VAL_OFF, queue.process_id));
+        const AtomicLoadResult loaded =
+            read_gpu_u64(queue.address_space, dep_sig + SIG_VAL_OFF, queue.process_id);
+        if (loaded.outcome != VmAccessOutcome::Complete) {
+          process_limit = read_idx;
+          if (loaded.outcome == VmAccessOutcome::Unavailable)
+            arm_stall_recheck(now);
+          else
+            queue.faulted = true;
+          dependency_access_failed = true;
+          break;
+        }
+        const auto v = static_cast<int64_t>(loaded.value);
         if (v > 0) {
           if (is_and) {
             deps_satisfied = false;
@@ -2345,6 +2880,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           }
         }
       }
+      if (dependency_access_failed)
+        break;
       if (!has_deps)
         deps_satisfied = true;
       util::Logger::cp([&](auto &os) {
@@ -2360,14 +2897,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         break;
       }
 
-      uint64_t sig = 0;
-      sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
-
       DispatchEntry dp{
           .dispatch_id = allocate_dispatch_id(),
           .queue_id = queue.queue_id,
+          .address_space = queue.address_space,
+          .interrupt_sink = queue.interrupt_sink,
           .process_id = queue.process_id,
-          .completion_signal = sig,
+          .completion_signal = barrier.completion_signal.handle,
           .kind = DispatchPacketKind::NonKernel,
           .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
       };
@@ -2389,8 +2925,17 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         bool condition_satisfied = true;
         if (barrier.signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
-          const auto signal_value = std::bit_cast<int64_t>(
-              read_gpu_u64(barrier.signal.handle + SIG_VAL_OFF, queue.process_id));
+          const AtomicLoadResult loaded = read_gpu_u64(
+              queue.address_space, barrier.signal.handle + SIG_VAL_OFF, queue.process_id);
+          if (loaded.outcome != VmAccessOutcome::Complete) {
+            process_limit = read_idx;
+            if (loaded.outcome == VmAccessOutcome::Unavailable)
+              arm_stall_recheck(now);
+            else
+              queue.faulted = true;
+            break;
+          }
+          const auto signal_value = std::bit_cast<int64_t>(loaded.value);
           const auto masked_value = signal_value & barrier.mask;
           switch (barrier.condition) {
           case HSA_SIGNAL_CONDITION_EQ:
@@ -2424,6 +2969,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         DispatchEntry dp{
             .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
+            .address_space = queue.address_space,
+            .interrupt_sink = queue.interrupt_sink,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
             .kind = DispatchPacketKind::NonKernel,
@@ -2436,8 +2983,17 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
       } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
         if (ext.dep_signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
-          auto v = static_cast<int64_t>(
-              read_gpu_u64(ext.dep_signal.handle + SIG_VAL_OFF, queue.process_id));
+          const AtomicLoadResult loaded = read_gpu_u64(
+              queue.address_space, ext.dep_signal.handle + SIG_VAL_OFF, queue.process_id);
+          if (loaded.outcome != VmAccessOutcome::Complete) {
+            process_limit = read_idx;
+            if (loaded.outcome == VmAccessOutcome::Unavailable)
+              arm_stall_recheck(now);
+            else
+              queue.faulted = true;
+            break;
+          }
+          const auto v = static_cast<int64_t>(loaded.value);
           util::Logger::cp([&](auto &os) {
             os << std::format("VENDOR_DEP_CHECK q={} dep_sig={:#x} val={}", queue.queue_id,
                               ext.dep_signal.handle, v);
@@ -2479,16 +3035,24 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         cluster_shape.size_x = ext.cluster_size_x;
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
-        process_aql_packet(dispatch, queue, pkt_addr, slot, qs, read_idx, cluster_shape);
+        const VmAccessOutcome outcome =
+            process_aql_packet(dispatch, queue, pkt_addr, slot, qs, read_idx, cluster_shape);
+        if (outcome != VmAccessOutcome::Complete) {
+          process_limit = read_idx;
+          if (outcome == VmAccessOutcome::Unavailable)
+            arm_stall_recheck(now);
+          else
+            queue.faulted = true;
+          break;
+        }
       } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
-        constexpr uint32_t SIG_OFF = 56;
-        const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
-
         DispatchEntry dp{
             .dispatch_id = allocate_dispatch_id(),
             .queue_id = queue.queue_id,
+            .address_space = queue.address_space,
+            .interrupt_sink = queue.interrupt_sink,
             .process_id = queue.process_id,
-            .completion_signal = sig,
+            .completion_signal = ext.completion_signal.handle,
             .kind = DispatchPacketKind::NonKernel,
             .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
@@ -2505,15 +3069,41 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     ++read_idx;
   }
 
-  {
-    auto *src = reinterpret_cast<const uint8_t *>(&process_limit);
-    for (uint32_t i = 0; i < sizeof(process_limit); ++i)
-      memory_->write8(queue.read_ptr_va + i, src[i], queue.process_id);
-  }
   // Advance the CP-private cursor to match. read_ptr_va may subsequently be
   // lowered by the debugger to hold a trapped dispatch; the cursor is not, so
   // the next fetch resumes here rather than re-fetching held packets.
   queue.fetch_cursor = process_limit;
+
+  VmAccessOutcome publication = VmAccessOutcome::Faulted;
+  if (queue.address_space) {
+    if (gpu_vm_ == nullptr) {
+      queue.faulted = true;
+      return;
+    }
+    std::optional<GpuVmAccess> access = gpu_vm_->snapshot(queue.address_space);
+    if (!access) {
+      queue.faulted = true;
+      return;
+    }
+    queue.read_pointer_publication_access = std::make_shared<GpuVmAccess>(*access);
+    queue.pending_read_pointer = process_limit;
+    publication = queue.read_pointer_publication_access->atomic_store(
+        queue.read_ptr_va, sizeof(queue.pending_read_pointer), queue.pending_read_pointer);
+  } else if (memory_ != nullptr) {
+    publication = memory_->atomic_store(queue.read_ptr_va, sizeof(process_limit), process_limit,
+                                        queue.process_id) == AccessOutcome::Complete
+                      ? VmAccessOutcome::Complete
+                      : VmAccessOutcome::Faulted;
+  }
+
+  if (publication == VmAccessOutcome::Unavailable) {
+    queue.read_pointer_publication_pending = true;
+    arm_stall_recheck(now);
+    return;
+  }
+  queue.read_pointer_publication_access.reset();
+  if (publication != VmAccessOutcome::Complete)
+    queue.faulted = true;
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick now) {
@@ -2524,26 +3114,34 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   // unsatisfied on this pass re-sets its flag below, re-arming the paced re-check.
   invalid_pending_.store(false, std::memory_order_release);
   stall_pending_.store(false, std::memory_order_release);
+  // Apply terminal faults before accepting any later shards. Both drains keep
+  // their inbox mutexes leaf locks and acquire hw_queue_mutex_ only after the
+  // corresponding inbox has been released.
+  drain_dispatch_fault_inbox();
+  drain_fanout_inbox();
+  drain_doorbell_inbox();
+
+  std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
-  // Take delivery of any shares peer XCDs handed us. Done before the lock so the
-  // inbox mutex stays a leaf; the drain acquires hw_queue_mutex_ itself.
-  drain_fanout_inbox();
-
-  std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
+  // Finish the prior empty transition before admitting a new queue generation.
+  // In particular, a transient mailbox write must not turn into a stale idle
+  // interrupt after packets from a later doorbell have already been accepted.
+  if (!drain_completions())
+    return;
 
   size_t entries_before = 0;
   for (auto &qs : new_queue_states_)
     entries_before += qs.entries.size();
 
   // Fetch packets (uses last_doorbell values set by the poll thread).
-  for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (!new_queue_states_[i].publication_retry_pending)
+      fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+  }
 
   // Ensure interrupt callback is set on completion tracker.
-  if (completion_ && interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
 
   size_t entries_after = 0;
   for (auto &qs : new_queue_states_)
@@ -2566,8 +3164,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     progress = false;
 
     for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-      if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
-          hw_queues_[qi].runtime_suspended)
+      if (hw_queues_[qi].faulted || hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+          hw_queues_[qi].runtime_suspended || new_queue_states_[qi].publication_retry_pending)
         continue;
       auto &qs = new_queue_states_[qi];
 
@@ -2580,8 +3178,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
         if (entry.is_non_kernel()) {
           entry.completed_wgs = entry.total_wgs;
           ++qs.next_dispatch_idx;
-          if (completion_)
-            completion_->drain_completions(new_queue_states_);
+          if (!drain_completions())
+            break;
+          if (qs.publication_retry_pending)
+            break;
           progress = true;
           continue;
         }
@@ -2604,8 +3204,14 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
           if (sent > 0)
             progress = true;
 
-          if (completion_)
-            completion_->drain_completions(new_queue_states_);
+          if (!drain_completions()) {
+            backpressure = true;
+            break;
+          }
+          if (qs.publication_retry_pending) {
+            backpressure = true;
+            break;
+          }
 
           if (qs.next_dispatch_idx >= qs.entries.size())
             break;
@@ -2630,8 +3236,8 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
 
   // Final drain: catch any entries that became fully_completed during the
   // last iteration but weren't drained by the re-entrant path.
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
+  if (!drain_completions())
+    return;
 
   util::Logger::cp([&](auto &os) {
     size_t remaining = 0;
@@ -2662,11 +3268,14 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   // Re-fetch: pick up any packets the host submitted while we were executing
   // (e.g., barrier packets queued after a kernel dispatch). Process them
   // immediately so host signal waits see completed barriers before returning.
-  for (size_t i = 0; i < hw_queues_.size(); ++i)
-    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (!new_queue_states_[i].publication_retry_pending)
+      fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+  }
   // Process any new non-kernel entries (barrier-kind packets).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
-    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+    if (hw_queues_[qi].faulted || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended || new_queue_states_[qi].publication_retry_pending)
       continue;
     auto &qs = new_queue_states_[qi];
     while (qs.next_dispatch_idx < qs.entries.size()) {
@@ -2677,10 +3286,12 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
         break;
       entry.completed_wgs = entry.total_wgs;
       ++qs.next_dispatch_idx;
+      if (!drain_completions())
+        break;
+      if (qs.publication_retry_pending)
+        break;
     }
   }
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
 
   arm_grid_wait_recheck();
 
@@ -2721,105 +3332,6 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// SDMA packet processor
-// ---------------------------------------------------------------------------
-
-/// @brief Resolve a GPU VA to a daemon-accessible host pointer.
-/// @details In daemon mode, the GPU VA belongs to the client process and cannot
-/// be dereferenced directly. The VMID page table maps gpu_va -> daemon_host_ptr,
-/// so we use GpuMemory::resolve_host_ptr() to find the correct address. In local
-/// mode, the GPU VA IS the host VA (identity mapping), so we cast directly.
-/// @returns Host pointer, or nullptr if the VA is not mapped.
-static void *resolve_sdma_ptr(GpuMemory *memory, uint64_t va, uint32_t vmid, size_t size) {
-  if (!memory)
-    return nullptr;
-  return memory->resolve_host_ptr(va, vmid, size);
-}
-
-// SDMA opcodes.
-namespace sdma {
-constexpr uint8_t OP_NOP = 0;
-constexpr uint8_t OP_COPY = 1;
-constexpr uint8_t OP_WRITE = 2;
-constexpr uint8_t OP_FENCE = 5;
-constexpr uint8_t OP_TRAP = 6;
-constexpr uint8_t OP_POLL_REGMEM = 8;
-constexpr uint8_t OP_ATOMIC = 10;
-constexpr uint8_t OP_CONST_FILL = 11;
-constexpr uint8_t OP_TIMESTAMP = 13;
-constexpr uint8_t OP_GCR = 17;
-constexpr uint8_t OP_HDP_FLUSH = 0x26; // GFX9 specific
-
-constexpr uint8_t SUBOP_COPY_LINEAR = 0;
-constexpr uint8_t SUBOP_FENCE_64B = 2;
-constexpr uint8_t SUBOP_POLL_MEM_64B = 5;
-
-// Packet sizes in dwords.
-constexpr uint32_t COPY_LINEAR_SIZE = 7;
-constexpr uint32_t COPY_LINEAR_BROADCAST_SIZE = 9;
-constexpr uint32_t FENCE_SIZE = 4;
-constexpr uint32_t TRAP_SIZE = 2;
-constexpr uint32_t POLL_REGMEM_SIZE = 6;
-constexpr uint32_t ATOMIC_SIZE = 8;
-constexpr uint32_t CONST_FILL_SIZE = 5;
-constexpr uint32_t TIMESTAMP_SIZE = 3;
-constexpr uint32_t GCR_SIZE = 5;
-constexpr uint32_t GCR_GFX1250_SIZE = 6;
-constexpr size_t TRANSFER_SCRATCH_BYTES = GpuMemory::PAGE_SIZE;
-
-// GCR GL2 cache-op control bits. The control dword and bit positions genuinely
-// differ by dialect (the gfx1250 GCR packet is a distinct layout, not a resized
-// legacy packet). Legacy/gfx9-12 pack gcr_control[15:0] into DW2 starting at
-// bit 16 (DW2 low 16 bits hold BaseVA_HI); gfx1250 makes DW2 a full 25-bit base
-// VA and relocates the control field to DW3 starting at bit 0. Only the GL2
-// writeback/invalidate/discard bits matter for the functional GL2 model.
-//   Legacy DW2:  GL2_DISCARD=29, GL2_INV=30, GL2_WB=31  (= gcr_control 13/14/15 + 16)
-//   gfx1250 DW3: GL2_DISCARD=13, GL2_INV=14, GL2_WB=15
-// Layouts and sizes (legacy 5 dwords, gfx1250 6 dwords) match the vendored
-// runtime SDMA GCR packet definitions for each dialect.
-constexpr uint32_t GCR_LEGACY_CONTROL_DW = 2;
-constexpr uint32_t GCR_LEGACY_GL2_DISCARD_BIT = 1u << 29;
-constexpr uint32_t GCR_LEGACY_GL2_INV_BIT = 1u << 30;
-constexpr uint32_t GCR_LEGACY_GL2_WB_BIT = 1u << 31;
-constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
-constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
-constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
-constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
-constexpr uint32_t COPY_LINEAR_WAIT_DWORDS = 7;
-constexpr uint32_t COPY_LINEAR_BODY_DWORDS = 6;
-constexpr uint32_t COPY_LINEAR_SIGNAL_DWORDS = 5;
-constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
-constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
-constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
-// NOP_BASE_SIZE intentionally omitted — NOP is handled inline.
-} // namespace sdma
-
-namespace {
-
-bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
-  switch (func) {
-  case 0:
-    return true;
-  case 1:
-    return value < reference;
-  case 2:
-    return value <= reference;
-  case 3:
-    return value == reference;
-  case 4:
-    return value != reference;
-  case 5:
-    return value >= reference;
-  case 6:
-    return value > reference;
-  default:
-    return true;
-  }
-}
-
-} // namespace
-
 void CommandProcessor::flush_gpu_caches() {
   // Both L1 caches are write-through, so discard their clean snapshots around
   // direct backing writes. Flush dirty L2 data before the direct write so a
@@ -2843,657 +3355,6 @@ void CommandProcessor::invalidate_gpu_caches() {
     cu->l1_vector().invalidate_all();
     cu->instruction_cache().invalidate_all();
   }
-}
-
-void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx,
-                                         simdojo::Tick now) {
-  // A queue that faulted stays halted. Hardware stops the engine on a VM fault
-  // and leaves it for the driver; resuming here would run the packets queued
-  // behind the faulted one, and a fence among them would publish completion for
-  // a transfer that never happened.
-  if (queue.faulted)
-    return;
-
-  uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
-
-  uint64_t rpos = read_idx / sizeof(uint32_t);
-  uint64_t wpos = write_idx / sizeof(uint32_t);
-
-  auto dw = [&](uint64_t off) -> uint32_t {
-    uint64_t addr = queue.ring_base_va + (((rpos + off) & ring_mask) * sizeof(uint32_t));
-    return memory_->read32(addr, queue.process_id);
-  };
-
-  // Helper: resolve a GPU VA from an SDMA packet to a host pointer.
-  // In daemon mode, the VA belongs to the client process; we go through the
-  // VMID page table. In local mode, the VA IS the host address.
-  auto resolve = [&](uint64_t va, size_t size = 1) -> void * {
-    return resolve_sdma_ptr(memory_, va, queue.process_id, size);
-  };
-  // A control address that does not resolve is either not mapped yet, which is
-  // worth waiting for, or faulted, which never will be. Retrying the second
-  // re-reports the same violation forever and never drains the queue.
-  auto resolve_control = [&](uint64_t va, size_t size) {
-    const amdgpu::GpuMemory::FaultScope faults;
-    void *ptr = resolve(va, size);
-    return std::pair<void *, bool>{ptr, faults.observed()};
-  };
-  auto copy_linear = [&](uint64_t src_va, std::span<const uint64_t> dst_vas,
-                         uint32_t count) -> amdgpu::CopyOutcome {
-    // has_range_mapping() first, and resolve() only if it says no. Both answer
-    // the same question here, but only one of them reports: resolve() records a
-    // violation against the process for an address it could not translate, and
-    // a mapping whose live extent is merely clipped is exactly such an address.
-    // Asking the non-reporting predicate first means a clipped PTE -- which the
-    // transfer below then services out of sparse backing and completes -- no
-    // longer delivers a memory exception for a packet that succeeded. Where the
-    // predicate says no, the endpoint is genuinely unknown and the branch below
-    // classifies it properly.
-    const bool source_known = memory_->has_range_mapping(src_va, count, queue.process_id) ||
-                              resolve(src_va, count) != nullptr;
-    const bool destinations_known = std::ranges::all_of(dst_vas, [&](uint64_t dst_va) {
-      return memory_->has_range_mapping(dst_va, count, queue.process_id) ||
-             resolve(dst_va, count) != nullptr;
-    });
-    // A pageable host buffer is in neither the page table nor the passthrough
-    // range, so in daemon mode the checks above cannot see it and the transfer
-    // below would read sparse zeroes. copy_block() reaches it through the
-    // client's memory and refuses rather than falling back to sparse, which
-    // leaves the packet pending for retry when the endpoint is truly gone.
-    if (!source_known || !destinations_known) {
-      // copy_block() now separates "not resolvable yet", which is worth
-      // retrying, from "this address does not exist", which never will be. The
-      // violation has already been reported to the process, so retrying a
-      // faulted endpoint would only wedge the queue behind a packet that can
-      // never land.
-      auto worst = amdgpu::CopyOutcome::Complete;
-      for (uint64_t dst_va : dst_vas) {
-        const auto outcome = memory_->copy_block(dst_va, src_va, count, queue.process_id);
-        if (outcome == amdgpu::CopyOutcome::Faulted)
-          return amdgpu::CopyOutcome::Faulted;
-        if (outcome == amdgpu::CopyOutcome::Unavailable)
-          worst = amdgpu::CopyOutcome::Unavailable;
-      }
-      return worst;
-    }
-
-    std::array<uint8_t, sdma::TRANSFER_SCRATCH_BYTES> copy_buffer{};
-    size_t offset = 0;
-    auto outcome = amdgpu::CopyOutcome::Complete;
-    while (offset < count) {
-      const size_t chunk = std::min(copy_buffer.size(), static_cast<size_t>(count) - offset);
-      auto bytes = std::span<uint8_t>(copy_buffer).first(chunk);
-      // This path is reached because the endpoints looked resolvable, and it is
-      // allowed to fall back to sparse backing for GPU memory never written.
-      // A faulted byte is not that, so it has to be told apart here rather than
-      // silently reported as a completed transfer.
-      //
-      // Stop at the first fault rather than recording it and carrying on. A
-      // faulted read leaves the scratch buffer holding zeroes or sparse bytes
-      // that were never in the source, and writing those to the destinations
-      // would replace live data with fabrication -- worse than the transfer not
-      // happening, and invisible to a caller that only learns the packet
-      // faulted.
-      if (memory_->read_block(src_va + offset, bytes, queue.process_id) ==
-          amdgpu::AccessOutcome::Faulted)
-        return amdgpu::CopyOutcome::Faulted;
-      for (uint64_t dst_va : dst_vas) {
-        if (memory_->write_block(dst_va + offset, std::span<const uint8_t>(bytes),
-                                 queue.process_id) == amdgpu::AccessOutcome::Faulted)
-          return amdgpu::CopyOutcome::Faulted;
-      }
-      offset += chunk;
-    }
-    return outcome;
-  };
-  // Publishing the read pointer is what tells the owner which packets are done.
-  // If it cannot be written the queue must stop: leaving a stale value visible
-  // means the next doorbell re-executes copies, fences and atomics that already
-  // ran. Reports whether the queue should keep going.
-  auto write_read_ptr = [&]() -> bool {
-    uint64_t rptr_val = rpos * sizeof(uint32_t);
-    assert((queue.read_ptr_va & (alignof(uint64_t) - 1)) == 0 &&
-           "SDMA queue read pointer must be 64-bit aligned");
-    // Published through the checked atomic store: it keeps the release ordering
-    // the doorbell protocol needs while validating the address, which a pointer
-    // from resolve() does not -- that only proves the page is readable.
-    const bool straddles_page =
-        (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) > GpuMemory::PAGE_SIZE;
-    // A straddling pointer cannot be one atomic store, so it falls back to the
-    // block write. The two differ in how the store is issued, not in what an
-    // unpublishable read pointer means, so one halt covers both: a queue left
-    // running on a stale pointer replays whatever the owner has not seen retire,
-    // and a straddling pointer is no less stale than an aligned one.
-    const amdgpu::AccessOutcome outcome =
-        straddles_page
-            ? write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id)
-            : memory_->atomic_store(queue.read_ptr_va, sizeof(rptr_val), rptr_val,
-                                    queue.process_id);
-    if (outcome == amdgpu::AccessOutcome::Faulted) {
-      queue.faulted = true;
-      return false;
-    }
-    return true;
-  };
-  // Publish the unchanged read pointer before retrying a wait/poll packet or an
-  // SDMA packet whose translated VA is not ready yet. This helper must be used
-  // as `return stop_and_retry_current_packet();`: the queue owner still sees the
-  // packet as pending, and continuing this scan would allow the final read-pointer
-  // write below to incorrectly advance past the pending packet.
-  // Halt the queue after a fault: the packet is retired, but nothing behind it
-  // may run, or a later fence would publish completion for a transfer that
-  // never landed.
-  auto fault_sdma_queue = [&](amdgpu::HwQueue &q) { q.faulted = true; };
-  auto stop_current_packet = [&] { static_cast<void>(write_read_ptr()); };
-  auto stop_and_retry_current_packet = [&] {
-    if (!write_read_ptr())
-      return; // The queue faulted publishing its pointer; do not re-arm.
-    // Wait/poll SDMA packet, or a packet whose translated VA is not yet ready:
-    // arm_stall_recheck() re-arms the re-check without spinning simulated time.
-    arm_stall_recheck(now);
-  };
-
-  while (rpos < wpos) {
-    uint32_t header = dw(0);
-    uint8_t op = header & 0xFF;
-    uint8_t sub_op = (header >> 8) & 0xFF;
-    uint32_t pkt_dwords = 0;
-
-    switch (op) {
-    case sdma::OP_NOP: {
-      uint32_t count = (dw(0) >> 16) & 0x3FFF;
-      pkt_dwords = 1 + count;
-      break;
-    }
-    case sdma::OP_COPY: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
-          (header & ((1u << 30) | (1u << 31)))) {
-        const bool has_wait = (header & (1u << 30)) != 0;
-        const bool has_signal = (header & (1u << 31)) != 0;
-        // WAIT and SIGNAL blocks are absent, not padded, when their header bit
-        // is clear. Account for those blocks before decoding the shifted body.
-        const uint32_t copy_base = 1 + (has_wait ? sdma::COPY_LINEAR_WAIT_DWORDS : 0);
-        const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
-        const uint32_t packet_dwords =
-            signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0);
-        if (rpos + packet_dwords > wpos) {
-          rpos = wpos;
-          continue;
-        }
-
-        if (has_wait) {
-          uint32_t wait_func = dw(1) & 0x7;
-          uint64_t wait_addr =
-              (static_cast<uint64_t>(dw(2) & ~0x7u)) | (static_cast<uint64_t>(dw(3)) << 32);
-          uint64_t wait_ref = static_cast<uint64_t>(dw(4)) | (static_cast<uint64_t>(dw(5)) << 32);
-          uint64_t wait_mask = static_cast<uint64_t>(dw(6)) | (static_cast<uint64_t>(dw(7)) << 32);
-          if (wait_addr > 0x1000) {
-            uint64_t wait_value = 0;
-            const auto wait_outcome =
-                memory_->atomic_load(wait_addr, sizeof(uint64_t), wait_value, queue.process_id);
-            if (wait_outcome != amdgpu::CopyOutcome::Complete) {
-              if (wait_outcome == amdgpu::CopyOutcome::Faulted) {
-                fault_sdma_queue(queue);
-                return stop_current_packet();
-              }
-              return stop_and_retry_current_packet();
-            }
-            if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
-              return stop_and_retry_current_packet();
-            }
-          }
-        }
-
-        int64_t *signal_ptr = nullptr;
-        uint64_t signal_addr = 0;
-        uint64_t signal_data = 0;
-        bool signal_decrement = false;
-        if (has_signal) {
-          uint32_t signal_op = dw(signal_base) & 0x7F;
-          signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
-                        (static_cast<uint64_t>(dw(signal_base + 2)) << 32);
-          signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
-                        (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
-
-          if (signal_addr > 0x1000 && signal_op == 0x70) {
-            const auto [resolved, faulted] = resolve_control(signal_addr, sizeof(int64_t));
-            signal_ptr = static_cast<int64_t *>(resolved);
-            if (!signal_ptr) {
-              if (faulted) {
-                fault_sdma_queue(queue);
-                return stop_current_packet();
-              }
-              return stop_and_retry_current_packet();
-            }
-            signal_decrement = true;
-          }
-        }
-
-        uint32_t count = (dw(copy_base) & 0x3FFFFFFF) + 1;
-        uint64_t src_va = static_cast<uint64_t>(dw(copy_base + 2)) |
-                          (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
-        uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
-                          (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
-        // Emulated SDMA writes straight to the backing store, bypassing the GPU
-        // caches. Real SDMA does not snoop GL2; coherence is re-established by
-        // the consuming kernel's acquire fence at dispatch. We model that with a
-        // coarse writeback+invalidate that runs BEFORE the direct write: the
-        // writeback publishes any dirty L2 lines so they are not lost, and —
-        // critically — a dirty line overlapping the
-        // destination is written back first, so the subsequent SDMA write
-        // supersedes it instead of being clobbered by a later flush. After the
-        // flush the caches are empty, so the destination re-reads fresh backing.
-        flush_gpu_caches();
-        const std::array destinations = {dst_va};
-        const auto copy_outcome = copy_linear(src_va, destinations, count);
-        if (copy_outcome == amdgpu::CopyOutcome::Unavailable)
-          return stop_and_retry_current_packet();
-        if (copy_outcome == amdgpu::CopyOutcome::Faulted) {
-          rpos += packet_dwords;
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-
-        // The packet is retired either way -- a faulted endpoint will never
-        // resolve -- but its completion signal says the destination holds the
-        // copied bytes, and after a fault it does not. Publishing it anyway
-        // would hand a waiter stale data and a green light, before the fault
-        // this already reported reaches the runtime.
-        if (signal_decrement && copy_outcome == amdgpu::CopyOutcome::Complete) {
-          if (memory_->atomic_fetch_sub64(signal_addr, static_cast<int64_t>(signal_data),
-                                          queue.process_id) == amdgpu::AccessOutcome::Faulted) {
-            rpos += packet_dwords;
-            fault_sdma_queue(queue);
-            return stop_current_packet();
-          }
-        }
-
-        pkt_dwords = packet_dwords;
-        break;
-      }
-
-      if (rpos + sdma::COPY_LINEAR_SIZE > wpos) {
-        rpos = wpos;
-        continue;
-      }
-      uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
-      uint64_t src_va = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
-      uint64_t dst_va = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
-      util::Logger::vm("SDMA COPY: src=", std::hex, src_va, " dst=", dst_va, std::dec,
-                       " count=", count, " (", count / 1024, " KB)");
-      // GFX11+ COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
-      // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
-      bool is_broadcast_copy = uses_gfx11_plus_sdma_packets()
-                                   ? (header & sdma::COPY_LINEAR_BROADCAST_FLAG) != 0
-                                   : (header & (1u << 28)) != 0;
-      if (is_broadcast_copy) {
-        uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
-        // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
-        // destination-overlapping dirty L2 line must be written back first so
-        // the SDMA write supersedes it rather than being clobbered afterward.
-        flush_gpu_caches();
-        const std::array destinations = {dst_va, dst2_va};
-        const auto broadcast_outcome = copy_linear(src_va, destinations, count);
-        if (broadcast_outcome == amdgpu::CopyOutcome::Unavailable)
-          return stop_and_retry_current_packet();
-        if (broadcast_outcome == amdgpu::CopyOutcome::Faulted) {
-          rpos += sdma::COPY_LINEAR_BROADCAST_SIZE;
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-        pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
-      } else {
-        flush_gpu_caches();
-        const std::array destinations = {dst_va};
-        const auto linear_outcome = copy_linear(src_va, destinations, count);
-        if (linear_outcome == amdgpu::CopyOutcome::Unavailable)
-          return stop_and_retry_current_packet();
-        if (linear_outcome == amdgpu::CopyOutcome::Faulted) {
-          rpos += sdma::COPY_LINEAR_SIZE;
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-        pkt_dwords = sdma::COPY_LINEAR_SIZE;
-      }
-      break;
-    }
-    case sdma::OP_FENCE: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_FENCE_64B) {
-        if (rpos + sdma::FENCE_64B_GFX11_PLUS_SIZE > wpos) {
-          rpos = wpos;
-          continue;
-        }
-
-        uint64_t addr_va =
-            static_cast<uint64_t>(dw(1) & ~0x7u) | (static_cast<uint64_t>(dw(2)) << 32);
-        uint64_t data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
-        // Flush before the store so a destination-overlapping dirty line is
-        // published first and the fence write supersedes it.
-        flush_gpu_caches();
-        if (memory_->atomic_store(addr_va, sizeof(uint64_t), data, queue.process_id) ==
-            amdgpu::AccessOutcome::Faulted) {
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-        pkt_dwords = sdma::FENCE_64B_GFX11_PLUS_SIZE;
-        break;
-      }
-
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      uint32_t data = dw(3);
-      flush_gpu_caches();
-      if (memory_->atomic_store(addr_va, sizeof(uint32_t), data, queue.process_id) ==
-          amdgpu::AccessOutcome::Faulted) {
-        fault_sdma_queue(queue);
-        return stop_current_packet();
-      }
-      pkt_dwords = sdma::FENCE_SIZE;
-      break;
-    }
-    case sdma::OP_TRAP: {
-      uint32_t event_id = dw(1) & 0x0FFFFFFF;
-      if (interrupt_cb_)
-        interrupt_cb_(queue.process_id, event_id);
-      pkt_dwords = sdma::TRAP_SIZE;
-      break;
-    }
-    case sdma::OP_POLL_REGMEM: {
-      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_POLL_MEM_64B) {
-        if (rpos + sdma::POLL_MEM_64B_GFX11_PLUS_SIZE > wpos) {
-          rpos = wpos;
-          continue;
-        }
-
-        uint32_t func = (header >> 28) & 0x7;
-        uint64_t addr = static_cast<uint64_t>(dw(1) & ~0x7u) | (static_cast<uint64_t>(dw(2)) << 32);
-        uint64_t ref = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
-        uint64_t mask = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
-        if (addr > 0x1000) {
-          uint64_t val = 0;
-          const auto poll_outcome =
-              memory_->atomic_load(addr, sizeof(uint64_t), val, queue.process_id);
-          if (poll_outcome != amdgpu::CopyOutcome::Complete) {
-            // A poll exists to wait for a condition, so an address that is
-            // merely not mapped yet is what it is waiting for. A faulted one
-            // never becomes true: retrying re-reports the same violation on
-            // every doorbell and the queue never drains.
-            if (poll_outcome == amdgpu::CopyOutcome::Faulted) {
-              fault_sdma_queue(queue);
-              return stop_current_packet();
-            }
-            return stop_and_retry_current_packet();
-          }
-          if (!sdma_compare_u64(func, val & mask, ref)) {
-            return stop_and_retry_current_packet();
-          }
-        }
-        pkt_dwords = sdma::POLL_MEM_64B_GFX11_PLUS_SIZE;
-        break;
-      }
-
-      bool mem_poll = (header >> 31) & 1;
-      bool hdp_flush = (header >> 26) & 1;
-      uint32_t func = (header >> 28) & 0x7;
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      uint32_t ref = dw(3);
-      uint32_t mask = dw(4);
-      if (!mem_poll) {
-        // Register poll / HDP flush — no-op in functional sim.
-      } else if (addr_va > 0x1000) {
-        uint64_t polled = 0;
-        const auto poll_outcome =
-            memory_->atomic_load(addr_va, sizeof(uint32_t), polled, queue.process_id);
-        if (poll_outcome != amdgpu::CopyOutcome::Complete) {
-          if (poll_outcome == amdgpu::CopyOutcome::Faulted) {
-            fault_sdma_queue(queue);
-            return stop_current_packet();
-          }
-          return stop_and_retry_current_packet();
-        }
-        auto compare = [func](uint32_t val, uint32_t reference) -> bool {
-          switch (func) {
-          case 0:
-            return true;
-          case 1:
-            return val < reference;
-          case 2:
-            return val <= reference;
-          case 3:
-            return val == reference;
-          case 4:
-            return val != reference;
-          case 5:
-            return val >= reference;
-          case 6:
-            return val > reference;
-          default:
-            return true;
-          }
-        };
-        const auto val = static_cast<uint32_t>(polled);
-        if (!compare(val & mask, ref)) {
-          return stop_and_retry_current_packet();
-        }
-      }
-      (void)hdp_flush;
-      pkt_dwords = sdma::POLL_REGMEM_SIZE;
-      break;
-    }
-    case sdma::OP_ATOMIC: {
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      uint64_t src_data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
-      uint32_t atomic_op = (header >> 25) & 0x7F;
-      // SDMA_ATOMIC_ADD64 = 47
-      if (atomic_op == 47 && addr_va > 0x1000) {
-        // A completion signal is decremented and then announced, so anything
-        // that can refuse has to be settled BEFORE the decrement: once the
-        // value drops, the waiter may already have observed it, and faulting
-        // afterwards leaves a signal that fired with no notification behind it.
-        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt_cb_;
-        uint64_t sig_base = addr_va - 8; // Signal layout: value at offset 8.
-        uint64_t mailbox_ptr = 0;
-        uint32_t event_id = 0;
-        if (completes_a_signal) {
-          // Read exactly, through the checked block API rather than a bare
-          // pointer. A client-owned signal with no page-table entry resolves to
-          // nothing here, and a record clipped by the end of its extent reads
-          // back part fabricated -- neither is a harmless zero. Event zero is
-          // the broadcast that wakes every type-zero event in the process, and
-          // a half-read id names some other event outright.
-          const auto read_metadata = [&](uint64_t va, void *into, size_t bytes) {
-            return memory_->read_block_exact(
-                va, std::span<uint8_t>(static_cast<uint8_t *>(into), bytes), queue.process_id);
-          };
-          if (read_metadata(sig_base + 16, &mailbox_ptr, sizeof(mailbox_ptr)) ==
-                  amdgpu::AccessOutcome::Faulted ||
-              read_metadata(sig_base + 24, &event_id, sizeof(event_id)) ==
-                  amdgpu::AccessOutcome::Faulted) {
-            fault_sdma_queue(queue);
-            return stop_current_packet();
-          }
-        }
-
-        // Flush before the RMW: the fetch_add reads the backing value, so a
-        // dirty overlapping L2 line must be written back first or the atomic
-        // would operate on stale data. The flush also leaves caches empty so
-        // the new value re-reads fresh.
-        flush_gpu_caches();
-        if (memory_->atomic_fetch_add64(addr_va, src_data, queue.process_id) ==
-            amdgpu::AccessOutcome::Faulted) {
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-
-        if (completes_a_signal) {
-          if (mailbox_ptr != 0) {
-            flush_gpu_caches();
-            if (memory_->atomic_store(mailbox_ptr, sizeof(uint64_t), uint64_t(event_id),
-                                      queue.process_id) == amdgpu::AccessOutcome::Faulted) {
-              fault_sdma_queue(queue);
-              return stop_current_packet();
-            }
-          }
-          // Zero means the id was never read, not "wake everything".
-          if (event_id != 0)
-            interrupt_cb_(queue.process_id, event_id);
-          else
-            util::Logger::vm("SDMA: signal at 0x", std::hex, sig_base, std::dec,
-                             " has no event id; not broadcasting");
-        }
-      }
-      pkt_dwords = sdma::ATOMIC_SIZE;
-      break;
-    }
-    case sdma::OP_CONST_FILL: {
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      uint32_t data = dw(3);
-      uint32_t count = (dw(4) & 0x3FFFFFF) + 1;
-      uint32_t fillsize = (header >> 30) & 0x3;
-      // A range that wraps the address space is a malformed packet rather than
-      // one waiting on a mapping: no later state makes it valid, so retrying it
-      // wedges the queue on a packet that can never land.
-      // The fill walks the range itself, so nothing else would report it.
-      if (memory_->check_range(addr_va, count, queue.process_id) ==
-          amdgpu::AccessOutcome::Faulted) {
-        fault_sdma_queue(queue);
-        return stop_current_packet();
-      }
-      // Non-reporting predicate first, as in copy_linear(): resolve() would
-      // otherwise record a violation for a clipped mapping that the fill then
-      // services and completes.
-      const bool destination_known = memory_->has_range_mapping(addr_va, count, queue.process_id) ||
-                                     resolve(addr_va, count) != nullptr;
-      if (!destination_known)
-        return stop_and_retry_current_packet();
-      {
-        // Flush before the fill so a destination-overlapping dirty line is
-        // published first and the fill supersedes it.
-        flush_gpu_caches();
-
-        std::array<uint8_t, sdma::TRANSFER_SCRATCH_BYTES> fill_buffer{};
-        std::array<uint8_t, sizeof(data)> fill_pattern{};
-        std::memcpy(fill_pattern.data(), &data, sizeof(data));
-        size_t offset = 0;
-        while (offset < count) {
-          const uint64_t chunk_va = addr_va + offset;
-          const size_t chunk = std::min(
-              {fill_buffer.size(), static_cast<size_t>(count) - offset,
-               GpuMemory::PAGE_SIZE - static_cast<size_t>(chunk_va & GpuMemory::PAGE_MASK)});
-          if (fillsize == 2) {
-            for (size_t i = 0; i < chunk; ++i)
-              fill_buffer[i] = fill_pattern[(offset + i) % fill_pattern.size()];
-          } else {
-            std::fill_n(fill_buffer.begin(), chunk, static_cast<uint8_t>(data));
-          }
-          if (memory_->has_page_mapping(chunk_va, queue.process_id) &&
-              memory_->write_block(chunk_va, std::span<const uint8_t>(fill_buffer).first(chunk),
-                                   queue.process_id) == amdgpu::AccessOutcome::Faulted) {
-            fault_sdma_queue(queue);
-            return stop_current_packet();
-          }
-          offset += chunk;
-        }
-      }
-      pkt_dwords = sdma::CONST_FILL_SIZE;
-      break;
-    }
-    case sdma::OP_TIMESTAMP: {
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      if (addr_va > 0x1000) {
-        auto now = std::chrono::steady_clock::now().time_since_epoch();
-        uint64_t ts = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-        // Flush before the direct store so a dirty cached line overlapping the
-        // timestamp address is published first and the timestamp supersedes it
-        // rather than being clobbered by a later flush (see other direct-write
-        // SDMA ops).
-        flush_gpu_caches();
-        if (memory_->atomic_store(addr_va, sizeof(uint64_t), ts, queue.process_id) ==
-            amdgpu::AccessOutcome::Faulted) {
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-      }
-      pkt_dwords = sdma::TIMESTAMP_SIZE;
-      break;
-    }
-    case sdma::OP_GCR: {
-      // GCR is the real SDMA cache-maintenance packet. It carries a base/size
-      // range plus separate GL2 writeback / invalidate / discard control bits.
-      // GFX9+ HW services the range at coarse (whole-cache) granularity, so we
-      // ignore the range but honor the control bits: a writeback must publish
-      // dirty L2 lines to backing (flush), while invalidate/discard drop them.
-      // Treating every GCR as an invalidate would silently lose simulator data
-      // that a writeback-only packet was meant to publish.
-      const bool gfx1250 = uses_gfx1250_gcr_packet();
-      const uint32_t control =
-          gfx1250 ? dw(sdma::GCR_GFX1250_CONTROL_DW) : dw(sdma::GCR_LEGACY_CONTROL_DW);
-      const uint32_t wb_bit = gfx1250 ? sdma::GCR_GFX1250_GL2_WB_BIT : sdma::GCR_LEGACY_GL2_WB_BIT;
-      const uint32_t inv_bit =
-          gfx1250 ? sdma::GCR_GFX1250_GL2_INV_BIT : sdma::GCR_LEGACY_GL2_INV_BIT;
-      const uint32_t discard_bit =
-          gfx1250 ? sdma::GCR_GFX1250_GL2_DISCARD_BIT : sdma::GCR_LEGACY_GL2_DISCARD_BIT;
-      const bool gl2_wb = (control & wb_bit) != 0;
-      const bool gl2_inv = (control & (inv_bit | discard_bit)) != 0;
-      if (gl2_wb) {
-        // Any writeback must publish dirty L2 data before it can be dropped. In
-        // the functional model a subsequent re-fetch from backing returns the
-        // same bytes, so the (harmless) invalidate inside flush is kept even for
-        // writeback-without-invalidate requests.
-        flush_gpu_caches();
-      } else if (gl2_inv) {
-        // Invalidate/discard only: drop without writeback.
-        invalidate_gpu_caches();
-      }
-      pkt_dwords = gfx1250 ? sdma::GCR_GFX1250_SIZE : sdma::GCR_SIZE;
-      break;
-    }
-    case sdma::OP_HDP_FLUSH:
-      pkt_dwords = 1;
-      break;
-    case sdma::OP_WRITE: {
-      if (rpos + 4 > wpos) {
-        rpos = wpos;
-        continue;
-      }
-      uint32_t count = (dw(3) & 0x3FFFFFF) + 1;
-      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
-      if (addr_va > 0x1000 && rpos + 4 + count <= wpos) {
-        // Flush before the write so a destination-overlapping dirty line is
-        // published first and the SDMA write supersedes it.
-        flush_gpu_caches();
-        // The whole range is written, so the whole range has to be validated --
-        // resolving one byte says nothing about the dwords that follow it, which
-        // may cross into a page that does not exist.
-        std::vector<uint32_t> payload(count);
-        for (uint32_t i = 0; i < count; ++i)
-          payload[i] = dw(4 + i);
-        if (memory_->write_block(
-                addr_va,
-                std::as_bytes(std::span<const uint32_t>(payload)).size() == 0
-                    ? std::span<const uint8_t>()
-                    : std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(payload.data()),
-                                               payload.size() * sizeof(uint32_t)),
-                queue.process_id) == amdgpu::AccessOutcome::Faulted) {
-          fault_sdma_queue(queue);
-          return stop_current_packet();
-        }
-      }
-      pkt_dwords = 4 + count;
-      break;
-    }
-    default:
-      // Unknown opcode — stop processing to avoid reading garbage.
-      util::Logger::vm("SDMA: unknown opcode 0x", std::hex, (unsigned)op, std::dec,
-                       " at rpos=", std::dec, rpos);
-      rpos = wpos; // Consume remaining to prevent infinite loop.
-      continue;
-    }
-
-    rpos += pkt_dwords;
-  }
-
-  static_cast<void>(write_read_ptr());
 }
 
 } // namespace amdgpu

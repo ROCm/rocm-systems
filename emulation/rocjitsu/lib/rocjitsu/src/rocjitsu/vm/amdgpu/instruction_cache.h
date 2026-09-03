@@ -5,6 +5,7 @@
 #define ROCJITSU_VM_AMDGPU_INSTRUCTION_CACHE_H_
 
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include <cstdint>
 #include <cstring>
@@ -83,6 +84,33 @@ public:
     std::memcpy(dst + head, line_for(memory, next, vmid), kFetchBytes - head);
   }
 
+  /// @brief Fetch through a retained VM binding and generation-safe namespace.
+  ///
+  /// This path is used by translated PCI/VFIO address spaces.  Lines from a
+  /// replaced root or a reused address-space slot cannot alias because both
+  /// the handle generation and translation epoch participate in the tag.
+  [[nodiscard]] VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst) {
+    const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
+    const uint8_t *line = nullptr;
+    VmAccessOutcome outcome = line_for(access, pc, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+
+    if (offset + kFetchBytes <= kLineSize) {
+      std::memcpy(dst, line + offset, kFetchBytes);
+      return VmAccessOutcome::Complete;
+    }
+
+    const uint32_t head = kLineSize - offset;
+    std::memcpy(dst, line + offset, head);
+    const uint64_t next = (pc & ~uint64_t{kLineSize - 1}) + kLineSize;
+    outcome = line_for(access, next, line);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    std::memcpy(dst + head, line, kFetchBytes - head);
+    return VmAccessOutcome::Complete;
+  }
+
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
     for (Line &line : lines_)
@@ -93,6 +121,8 @@ private:
   struct Line {
     uint64_t addr = 0;
     uint32_t vmid = 0;
+    VmCacheNamespace cache_namespace;
+    bool translated = false;
     bool valid = false;
     uint8_t data[kLineSize] = {};
   };
@@ -100,14 +130,43 @@ private:
   const uint8_t *line_for(const GpuMemory &memory, uint64_t addr, uint32_t vmid) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
-    if (line.valid && line.addr == line_addr && line.vmid == vmid)
+    if (line.valid && !line.translated && line.addr == line_addr && line.vmid == vmid)
       return line.data;
 
     memory.read_block(line_addr, std::span<uint8_t>(line.data, kLineSize), vmid);
     line.addr = line_addr;
     line.vmid = vmid;
+    line.cache_namespace = {};
+    line.translated = false;
     line.valid = true;
     return line.data;
+  }
+
+  VmAccessOutcome line_for(const GpuVmAccess &access, uint64_t addr, const uint8_t *&data) {
+    const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
+    const VmCacheNamespace cache_namespace = access.cache_namespace();
+    Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
+    if (line.valid && line.translated && line.addr == line_addr &&
+        line.cache_namespace == cache_namespace) {
+      data = line.data;
+      return VmAccessOutcome::Complete;
+    }
+
+    const VmAccessOutcome outcome = access.read(
+        line_addr, std::span<std::byte>(reinterpret_cast<std::byte *>(line.data), kLineSize),
+        VmAccessKind::Execute);
+    if (outcome != VmAccessOutcome::Complete) {
+      line.valid = false;
+      data = nullptr;
+      return outcome;
+    }
+    line.addr = line_addr;
+    line.vmid = 0;
+    line.cache_namespace = cache_namespace;
+    line.translated = true;
+    line.valid = true;
+    data = line.data;
+    return VmAccessOutcome::Complete;
   }
 
   Line lines_[kNumLines];

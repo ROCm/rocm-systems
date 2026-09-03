@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
@@ -40,6 +41,7 @@
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <thread>
 #include <vector>
@@ -50,6 +52,80 @@ const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
 const std::string CDNA5_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 constexpr uint32_t kCdna5GpuId = 1250;
+
+TEST(InterruptSinkTest, RoutesAndRevokesFrontendsIndependently) {
+  std::vector<std::pair<uint32_t, uint32_t>> first_calls;
+  std::vector<std::pair<uint32_t, uint32_t>> second_calls;
+
+  rocjitsu::amdgpu::InterruptSubscription first([&](uint32_t process_id, uint32_t event_id) {
+    first_calls.emplace_back(process_id, event_id);
+  });
+  rocjitsu::amdgpu::InterruptSubscription second([&](uint32_t process_id, uint32_t event_id) {
+    second_calls.emplace_back(process_id, event_id);
+  });
+  const auto first_sink = first.sink();
+  const auto second_sink = second.sink();
+
+  first_sink.deliver(17, 23);
+  EXPECT_EQ(first_calls, (std::vector<std::pair<uint32_t, uint32_t>>{{17, 23}}));
+  EXPECT_TRUE(second_calls.empty());
+
+  second_sink.deliver(17, 23);
+  EXPECT_EQ(second_calls, first_calls);
+
+  first.reset();
+  first_sink.deliver(31, 47);
+  second_sink.deliver(31, 47);
+  EXPECT_EQ(first_calls.size(), 1u);
+  EXPECT_EQ(second_calls, (std::vector<std::pair<uint32_t, uint32_t>>{{17, 23}, {31, 47}}));
+}
+
+TEST(InterruptSinkTest, ResetDrainsAnInFlightCallback) {
+  std::promise<void> callback_entered;
+  std::promise<void> release_callback;
+  std::shared_future<void> release = release_callback.get_future().share();
+  rocjitsu::amdgpu::InterruptSubscription subscription([&](uint32_t, uint32_t) {
+    callback_entered.set_value();
+    release.wait();
+  });
+  const auto sink = subscription.sink();
+
+  std::jthread delivery([&] { sink.deliver(1, 2); });
+  ASSERT_EQ(callback_entered.get_future().wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+
+  std::future<void> reset = std::async(std::launch::async, [&] { subscription.reset(); });
+  EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(10)), std::future_status::timeout);
+  release_callback.set_value();
+  EXPECT_EQ(reset.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  delivery.join();
+}
+
+TEST(InterruptSinkTest, SelfResetDoesNotDeadlockAndRevokesHeldSink) {
+  rocjitsu::amdgpu::InterruptSubscription subscription;
+  std::atomic<uint32_t> calls{0};
+  subscription = rocjitsu::amdgpu::InterruptSubscription([&](uint32_t, uint32_t) {
+    calls.fetch_add(1, std::memory_order_relaxed);
+    subscription.reset();
+  });
+  const auto sink = subscription.sink();
+
+  sink.deliver(1, 2);
+  EXPECT_EQ(calls.load(std::memory_order_relaxed), 1u);
+  EXPECT_FALSE(subscription);
+  sink.deliver(1, 2);
+  EXPECT_EQ(calls.load(std::memory_order_relaxed), 1u);
+}
+
+TEST(InterruptSinkTest, QueueHeldSinkIsSafeAfterOwnerReset) {
+  uint32_t calls = 0;
+  rocjitsu::amdgpu::InterruptSubscription subscription([&](uint32_t, uint32_t) { ++calls; });
+  const auto queue_sink = subscription.sink();
+  subscription.reset();
+  EXPECT_FALSE(subscription);
+  queue_sink.deliver(1, 2);
+  EXPECT_EQ(calls, 0u);
+}
 
 // A part with no modelled CWSR record layout. gfx1100 is not a debug target:
 // kmd::cwsr_layout_modelled() covers gfx942/gfx950/gfx1250, and the driver has to
@@ -129,6 +205,16 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   int rc = driver->ioctl(AMDKFD_IOC_GET_TILE_CONFIG, &args);
   driver->close();
   return rc == 0 ? args.gb_addr_config : 0;
+}
+
+std::unique_ptr<rocjitsu::SoC> load_standalone_soc(const std::string &config_path) {
+  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  auto root = loaded.take_root();
+  auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
+  if (!soc)
+    return nullptr;
+  root.release();
+  return std::unique_ptr<rocjitsu::SoC>(soc);
 }
 
 class KfdIoctlTest : public ::testing::Test {
@@ -420,19 +506,12 @@ TEST_F(KfdIoctlTest, DestroyingOneOwnerLeavesTheOtherQueueUnaffected) {
       << "the surviving queue's owner must still poll its own ring";
 }
 
-// The idle walk skips replicas, so a fanned-out queue raises HQD_IDLE from the
-// XCD that owns it and from nowhere else. Each peer's shards drain before the
-// owner's, so a report from a peer is not merely duplicated, it is early.
-//
-// Reaching the skip needs a CP that is *both* running a monitor and holding a
-// replica -- a CP with only replicas never starts a monitor at all, so its sweep
-// never runs and a test built on one passes no matter what the walk does. Two
-// processes give that shape and make it observable: the callback carries the
-// process id, so an owner reporting its own queue is distinguishable from a
-// replica reporting someone else's. Queue placement is by process-local ordinal,
-// so process B's second queue is what lands on a different XCD than process A's
-// first.
-TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
+// A CP that owns one queue may also hold another queue's fan-out replica. The
+// monitor must count and poll only the queue it owns; replicas consume dispatch
+// shards pushed by their owner and never inspect the shared ring themselves.
+// Queue placement is by process-local ordinal, so process B's second queue lands
+// on a different XCD than process A's first and creates the mixed shape here.
+TEST_F(KfdIoctlTest, ActiveOwnerDoesNotPollFanoutReplicas) {
   const uint32_t num_xcds = soc_->num_xcds();
   ASSERT_GT(num_xcds, 1u);
 
@@ -463,42 +542,16 @@ TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
   auto *owner_of_b2 = soc_->xcd(1)->command_processor();
   ASSERT_NE(owner_of_a, owner_of_b2);
 
-  // Record which process ids each of the two CPs reports idle. Replaces the
-  // driver's own callback; nothing here waits on a KFD event.
-  std::mutex seen_mutex;
-  std::set<uint32_t> seen_by_b2_owner;
-  std::set<uint32_t> seen_by_a_owner;
-
-  // Installed before the first CREATE_QUEUE, which is what starts the doorbell
-  // monitors. interrupt_cb_ is a plain std::function that the poll loop reads
-  // without a lock, so assigning it once a monitor is live is a data race on the
-  // function object itself -- one TSan reports.
-  owner_of_b2->set_interrupt_callback([&](uint32_t pid, uint32_t) {
-    std::lock_guard<std::mutex> lock(seen_mutex);
-    seen_by_b2_owner.insert(pid);
-  });
-  owner_of_a->set_interrupt_callback([&](uint32_t pid, uint32_t) {
-    std::lock_guard<std::mutex> lock(seen_mutex);
-    seen_by_a_owner.insert(pid);
-  });
-
-  // Detaches the observers before the state they capture goes out of scope.
-  // Declared after that state so it is destroyed first, and it runs on every exit
-  // path including a failed ASSERT: closing both processes destroys their queues,
-  // which stops and joins every monitor, so no poll thread can still be inside a
-  // callback by the time these locals die.
+  // Closing both processes stops their queue monitors before fixture teardown.
   struct ObserverGuard {
     rocjitsu::SimulatedKfd *driver;
-    rocjitsu::SoC *soc;
     uint32_t pid_a;
     uint32_t pid_b;
     ~ObserverGuard() {
       driver->close(pid_a);
       driver->close(pid_b);
-      for (uint32_t xi = 0; xi < soc->num_xcds(); ++xi)
-        soc->xcd(xi)->command_processor()->set_interrupt_callback(nullptr);
     }
-  } observer_guard{driver_, soc_, pid_a, pid_b};
+  } observer_guard{driver_, pid_a, pid_b};
 
   // A's only queue takes ordinal 0; B's queues take ordinals 0 and 1, so B's
   // second one is owned by a different XCD than A's.
@@ -512,6 +565,10 @@ TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
   ASSERT_GT(owner_of_b2->registered_queue_count_for_test(),
             owner_of_b2->polled_kfd_queue_count_for_test())
       << "the XCD under test must also hold a replica it does not own";
+  EXPECT_EQ(owner_of_a->polled_kfd_queue_count_for_test(), 2u)
+      << "the first XCD owns one queue from each process";
+  EXPECT_EQ(owner_of_b2->polled_kfd_queue_count_for_test(), 1u)
+      << "the second XCD owns only process B's second queue";
 
   // The observers below are installed only on the two owners, so a replica-only
   // XCD that started a monitor of its own would run the same idle sweep and report
@@ -529,24 +586,8 @@ TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
         << "xcd" << xi << " started a doorbell monitor for replicas alone";
   }
 
-  // Every queue is empty from creation, so each owner re-broadcasts idle on its
-  // periodic sweep. Wait for the sweep to have happened rather than for a fixed
-  // duration, so a loaded machine does not turn "not yet" into "never".
-  auto b2_owner_reported = [&] {
-    std::lock_guard<std::mutex> lock(seen_mutex);
-    return !seen_by_b2_owner.empty();
-  };
-  for (int i = 0; i < 4000 && !b2_owner_reported(); ++i)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  ASSERT_TRUE(b2_owner_reported()) << "the owning XCD never reported its idle queue";
-  // Give a wrong reporter the same chance to appear that the right one had.
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-  std::lock_guard<std::mutex> lock(seen_mutex);
-  EXPECT_TRUE(seen_by_b2_owner.count(pid_b) == 1) << "the owning XCD must report the queue it owns";
-  EXPECT_EQ(seen_by_b2_owner.count(pid_a), 0u)
-      << "this XCD holds only a replica of process A's queue and must not report it idle";
-  EXPECT_EQ(seen_by_a_owner.count(pid_a), 1u) << "process A's queue is idle on its own owner";
+  EXPECT_TRUE(owner_of_a->doorbell_monitor_running_for_test());
+  EXPECT_TRUE(owner_of_b2->doorbell_monitor_running_for_test());
 }
 
 class KfdIoctlCdna5Test : public KfdIoctlTest {
@@ -3637,6 +3678,26 @@ TEST_F(KfdIoctlTest, IoctlAfterCloseFailsCleanly) {
   EXPECT_EQ(daemon_driver.ioctl(pid, AMDKFD_IOC_GET_VERSION, &ver), -ESRCH);
 }
 
+// VMIDs/PASIDs are hardware-visible routing keys on a shared SoC, not private
+// counters owned by each KFD frontend. Two live frontends must therefore never
+// publish the same numeric identity into GpuVm/GpuMemory.
+TEST_F(KfdIoctlTest, IndependentDriversUseDistinctProcessIdsOnOneSoc) {
+  ASSERT_NE(soc_, nullptr);
+  const uint32_t primary_process = driver_->local_process_id();
+  ASSERT_NE(primary_process, 0u);
+
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, true);
+  const uint32_t daemon_process = daemon_driver.open_process();
+  ASSERT_NE(daemon_process, 0u);
+  EXPECT_NE(daemon_process, primary_process);
+  EXPECT_TRUE(soc_->gpu_vm().find_vmid(primary_process).has_value());
+  EXPECT_TRUE(soc_->gpu_vm().find_vmid(daemon_process).has_value());
+
+  EXPECT_EQ(daemon_driver.close(daemon_process), 0);
+  EXPECT_TRUE(soc_->gpu_vm().find_vmid(primary_process).has_value());
+  EXPECT_FALSE(soc_->gpu_vm().find_vmid(daemon_process).has_value());
+}
+
 // Deterministic regression for destructor teardown of a multiply-opened process.
 // close() only tears a process down on the LAST open reference, so a process with
 // open_ref_count_ > 1 survives a single close(). ~SimulatedKfd must keep closing
@@ -3802,7 +3863,12 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotZeroStrideReportsCountAndWritesNothing
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesMultipleAgentsWithCallerStride) {
   constexpr uint32_t kSecondGpuId = kGpuId + 1;
-  rocjitsu::SimulatedKfd multi_gpu_driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+  auto first_soc = load_standalone_soc(CONFIG_PATH);
+  auto second_soc = load_standalone_soc(CONFIG_PATH);
+  ASSERT_NE(first_soc, nullptr);
+  ASSERT_NE(second_soc, nullptr);
+  rocjitsu::SimulatedKfd multi_gpu_driver({first_soc.get(), second_soc.get()},
+                                          {kGpuId, kSecondGpuId});
   std::vector<rocjitsu::config::KfdDeviceConfig> devices(2, loaded_.device);
   devices[1].gpu_id = kSecondGpuId;
   devices[1].location_id++;
@@ -3901,7 +3967,11 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
   // rather than handing back two zero-filled entries.
   {
     SCOPED_TRACE("setup_topology never called");
-    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    auto first_soc = load_standalone_soc(CONFIG_PATH);
+    auto second_soc = load_standalone_soc(CONFIG_PATH);
+    ASSERT_NE(first_soc, nullptr);
+    ASSERT_NE(second_soc, nullptr);
+    rocjitsu::SimulatedKfd driver({first_soc.get(), second_soc.get()}, {kGpuId, kSecondGpuId});
     std::array<uint8_t, kEntryBytes * 2> buf{};
     kfd_ioctl_dbg_trap_args snapshot{};
     snapshot_two(driver, buf, snapshot);
@@ -3916,7 +3986,11 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
   // not, and its slot is left as the caller had it.
   {
     SCOPED_TRACE("single-device setup_topology on a two-GPU driver");
-    rocjitsu::SimulatedKfd driver({soc_, soc_}, {kGpuId, kSecondGpuId});
+    auto first_soc = load_standalone_soc(CONFIG_PATH);
+    auto second_soc = load_standalone_soc(CONFIG_PATH);
+    ASSERT_NE(first_soc, nullptr);
+    ASSERT_NE(second_soc, nullptr);
+    rocjitsu::SimulatedKfd driver({first_soc.get(), second_soc.get()}, {kGpuId, kSecondGpuId});
     driver.setup_topology(loaded_.device, soc_->num_xcds());
     std::array<uint8_t, kEntryBytes * 2> buf{};
     kfd_ioctl_dbg_trap_args snapshot{};

@@ -95,6 +95,7 @@ inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kFunctionalFairnessSlice = 64;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
 
@@ -266,6 +267,13 @@ public:
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
+  /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
+  void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
+
+  /// @brief Return the device VM service used by translated wavefront accesses.
+  GpuVm *gpu_vm() { return gpu_vm_; }
+  const GpuVm *gpu_vm() const { return gpu_vm_; }
+
   /// @brief Return the command processor that owns this CU's dispatch stream.
   CommandProcessor *command_processor() { return cp_; }
 
@@ -320,6 +328,11 @@ public:
   /// then reclaims LDS if the CU is now idle and unpinned. The caller is responsible
   /// for unpinning any CP-side cluster LDS pin.
   void abort_workgroup(uint32_t dispatch_id, uint32_t wg_id);
+
+  /// @brief Cancel every resident wave and pending completion for one dispatch.
+  /// @details Used by the command processor after a terminal dispatch fault.
+  /// No normal wave/workgroup completion or plugin-completion callback is fired.
+  void abort_dispatch(uint32_t dispatch_id);
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
@@ -912,7 +925,7 @@ protected:
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
-  void route_memory_inst(Instruction *inst, Wavefront &wf);
+  VmAccessOutcome route_memory_inst(Instruction *inst, Wavefront &wf);
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
@@ -960,6 +973,9 @@ protected:
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
   void flush_wg_completions();
 
+  /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
@@ -968,6 +984,13 @@ protected:
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_wg_completions once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
+  struct PendingVmFault {
+    uint32_t queue_id = 0;
+    uint32_t process_id = 0;
+    uint32_t dispatch_id = 0;
+    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+  };
+  std::vector<PendingVmFault> pending_vm_faults_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -992,6 +1015,7 @@ protected:
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
+  TensorDmaPipeline tensor_dma_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
@@ -1003,6 +1027,7 @@ protected:
   AluExceptionHandler alu_exception_handler_;
   std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
@@ -1114,10 +1139,20 @@ public:
       functional_yield_requested_ = false;
       last_quantum_executed_ = 0;
       const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : kFunctionalQuantum;
+      const auto *simulation = this->engine();
+      const simdojo::Tick start_tick =
+          simulation ? simulation->context(this->partition_id()).current_tick() : 0;
       for (uint32_t i = 0; i < quantum && step(); ++i) {
         ++last_quantum_executed_;
         if (std::exchange(functional_yield_requested_, false))
           break;
+        if (simulation && last_quantum_executed_ % kFunctionalFairnessSlice == 0) {
+          const simdojo::Tick horizon = start_tick > simdojo::TICK_MAX - last_quantum_executed_
+                                            ? simdojo::TICK_MAX
+                                            : start_tick + last_quantum_executed_;
+          if (simulation->cooperative_yield_pending(this->partition_id(), horizon))
+            break;
+        }
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.

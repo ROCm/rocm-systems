@@ -95,6 +95,7 @@ public:
   uint64_t sequence = 0;            ///< Tie-breaking sequence number.
   Event *event = nullptr;           ///< Reusable event descriptor.
   std::unique_ptr<Message> message; ///< Optional message payload for this firing.
+  bool asynchronous = false;        ///< Marks work injected through the thread-safe async path.
 
   /// @brief Greater-than for min-heap ordering: smallest timestamp first,
   /// then event type priority, then sequence number.
@@ -110,43 +111,78 @@ public:
 /// @brief Per-partition priority queue of simulation events.
 ///
 /// @details Each partition (and therefore each worker thread) has exactly one
-/// EventQueue. Entries are ordered by timestamp via a min-heap backed by
-/// a flat vector. The queue stores EventQueueEntry values; Events are externally
-/// owned and reusable across multiple firings.
+/// EventQueue. Local and asynchronously injected entries use separate min-heaps,
+/// both ordered by timestamp, event type, and insertion sequence. When their
+/// heads have the same timestamp and type, async work runs first for prompt host
+/// response, but a fixed burst limit guarantees progress for existing local work.
+/// The queue stores EventQueueEntry values; Events are externally owned and
+/// reusable across multiple firings.
 class EventQueue {
 public:
+  /// @brief Maximum async entries selected while equal-priority local work is waiting.
+  static constexpr uint32_t kMaxConsecutiveAsyncEvents = 8;
+
   EventQueue() = default;
 
   /// @brief Enqueue a heap entry. Assigns a sequence number for tie-breaking.
   /// @param entry The entry to enqueue (ownership of message transferred).
   void push(EventQueueEntry entry) {
     entry.sequence = next_sequence_++;
-    entries_.push_back(std::move(entry));
-    std::push_heap(entries_.begin(), entries_.end(), std::greater<>{});
+    std::vector<EventQueueEntry> &entries =
+        entry.asynchronous ? asynchronous_entries_ : local_entries_;
+    entries.push_back(std::move(entry));
+    std::push_heap(entries.begin(), entries.end(), std::greater<>{});
   }
 
   /// @brief Dequeue and return the earliest entry.
   /// @returns The EventQueueEntry with the smallest timestamp.
   EventQueueEntry pop() {
-    assert(!entries_.empty());
-    std::pop_heap(entries_.begin(), entries_.end(), std::greater<>{});
-    auto entry = std::move(entries_.back());
-    entries_.pop_back();
-    return entry;
+    assert(!empty());
+
+    if (local_entries_.empty()) {
+      consecutive_async_events_ = 0;
+      return pop_from(asynchronous_entries_);
+    }
+    if (asynchronous_entries_.empty()) {
+      consecutive_async_events_ = 0;
+      return pop_from(local_entries_);
+    }
+
+    const EventQueueEntry &local = local_entries_.front();
+    const EventQueueEntry &asynchronous = asynchronous_entries_.front();
+    if (!has_same_priority(local, asynchronous)) {
+      consecutive_async_events_ = 0;
+      if (asynchronous > local)
+        return pop_from(local_entries_);
+      return pop_from(asynchronous_entries_);
+    }
+
+    if (consecutive_async_events_ < kMaxConsecutiveAsyncEvents) {
+      ++consecutive_async_events_;
+      return pop_from(asynchronous_entries_);
+    }
+
+    consecutive_async_events_ = 0;
+    return pop_from(local_entries_);
   }
 
   /// @brief Peek at the earliest entry's timestamp without removing it.
   /// @returns Timestamp of the next entry, or TICK_MAX if empty.
-  Tick next_event_time() const { return entries_.empty() ? TICK_MAX : entries_.front().timestamp; }
+  Tick next_event_time() const {
+    Tick local_time = local_entries_.empty() ? TICK_MAX : local_entries_.front().timestamp;
+    Tick asynchronous_time =
+        asynchronous_entries_.empty() ? TICK_MAX : asynchronous_entries_.front().timestamp;
+    return std::min(local_time, asynchronous_time);
+  }
 
   /// @brief Check whether the queue is empty.
   /// @retval true No entries are enqueued.
   /// @retval false At least one entry is enqueued.
-  bool empty() const { return entries_.empty(); }
+  bool empty() const { return local_entries_.empty() && asynchronous_entries_.empty(); }
 
   /// @brief Return the number of enqueued entries.
   /// @returns Current queue size.
-  size_t size() const { return entries_.size(); }
+  size_t size() const { return local_entries_.size() + asynchronous_entries_.size(); }
 
   /// @brief Return the last processed tick (set by the engine).
   /// @returns The current tick value.
@@ -157,9 +193,24 @@ public:
   void set_current_tick(Tick t) { current_tick_ = t; }
 
 private:
-  std::vector<EventQueueEntry> entries_; ///< Min-heap of entries by timestamp.
-  uint64_t next_sequence_ = 0;           ///< Monotonic counter for deterministic tie-breaking.
-  Tick current_tick_ = 0;                ///< Last processed simulation tick.
+  /// @brief Remove the minimum entry from one of the source-specific heaps.
+  static EventQueueEntry pop_from(std::vector<EventQueueEntry> &entries) {
+    std::pop_heap(entries.begin(), entries.end(), std::greater<>{});
+    EventQueueEntry entry = std::move(entries.back());
+    entries.pop_back();
+    return entry;
+  }
+
+  /// @brief Return whether two entries compete in the async/local arbitration class.
+  static bool has_same_priority(const EventQueueEntry &left, const EventQueueEntry &right) {
+    return left.timestamp == right.timestamp && left.event->type() == right.event->type();
+  }
+
+  std::vector<EventQueueEntry> local_entries_;        ///< Heap of owning-thread entries.
+  std::vector<EventQueueEntry> asynchronous_entries_; ///< Heap of cross-thread entries.
+  uint64_t next_sequence_ = 0; ///< Monotonic counter for deterministic source-local ordering.
+  uint32_t consecutive_async_events_ = 0; ///< Async selections while equal local work waits.
+  Tick current_tick_ = 0;                 ///< Last processed simulation tick.
 };
 
 /// @brief Concurrent queue for cross-partition event delivery.

@@ -15,6 +15,7 @@
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
@@ -64,6 +65,7 @@ public:
     uint64_t scratch_backing_va = 0;
     uint64_t trap_tba_addr = 0;
     uint64_t trap_tma_addr = 0;
+    amdgpu::AddressSpaceHandle address_space;
   };
 
   /// @brief Construct a new KFD process with a unique process ID.
@@ -657,6 +659,7 @@ public:
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
+    amdgpu::QueueHandle queue_handle;
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 

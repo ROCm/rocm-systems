@@ -28,12 +28,14 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -209,6 +211,124 @@ private:
   std::vector<Event> ends_;
 };
 
+/// Records whether each dispatched wave retained the queue's address-space identity.
+class AddressSpaceIdentityPlugin : public ExecutionPlugin {
+public:
+  explicit AddressSpaceIdentityPlugin(amdgpu::AddressSpaceHandle expected)
+      : ExecutionPlugin("xcd-address-space-identity"), expected_(expected) {}
+
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *> waves) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++workgroups_;
+    for (const auto *wave : waves)
+      retained_ = retained_ && wave->address_space() == expected_;
+  }
+
+  bool retained() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return retained_;
+  }
+
+  uint32_t workgroups() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return workgroups_;
+  }
+
+private:
+  amdgpu::AddressSpaceHandle expected_;
+  mutable std::mutex mutex_;
+  bool retained_ = true;
+  uint32_t workgroups_ = 0;
+};
+
+/// Identity translator and transport adapter used only to put the ordinary
+/// simulator backing behind a real generation-checked GpuVm handle.
+class SparseGpuVmAccess final : public amdgpu::AddressSpaceTranslator,
+                                public amdgpu::PhysicalMemoryAccess {
+public:
+  explicit SparseGpuVmAccess(amdgpu::GpuMemory &memory) : memory_(&memory) {}
+
+  amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                        amdgpu::VmAccessKind) const override {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed, .translation = {}};
+    return {
+        .outcome = amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = amdgpu::VmMemoryDomain::Local,
+                        .address = address,
+                        .contiguous_bytes =
+                            amdgpu::GpuMemory::PAGE_SIZE - (address & amdgpu::GpuMemory::PAGE_MASK),
+                        .mtype = amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
+                               std::span<std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    return memory_->read_block(address,
+                               std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()),
+                                                  bytes.size())) == amdgpu::AccessOutcome::Complete
+               ? amdgpu::VmAccessOutcome::Complete
+               : amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                std::span<const std::byte> bytes) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    return memory_->write_block(
+               address, std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()),
+                                                 bytes.size())) == amdgpu::AccessOutcome::Complete
+               ? amdgpu::VmAccessOutcome::Complete
+               : amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  amdgpu::AtomicLoadResult atomic_load(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                       uint32_t width) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    uint64_t observed = 0;
+    bool exchanged = false;
+    const auto outcome =
+        memory_->atomic_compare_exchange(address, width, 0, 0, observed, exchanged, 0);
+    return {.outcome = outcome == amdgpu::AccessOutcome::Complete
+                           ? amdgpu::VmAccessOutcome::Complete
+                           : amdgpu::VmAccessOutcome::Faulted,
+            .value = observed};
+  }
+
+  amdgpu::VmAccessOutcome atomic_store(amdgpu::VmMemoryDomain domain, uint64_t address,
+                                       uint32_t width, uint64_t value) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return amdgpu::VmAccessOutcome::Malformed;
+    return memory_->atomic_store(address, width, value, 0) == amdgpu::AccessOutcome::Complete
+               ? amdgpu::VmAccessOutcome::Complete
+               : amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  amdgpu::AtomicCompareExchangeResult compare_exchange(amdgpu::VmMemoryDomain domain,
+                                                       uint64_t address, uint32_t width,
+                                                       uint64_t expected,
+                                                       uint64_t desired) override {
+    if (domain != amdgpu::VmMemoryDomain::Local)
+      return {.outcome = amdgpu::VmAccessOutcome::Malformed};
+    uint64_t observed = 0;
+    bool exchanged = false;
+    const auto outcome =
+        memory_->atomic_compare_exchange(address, width, expected, desired, observed, exchanged, 0);
+    return {.outcome = outcome == amdgpu::AccessOutcome::Complete
+                           ? amdgpu::VmAccessOutcome::Complete
+                           : amdgpu::VmAccessOutcome::Faulted,
+            .observed = observed,
+            .exchanged = exchanged};
+  }
+
+private:
+  amdgpu::GpuMemory *memory_;
+};
+
 } // namespace
 
 // Fan-out is a property of the queue, not of the device. A queue registered
@@ -261,6 +381,47 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kTotalCus);
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
     EXPECT_EQ(counts[xi], kTotalCus / kTotalXcds) << "xcd" << xi;
+}
+
+TEST(XcdDistributionTest, FanoutPreservesAddressSpaceIdentityThroughEveryWave) {
+  XcdDistributionFixture fx;
+  auto vm_access = std::make_shared<SparseGpuVmAccess>(*fx.memory);
+  const amdgpu::AddressSpaceHandle address_space =
+      fx.soc->gpu_vm().register_translated(/*vmid=*/17, vm_access, vm_access);
+  ASSERT_TRUE(address_space);
+
+  auto plugin = std::make_unique<AddressSpaceIdentityPlugin>(address_space);
+  auto *identity = plugin.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fx.soc->set_plugin_group(group);
+
+  auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
+  ASSERT_NE(cp, nullptr);
+  auto queue = test::make_fanout_queue(fx.memory, cp, /*queue_id=*/1,
+                                       test::AqlQueue::DEFAULT_RING_ADDR, address_space);
+
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->queue_address_space_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              address_space)
+        << "xcd" << xi << " lost the queue address-space identity";
+  }
+
+  queue->dispatch(kKdAddr, kTotalXcds * kWavefrontSize, kWavefrontSize);
+  fx.engine->run();
+
+  EXPECT_EQ(identity->workgroups(), kTotalXcds);
+  EXPECT_TRUE(identity->retained());
+  const auto counts = fx.soc->dispatched_workgroups_per_xcd();
+  ASSERT_EQ(counts.size(), kTotalXcds);
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
+    EXPECT_EQ(counts[xi], 1u) << "xcd" << xi << " did not execute its address-space shard";
+    EXPECT_EQ(fx.soc->xcd(xi)->command_processor()->first_accepted_address_space_for_test(
+                  /*queue_id=*/1, /*process_id=*/0),
+              address_space)
+        << "xcd" << xi << " lost the dispatch address-space identity";
+  }
 }
 
 // The split must not depend on which XCD the queue landed on: rank is the XCD's
