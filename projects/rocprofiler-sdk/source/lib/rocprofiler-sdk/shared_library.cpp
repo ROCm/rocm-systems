@@ -77,13 +77,16 @@ library_info::library_info(std::string_view sym_name, void* sym)
     }
     else
     {
+        const char* _fname = (_info.dli_fname) ? _info.dli_fname : "(null)";
+        const char* _sname = (_info.dli_sname) ? _info.dli_sname : "(null)";
+
         ROCP_WARNING << fmt::format(
             "Failed to resolve rocprofiler-sdk shared library path to symbol '{}' ({}) :: "
             "file_name={}, symbol_name={}, load_address={}, nearest_symbol={}",
             sym_name,
             sdk::utility::as_hex(sym),
-            _info.dli_fname,
-            _info.dli_sname,
+            _fname,
+            _sname,
             sdk::utility::as_hex(_info.dli_fbase),
             sdk::utility::as_hex(_info.dli_saddr));
     }
