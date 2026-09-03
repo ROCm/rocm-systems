@@ -25,7 +25,7 @@ if(NOT DEFINED HIP_PLATFORM)
   set(HIP_PLATFORM "amd")
 endif()
 
-if(HIP_PLATFORM STREQUAL "amd")
+if(HIP_PLATFORM STREQUAL "amd" OR HIP_PLATFORM STREQUAL "nvidia")
   enable_language(HIP)
   set_source_files_properties(${HRR_GPU_WORKLOAD_SOURCES} PROPERTIES LANGUAGE HIP)
 endif()

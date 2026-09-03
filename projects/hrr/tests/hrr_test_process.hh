@@ -125,8 +125,15 @@ class SpawnProc {
       ::close(pipefd[1]);
       char buffer[4096];
       ssize_t n;
-      while ((n = ::read(pipefd[0], buffer, sizeof(buffer))) > 0) {
-        output_.append(buffer, static_cast<size_t>(n));
+      while (true) {
+        n = ::read(pipefd[0], buffer, sizeof(buffer));
+        if (n > 0) {
+          output_.append(buffer, static_cast<size_t>(n));
+        } else if (n == 0) {
+          break;
+        } else if (errno != EINTR) {
+          break;
+        }
       }
       ::close(pipefd[0]);
     }
