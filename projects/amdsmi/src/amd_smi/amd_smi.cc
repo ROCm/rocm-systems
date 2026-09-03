@@ -1501,6 +1501,8 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
     memset(info, 0, sizeof(*info));
     info->component_type = AMDSMI_CUID_COMPONENT_UNKNOWN;
     info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
+    std::cout << "Failed to query temporary CUID, status: "
+              << cuid_status_to_amdsmi(auxiliary_status) << std::endl;
     return cuid_status_to_amdsmi(auxiliary_status);
   }
   info->auxiliary = temporary ? 1 : 0;
@@ -1524,9 +1526,14 @@ amdsmi_status_t amdsmi_set_cuid_seed(const uint8_t seed[AMDSMI_CUID_SEED_SIZE]) 
   // No length parameter because there is no other accepted length: the
   // specification defines a 256-bit shared secret, and any other size is
   // corruption rather than a shorter secret.
-  const amdcuid_status_t status = amdcuid_set_hash_key(seed);
+  amdcuid_status_t status = amdcuid_set_hash_key(seed);
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
+      // Refresh the CUID after setting the new seed to ensure it takes effect.
+      status = amdcuid_refresh();
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        return AMDSMI_STATUS_API_FAILED;
+      }
       return AMDSMI_STATUS_SUCCESS;
     case AMDCUID_STATUS_PERMISSION_DENIED:
       return AMDSMI_STATUS_NO_PERM;

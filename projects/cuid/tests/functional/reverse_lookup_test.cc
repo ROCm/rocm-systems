@@ -24,7 +24,14 @@
 //   [15]     bits[1:0]=device_type[3:2] | bits[7:2]=padding (payload 120:127)
 static void extract_primary_raw_bits(const amdcuid_id_t& uuid, uint8_t raw_bits[16]) {
   amdcuid_id_t mutable_uuid = uuid;
-  CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+  // An adopted Platform CUID (e.g. the SMBIOS system UUID) is not a framed
+  // UUIDv8: it has no version/variant bits to strip, so its raw bytes must be
+  // taken verbatim.
+  if (CuidUtilities::is_constructed(&mutable_uuid)) {
+    CuidUtilities::remove_UUIDv8_bits(&mutable_uuid, raw_bits);
+  } else {
+    memcpy(raw_bits, mutable_uuid.bytes, 16);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,16 +137,22 @@ void TestReverseSerialNumber::Run() {
                                            &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint64_t extracted_serial = 0;
     memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
 
     EXPECT_EQ(serial_number, extracted_serial)
-        << "Serial number mismatch for device " << device_node;
+        << "Serial number mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n", device_node,
+      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n", amdcuid_id_to_string(device_handles_[i]),
              (unsigned long long)serial_number, (unsigned long long)extracted_serial);
     }
   }
@@ -173,6 +186,12 @@ void TestReverseVendorId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint16_t extracted_vendor =
@@ -183,9 +202,9 @@ void TestReverseVendorId::Run() {
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_VENDOR_ID,
                                            &queried_vendor, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << device_node;
+    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] vendor_id: 0x%04x\n", device_node, queried_vendor); }
+    IF_VERB(1) { printf("  Device [%s] vendor_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_vendor); }
   }
 }
 
@@ -217,6 +236,12 @@ void TestReverseDeviceId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint16_t extracted_device_id =
@@ -231,9 +256,9 @@ void TestReverseDeviceId::Run() {
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_device_id, queried_device_id)
-        << "Device ID mismatch for device " << device_node;
+        << "Device ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] device_id: 0x%04x\n", device_node, queried_device_id); }
+    IF_VERB(1) { printf("  Device [%s] device_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_device_id); }
   }
 }
 
@@ -265,6 +290,12 @@ void TestReverseRevisionId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     uint8_t extracted_revision = raw_bits[9];
@@ -279,9 +310,9 @@ void TestReverseRevisionId::Run() {
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_revision, queried_revision)
-        << "Revision ID mismatch for device " << device_node;
+        << "Revision ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] revision_id: 0x%02x\n", device_node, queried_revision); }
+    IF_VERB(1) { printf("  Device [%s] revision_id: 0x%02x\n", amdcuid_id_to_string(device_handles_[i]), queried_revision); }
   }
 }
 
@@ -313,6 +344,12 @@ void TestReverseUnitId::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     // unit_id is 13 bits: lower 8 in raw_bits[8], upper 5 in bits [4:0] of
@@ -328,9 +365,9 @@ void TestReverseUnitId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << device_node;
+    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] unit_id: 0x%04x\n", device_node, queried_unit_id); }
+    IF_VERB(1) { printf("  Device [%s] unit_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_unit_id); }
   }
 }
 
@@ -362,6 +399,12 @@ void TestReverseDeviceType::Run() {
         device_handles_[i], AMDCUID_QUERY_PRIMARY_CUID, &primary_id, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
 
+    if (!CuidUtilities::is_constructed(&primary_id)) {
+      // An adopted firmware UUID (e.g. a Platform's SMBIOS system UUID) carries
+      // no packed info to reverse-check; it is opaque firmware bytes.
+      continue;
+    }
+
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     // device_type is 4 bits: bits [7:6] of raw_bits[14] hold bits [1:0]
@@ -376,10 +419,10 @@ void TestReverseDeviceType::Run() {
                                            &queried_type, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(static_cast<amdcuid_device_type_t>(extracted_type), queried_type)
-        << "Device type mismatch for device " << device_node;
+        << "Device type mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] device_type: %u\n", device_node, static_cast<unsigned>(queried_type));
+      printf("  Device [%s] device_type: %u\n", amdcuid_id_to_string(device_handles_[i]), static_cast<unsigned>(queried_type));
     }
   }
 }

@@ -814,12 +814,11 @@ amdcuid_status_t amdcuid_get_key_info(amdcuid_key_info_t* info) {
   // unprivileged caller would otherwise get on a provisioned node ("not
   // provisioned", with the fallback fingerprint) is wrong, not unavailable.
   // Only a store that exists and is not a key is KEY_ERROR.
-  const amdcuid_status_t store = global_hmac.key_store_status();
-  if (store != AMDCUID_STATUS_SUCCESS) return store;
-  if (!global_hmac.is_valid()) return AMDCUID_STATUS_KEY_ERROR;
-
-  info->provisioned = global_hmac.is_using_default_key() ? 0 : 1;
-  return global_hmac.key_fingerprint(info->fingerprint);
+  //
+  // Answered from a single call into global_hmac: see
+  // cuid_hmac::get_key_info() for context under concurrent
+  // amdcuid_set_hash_key().
+  return global_hmac.get_key_info(info);
 }
 
 amdcuid_status_t amdcuid_generate_hash_key(uint8_t key[32]) {

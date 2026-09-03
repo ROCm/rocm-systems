@@ -643,8 +643,11 @@ amdcuid_status_t CuidUtilities::generate_derived_cuid(const amdcuid_primary_id* 
   memcpy(id_bits + 9, derived_id->hash + 8, 6);
   id_bits[14] &= 0x1F;
 
-  // bit 117: temp bit carried over from primary ID
-  id_bits[14] |= (primary_id->raw_bits[14] & 0x20);
+  // Bit 117 is meaningful only in a constructed primary. For an adopted
+  // Platform UUID, raw_bits contains opaque firmware bytes.
+  if (is_constructed(&primary_id->UUIDv8_representation)) {
+    id_bits[14] |= (primary_id->raw_bits[14] & 0x20);
+  }
 
   // bits 118-121: reserved bits part 2 (4 bits), placed by the same helper the
   // primary packer uses. Bits 122-127 are padding and stay zero.

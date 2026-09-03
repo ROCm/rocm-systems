@@ -261,6 +261,33 @@ amdcuid_status_t cuid_hmac::key_fingerprint(uint8_t out[8]) const {
   return AMDCUID_STATUS_SUCCESS;
 }
 
+amdcuid_status_t cuid_hmac::get_key_info(amdcuid_key_info_t* info) const {
+  if (!info) return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+  // One lock_guard for the whole read, so a concurrent set_hmac_key() can't
+  // land mid-read and mix status from one key with a fingerprint from
+  // another; the key is copied out so hashing runs outside the lock.
+  uint8_t key_copy[key_length];
+  size_t key_copy_len;
+  {
+    std::lock_guard<std::mutex> lock(key_mutex_);
+    if (key_store_status_ != AMDCUID_STATUS_SUCCESS) return key_store_status_;
+    if (!key || !valid) return AMDCUID_STATUS_KEY_ERROR;
+    key_copy_len = key_len;
+    std::memcpy(key_copy, key, key_copy_len);
+    info->provisioned = using_default_key ? 0 : 1;
+  }
+
+  uint8_t digest[32];
+  const amdcuid_status_t status = CuidUtilities::sha256_unkeyed(key_copy, key_copy_len, digest);
+  rocm::sha2::secure_zero(key_copy, sizeof(key_copy));
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+
+  std::memcpy(info->fingerprint, digest, sizeof(info->fingerprint));
+  rocm::sha2::secure_zero(digest, sizeof(digest));
+  return AMDCUID_STATUS_SUCCESS;
+}
+
 amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char* digest_name) {
   if (!impl_) {
     std::cerr << "HMAC context is not initialized" << std::endl;
