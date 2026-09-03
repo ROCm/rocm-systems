@@ -186,13 +186,18 @@ jobs:
           fetch-depth: 0
 
       - name: Reap orphaned per-run configs
-        # Self-healing janitor. The cleanup steps below cover the paths we can
-        # predict, but a runner dying mid-job leaves its copy behind forever on
-        # NFS. Anything older than a day is unambiguously dead: the longest a run
-        # can legally live is the detect job's 500min timeout.
+        # Self-healing janitor, and the ONLY thing that deletes these files --
+        # detect deliberately does not clean up after itself, so that "Re-run
+        # failed jobs" still finds the config build handed it.
+        #
+        # 48h is a heuristic, not a derived bound. A run's real life is the build
+        # plus an unbounded wait for a detect runner (timeout-minutes does not
+        # start until a runner is assigned, so that wait is invisible to every
+        # timeout in this file) plus detect's own 500min. Reaping a config a
+        # queued run still needs would fail that run, so leave wide margin.
         run: |
           find "${RCCL_CI_ROOT}/configs" -maxdepth 1 -name 'ci_detect_run_*.json' \
-            -mmin +1440 -print -delete 2>/dev/null || true
+            -mmin +2880 -print -delete 2>/dev/null || true
 
       - name: Detect changed paths
         id: paths
@@ -215,7 +220,18 @@ jobs:
             echo "::error::Could not diff against origin/${{ github.base_ref }}. Refusing to guess whether RCCL changed — a wrong guess here produces a meaningless green gate."
             exit 1
           fi
-          if grep -q '^projects/rccl/' <<<"${diff_out}"; then
+          # Mirror the `paths` exclusions above. Without this, a PR touching
+          # this workflow file (itself a trigger path) alongside a doc under
+          # projects/rccl/ matches ^projects/rccl/ and buys a full compile plus
+          # a ~25min 4-node detect on source that did not change.
+          #
+          # `|| true` scopes only to the filter -- a grep matching nothing exits
+          # 1, which is not an error here. It must not extend to the git diff
+          # above, which is exactly the swallowed failure this step exists to
+          # prevent.
+          rccl_src="$(grep '^projects/rccl/' <<<"${diff_out}" \
+            | grep -vE '(\.md$|^projects/rccl/docs/|^projects/rccl/LICENSE|/CODEOWNERS$)' || true)"
+          if [[ -n "${rccl_src}" ]]; then
             echo "rccl_changed=1" >> "$GITHUB_OUTPUT"
           else
             echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
@@ -227,7 +243,7 @@ jobs:
           BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
           BASE_REF: origin/${{ github.base_ref || 'develop' }}
-          _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
+          _CONFIG: ${{ inputs.config || format('{0}/configs/ci_detect_prod.json', env.RCCL_CI_ROOT) }}
         run: |
           if [[ "${BUILD_RCCL}" == "1" ]]; then
             # Give every run its own copy of the config rather than templating
@@ -291,6 +307,12 @@ jobs:
               [[ -n "${build_job}" ]] && break
               sleep 1
             done
+            if [[ -z "${build_job}" ]]; then
+              # The trap can only scancel an id it has. A job that submitted but
+              # whose id never showed leaves an exclusive node held with no trap
+              # coverage, so make that gap visible rather than silent.
+              echo "::warning::could not read the build job id within 30s; if a job was submitted it is now running without scancel coverage"
+            fi
             echo "build slurm job: ${build_job:-<unknown>}"
 
             set +e
@@ -405,38 +427,99 @@ jobs:
           HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
           ART=""
           if [[ -f "${HELPER}" ]]; then
-            ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null)" || ART=""
+            # Last line only: this goes to GITHUB_OUTPUT as a bare key=value,
+            # which has no multi-line form, so a banner on the helper's stdout
+            # would truncate the path and leak the rest as further outputs.
+            ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null | tail -n1)" || ART=""
           fi
           if [[ -z "${ART}" ]]; then
-            # Helper missing or failed: the cluster's cvs checkout predates it.
-            # Fall back to the legacy shared dir and say so loudly rather than
-            # emitting an empty path that would silently resolve to "/".
+            if [[ "${RCCL_CI_WORKSPACE}" == "1" ]]; then
+              # Fail rather than guess. In workspace mode the detector writes to
+              # runs/<run_key>/artifacts; the legacy shared dir holds whatever an
+              # earlier run left there, so falling back would render another
+              # run's report as this PR's verdict. A stale green is the worst
+              # failure mode a gate has.
+              echo "::error::workspace.sh --print-artifacts is unavailable and RCCL_CI_WORKSPACE=1. Refusing to fall back to the shared artifact dir, whose contents belong to a different run. Update the cvs checkout on the cluster."
+              exit 1
+            fi
             ART="${RCCL_CI_ROOT}/ab_artifacts"
-            echo "::warning::workspace.sh --print-artifacts unavailable; falling back to ${ART}. If RCCL_CI_WORKSPACE=1 this report may be from a different run — update the cvs checkout on the cluster."
+            echo "::warning::workspace.sh --print-artifacts unavailable; falling back to ${ART}."
           fi
           echo "dir=${ART}" >> "$GITHUB_OUTPUT"
           echo "Artifact dir: ${ART}"
           ls -la "${ART}" 2>/dev/null || echo "(artifact dir absent)"
 
+      - name: Evaluate verdict
+        id: verdict
+        if: always()
+        env:
+          _ART: ${{ steps.art.outputs.dir }}
+        # Decide trustworthiness ONCE, here, before anything renders. Both the
+        # render step and the gate step below consume this answer, so they can
+        # never disagree about whether this run measured anything.
+        #
+        # Never fails: it only reports. `Gate on detector verdict` owns the
+        # failing, so that a report is still rendered and uploaded first.
+        run: |
+          REPORT="${_ART}/ab_regression_report.json"
+          if [[ ! -f "${REPORT}" ]]; then
+            echo "present=0" >> "$GITHUB_OUTPUT"
+            echo "trustworthy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "present=1" >> "$GITHUB_OUTPUT"
+          python3 - "${REPORT}" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          reports = d.get("reports", {}) or {}
+          trust = d.get("trustworthy")
+          if trust is None:
+              trust = bool(reports) and all(
+                  r.get("summary", {}).get("trustworthy", False) for r in reports.values())
+          print(f"trustworthy={'true' if trust else 'false'}")
+          print("regressions=%d" % sum(
+              r.get("summary", {}).get("regressions", 0) for r in reports.values()))
+          reasons = d.get("untrustworthy_reasons") or ["report predates the trustworthy flag"]
+          print("reasons<<EOR")
+          if not trust:
+              for why in reasons:
+                  print(why)
+          print("EOR")
+          prov = d.get("provenance") or {}
+          print(f"provenance=cvs@{prov.get('cvs_sha')} thresholds={d.get('thresholds_source')}")
+          PY
+
       - name: Render report
         if: always()
         env:
           _ART: ${{ steps.art.outputs.dir }}
+          _PRESENT: ${{ steps.verdict.outputs.present }}
+          _TRUST: ${{ steps.verdict.outputs.trustworthy }}
+          _REASONS: ${{ steps.verdict.outputs.reasons }}
         run: |
           REPORT="${_ART}/ab_regression_report.json"
-          if [[ ! -f "${REPORT}" ]]; then
-            # Say so plainly instead of letting format_report.py traceback, and
-            # never fall back to another directory's report.
+          # Deliberately do NOT write rccl_report.md on either bail-out below.
+          # Its presence in the uploaded artifact is the `report` job's signal
+          # that a real verdict exists, so writing a placeholder would make "the
+          # detector could not measure" indistinguishable from "the detector
+          # said pass" -- and report would post the placeholder as a result.
+          {
+            echo "### RCCL Perf Regression Gate"
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${_PRESENT}" != "1" ]]; then
             echo "::warning::No report at ${REPORT} — the detector did not produce one."
-            echo "### RCCL Perf Regression Gate" >> "${GITHUB_STEP_SUMMARY}"
-            echo "" >> "${GITHUB_STEP_SUMMARY}"
             echo "No report was produced for this run (\`${REPORT}\` is missing)." >> "${GITHUB_STEP_SUMMARY}"
             echo "See the detector step log above for the failure." >> "${GITHUB_STEP_SUMMARY}"
-            # Deliberately do NOT write rccl_report.md here. Its presence in the
-            # uploaded artifact is the `report` job's signal that a real verdict
-            # exists; a placeholder file would make "the detector measured
-            # nothing" indistinguishable from "the detector said pass", and
-            # report would post the placeholder text as though it were a result.
+            exit 0
+          fi
+          if [[ "${_TRUST}" != "true" ]]; then
+            # The gate rejected this run as unmeasured. Rendering it anyway is
+            # how a run the detector refused to score still reaches the PR as a
+            # verdict -- the stale-green failure this workflow exists to close.
+            echo "The detector produced no usable verdict, so nothing is rendered." >> "${GITHUB_STEP_SUMMARY}"
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "${_REASONS}" >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
           # Render into the artifact dir, not RUNNER_TEMP: upload-artifact@v4
@@ -455,9 +538,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # Namespaced per run+attempt: with runs no longer serialised by a
-          # global lock, a fixed name would collide across concurrent runs.
-          name: rccl-ab-report-${{ github.run_id }}-${{ github.run_attempt }}
+          # Namespaced per run -- with runs no longer serialised by a global
+          # lock, a fixed name would collide across concurrent runs.
+          #
+          # Deliberately NOT per attempt. "Re-run failed jobs" bumps run_attempt
+          # but does not re-run a `detect` that already succeeded, so an
+          # attempt-stamped name would leave `report` hunting for an artifact
+          # nobody uploaded and posting "not measured" over a good verdict.
+          # `overwrite` keeps the name resolving to the newest upload when
+          # detect itself is re-run; there is exactly one writer per run, so the
+          # parallel-writer hazard in the overwrite docs does not apply here.
+          name: rccl-ab-report-${{ github.run_id }}
+          overwrite: true
           if-no-files-found: warn
           # Only paths under THIS run's artifact dir. rccl_runs.log used to be the
           # shared /it-share/rccl-ci/ab_artifacts/rccl_runs.log, which every run
@@ -476,34 +568,40 @@ jobs:
             ${{ steps.art.outputs.dir }}/rccl_runs.log
             ${{ steps.art.outputs.dir }}/rccl_report.md
 
-      - name: Clean up per-run config copy
-        if: always()
-        env:
-          _CONFIG: ${{ needs.build.outputs.config_json }}
-        run: |
-          case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
-          esac
+      # No cleanup of the per-run config here, deliberately. `build` does not
+      # re-run when only `detect` is retried, so its outputs -- including the
+      # config path -- are re-served verbatim on attempt 2. Deleting the file
+      # here made "Re-run failed jobs" fail on a missing config, and the detect
+      # failures most worth retrying (Slurm submission, polling timeout,
+      # transient NFS) are exactly the ones that left it deleted. The janitor at
+      # the top of `build` is the sole owner of deletion, as it already is for
+      # the `report` job.
 
       - name: Gate on detector verdict
         if: always()
+        # Values reach the shell through env:, not raw ${{ }} interpolation --
+        # they originate in a helper's stdout and a captured exit code.
+        env:
+          _CODE: ${{ steps.detect.outputs.exit_code }}
+          _ART: ${{ steps.art.outputs.dir }}
+          _PRESENT: ${{ steps.verdict.outputs.present }}
+          _TRUST: ${{ steps.verdict.outputs.trustworthy }}
+          _REGRESSIONS: ${{ steps.verdict.outputs.regressions }}
+          _REASONS: ${{ steps.verdict.outputs.reasons }}
+          _PROVENANCE: ${{ steps.verdict.outputs.provenance }}
         run: |
           # submit_and_poll.sh exit codes: 0 = pass, 1 = regression detected,
           # 2 = submission/polling error (job never reached a terminal state).
           # steps.detect.outcome can't distinguish 1 from 2 -- continue-on-error
           # reports "failure" for any nonzero exit -- so branch on the exit
-          # code we captured explicitly instead.
-          code="${{ steps.detect.outputs.exit_code }}"
-          if [[ "${code}" != "0" && "${code}" != "1" ]]; then
-            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${code}). Report on NFS may be stale — not gating on it."
+          # code we captured explicitly instead. An empty value means the step
+          # was killed before it wrote one, which is also an infra failure.
+          if [[ "${_CODE}" != "0" && "${_CODE}" != "1" ]]; then
+            echo "::error::Detector failed to run (SLURM submission/polling error or timeout, exit ${_CODE:-<none>}). Report on NFS may be stale — not gating on it."
             exit 2
           fi
-          # Advisory mode (see PR description): report the verdict but don't
-          # fail the job on a detected regression yet. Infra failures above
-          # still fail hard regardless of mode.
-          REPORT="${{ steps.art.outputs.dir }}/ab_regression_report.json"
-          if [[ ! -f "${REPORT}" ]]; then
-            echo "::error::Detector exited ${code} but produced no report at ${REPORT}."
+          if [[ "${_PRESENT}" != "1" ]]; then
+            echo "::error::Detector exited ${_CODE} but produced no report at ${_ART}/ab_regression_report.json."
             exit 2
           fi
           # "No usable verdict" is an infra failure, not an advisory finding. The
@@ -511,25 +609,18 @@ jobs:
           # a PR while the gate earns trust — it was never meant to cover a run
           # that failed to measure anything. Those must fail hard, or the gate
           # spends its advisory period reporting green on runs it never made.
-          python3 - "${REPORT}" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          reports = d.get("reports", {}) or {}
-          trust = d.get("trustworthy")
-          if trust is None:
-              trust = bool(reports) and all(
-                  r.get("summary", {}).get("trustworthy", False) for r in reports.values())
-          if not trust:
-              for why in (d.get("untrustworthy_reasons") or ["report predates the trustworthy flag"]):
-                  print(f"::error::{why}")
-              print("::error::Detector produced NO USABLE VERDICT — failing the gate. "
-                    "This is not a regression finding; it means the run could not measure.")
-              sys.exit(2)
-          n = sum(r.get("summary", {}).get("regressions", 0) for r in reports.values())
-          prov = d.get("provenance") or {}
-          print(f"Verdict source: cvs@{prov.get('cvs_sha')} thresholds={d.get('thresholds_source')}")
-          print(f"::notice::{n} confirmed regression(s) (advisory mode: not failing the PR)")
-          PY
+          if [[ "${_TRUST}" != "true" ]]; then
+            while IFS= read -r why; do
+              [[ -n "${why}" ]] && echo "::error::${why}"
+            done <<<"${_REASONS}"
+            echo "::error::Detector produced NO USABLE VERDICT — failing the gate. This is not a regression finding; it means the run could not measure."
+            exit 2
+          fi
+          # Advisory mode (see PR description): report the verdict but don't
+          # fail the job on a detected regression yet. Infra failures above
+          # still fail hard regardless of mode.
+          echo "Verdict source: ${_PROVENANCE}"
+          echo "::notice::${_REGRESSIONS} confirmed regression(s) (advisory mode: not failing the PR)"
 
   # ---------------------------------------------------------------------------
   # The PR comment lives in its own always() job.
@@ -565,6 +656,12 @@ jobs:
     needs: [build, detect]
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # Safe to cancel, unlike build and detect: this job holds no Slurm
+    # allocation, so nothing is orphaned. Purely a latency win -- it is NOT what
+    # keeps a stale verdict off the PR. See the head-SHA guard below.
+    concurrency:
+      group: rccl-perf-gate-report-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     timeout-minutes: 15
     permissions:
       contents: read
@@ -579,7 +676,8 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: rccl-ab-report-${{ github.run_id }}-${{ github.run_attempt }}
+          # Run-scoped, not attempt-scoped -- see the note on the upload.
+          name: rccl-ab-report-${{ github.run_id }}
           path: ${{ runner.temp }}/dl
 
       - name: Compose comment
@@ -620,7 +718,33 @@ jobs:
           fi
           cat "${OUT}" >> "${GITHUB_STEP_SUMMARY}"
 
+      - name: Check this verdict still describes the PR head
+        id: fresh
+        # A sticky comment is a claim about the CURRENT state of the PR, so a run
+        # whose commit is no longer the head has nothing to say and must not
+        # overwrite a newer verdict.
+        #
+        # The concurrency group above does not cover this. cancel-in-progress
+        # only fires when two jobs are genuinely concurrent, and the worst
+        # ordering is not: a run whose detect takes ~25min can be overtaken by a
+        # later docs-only push whose detect is skipped and whose report posts
+        # immediately -- then the older run's report starts and lands last.
+        # Nothing was ever concurrent, so nothing was ever cancelled.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          _RAN_FOR: ${{ github.event.pull_request.head.sha }}
+        run: |
+          head="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" --jq .head.sha)"
+          if [[ "${head}" != "${_RAN_FOR}" ]]; then
+            echo "stale=1" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not posting: this run measured ${_RAN_FOR}, but the PR head is now ${head}. A newer run owns the comment."
+            echo "Superseded — this run measured \`${_RAN_FOR}\`, which is no longer the PR head." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "stale=0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Post / update PR comment
+        if: steps.fresh.outputs.stale == '0'
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
