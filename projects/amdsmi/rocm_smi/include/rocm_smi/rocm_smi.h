@@ -643,6 +643,36 @@ typedef struct {
   uint64_t reserved[5];
 } rsmi_npm_info_t;
 
+//! Maximum length for AMPP string buffers. Must stay equal to
+//! AMDSMI_MAX_STRING_LENGTH (amd_smi/amdsmi.h) -- the two structs below
+//! mirror amdsmi_ampp_field_t/amdsmi_ampp_profile_t byte-for-byte so
+//! amd_smi.cc can translate between them with a single sizeof-guarded
+//! memcpy/reinterpret_cast.
+#define RSMI_AMPP_MAX_STRING_LENGTH 256
+
+/**
+ * @brief A single AMPP profile field (name/value/unit/limits).
+ */
+typedef struct {
+  char name[RSMI_AMPP_MAX_STRING_LENGTH];
+  char unit[RSMI_AMPP_MAX_STRING_LENGTH];
+  int64_t value;
+  int64_t min_value;
+  int64_t max_value;
+  bool has_limits;
+} rsmi_ampp_field_t;
+
+/**
+ * @brief A single AMPP profile descriptor.
+ */
+typedef struct {
+  char name[RSMI_AMPP_MAX_STRING_LENGTH];
+  uint32_t index;
+  bool is_active;
+  bool is_writable;
+  bool is_configured;
+} rsmi_ampp_profile_t;
+
 /**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
  * various activity metrics.
@@ -3185,6 +3215,86 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);
 
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
+
+/**
+ *  @brief Get the list of AMPP (amdsmi power profile) profiles currently
+ *  published by the driver for the given device, along with the AMPP ABI
+ *  version string.
+ *
+ *  @details If @p profiles is nullptr, @p num_profiles will be set to the
+ *  number of profiles currently available and ::RSMI_STATUS_SUCCESS is
+ *  returned. Otherwise, @p num_profiles is treated as the capacity of the
+ *  @p profiles array; if that capacity is smaller than the number of
+ *  profiles available, ::RSMI_STATUS_OUT_OF_RESOURCES is returned and
+ *  *num_profiles is set to the required capacity, without partially
+ *  filling @p profiles.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] version optional buffer of size RSMI_AMPP_MAX_STRING_LENGTH
+ *  to receive the AMPP ABI version string, or nullptr to skip
+ *  @param[inout] profiles buffer to receive the profile list, or nullptr
+ *  @param[inout] num_profiles capacity of @p profiles on input, count on
+ *  output
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS num_profiles is nullptr
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported on this device
+ *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p profiles capacity too small
+ */
+rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP_MAX_STRING_LENGTH],
+                                         rsmi_ampp_profile_t* profiles, uint32_t* num_profiles);
+
+/**
+ *  @brief Get the fields (name/value/unit/limits) of a single AMPP profile.
+ *
+ *  @details Same two-call sizing convention as rsmi_dev_ampp_profiles_get:
+ *  if @p fields is nullptr, only *num_fields is filled in.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_2")
+ *  @param[inout] num_fields capacity of @p fields on input, count on output
+ *  @param[inout] fields buffer to receive the field list, or nullptr
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name/num_fields invalid, or
+ *  profile_name does not name a currently published profile
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported on this device
+ *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p fields capacity too small
+ *  @retval ::RSMI_STATUS_NO_DATA the profile is writable but not yet
+ *  configured (has no fields yet)
+ */
+rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name,
+                                       uint32_t* num_fields, rsmi_ampp_field_t* fields);
+
+/**
+ *  @brief Activate an AMPP profile.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_2")
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name invalid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported
+ *  @retval ::RSMI_STATUS_PERMISSION insufficient permission to write
+ */
+rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profile_name);
+
+/**
+ *  @brief Stage/commit field values into a writable custom profile slot.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_5")
+ *  @param[in] fields fields to stage
+ *  @param[in] num_fields number of entries in @p fields
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name/fields/num_fields invalid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP, or CONFIGURE on this slot, is
+ *  not supported
+ *  @retval ::RSMI_STATUS_PERMISSION insufficient permission to write
+ */
+rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profile_name,
+                                              const rsmi_ampp_field_t* fields, uint32_t num_fields);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the

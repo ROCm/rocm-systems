@@ -1287,6 +1287,93 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _ValidatePtlFormat
 
+    def _ampp_configure_options(self):
+        """Custom action for --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]"""
+        output_format = self.helpers.get_output_format()
+
+        class AMDSMIAmppConfigureArgs(argparse.Action):
+            def __call__(
+                self,
+                parser: AMDSMIParser,
+                namespace: argparse.Namespace,
+                values: list,
+                option_string: Optional[str] = None,
+            ) -> None:
+                if not values:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1], "Missing PROFILE_NAME argument", output_format
+                    )
+
+                ampp_configure_args = collections.namedtuple(
+                    "ampp_configure_args", ["profile_name", "fields", "file_path"]
+                )
+
+                # `@<path>` form: restore every writable, configured profile
+                # found in a JSON file (as produced by
+                # `amd-smi static --ampp --json`) in one call.
+                if values[0].startswith("@"):
+                    if len(values) > 1:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            " ".join(values),
+                            output_format,
+                            hint="'@<path>' must be the only argument when loading profiles from a file.",
+                        )
+                    file_path = values[0][1:]
+                    if not file_path:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            values[0],
+                            output_format,
+                            hint="File path cannot be empty after '@'.",
+                        )
+                    setattr(namespace, self.dest, ampp_configure_args(None, None, file_path))
+                    return
+
+                profile_name = values[0]
+                field_tokens = values[1:]
+
+                if not field_tokens:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1],
+                        "Missing at least one KEY=VALUE field argument for --ampp-configure",
+                        output_format,
+                    )
+
+                fields = []
+                for token in field_tokens:
+                    if "=" not in token:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint="Fields must be given as KEY=VALUE (e.g. PPT0_Limit=300).",
+                        )
+                    key, _, raw_value = token.partition("=")
+                    key = key.strip()
+                    raw_value = raw_value.strip()
+                    if not key:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint="Field name cannot be empty in KEY=VALUE.",
+                        )
+                    try:
+                        value = int(raw_value)
+                    except ValueError:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint=f"Field value must be an integer (got '{raw_value}').",
+                        )
+                    fields.append({"name": key, "value": value})
+
+                setattr(namespace, self.dest, ampp_configure_args(profile_name, fields, None))
+
+        return AMDSMIAmppConfigureArgs
+
     ### Building parsers ###
     @staticmethod
     def _guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G")):
@@ -1616,6 +1703,15 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
             static_parser.add_argument(
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
+            )
+
+            ampp_help = (
+                "Display AMPP (amdsmi power profile) recipe table: per-profile"
+                " version/active/writable/configured state and per-field"
+                " name/unit/value/min/max."
+            )
+            static_parser.add_argument(
+                "-A", "--ampp", action="store_true", required=False, help=ampp_help
             )
 
             # Options to display on Hypervisors and Baremetal
@@ -2670,6 +2766,38 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     help=set_gtt_help,
                     metavar="GB",
+                )
+
+                set_ampp_help = (
+                    "Activate an AMPP (amdsmi power profile) by name."
+                    "\n\tUse `amd-smi static --ampp` to see available profiles."
+                )
+                set_value_exclusive_group.add_argument(
+                    "-A",
+                    "--ampp",
+                    action="store",
+                    type=str,
+                    required=False,
+                    help=set_ampp_help,
+                    metavar="PROFILE_NAME",
+                )
+
+                set_ampp_configure_help = (
+                    "Configure an AMPP (amdsmi power profile) custom slot by staging one or "
+                    "more KEY=VALUE fields, then committing them."
+                    "\n\tUse `amd-smi static --ampp` to see writable profiles and field names."
+                    "\n\tExample: --ampp-configure profile_2 PPT0_Limit=300"
+                    "\n\tAlternatively, pass @<path> to restore every writable profile found "
+                    "in a JSON file (as produced by `amd-smi static --ampp --json`)."
+                    "\n\tExample: --ampp-configure @profiles.json"
+                )
+                set_value_exclusive_group.add_argument(
+                    "--ampp-configure",
+                    action=self._ampp_configure_options(),
+                    nargs="+",
+                    required=False,
+                    help=set_ampp_configure_help,
+                    metavar=("PROFILE_NAME", "KEY=VALUE"),
                 )
 
         if self.helpers.is_amd_hsmp_initialized():

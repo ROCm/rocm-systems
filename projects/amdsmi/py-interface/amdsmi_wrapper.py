@@ -4844,6 +4844,61 @@ try:
     amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
+class struct_amdsmi_ampp_field_t(Structure):
+    pass
+
+struct_amdsmi_ampp_field_t._pack_ = 1 # source:False
+struct_amdsmi_ampp_field_t._layout_ = 'ms'
+struct_amdsmi_ampp_field_t._fields_ = [
+    ('name', ctypes.c_char * 256),
+    ('unit', ctypes.c_char * 256),
+    ('value', ctypes.c_int64),
+    ('min_value', ctypes.c_int64),
+    ('max_value', ctypes.c_int64),
+    ('has_limits', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+]
+
+amdsmi_ampp_field_t = struct_amdsmi_ampp_field_t
+class struct_amdsmi_ampp_profile_t(Structure):
+    pass
+
+struct_amdsmi_ampp_profile_t._pack_ = 1 # source:False
+struct_amdsmi_ampp_profile_t._layout_ = 'ms'
+struct_amdsmi_ampp_profile_t._fields_ = [
+    ('name', ctypes.c_char * 256),
+    ('index', ctypes.c_uint32),
+    ('is_active', ctypes.c_bool),
+    ('is_writable', ctypes.c_bool),
+    ('is_configured', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte),
+]
+
+amdsmi_ampp_profile_t = struct_amdsmi_ampp_profile_t
+try:
+    amdsmi_get_ampp_profiles = _libraries['libamd_smi.so'].amdsmi_get_ampp_profiles
+    amdsmi_get_ampp_profiles.restype = amdsmi_status_t
+    amdsmi_get_ampp_profiles.argtypes = [amdsmi_processor_handle, ctypes.c_char * 256, ctypes.POINTER(struct_amdsmi_ampp_profile_t), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_ampp_fields = _libraries['libamd_smi.so'].amdsmi_get_ampp_fields
+    amdsmi_get_ampp_fields.restype = amdsmi_status_t
+    amdsmi_get_ampp_fields.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_ampp_field_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_activate_ampp_profile = _libraries['libamd_smi.so'].amdsmi_activate_ampp_profile
+    amdsmi_activate_ampp_profile.restype = amdsmi_status_t
+    amdsmi_activate_ampp_profile.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    amdsmi_configure_ampp_profile = _libraries['libamd_smi.so'].amdsmi_configure_ampp_profile
+    amdsmi_configure_ampp_profile.restype = amdsmi_status_t
+    amdsmi_configure_ampp_profile.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_amdsmi_ampp_field_t), uint32_t]
+except AttributeError:
+    pass
 class struct_amdsmi_uma_carveout_option_t(Structure):
     pass
 
@@ -5253,14 +5308,17 @@ __all__ = \
     'amdsmi_accelerator_partition_profile_t',
     'amdsmi_accelerator_partition_resource_profile_t',
     'amdsmi_accelerator_partition_resource_type_t',
-    'amdsmi_accelerator_partition_type_t', 'amdsmi_affinity_scope_t',
-    'amdsmi_alloc_fabric_telemetry', 'amdsmi_apu_metrics_t',
+    'amdsmi_accelerator_partition_type_t',
+    'amdsmi_activate_ampp_profile', 'amdsmi_affinity_scope_t',
+    'amdsmi_alloc_fabric_telemetry', 'amdsmi_ampp_field_t',
+    'amdsmi_ampp_profile_t', 'amdsmi_apu_metrics_t',
     'amdsmi_asic_info_t', 'amdsmi_bdf_t', 'amdsmi_bit_field_t',
     'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
     'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_mem_alloc_mode_t',
-    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_compute_partition_type_t',
+    'amdsmi_configure_ampp_profile', 'amdsmi_container_types_t',
     'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
     'amdsmi_cper_guid_t', 'amdsmi_cper_hdr_t',
     'amdsmi_cper_notify_type_t', 'amdsmi_cper_sev_t',
@@ -5291,6 +5349,7 @@ __all__ = \
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
     'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper',
+    'amdsmi_get_ampp_fields', 'amdsmi_get_ampp_profiles',
     'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
     'amdsmi_get_cpu_affinity_with_scope', 'amdsmi_get_cpu_cc6_enable',
     'amdsmi_get_cpu_cclk_limit', 'amdsmi_get_cpu_core_boostlimit',
@@ -5497,6 +5556,7 @@ __all__ = \
     'struct_amdsmi_accelerator_partition_profile_config_t',
     'struct_amdsmi_accelerator_partition_profile_t',
     'struct_amdsmi_accelerator_partition_resource_profile_t',
+    'struct_amdsmi_ampp_field_t', 'struct_amdsmi_ampp_profile_t',
     'struct_amdsmi_apu_metrics_t', 'struct_amdsmi_asic_info_t',
     'struct_amdsmi_bdf_t_1', 'struct_amdsmi_board_info_t',
     'struct_amdsmi_clk_info_t', 'struct_amdsmi_counter_value_t',

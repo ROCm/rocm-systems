@@ -192,6 +192,7 @@ if __name__ == "__main__":
         "--core",
         "--profile",
         "--cper-file",
+        "--ampp",
     ]
     case_sensitive_prefixes = [
         "--folder=",
@@ -201,14 +202,35 @@ if __name__ == "__main__":
         "--core=",
         "--profile=",
         "--cper-file=",
+        "--ampp=",
     ]
+    # Arguments whose *entire* remaining value list (nargs="+") must keep case
+    # -- e.g. --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...], where
+    # the sysfs field names (KEY) are case-sensitive per the driver spec (e.g.
+    # "PPT0_Limit", "MaxGfxclkFreq"). Unlike case_sensitive_args above, this
+    # must preserve case for *all* following tokens, not just the next one,
+    # until the next flag (a token starting with "-") or end of argv.
+    multi_value_case_sensitive_args = ["--ampp-configure"]
 
     preserve_case_for_next = False
+    preserve_case_until_flag = False
     for i, arg in enumerate(sys.argv):
+        if preserve_case_until_flag and not arg.startswith("-"):
+            # Still within the case-sensitive value list of a preceding
+            # multi-value flag (e.g. --ampp-configure).
+            processed_argv.append(arg)
+            continue
+        preserve_case_until_flag = False
+
         if preserve_case_for_next:
             # Preserve case for the next argument value
             processed_argv.append(arg)
             preserve_case_for_next = False
+        elif arg in multi_value_case_sensitive_args:
+            # Convert flag to lowercase but preserve case for every value
+            # that follows, until the next flag.
+            processed_argv.append(arg.lower())
+            preserve_case_until_flag = True
         elif arg in case_sensitive_args:
             # Convert flag to lowercase but preserve next value
             processed_argv.append(arg.lower())

@@ -220,6 +220,9 @@ class Device {
   // GPU Overdrive (gpu_od) sysfs path helper methods
   std::string get_gpu_od_fan_min_pwm_path(void) const;
 
+  // AMPP (amdsmi power profile) sysfs root path helper method
+  std::string get_ampp_root_path(void) const;
+
   int readDevInfo(DevInfoTypes type, uint64_t* val);
   int readDevInfoLine(DevInfoTypes type, std::string* line);
   int readDevInfo(DevInfoTypes type, std::string* val);

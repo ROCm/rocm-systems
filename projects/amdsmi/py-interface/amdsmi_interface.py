@@ -27,7 +27,7 @@ from ctypes import POINTER, c_void_p
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
@@ -7205,6 +7205,206 @@ def amdsmi_set_gpu_uma_carveout(processor_handle: processor_handle_t, option_ind
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     _check_res(amdsmi_wrapper.amdsmi_set_gpu_uma_carveout(processor_handle, option_index))
+
+
+# AMPP (amdsmi power profile) functions
+# Note: This is a kernel UAPI sysfs feature (app_modes/), not libdrm, and is
+# unrelated to the legacy amdsmi_get_gpu_power_profile_presets/
+# amdsmi_set_gpu_power_profile preset-mask API. Profile names, field names,
+# and units are all opaque strings enumerated at runtime -- never mapped to
+# an AMDSMI-defined enum here.
+
+
+def _ampp_profile_to_dict(profile) -> Dict[str, Any]:
+    name = profile.name.decode("utf-8") if isinstance(profile.name, bytes) else profile.name
+    return {
+        "name": name,
+        "index": profile.index,
+        "is_active": bool(profile.is_active),
+        "is_writable": bool(profile.is_writable),
+        "is_configured": bool(profile.is_configured),
+    }
+
+
+def _ampp_field_to_dict(field) -> Dict[str, Any]:
+    name = field.name.decode("utf-8") if isinstance(field.name, bytes) else field.name
+    unit = field.unit.decode("utf-8") if isinstance(field.unit, bytes) else field.unit
+    return {
+        "name": name,
+        "unit": unit,
+        "value": field.value,
+        "min_value": field.min_value,
+        "max_value": field.max_value,
+        "has_limits": bool(field.has_limits),
+    }
+
+
+def amdsmi_get_ampp_profiles(
+    processor_handle: processor_handle_t,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Get the list of AMPP power profiles published by the driver.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        Tuple[str, List[dict]]: (version, profiles).
+        version is the app_modes/profile_abi string (e.g. "1.0"); this is a
+        single tree-wide value, not a per-profile one.
+        profiles is one dict per published profile_N, each with 'name',
+        'index', 'is_active', 'is_writable', 'is_configured'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NOT_SUPPORTED if the
+            device has no app_modes/ sysfs tree)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_profiles = ctypes.c_uint32(0)
+    version_buf = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_profile_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, nullptr, ctypes.byref(num_profiles)
+        )
+    )
+
+    profiles = (amdsmi_wrapper.amdsmi_ampp_profile_t * num_profiles.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, profiles, ctypes.byref(num_profiles)
+        )
+    )
+
+    version = version_buf.value.decode("utf-8")
+    return version, [_ampp_profile_to_dict(profiles[i]) for i in range(num_profiles.value)]
+
+
+def amdsmi_get_ampp_fields(
+    processor_handle: processor_handle_t, profile_name: str
+) -> List[Dict[str, Any]]:
+    """
+    Get the fields of a single AMPP power profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to query (e.g. "profile_2"), as
+            returned by amdsmi_get_ampp_profiles
+
+    Returns:
+        List[dict]: One dict per published field, each with 'name', 'unit',
+        'value', 'min_value', 'max_value', 'has_limits'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_DATA if the profile
+            is a writable but unconfigured custom slot, INVAL if
+            profile_name is not currently published)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    profile_name_bytes = (
+        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    )
+
+    num_fields = ctypes.c_uint32(0)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_field_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), nullptr
+        )
+    )
+
+    fields = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), fields
+        )
+    )
+
+    return [_ampp_field_to_dict(fields[i]) for i in range(num_fields.value)]
+
+
+def amdsmi_activate_ampp_profile(processor_handle: processor_handle_t, profile_name: str):
+    """
+    Activate an AMPP profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to activate (e.g. "profile_2"),
+            as returned by amdsmi_get_ampp_profiles
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, INVAL for an unpublished profile_name)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    profile_name_bytes = (
+        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    )
+
+    _check_res(amdsmi_wrapper.amdsmi_activate_ampp_profile(processor_handle, profile_name_bytes))
+
+
+def amdsmi_configure_ampp_profile(
+    processor_handle: processor_handle_t, profile_name: str, fields: List[Dict[str, Any]]
+):
+    """
+    Configure a custom AMPP profile slot.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to configure (e.g. "profile_5"),
+            as returned by amdsmi_get_ampp_profiles
+        fields: List of dicts with 'name' and 'value' to stage (partial
+            staging of a subset of fields is allowed, but at least one
+            field is required -- the driver rejects a commit with nothing
+            ever staged)
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, NOT_SUPPORTED if the profile is not
+            writable, INVAL for an unpublished profile_name, unrecognized
+            field name, or an empty `fields` list)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    profile_name_bytes = (
+        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    )
+
+    num_fields = len(fields)
+    field_array = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields)()
+    for i, field in enumerate(fields):
+        field_name = field["name"]
+        field_name_bytes = field_name.encode("utf-8") if isinstance(field_name, str) else field_name
+        field_array[i].name = field_name_bytes
+        field_array[i].value = int(field["value"])
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_configure_ampp_profile(
+            processor_handle, profile_name_bytes, field_array, num_fields
+        )
+    )
 
 
 def amdsmi_get_ttm_info():

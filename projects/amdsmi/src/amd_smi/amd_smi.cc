@@ -1700,6 +1700,120 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
+                                         char version[AMDSMI_MAX_STRING_LENGTH],
+                                         amdsmi_ampp_profile_t* profiles, uint32_t* num_profiles) {
+  AMDSMI_CHECK_INIT();
+
+  if (num_profiles == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  std::vector<rsmi_ampp_profile_t> rsmi_profiles;
+  if (profiles != nullptr) {
+    rsmi_profiles.resize(*num_profiles);
+  }
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version,
+                   profiles != nullptr ? rsmi_profiles.data() : nullptr, num_profiles);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  if (profiles != nullptr) {
+    if (sizeof(amdsmi_ampp_profile_t) != sizeof(rsmi_ampp_profile_t)) {
+      return AMDSMI_STATUS_UNEXPECTED_SIZE;
+    }
+    std::memcpy(profiles, rsmi_profiles.data(), (*num_profiles) * sizeof(amdsmi_ampp_profile_t));
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
+                                       const char* profile_name, uint32_t* num_fields,
+                                       amdsmi_ampp_field_t* fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr || num_fields == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  std::vector<rsmi_ampp_field_t> rsmi_fields;
+  if (fields != nullptr) {
+    rsmi_fields.resize(*num_fields);
+  }
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_fields_get, processor_handle, 0, profile_name, num_fields,
+                   fields != nullptr ? rsmi_fields.data() : nullptr);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  if (fields != nullptr) {
+    if (sizeof(amdsmi_ampp_field_t) != sizeof(rsmi_ampp_field_t)) {
+      return AMDSMI_STATUS_UNEXPECTED_SIZE;
+    }
+    std::memcpy(fields, rsmi_fields.data(), (*num_fields) * sizeof(amdsmi_ampp_field_t));
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_handle,
+                                             const char* profile_name) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_activate, processor_handle, 0, profile_name);
+}
+
+amdsmi_status_t amdsmi_configure_ampp_profile(amdsmi_processor_handle processor_handle,
+                                              const char* profile_name,
+                                              const amdsmi_ampp_field_t* fields,
+                                              uint32_t num_fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "amdsmi_ampp_field_t and rsmi_ampp_field_t must remain layout-compatible");
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_configure, processor_handle, 0, profile_name,
+                      reinterpret_cast<const rsmi_ampp_field_t*>(fields), num_fields);
+}
+
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
                                           amdsmi_vram_usage_t* vram_info) {
   AMDSMI_CHECK_INIT();

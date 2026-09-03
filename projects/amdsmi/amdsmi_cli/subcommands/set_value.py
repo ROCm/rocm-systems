@@ -24,7 +24,7 @@ import logging
 import math
 import sys
 
-from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException, AmdSmiRequiredCommandException
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
@@ -845,6 +845,119 @@ class SetValueCommands:
             return None
         return eligible[-1]
 
+    @staticmethod
+    def _is_valid_ampp_field(field):
+        # amdsmi_configure_ampp_profile() does int(field["value"]) internally,
+        # which raises a bare ValueError/TypeError (not AmdSmiLibraryException)
+        # for a non-numeric value -- reject it here so one bad field can't
+        # abort the whole file-restore loop with an unhandled traceback.
+        if not isinstance(field, dict) or "name" not in field or "value" not in field:
+            return False
+        try:
+            int(field["value"])
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def _configure_ampp_from_file(self, args, file_path, gpu_bdf, gpu_id):
+        # Restores every writable profile for this GPU's entry from a
+        # `amd-smi static --ampp --json`-shaped file (--ampp-configure @<path>).
+        # That file's top level is `{"gpu_data": [{"gpu": <int>, "ampp": {...}}, ...]}`
+        # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
+        # the integer "gpu" index, not by BDF.
+        command = " ".join(sys.argv[1:])
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                file_data = json.load(f)
+        except OSError as e:
+            raise AmdSmiInvalidFilePathException(
+                command, self.logger.format, f"Unable to read '{file_path}': {e}"
+            ) from e
+        except json.JSONDecodeError as e:
+            raise AmdSmiInvalidFilePathException(
+                command, self.logger.format, f"'{file_path}' is not valid JSON: {e}"
+            ) from e
+
+        if not isinstance(file_data, dict) or not isinstance(file_data.get("gpu_data"), list):
+            raise AmdSmiInvalidFilePathException(
+                command,
+                self.logger.format,
+                f"'{file_path}' is not an 'amd-smi static --ampp --json' shaped file "
+                "(expected a top-level 'gpu_data' list).",
+            )
+
+        gpu_entry = next(
+            (
+                entry
+                for entry in file_data["gpu_data"]
+                if isinstance(entry, dict) and entry.get("gpu") == gpu_id
+            ),
+            None,
+        )
+        if gpu_entry is None:
+            found_ids = [
+                entry.get("gpu") for entry in file_data["gpu_data"] if isinstance(entry, dict)
+            ]
+            raise AmdSmiInvalidFilePathException(
+                command,
+                self.logger.format,
+                f"'{file_path}' has no entry for GPU {gpu_id} (BDF:{gpu_bdf}). Found gpu ids: "
+                f"{', '.join(str(i) for i in found_ids) or 'none'}",
+            )
+
+        ampp_entry = gpu_entry.get("ampp")
+        if not isinstance(ampp_entry, dict):
+            raise AmdSmiInvalidFilePathException(
+                command,
+                self.logger.format,
+                f"'{file_path}' has no AMPP data for GPU {gpu_id} (BDF:{gpu_bdf}).",
+            )
+
+        profiles = ampp_entry.get("profiles")
+        if not isinstance(profiles, list):
+            profiles = []
+        writable_profiles = [
+            p
+            for p in profiles
+            if isinstance(p, dict)
+            and p.get("name")
+            and p.get("is_writable")
+            and isinstance(p.get("fields"), list)
+            and p.get("fields")
+        ]
+
+        if not writable_profiles:
+            self.logger.store_output(
+                args.gpu,
+                "ampp_configure",
+                f"No writable AMPP profiles with staged fields found in '{file_path}'.",
+            )
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
+
+        results = []
+        for profile_entry in writable_profiles:
+            profile_name = profile_entry["name"]
+            fields = profile_entry["fields"]
+            if not all(self._is_valid_ampp_field(f) for f in fields):
+                results.append(f"{profile_name}: Malformed 'fields' entry, skipping")
+                continue
+            try:
+                amdsmi_interface.amdsmi_configure_ampp_profile(args.gpu, profile_name, fields)
+                field_str = ", ".join(f"{f['name']}={f['value']}" for f in fields)
+                results.append(f"{profile_name}: Successfully configured ({field_str})")
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+                results.append(
+                    f"{profile_name}: [{e.get_error_info(detailed=False)}] Unable to configure"
+                )
+
+        self.logger.store_output(args.gpu, "ampp_configure", results)
+        self.logger.print_output()
+        self.logger.clear_multiple_devices_output()
+
     def set_gpu(
         self,
         args,
@@ -866,6 +979,8 @@ class SetValueCommands:
         ptl_format=None,
         mem_carveout=None,
         compute_partition_mem_alloc_mode=None,
+        ampp=None,
+        ampp_configure=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -928,6 +1043,10 @@ class SetValueCommands:
             args.mem_carveout = mem_carveout
         if compute_partition_mem_alloc_mode is not None:
             args.compute_partition_mem_alloc_mode = compute_partition_mem_alloc_mode
+        if ampp is not None:
+            args.ampp = ampp
+        if ampp_configure is not None:
+            args.ampp_configure = ampp_configure
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -966,6 +1085,8 @@ class SetValueCommands:
                     getattr(args, "process_isolation", None) is not None,
                     getattr(args, "mem_carveout", None) is not None,
                     getattr(args, "compute_partition_mem_alloc_mode", None) is not None,
+                    getattr(args, "ampp", None) is not None,
+                    getattr(args, "ampp_configure", None) is not None,
                 ]
             ):
                 command = " ".join(sys.argv[1:])
@@ -1906,6 +2027,82 @@ class SetValueCommands:
             self.logger.clear_multiple_devices_output()
             return
 
+        if getattr(args, "ampp", None):
+            try:
+                amdsmi_interface.amdsmi_activate_ampp_profile(args.gpu, args.ampp)
+                self.logger.store_output(
+                    args.gpu, "ampp", f"Successfully set AMPP profile to {args.ampp}"
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+
+                # Get available profiles for error message
+                try:
+                    _, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                    available_str = ", ".join(p["name"] for p in ampp_profiles)
+                except amdsmi_exception.AmdSmiLibraryException as get_error:
+                    available_str = "Unable to fetch available AMPP profiles"
+                    logging.debug(
+                        f"Failed to fetch available AMPP profiles: {get_error.get_error_info()}"
+                    )
+
+                error_msg = (
+                    f"[{e.get_error_info(detailed=False)}] Unable to set AMPP profile to "
+                    f"{args.ampp}"
+                )
+                self.logger.store_output(args.gpu, "ampp", error_msg)
+                print(f"\nValid AMPP Profiles: [{available_str}]\n")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+        if getattr(args, "ampp_configure", None):
+            if args.ampp_configure.file_path is not None:
+                self._configure_ampp_from_file(args, args.ampp_configure.file_path, gpu_bdf, gpu_id)
+                return
+
+            profile_name = args.ampp_configure.profile_name
+            fields = args.ampp_configure.fields
+            try:
+                amdsmi_interface.amdsmi_configure_ampp_profile(args.gpu, profile_name, fields)
+                field_str = ", ".join(f"{f['name']}={f['value']}" for f in fields)
+                self.logger.store_output(
+                    args.gpu,
+                    "ampp_configure",
+                    f"Successfully configured AMPP profile {profile_name}"
+                    + (f" ({field_str})" if field_str else " (no fields staged)"),
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+
+                # Get available profiles/fields for error message
+                try:
+                    _, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                    available_str = ", ".join(p["name"] for p in ampp_profiles if p["is_writable"])
+                except amdsmi_exception.AmdSmiLibraryException as get_error:
+                    available_str = "Unable to fetch available AMPP profiles"
+                    logging.debug(
+                        f"Failed to fetch available AMPP profiles: {get_error.get_error_info()}"
+                    )
+
+                error_msg = (
+                    f"[{e.get_error_info(detailed=False)}] Unable to configure AMPP profile "
+                    f"{profile_name}"
+                )
+                self.logger.store_output(args.gpu, "ampp_configure", error_msg)
+                print(f"\nWritable AMPP Profiles: [{available_str}]\n")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
         if getattr(args, "compute_partition_mem_alloc_mode", None):
             try:
                 mode = amdsmi_interface.AmdSmiAcceleratorPartitionMemAllocModeType[
@@ -1985,6 +2182,8 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        ampp=None,
+        ampp_configure=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -1999,6 +2198,9 @@ class SetValueCommands:
             compute_partition (amdsmi_interface.AmdSmiComputePartitionType, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (amdsmi_interface.AmdSmiMemoryPartitionType, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
+            ampp (str, optional): Value override for args.ampp (profile name to ACTIVATE). Defaults to None.
+            ampp_configure (namedtuple, optional): Value override for args.ampp_configure
+                (profile_name, fields) to CONFIGURE. Defaults to None.
 
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
             cpu_pwr_limit (int, optional): Value override for args.cpu_pwr_limit. Defaults to None.
@@ -2093,6 +2295,8 @@ class SetValueCommands:
             "ptl_format",
             "mem_carveout",
             "compute_partition_mem_alloc_mode",
+            "ampp",
+            "ampp_configure",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -2162,6 +2366,8 @@ class SetValueCommands:
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
                         args.compute_partition_mem_alloc_mode is not None,
+                        args.ampp is not None,
+                        args.ampp_configure is not None,
                     ]
                 )
             except AttributeError:
@@ -2309,6 +2515,8 @@ class SetValueCommands:
                     ptl_status,
                     ptl_format,
                     mem_carveout,
+                    ampp=ampp,
+                    ampp_configure=ampp_configure,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None and args.core == None:
@@ -2372,4 +2580,6 @@ class SetValueCommands:
                 ptl_status,
                 ptl_format,
                 mem_carveout,
+                ampp=ampp,
+                ampp_configure=ampp_configure,
             )
