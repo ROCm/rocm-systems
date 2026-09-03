@@ -16,9 +16,11 @@ minimum evidence of progress are binding.
 ## 1. Why the operating strategy is changing
 
 The fifth refactoring materially improved ownership, layering, mode locality,
-architecture locality, and test coverage. It also reduced the starting 91,450
-production implementation lines to 88,015 lines. That is real progress, but the
-recent slope is not sufficient:
+architecture locality, and test coverage. Its ledger reported a reduction from
+91,450 production implementation lines to 88,015 lines. The fresh commit-based
+recount in Section 11 corrects that boundary to 88,023 lines. That small
+bookkeeping discrepancy does not change the conclusion that the recent slope
+was insufficient:
 
 - checkpoint 174 removed 346 implementation lines in one deletion;
 - the next eleven checkpoints moved from 88,035 to 88,015 lines, only 20 net
@@ -51,7 +53,7 @@ each remaining peephole as its own project.
 > undertaken before completion.
 
 The immediate campaign has a hard **3,000-line net implementation-reduction
-review floor** and a **5,000-line stretch milestone**, measured from the 88,015
+review floor** and a **5,000-line stretch milestone**, measured from the 88,023
 line baseline. Reaching 3,000 lines is the earliest point at which completion
 may be discussed; it is not by itself a completion condition. The broader
 below-80,000 aspiration remains a direction of travel rather than permission to
@@ -263,9 +265,9 @@ commit `362683743db`:
 | Signal | Baseline |
 | --- | ---: |
 | Production files | 310 |
-| Physical production lines | 102,167 |
-| Nonblank production lines | 95,753 |
-| Production implementation lines | **88,015** |
+| Physical production lines | 102,170 |
+| Nonblank production lines | 95,756 |
+| Production implementation lines | **88,023** |
 | Test inventory | **5,424** |
 
 Production implementation lines exclude tests, generated code, documentation,
@@ -291,7 +293,7 @@ floor was reached.
 Completion requires a fresh post-refactoring whole-codebase deep read showing:
 
 1. At least 3,000 net production implementation lines have been removed from
-   the 88,015-line baseline, without scope loss or metric displacement.
+   the 88,023-line baseline, without scope loss or metric displacement.
 2. One or more substantial subsystem regions were actually replaced and their
    old implementations deleted; the result is not an accumulation of local
    wrappers and file moves.
@@ -471,14 +473,14 @@ The production accounting from the `362683743db` baseline is:
 | Signal | Baseline | Macro-slice 2 result | Change |
 | --- | ---: | ---: | ---: |
 | ConSan production files | 310 | 310 | 0 |
-| Physical ConSan production lines | 102,167 | 100,517 | **-1,650** |
-| Nonblank ConSan production lines | 95,753 | 94,112 | **-1,641** |
-| ConSan implementation lines | 88,015 | 86,379 | **-1,636** |
+| Physical ConSan production lines | 102,170 | 100,517 | **-1,653** |
+| Nonblank ConSan production lines | 95,756 | 94,112 | **-1,644** |
+| ConSan implementation lines | 88,023 | 86,379 | **-1,644** |
 
 The physical source diff contains 2,326 additions and 3,979 deletions in the
 declared ConSan scope. The generic `InstructionSequence` owner outside that
 scope adds 22 net implementation lines, so the conservative campaign result
-including its full enabling cost is **1,614 net production implementation
+including its full enabling cost is **1,622 net production implementation
 lines deleted**. One 17-line direct unit-test extension pins the two new EXEC
 branch encodings. No production mini-language, alternate emitter, adapter, or
 old branch-fixup authority remains.
@@ -686,8 +688,8 @@ The post-abort production accounting is:
 | Nonblank ConSan production lines | 93,515 | 93,526 | +11 |
 | ConSan implementation lines | 85,778 | 85,780 | **+2 bug fix** |
 
-The campaign therefore retains **2,235 net implementation lines of reduction**
-from the 88,015-line baseline. Macro-slice 4 contributes no claimed shrinkage,
+The campaign therefore retains **2,243 net implementation lines of reduction**
+from the 88,023-line baseline. Macro-slice 4 contributes no claimed shrinkage,
 does not clear the 3,000-line review floor, and supplies evidence against
 revisiting mirrored final-validation construction unless a materially smaller
 proof representation is found. Candidate selection returns to the whole
@@ -796,8 +798,8 @@ The production accounting from the Macro-slice 4 post-abort result is:
 
 The production implementation diff contains 1,480 deleted and 236 added
 lines, for the 1,244-line net reduction. This exceeds the 950-line thesis and
-500-line abort floor. From the 88,015-line sixth-refactoring baseline, the
-campaign has now removed **3,479 net production implementation lines** and
+500-line abort floor. From the 88,023-line sixth-refactoring baseline, the
+campaign has now removed **3,487 net production implementation lines** and
 crossed the 3,000-line review floor. It has not reached the 5,000-line stretch
 milestone, and crossing the review floor is not a completion condition.
 
@@ -931,7 +933,7 @@ All three experimental code commits were reverted; no route record, dispatcher
 helper, alternate emitter, adapter, or duplicated authority remains. The
 post-revert build and the same 79 focused tests pass. Production returns to the
 Macro-slice 5 total of **84,536 implementation lines**, so the campaign remains
-at **3,479 net implementation lines removed** from baseline. This negative
+at **3,487 net implementation lines removed** from baseline. This negative
 result rejects dense synchronization routing as a current macro-replacement
 candidate and returns selection to the whole production tree.
 
@@ -1036,8 +1038,8 @@ cutover is:
 The nine affected production files contain 259 added and 844 deleted physical
 lines. The governing 519-line net implementation reduction clears the
 500-line abort floor, although it is 31 lines short of the deliberately
-conservative 550-line target. The campaign is now **3,998 net implementation
-lines below the 88,015-line baseline**, leaving 1,002 lines to the stretch
+conservative 550-line target. The campaign is now **4,006 net implementation
+lines below the 88,023-line baseline**, leaving 994 lines to the stretch
 milestone.
 
 The behavioral fault matrix passed 132/132 tests. The architecture-boundary
@@ -1164,9 +1166,9 @@ completed scalar cutover is:
 
 The production diff contains 692 added and 1,227 deleted physical lines. The
 501-line governing reduction clears the 500-line abort floor, although it
-falls 99 lines short of the 600-line conservative target. From the 88,015-line
-sixth-refactoring baseline, the campaign has now removed **4,499 net
-production implementation lines**, leaving 501 lines to the 5,000-line
+falls 99 lines short of the 600-line conservative target. From the 88,023-line
+sixth-refactoring baseline, the campaign has now removed **4,507 net
+production implementation lines**, leaving 493 lines to the 5,000-line
 stretch milestone.
 
 The focused MOI matrix passed 827/827 tests. The complete nonphysical ConSan
@@ -1178,3 +1180,281 @@ this intermediate milestone. Macro-slice 8 therefore closes as an accepted
 subsystem convergence, but the sixth-refactoring campaign remains active and
 returns to a fresh whole-codebase search rather than extending scalar
 placement mechanically.
+
+## 11. Post-refactoring completion audit
+
+This audit is based on a fresh read of the current production tree, its build
+manifests, the definitions and consumers around the remaining large regions,
+and the final test inventory. It does not infer completion merely from the
+execution record or from reaching the numeric review floor.
+
+### 11.1 Quantitative result and scope preservation
+
+The governing counter now reports 83,516 production implementation lines:
+
+| Signal | Baseline | Final tree | Change |
+| --- | ---: | ---: | ---: |
+| Production files | 310 | 312 | +2 |
+| Physical production lines | 102,170 | 97,525 | **-4,645** |
+| Nonblank production lines | 95,756 | 91,118 | **-4,638** |
+| Production implementation lines | 88,023 | 83,516 | **-4,507** |
+| Registered ConSan tests | 5,424 | 5,422 | -2 |
+
+The implementation reduction is 5.1% of the sixth-refactoring baseline. It
+clears the 3,000-line review floor by 1,507 lines and finishes 493 lines short
+of the explicitly nonbinding 5,000-line stretch milestone. The original
+Section 8 ledger undercounted the named baseline commit by three physical,
+three nonblank, and eight implementation lines; the table above is the fresh
+blob-by-blob recount. The source diff in the declared production directories
+contains 4,300 additions and 8,944 deletions across 51 files; that raw diff
+also includes the one-line build-manifest change. The only enabling production
+change outside the governing ConSan directories is the 22-line
+`InstructionSequence` extension from Macro-slice 2. Charging that extension in
+full still leaves a conservative **4,485 net implementation lines removed**.
+
+No implementation was displaced into tests, generated sources, scripts,
+comments, data tables, or metaprogramming. The two additional production files
+are the 48-line typed enum-vocabulary mechanism and the implementation-free
+architecture tombstone retained because this campaign could not delete a file.
+All four modes and all five targets remain registered and exercised.
+
+The accepted macro replacements and retained bug fix account for the
+implementation change as follows:
+
+| Macro-slice | Replacement | Net implementation change |
+| ---: | --- | ---: |
+| 2 | repeated instruction construction -> one typed transaction | -1,644 in the governing scope; -1,622 including its external helper cost |
+| 3 | parallel enum arrays and spelling switches -> one vocabulary authority | -601 |
+| 4 | retained independent fail-closed bug fix after abort | +2 |
+| 5 | SuperCollider LDS private reservoir -> common direct reservoir | -1,244 |
+| 7 | split fault plan/re-resolution -> one resolved mutation transaction | -519 |
+| 8 | repeated scalar range reconstruction -> one placement domain | -501 |
+
+Macro-slices 1, 4, and 6 were reverted when complete or representative
+cutovers failed their stated economics. Their experimental additions do not
+contribute to the final size result.
+
+### 11.2 Actual component and dataflow shape
+
+The static transformer now has an exhaustive, exclusive, forward-only build
+graph:
+
+```text
+contracts -> targets -> analysis -> transform -> validation -> orchestration
+```
+
+- **Contracts** own classifiers, normalized semantic vocabularies, input
+  layout, observation policy, and immutable common value types.
+- **Targets** turn concrete gfx identity into normalized capabilities and
+  target operations. They do not choose a mode.
+- **Analysis** decodes the program once into program, synchronization, and
+  fault-selection inventories without depending on mutation state.
+- **Transform** owns mode planning and emission, shared placement and resource
+  mechanics, routing, descriptor growth, fault application, perturbation, and
+  patch publication.
+- **Validation** independently reconstructs original and replacement behavior,
+  descriptor effects, patch geometry, and relay ownership. It may read
+  analysis and transformation products but is not visible to either producer.
+- **Orchestration** composes those stages and publishes the reviewed result.
+
+The CMake manifest assigns every production `.cpp` to exactly one component,
+rejects duplicate ownership, and rejects an unowned source. The architecture-
+boundary gate enforces the important reverse-dependency prohibitions rather
+than leaving this graph as documentation only.
+
+The runtime side is separately layered as report trust, report snapshot,
+mode-local decoding, mode-local analysis, mode-local rendering, and the HSA
+hook coordinator. It consumes the transformer report contract; it does not
+reach back into placement or mutation internals.
+
+The effective dataflow is consequently:
+
+```text
+request + object
+  -> normalized target profile and immutable program inventories
+  -> selected mode policy and typed resource/placement plans
+  -> shared mutation and emission mechanisms
+  -> patch proof + candidate bytes
+  -> independent final validation
+  -> public transform result
+  -> runtime snapshot/decode/analyze/render pipeline
+```
+
+The five successful replacements shortened this flow rather than adding
+facades beside it. Instruction words have one construction transaction;
+closed vocabularies have one iterable/spelling authority; direct relay
+reservoirs have one relocation representation; fault selection flows directly
+into mutation; and scalar searches consume one owner-aware availability
+domain.
+
+### 11.3 Mode locality and sharing
+
+Record/Replay, Sampled, and InlineShadow register their policy and resource
+demand in `consan_moi_record_replay.cpp`, `consan_moi_sampled.cpp`, and
+`consan_moi_inline_shadow.cpp`. Their evidence bodies, report layouts, report
+contracts, and specialized emitters remain in correspondingly mode-named
+files. SuperCollider owns its LDS and FLAT protocols and its report planning in
+SuperCollider-named files. The host report pipeline follows the same rule with
+mode-named decoder, analyzer, and renderer sources.
+
+The common layer contains mechanisms rather than a shadow implementation of
+each mode: instruction transactions, scalar availability, direct reservoir
+relocation, descriptor mutation, patch publication, target-address
+normalization, shared barrier placement, and report transport. Mode owners
+select typed policy or supply a semantic body; common mechanisms do not reopen
+that policy through a broad request, an architecture value, or a mode switch.
+The boundary test specifically prevents mode-local probe emission, scratch
+demand, report capacity, private-owner policy, and report-layout policy from
+returning to common files.
+
+There is no production file for a Record/Replay-by-gfx, Sampled-by-gfx, or
+InlineShadow-by-gfx implementation. The only filenames combining a mode and a
+gfx family are the three SuperCollider target-operation providers; they are
+architecture providers named for gfx9, gfx11/gfx12, and gfx1250, and contain
+target encoding/capability behavior rather than duplicated SuperCollider
+algorithms. Thus the tree has not acquired an `N * M` mode/architecture
+matrix.
+
+### 11.4 Architecture locality
+
+Concrete target behavior is physically concentrated in gfx-named profile and
+target-operation files: program analysis, fault operations, SuperCollider
+operations, validation operations, gfx1250 LDS/VGPR-bank behavior, and the
+per-target capability profiles. Shared and mode-local code consumes normalized
+target facts and operation packages.
+
+A raw-architecture-token scan of common and mode files found references only
+in explanatory comments and stable diagnostics, not behavioral dispatch.
+Mode-provider sources are mechanically forbidden from including generated ISA
+architecture headers or naming `ROCJITSU_CODE_ARCH_*`. Target providers are in
+turn forbidden from selecting Record/Replay, Sampled, InlineShadow, or
+SuperCollider policy. The hypothetical-target test proves that a new target
+can register normalized analysis without changing a mode, while the
+hypothetical-mode test proves the converse. This makes architecture-specific
+code skippable and preserves a direct extension path.
+
+### 11.5 Independent validation and absence of rewrite residue
+
+Final validation remains a separate component and reconstructs its verdict
+from pristine bytes, replacement bytes, immutable inventories, patch geometry,
+and mutation proofs. It does not consume fault resolver pointers, trust a
+producer's placement verdict, or call mutation infrastructure. Macro-slice 4
+demonstrated that replacing mirrored instruction construction with explicit
+decoded proofs would strengthen one aspect of independence but add 617
+physical lines. That experiment was reverted rather than retained as an
+uneconomic second validation language; the existing independent byte,
+semantic, graph, descriptor, and ownership proofs remain intact.
+
+Searches of the production tree and the boundary gate confirm that the split
+fault-planning/application APIs, dense-relay experiment, decoded-proof helpers,
+special LDS reservoir representation, parallel enum spelling authorities, and
+split scalar validators have not survived. The three abandoned experiments
+had all experimental implementation reverted. There is no material comparison
+switch, migration adapter, alternate emitter, duplicate authority, or inactive
+framework left in production. The one empty source tombstone carries no
+implementation and is declared explicitly by the exhaustive source-ownership
+manifest.
+
+### 11.6 Bugs and regression coverage
+
+One pre-existing behavior defect was exposed during the work. If every
+expected compare-exchange in an InlineShadow versioned-release transaction was
+corrupted, final validation dereferenced an empty position list instead of
+failing closed. The owner fix reports the missing transaction semantics, and
+`FinalValidationPinsVersionedCausalReleaseTransaction` now corrupts every
+claim and asserts that diagnostic. No other pre-existing behavior defect was
+found during the accepted replacements.
+
+Tests that existed solely to construct the deleted internal fault-plan bridge
+were retired with that private API. Their behavioral obligations remain in the
+fault request, selection, exact-byte mutation, rollback, composition, and
+adversarial final-validation tests. Macro-slice 5 added direct coverage for
+caller-selected reservoir donor bounds; Macro-slices 7 and 8 strengthened the
+architecture gate to forbid resurrection of the displaced authorities; and
+the instruction-sequence test directly pins the two newly supported EXEC
+branch encodings. The final registration count is two below the baseline:
+representation-specific fault-plan and LDS-reservoir tests disappeared with
+their deleted production authorities, while replacement tests exercise the
+resolved fault transaction, common direct reservoir, donor bounds, enum
+vocabularies, and instruction transaction. The correct/incorrect device
+matrix, its mode/target rows, and its 635 physical gfx1201 rows were not
+reduced.
+
+### 11.7 Fresh whole-tree candidate disposition
+
+The final scan reconsidered the initial examples and the other large semantic
+regions rather than stopping at Macro-slice 8:
+
+- **MOI emission:** Macro-slice 2 harvested the repeated optional-builder and
+  local-fixup protocol. Surviving branch offsets connect separately placed
+  text regions and expose placement semantics; straight-line fragments retain
+  named semantic subexpressions. Neither is a second instruction transaction.
+- **SuperCollider:** Macro-slice 5 removed the duplicate direct reservoir.
+  Remaining LDS and FLAT volume implements different protocols: LDS owns dense
+  generated islands and multi-owner/max-flow policy, while FLAT owns
+  direct/local/appended placement and runtime address-space gating. A common
+  body would be a union-shaped mode framework.
+- **MOI placement:** Macro-slice 8 removed repeated range accounting and owner
+  reconstruction. Remaining fallback order, lifetime distinctions, resource
+  media, explicit overrides, and target/mode eligibility are the placement
+  problem itself. Differential tests proved that owner-wide partial placement
+  and RDNA4 object-wide spill coordination cannot be collapsed into the
+  component-local fallback.
+- **Independent validation:** the complete Macro-slice 4 experiment showed
+  that explicit decoded proofs restate rather than eliminate the surviving
+  obligations. A smaller proof representation would be required before this
+  region becomes a credible replacement.
+- **Dense relay routing:** the complete Macro-slice 6 experiment converged all
+  synchronization users and the access emitter but removed only 147 net lines.
+  Call-return, derived-key, clone-local, explicit-key, tagged-SCC,
+  dependency-wait, and relocated-host variants are semantic inputs, not copies
+  hidden by the current organization.
+- **Branch-only routing:** exact-batch, exact-pair, and bounded greedy paths
+  preserve different feasibility and work-budget contracts. Fixed
+  source/destination pairs create capacity-sharing commodities, and deferred
+  owner selection is a group-activation cost; an ordinary additive flow model
+  cannot replace those semantics.
+- **Program inventory:** kernel and non-dispatchable-function containers share
+  range and statistics fields, but descriptor/dispatch/ownership differences
+  leave only a few dozen paired traversal lines. A unified container would add
+  filtered views and does not expose 500 deletable lines.
+- **Fault and synchronization inventories:** both project identity and decoded
+  geometry, but fault sites additionally include non-synchronizing LDS and
+  unsupported ordinary-memory candidates with stable user-facing diagnostics.
+  Eliminating that projection would widen synchronization events into a
+  mutation/synchronization union for an estimated 250--350-line deletion.
+- **Host reports, hook registries, options, and synchronization graphs:** the
+  host report stages are already mode-local; hook registries own different
+  lifetimes; options are a thin aggregate of typed input contracts; and the
+  barrier, atomic, ordinary-memory, execution-owner, and move-destination
+  graphs prove different relations. None currently presents a replacement-
+  sized duplicate authority.
+
+These are economic and semantic dispositions, not claims that the code can
+never become smaller. They show that no currently identified replacement both
+belongs in this campaign and clears its approximately 500-line floor without
+introducing a broader union, filtering layer, proof DSL, or second authority.
+Manufacturing 493 lines of deletion to hit the stretch number would therefore
+make the design less clear, contrary to the charter.
+
+### 11.8 Final validation evidence and conclusion
+
+At the final tree:
+
+- the local TheRock toolchain/runtime rebuild completed successfully at
+  `-j16`;
+- `ConSan.ArchitectureBoundaries` passed;
+- the complete nonphysical ConSan matrix passed **4,787/4,787** in 197.99
+  seconds, covering all four modes and all five emulated targets;
+- the complete nonphysical RocJitsu matrix processed 9,572 registered entries
+  with **9,562 passes, zero failures**, one disabled test, and nine expected
+  environment-dependent skips in 238.20 seconds; and
+- the deliberately selected physical gfx1201 ConSan milestone passed
+  **635/635** serially at `-j1` in 109.85 seconds.
+
+The audit therefore finds every completion criterion in Section 9 satisfied.
+The sixth refactoring closes at 83,516 governing implementation lines, with
+4,507 lines removed, five accepted subsystem replacements, three economically
+failed experiments fully reverted, preserved mode and target coverage,
+independent final validation, and no clearly superior remaining macro
+replacement identified by the fresh whole-tree read.
