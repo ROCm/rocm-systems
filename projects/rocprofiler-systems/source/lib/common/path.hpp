@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <link.h>
 #include <linux/limits.h>
 #include <string>
@@ -106,7 +107,9 @@ is_regular_file(std::string_view path) ROCPROFSYS_INTERNAL_API;
 
 [[nodiscard]] inline bool
 create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
-                                     const std::string& filepath) ROCPROFSYS_INTERNAL_API;
+                                     const std::string& filepath,
+                                     std::ios::openmode mode = std::ios::out)
+    ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
@@ -352,15 +355,17 @@ is_text_file(const std::string& filename)
  * The parent directory tree is created if absent; an already-existing
  * directory is not an error. A @p filepath with no directory component (e.g.
  * "out.txt") creates nothing and is opened relative to the current directory.
- * The stream is opened for output only, truncating any existing file.
  * @param out_fstream Closed output stream to open. Left closed if the parent directory
  *                    could not be created.
  * @param filepath    Path of the file to open.
+ * @param mode        Open mode forwarded to std::ofstream::open. Defaults to
+ *                    std::ios::out (output only, truncating any existing file).
  * @return true if the parent directory is in place and @p out_fstream is open and good.
  */
 bool
 create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
-                                     const std::string& filepath)
+                                     const std::string& filepath,
+                                     std::ios::openmode mode)
 {
     const auto parent = parent_path(filepath);
     if(!parent.empty())
@@ -373,7 +378,7 @@ create_parent_dirs_and_open_ofstream(std::ofstream&     out_fstream,
         }
     }
 
-    out_fstream.open(filepath);
+    out_fstream.open(filepath, mode);
     return out_fstream.is_open() && out_fstream.good();
 }
 
