@@ -785,8 +785,8 @@ most frequent first, with the number of calls that used it::
 
 One set of arguments is limited to 8 items and 160 characters, and at most five
 sets are listed; any beyond that are reported as ``... N more variants``. The
-``Args`` column of ``ml_api_trace/consolidated.csv`` holds the untruncated
-arguments.
+``Args`` column of ``ml_api_trace/consolidated.csv`` holds the full captured
+arguments, subject to the capture limits above.
 
 The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel, aggregated over every source
