@@ -1899,6 +1899,19 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
+  // symMinR2: suppress symk below this size for R2 buffers so DDA wins in that sub-range.
+  // RS: DDA/SIMPLE beats SYM up to ~2 MiB (9_2 sweep); SYM wins 4 MiB+. Floor at 2 MiB.
+  .symMinR2 = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather       -- no lower suppression
+    2ULL*1024*1024,       // [3] ReduceScatter   -- DDA wins below 2 MiB for R2
+    0,                    // [4] AllReduce       -- no lower suppression (CE handles upper)
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
 
   // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
   .unrollMapAR  = kUnrollAR_gfx1250,
@@ -1917,6 +1930,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 
@@ -1930,6 +1944,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symMaxR2Graph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 

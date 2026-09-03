@@ -293,6 +293,11 @@ struct rcclArchThresholds {
   // graph-unsafe, so graph mode typically wants no suppression (keep symk).
   // 0 means no suppression, same convention as symMaxR2 -- not "inherit eager".
   size_t symMaxR2Graph[RCCL_DDA_FUNC_COUNT];
+  // Symmetric kernel lower-bound per collective when recv buffer is registered (R2).
+  // Below this size DDA is faster than symk; setting this suppresses symk so DDA
+  // can win in that sub-range while symk still wins above it.
+  // 0 means no suppression (symk may win at any size for that collective).
+  size_t symMinR2[RCCL_DDA_FUNC_COUNT];
 
   // Per-size unroll factor breakpoints for gfx1250.  Each entry is a
   // (maxBytes, unrollIdx) pair: the first entry whose maxBytes >= msgBytes

@@ -746,6 +746,14 @@ inline size_t rcclSymMaxR2Cap(const ncclComm* comm, ncclFunc_t func, bool graphM
   const size_t* caps = graphMode ? table->symMaxR2Graph : table->symMaxR2;
   return ddaThresholdFromTable(caps, func);
 }
+
+// R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
+// faster than symk; symk is suppressed so DDA can win.  0 = no suppression.
+inline size_t rcclSymMinR2Cap(const ncclComm* comm, ncclFunc_t func) {
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  return ddaThresholdFromTable(table->symMinR2, func);
+}
 } // namespace
 
 size_t rcclCeRegMax(const ncclComm* comm, ncclFunc_t func) {
@@ -1700,10 +1708,14 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   }
 
   // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
-  const bool symEligible =
+  // symMinR2: below this threshold DDA beats symk for R2 buffers -- suppress symk so DDA wins.
+  const bool symkRequested =
     (op == ncclSum || op == ncclAvg) &&
     isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                datatype, recvcount, sendbuff, recvbuff);
+  const size_t rsSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncReduceScatter);
+  const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
+  const bool symEligible = symkRequested && !symSuppressedByMin;
 
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
