@@ -20,9 +20,9 @@ import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
 
-_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 

@@ -29,10 +29,17 @@ class Util:
 
         # Build the subprocess environment once and cache it. Prepends the ROCm
         # bin directory so amd-smi is found even when invoked via sudo, which
-        # strips non-standard PATH entries. Honors ROCM_HOME/ROCM_PATH when not
-        # running under sudo; defaults to /opt/rocm otherwise (sudo strips those
-        # vars so the fallback is what actually takes effect in that case).
-        rocm_root = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH") or "/opt/rocm"
+        # strips non-standard PATH entries. AMDSMI_PATH (which names
+        # <root>/share/amd_smi) wins, then ROCM_HOME/ROCM_PATH, matching
+        # common.cli_search_order so the binary spawned here and the exit codes
+        # cli/base.py imports come from one install. Defaults to /opt/rocm
+        # otherwise (sudo strips those vars so the fallback is what actually
+        # takes effect in that case).
+        amdsmi_path = os.getenv("AMDSMI_PATH")
+        if amdsmi_path:
+            rocm_root = os.path.abspath(os.path.join(amdsmi_path, os.pardir, os.pardir))
+        else:
+            rocm_root = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH") or "/opt/rocm"
         rocm_bin = os.path.join(rocm_root, "bin")
         self._subprocess_env = os.environ.copy()
         existing_path = self._subprocess_env.get("PATH", "")

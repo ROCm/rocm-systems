@@ -25,11 +25,11 @@ import os
 import types
 import unittest
 
-from common.common import amdsmi_path, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
 
-# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
-# matching install; see common.find_cli_dir). None -> setUpClass skips.
-_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+# Locate the CLI dir; cli_search_order() decides whether the install or this
+# checkout wins. None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
