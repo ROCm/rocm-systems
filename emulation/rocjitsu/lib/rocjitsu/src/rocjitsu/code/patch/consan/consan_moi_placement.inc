@@ -1307,6 +1307,47 @@ moi_scalar_owner_descriptors(std::span<const ConSanCandidateResourcePlan> site_p
   return owners;
 }
 
+/// Partition resource-plan owners into the connected components that must
+/// share one scalar ABI. A shared helper joins all kernels that can reach it;
+/// unrelated kernels remain independently placeable.
+[[nodiscard]] std::vector<std::vector<uint64_t>>
+moi_scalar_owner_components(std::span<const ConSanCandidateResourcePlan> plans) {
+  std::vector<std::vector<uint64_t>> components;
+  for (const ConSanCandidateResourcePlan &plan : plans) {
+    if (plan.owner_descriptor_file_offsets.empty())
+      continue;
+    std::optional<size_t> destination;
+    for (size_t index = 0; index < components.size();) {
+      const bool intersects =
+          std::ranges::any_of(plan.owner_descriptor_file_offsets, [&](uint64_t owner) {
+            return std::ranges::find(components[index], owner) != components[index].end();
+          });
+      if (!intersects) {
+        ++index;
+        continue;
+      }
+      if (!destination) {
+        destination = index++;
+        continue;
+      }
+      for (uint64_t owner : components[index]) {
+        if (std::ranges::find(components[*destination], owner) == components[*destination].end())
+          components[*destination].push_back(owner);
+      }
+      components.erase(components.begin() + static_cast<ptrdiff_t>(index));
+    }
+    if (!destination) {
+      destination = components.size();
+      components.emplace_back();
+    }
+    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
+      if (std::ranges::find(components[*destination], owner) == components[*destination].end())
+        components[*destination].push_back(owner);
+    }
+  }
+  return components;
+}
+
 struct MoiScalarOwnerContextResolution {
   std::vector<const MoiKernelResourceContext *> contexts;
   std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
@@ -3061,43 +3102,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   const MoiResourcePlanningState &state = planning_state;
   if (!state.valid)
     return false;
-
-  std::unordered_map<uint64_t, uint64_t> parent;
-  const auto ensure_owner = [&](uint64_t descriptor_offset) {
-    parent.try_emplace(descriptor_offset, descriptor_offset);
-  };
-  for (const ConSanCandidateResourcePlan &plan : site_plans) {
-    // This pass also precedes persistent-state placement. A provisional
-    // NoLegalWindow plan is not irrecoverable: owner-local persistent VGPRs
-    // can shrink the site's final ABI, after which it still needs a transient
-    // EXEC/dispatch assignment proven against this exact owner component.
-    // Plans without a resolved owner naturally contribute nothing here.
-    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets)
-      ensure_owner(descriptor_offset);
-  }
-  const auto find_root = [&](uint64_t owner) {
-    uint64_t root = owner;
-    while (parent.at(root) != root)
-      root = parent.at(root);
-    uint64_t cursor = owner;
-    while (parent.at(cursor) != cursor) {
-      const uint64_t next = parent.at(cursor);
-      parent[cursor] = root;
-      cursor = next;
-    }
-    return root;
-  };
-  for (const ConSanCandidateResourcePlan &plan : site_plans) {
-    if (plan.owner_descriptor_file_offsets.empty())
-      continue;
-    const uint64_t first = plan.owner_descriptor_file_offsets.front();
-    for (uint64_t owner : plan.owner_descriptor_file_offsets) {
-      const uint64_t lhs = find_root(first);
-      const uint64_t rhs = find_root(owner);
-      if (lhs != rhs)
-        parent[rhs] = lhs;
-    }
-  }
+  const std::vector<std::vector<uint64_t>> owner_components =
+      moi_scalar_owner_components(site_plans);
 
   std::unordered_map<BasicBlock *, std::vector<const MoiKernelResourceContext *>> contexts_by_block;
   for (const MoiKernelResourceContext &context : state.contexts) {
@@ -3153,16 +3159,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       include_site(kernel.entry_text_offset);
   }
 
-  std::unordered_map<uint64_t, RegisterSet> unavailable_by_component;
-  std::unordered_map<uint64_t, std::vector<uint64_t>> owners_by_component;
-  for (const auto &[owner, ignored] : parent) {
-    (void)ignored;
-    const uint64_t root = find_root(owner);
-    owners_by_component[root].push_back(owner);
-    if (const auto it = unavailable_by_owner.find(owner); it != unavailable_by_owner.end())
-      unavailable_by_component[root] |= it->second;
-  }
-
   const uint16_t count = moi_exec_save_sgpr_count(
       resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
       arch);
@@ -3170,7 +3166,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
 
   bool assigned_any = false;
   bool missed_required_assignment = false;
-  for (auto &[root, owners] : owners_by_component) {
+  for (const std::vector<uint64_t> &owners : owner_components) {
     const auto component_contexts = resolve_moi_scalar_owner_contexts(state, owners);
     if (!component_contexts) {
       missed_required_assignment = true;
@@ -3198,7 +3194,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                       : needs_exec_override || (inline_layout && needs_dispatch_override);
     if (!needs_override)
       continue;
-    const RegisterSet &unavailable = unavailable_by_component[root];
+    RegisterSet unavailable;
+    for (uint64_t owner : owners) {
+      if (const auto it = unavailable_by_owner.find(owner); it != unavailable_by_owner.end())
+        unavailable |= it->second;
+    }
     // A code-object-wide EXEC window may already have a complete liveness
     // proof while only the persistent dispatch pair excludes this component.
     // Retain that transient window and override just the dispatch
@@ -3990,22 +3990,16 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     return false;
   }
 
-  for (uint32_t sgpr = scalar_contexts.tail_floor; sgpr < moi_ordinary_sgpr_limit(arch); ++sgpr) {
-    if (point.moi_exec_save_sgpr &&
-        range_overlaps(static_cast<uint16_t>(sgpr), 1u, *point.moi_exec_save_sgpr,
-                       moi_exec_save_sgpr_count(
-                           resolve_moi_exec_save_requirement(problem.request(), problem.resources(),
-                                                             point, problem.mode_semantics()),
-                           arch))) {
-      continue;
-    }
-    if (!moi_scalar_contexts_admit_reserved_window(scalar_contexts.summaries,
-                                                   static_cast<uint16_t>(sgpr), 1u, arch)) {
-      continue;
-    }
-    point.moi_owner_sgpr.set(static_cast<uint16_t>(sgpr), true);
+  MoiScalarPlacementDomain domain(arch, moi_ordinary_sgpr_limit(arch), scalar_contexts.summaries);
+  domain.occupy(point.moi_exec_save_sgpr,
+                moi_exec_save_sgpr_count(
+                    resolve_moi_exec_save_requirement(problem.request(), problem.resources(), point,
+                                                      problem.mode_semantics()),
+                    arch));
+  if (const auto sgpr = domain.select_first(scalar_contexts.tail_floor, 1u)) {
+    point.moi_owner_sgpr.set(*sgpr, true);
     diagnostics.emplace_back("ConSan MOI automatically assigned hw_id owner temporary s" +
-                             std::to_string(sgpr));
+                             std::to_string(*sgpr));
     return true;
   }
 
@@ -4119,26 +4113,14 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
   first = util::align_up(first, 2u);
   const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
   const uint16_t ordinary_sgpr_limit = moi_ordinary_sgpr_limit(arch);
-  const auto dispatch_base = first_admitted_moi_register_range(
-      first, dispatch_state_count, ordinary_sgpr_limit, 2u, [&](uint16_t candidate) {
-        if (persistent_sgpr_range_overlaps_reserved_ordinary_range(candidate, dispatch_state_count,
-                                                                   arch))
-          return false;
-        if (moi_scalar_contexts_conflict_with_physical_vcc(scalar_contexts.summaries, candidate,
-                                                           dispatch_state_count, arch))
-          return false;
-        if (options.moi_owner_sgpr.base() &&
-            range_overlaps(candidate, dispatch_state_count, *options.moi_owner_sgpr.base(), 1u))
-          return false;
-        if (options.moi_exec_save_sgpr &&
-            range_overlaps(
-                candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
-                moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                             request, resources, options, problem.mode_semantics()),
-                                         arch)))
-          return false;
-        return true;
-      });
+  MoiScalarPlacementDomain dispatch_domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries);
+  dispatch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
+  dispatch_domain.occupy(
+      options.moi_exec_save_sgpr,
+      moi_exec_save_sgpr_count(
+          resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
+          arch));
+  const auto dispatch_base = dispatch_domain.select_first(first, dispatch_state_count, 2u);
   if (dispatch_base) {
     options.moi_dispatch_identity.set_sgpr(*dispatch_base, true);
     qualify_owner_local_assignments(*dispatch_base);
@@ -4217,35 +4199,18 @@ configure_automatic_moi_dispatch_id_sgprs(const ConSanMoiOperatingPoint &base,
         std::ranges::any_of(problem.inventory().kernels(), [](const ConSanKernelInfo &kernel) {
           return kernel.uses_dynamic_stack.value_or(false);
         });
-    const auto referenced = [&](uint16_t base) {
-      for (uint16_t index = 0; index < dispatch_state_count; ++index) {
-        if (references.references.contains(
-                {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
-          return true;
-        }
-      }
-      return false;
-    };
     if (references.control_flow_closed && !references.uses_indirect_sgprs) {
-      const auto unused_dispatch_base = first_admitted_moi_register_range(
-          20u, dispatch_state_count, ordinary_sgpr_limit, 2u, [&](uint16_t candidate) {
-            return !referenced(candidate) &&
-                   !persistent_sgpr_range_overlaps_reserved_ordinary_range(
-                       candidate, dispatch_state_count, arch) &&
-                   !moi_scalar_contexts_conflict_with_physical_vcc(
-                       scalar_contexts.summaries, candidate, dispatch_state_count, arch) &&
-                   (!options.moi_owner_sgpr.base() ||
-                    !range_overlaps(candidate, dispatch_state_count, *options.moi_owner_sgpr.base(),
-                                    1u)) &&
-                   (!options.moi_exec_save_sgpr ||
-                    !range_overlaps(candidate, dispatch_state_count, *options.moi_exec_save_sgpr,
-                                    moi_exec_save_sgpr_count(
-                                        resolve_moi_exec_save_requirement(
-                                            request, resources, options, problem.mode_semantics()),
-                                        arch))) &&
-                   (!has_dynamic_stack_owner ||
-                    !moi_sgpr_range_overlaps_dynamic_stack_state(candidate, dispatch_state_count));
-          });
+      MoiScalarPlacementDomain unused_domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries,
+                                             &references.references);
+      unused_domain.occupy(options.moi_owner_sgpr.base(), 1u);
+      unused_domain.occupy(
+          options.moi_exec_save_sgpr,
+          moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, options,
+                                                                     problem.mode_semantics()),
+                                   arch));
+      if (has_dynamic_stack_owner)
+        unused_domain.occupy_dynamic_stack_state();
+      const auto unused_dispatch_base = unused_domain.select_first(20u, dispatch_state_count, 2u);
       if (unused_dispatch_base) {
         options.moi_dispatch_identity.set_sgpr(*unused_dispatch_base, true);
         qualify_owner_local_assignments(*unused_dispatch_base);
@@ -5063,40 +5028,11 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           "boundary to owner-local persistent VGPR placement");
     }
 
-    std::vector<std::vector<uint64_t>> components;
-    for (const ConSanCandidateResourcePlan &plan : resource_plans) {
-      // Persistent placement and resource planning form a fixed point. A
-      // resource-failed plan still contributes its resolved ownership: the
-      // component-local tuple selected here may reduce its scratch ABI enough
-      // for the subsequent resource-plan rebuild to admit it. Dropping such a
-      // plan makes that recovery impossible and can silently omit every site
-      // owned by a full-pressure kernel.
-      for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-        if (std::ranges::none_of(components, [&](const auto &component) {
-              return std::ranges::find(component, descriptor_offset) != component.end();
-            })) {
-          components.push_back({descriptor_offset});
-        }
-      }
-      std::optional<size_t> merged_index;
-      for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-        const auto component = std::ranges::find_if(components, [&](const auto &candidate) {
-          return std::ranges::find(candidate, descriptor_offset) != candidate.end();
-        });
-        if (component == components.end())
-          continue;
-        const size_t index = static_cast<size_t>(component - components.begin());
-        if (!merged_index) {
-          merged_index = index;
-        } else if (*merged_index != index) {
-          auto &destination = components[*merged_index];
-          destination.insert(destination.end(), components[index].begin(), components[index].end());
-          components.erase(components.begin() + static_cast<ptrdiff_t>(index));
-          if (index < *merged_index)
-            --*merged_index;
-        }
-      }
-    }
+    // Persistent placement and resource planning form a fixed point. Failed
+    // plans still contribute ownership so a smaller component-local ABI can
+    // recover them on the subsequent resource-plan rebuild.
+    const std::vector<std::vector<uint64_t>> components =
+        moi_scalar_owner_components(resource_plans);
 
     std::string scalar_persistence_failure;
     const auto try_assign_scalar_persistent_state = [&] {
