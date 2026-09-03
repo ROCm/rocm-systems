@@ -15,6 +15,7 @@ Required: AMD SMI library installed (pip install amdsmi)
 from __future__ import print_function
 import sys
 import os
+import enum
 import logging
 
 # Version information
@@ -24,8 +25,19 @@ SMI_PAT = 0
 SMI_HASH = "amdsmi"
 __version__ = "%s.%s.%s+%s" % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
-# Set to 1 if an error occurs
-RETCODE = 0
+
+# `amd-smi --rocm-smi` mirrors legacy rocm-smi's default output, so it keeps
+# rocm-smi's binary exit convention (0 = success, 1 = error) instead of amd-smi's
+# exit-code redesign (the 192-255 AmdSmiExitCode band + library status codes).
+# Adopting the new codes here could break scripts that rely on rocm-smi's existing
+# $? contract.
+class RocmSmiCompatExitCode(enum.IntEnum):
+    SUCCESS = 0
+    ERROR = 1
+
+
+# Set to RocmSmiCompatExitCode.ERROR if an error occurs
+RETCODE = int(RocmSmiCompatExitCode.SUCCESS)
 
 # If we want JSON format output instead
 PRINT_JSON = False
@@ -814,7 +826,7 @@ def showAllConcise(deviceList):
 
     if PRINT_JSON:
         print("NOT_SUPPORTED: Cannot print JSON/CSV output for concise output")
-        sys.exit(1)
+        sys.exit(int(RocmSmiCompatExitCode.ERROR))
 
     silent = True
 
@@ -992,17 +1004,17 @@ def main():
     except ImportError:
         print("ERROR: Could not import amdsmi module")
         print("Install with: pip install amdsmi")
-        return 1
+        return int(RocmSmiCompatExitCode.ERROR)
 
     # Check if driver is initialized
     if not driverInitialized():
         logging.error("Unable to detect amdgpu driver. Exiting...")
-        return 1
+        return int(RocmSmiCompatExitCode.ERROR)
 
     # Initialize AMD SMI (equivalent to rocm_smi.initializeRsmi())
     if not initializeRsmi():
         logging.error("Failed to initialize AMD SMI")
-        return 1
+        return int(RocmSmiCompatExitCode.ERROR)
 
     try:
         # Get processor handles (equivalent to rocm_smi.listDevices())
@@ -1010,7 +1022,7 @@ def main():
 
         if not deviceList:
             logging.error("No AMD GPU devices found")
-            return 1
+            return int(RocmSmiCompatExitCode.ERROR)
 
         # Check AMD GPUs (equivalent to rocm_smi.checkAmdGpus())
         if not checkAmdGpus(deviceList):

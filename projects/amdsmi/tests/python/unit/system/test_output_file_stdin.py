@@ -23,11 +23,12 @@ import tempfile
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, find_cli_dir
 
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-_CLI_DIR = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli")
-PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else None
 
 
 class _FakeStdin:
@@ -77,8 +78,10 @@ def _load_parser_module():
 class TestOutputFileStdinGuard(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(PARSER_PATH):
-            raise unittest.SkipTest(f"amdsmi_parser not installed at {PARSER_PATH}")
+        if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI amdsmi_parser.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
         _install_stubs()
         cls.parser_mod = _load_parser_module()
         import amdsmi_cli_exceptions  # resolved from _CLI_DIR above
@@ -172,7 +175,3 @@ class TestOutputFileStdinGuard(unittest.TestCase):
             self.assertEqual(os.path.getsize(tmp), 0)
         finally:
             os.unlink(tmp)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -9,7 +9,3 @@ import unittest
 
 class TestIfoeDiscovery(unittest.TestCase):
     pass  # Add IFoE discovery tests here
-
-
-if __name__ == "__main__":
-    unittest.main()

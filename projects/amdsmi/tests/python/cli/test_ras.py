@@ -45,8 +45,8 @@ class TestRas(TestCliBase):
 
         tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ras_afid_")
         try:
-            # A real but undecodable .cper (non-empty garbage bytes): decodes to
-            # "decode failed" in the table, but the command still exits 0.
+            # A real but undecodable .cper (non-empty garbage bytes): reported as
+            # a decode error in the table, and the command exits with that status.
             garbage = os.path.join(tmp_dir, "garbage.cper")
             with open(garbage, "wb") as fout:
                 fout.write(b"\x00" * 64)
@@ -65,9 +65,9 @@ class TestRas(TestCliBase):
             os.symlink(target_dir, symlink_dir)
 
             cmds = [
-                # Folder with a (garbage) .cper: undecodable rows are reported but
-                # the command exits 0.
-                (f"amd-smi ras --afid --folder {tmp_dir}", self.PASS),
+                # Folder with a (garbage) .cper: the undecodable file is reported
+                # and the command exits non-zero with the decode status.
+                (f"amd-smi ras --afid --folder {tmp_dir}", self.FAIL),
                 # --cper-file and --folder are mutually exclusive under --afid.
                 (f"amd-smi ras --afid --cper-file {garbage} --folder {tmp_dir}", self.FAIL),
                 # Nonexistent folder.
@@ -84,7 +84,9 @@ class TestRas(TestCliBase):
             # assigned to self.output a second time.
             cmd = f"amd-smi ras --afid --folder {tmp_dir} --json"
             (rc, data, std_err) = self.util.RunCmdSync(cmd)
-            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            # The garbage .cper fails to decode, so the command exits non-zero;
+            # the JSON is still emitted for the caller to parse.
+            self.assertNotEqual(rc, self.PASS, f"Command '{cmd}' unexpectedly passed (rc={rc})")
             self.assertIsNotNone(data, f"Command '{cmd}' produced no output")
             json_data = json.loads(data)
             self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
@@ -94,9 +96,16 @@ class TestRas(TestCliBase):
                     dict,
                     f"'{cmd}' emitted a non-object element (double-wrapped?): {entry!r}",
                 )
+                # Unified per-file schema: cper_file, afids, status, message, code.
                 self.assertIn("cper_file", entry)
                 self.assertIn("afids", entry)
-                self.assertIn("decode_failed", entry)
+                self.assertIn("status", entry)
+                self.assertIn("message", entry)
+                self.assertIn("code", entry)
+                # A file that failed to decode reports a non-success status and
+                # a matching non-zero code (garbage.cper -> UNEXPECTED_DATA).
+                if entry["status"] != "AMDSMI_STATUS_SUCCESS":
+                    self.assertNotEqual(entry["code"], 0)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         return

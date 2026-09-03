@@ -22,14 +22,15 @@ These tests exercise:
 import argparse
 import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, find_cli_dir, stub_modules
 
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
 class _FakeClkType:
@@ -71,7 +72,7 @@ def _patch(testcase, obj, **overrides):
         testcase.addCleanup(_restore_attr, obj, name, original)
 
 
-def _install_fake_amdsmi():
+def _build_fake_amdsmi():
     amdsmi_pkg = types.ModuleType("amdsmi")
     interface = types.ModuleType("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
@@ -100,10 +101,11 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+    }
 
 
 def _load_metric_module():
@@ -237,9 +239,13 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls.interface = _install_fake_amdsmi()
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
 
     def test_navi_vcn_busy_reads_sysfs(self):
@@ -331,7 +337,3 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
         self.assertIsInstance(vcn, dict)
         self.assertIn("xcp_0", vcn)
         self.assertIn("xcp_1", vcn)
-
-
-if __name__ == "__main__":
-    unittest.main()

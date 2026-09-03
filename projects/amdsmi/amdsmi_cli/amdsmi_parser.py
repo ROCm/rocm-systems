@@ -349,11 +349,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
-    def _is_command_supported(self, user_input, acceptable_values, command_name):
-        if acceptable_values == "N/A":
-            outputformat = self.helpers.get_output_format()
-            raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
-        elif str(user_input).upper() not in acceptable_values:
+    def _is_command_supported(self, user_input, acceptable_values):
+        if str(user_input).upper() not in acceptable_values:
             print(f"Valid inputs are {acceptable_values}")
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 sys.argv[1], str(user_input).upper(), self.helpers.get_output_format()
@@ -381,11 +378,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
                 if lim_type not in valid_lim_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], lim_type, output_format
+                        sys.argv[1],
+                        lim_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_lim_types)}.",
                     )
 
                 # Check if the val is a valid integer value
@@ -425,7 +428,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
-                        sys.argv[1], clk_type, output_format
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"Valid options are: {', '.join(valid_clk_types)}.",
                     )
 
                 if not perf_levels_str:
@@ -2524,9 +2530,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "--accelerator-partition",
                     action="store",
                     choices=accelerator_set_choices,
-                    type=lambda value: self._is_command_supported(
-                        value, accelerator_set_choices, "--compute-partition"
-                    ),
+                    type=lambda value: self._is_command_supported(value, accelerator_set_choices),
                     required=False,
                     help=set_compute_partition_help,
                     metavar=("TYPE/INDEX"),

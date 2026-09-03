@@ -25,18 +25,15 @@ non-baremetal platforms, so ``args`` has no ``partition`` attribute and
 import argparse
 import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
 
-# The amd-smi CLI ships alongside the amdsmi package: ``common`` resolves
-# ``amdsmi_path`` to ``<rocm>/share/amd_smi`` and the CLI installs to the sibling
-# ``<rocm>/libexec/amdsmi_cli``. ``setUpClass`` skips the suite if it is absent
-# (e.g. an unusual layout where only the package, not the CLI, is present).
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 
 class _FakeClkType:
@@ -81,44 +78,49 @@ def _patch_interface(testcase, interface, **overrides):
         testcase.addCleanup(_restore_attr, interface, name, original)
 
 
-def _install_fake_amdsmi():
+def _build_fake_amdsmi(**interface_overrides):
     """Register a stub ``amdsmi`` package so ``metric.py`` imports cleanly.
+
+    ``interface_overrides`` replace or add ``amdsmi_interface`` attributes, for a
+    class that needs a different default (e.g. a call that must raise).
 
     Returns the fake ``amdsmi_interface`` module so individual tests can swap in
     per-case return values for the C-library entry points.
     """
-    amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = types.ModuleType("amdsmi.amdsmi_interface")
-    exception = types.ModuleType("amdsmi.amdsmi_exception")
-
-    interface.AMDSMI_MAX_NUM_GFX_CLKS = 8
-    interface.AMDSMI_MAX_NUM_CLKS = 4
-    interface.AMDSMI_MAX_RAIL_INDEX = 7
-    interface.AmdSmiClkType = _FakeClkType
 
     # Default clock-limit payload reused by every AmdSmiClkType lookup.
     def _get_clock_info(_handle, _clk_type):
         return {"min_clk": 400, "max_clk": 2100, "clk_deep_sleep": "DISABLED"}
 
-    interface.amdsmi_get_clock_info = _get_clock_info
-    interface.amdsmi_get_gpu_metrics_info = lambda _handle: {}
-    interface._NA_amdsmi_get_gpu_metrics_info = lambda: {}
-    # Set per-test; default keeps the partition path inert.
-    interface.amdsmi_get_gpu_partition_metrics_info = lambda _handle: None
+    interface = fake_module(
+        "amdsmi.amdsmi_interface",
+        AMDSMI_MAX_NUM_GFX_CLKS=8,
+        AMDSMI_MAX_NUM_CLKS=4,
+        AMDSMI_MAX_RAIL_INDEX=7,
+        AmdSmiClkType=_FakeClkType,
+        amdsmi_get_clock_info=_get_clock_info,
+        amdsmi_get_gpu_metrics_info=lambda _handle: {},
+        _NA_amdsmi_get_gpu_metrics_info=lambda: {},
+        # Set per-test; default keeps the partition path inert.
+        amdsmi_get_gpu_partition_metrics_info=lambda _handle: None,
+        **interface_overrides,
+    )
+    exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
+    amdsmi_pkg = fake_module("amdsmi", amdsmi_interface=interface, amdsmi_exception=exception)
 
-    exception.AmdSmiLibraryException = _FakeLibraryException
-
-    amdsmi_pkg.amdsmi_interface = interface
-    amdsmi_pkg.amdsmi_exception = exception
-
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+        # The metric module is loaded against these fakes, so it goes with them.
+        "metric_under_test": None,
+    }
 
 
 def _load_metric_module():
     spec = importlib.util.spec_from_file_location("metric_under_test", METRIC_PATH)
+    if spec is None or spec.loader is None:
+        raise unittest.SkipTest(f"amd-smi CLI metric.py is not loadable ({METRIC_PATH})")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -161,7 +163,7 @@ class _FakeHelpers:
     def is_windows(self):
         return False
 
-    def is_baremetal(self):
+    def is_baremetal(self) -> bool:
         return True
 
     def is_linux(self):
@@ -176,7 +178,7 @@ class _FakeHelpers:
     def os_info(self):
         return "mock-os"
 
-    def _get_metric_version_and_partition_info(self, *args, **kwargs):
+    def _get_metric_version_and_partition_info(self, *args, **kwargs) -> dict:
         return {"num_partition": 1}
 
     def unit_format(self, logger, value, unit):
@@ -194,10 +196,10 @@ class _FakeHelpers:
 class _FakeHelpersVirtualOS(_FakeHelpers):
     """Virtual-OS stub: ``is_baremetal()`` is False, so ``--partition`` is unregistered."""
 
-    def is_baremetal(self):
+    def is_baremetal(self) -> bool:
         return False
 
-    def _get_metric_version_and_partition_info(self, *args, **kwargs):
+    def _get_metric_version_and_partition_info(self, *args, **kwargs) -> dict:
         return {"num_partition": "N/A"}
 
 
@@ -266,14 +268,22 @@ def _build_virtual_os_args(**overrides):
 class TestCliMetricPartitionClock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls.interface = _install_fake_amdsmi()
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
 
     def _run_clock_partition(self, partition_metrics):
         """Drive ``metric_gpu`` for ``--clock --partition`` and return ``clocks``."""
-        self.interface.amdsmi_get_gpu_partition_metrics_info = lambda _handle: partition_metrics
+        setattr(
+            self.interface,
+            "amdsmi_get_gpu_partition_metrics_info",
+            lambda _handle: partition_metrics,
+        )
 
         commands = object.__new__(self.metric_module.MetricCommands)
         commands.logger = _FakeLogger()
@@ -401,7 +411,10 @@ class TestCliMetricPartitionClock(unittest.TestCase):
         commands.group_check_printed = True
         commands.device_handles = []
         commands.metric_gpu(args)
-        return commands.logger.captured_values
+        captured = commands.logger.captured_values
+        self.assertIsNotNone(captured, "metric_gpu did not store a values payload")
+        assert captured is not None  # narrows the Optional for the callers below
+        return captured
 
     def test_usage_partition_branch_uses_partition_metrics(self):
         # partition=True drives the fetch; gpu_partition_metrics is non-None, so
@@ -456,22 +469,25 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls.interface = _install_fake_amdsmi()
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi(
+            # fclk is unavailable so the non-partition clock exception handler fires.
+            amdsmi_get_clk_freq=_raise_lib_exc,
+            # Temperature enum access is not guarded, so the enums must exist; the
+            # sensor fetches degrade to N/A.
+            amdsmi_get_gpu_activity=_raise_lib_exc,
+            amdsmi_get_temp_metric=_raise_lib_exc,
+            AmdSmiTemperatureType=types.SimpleNamespace(
+                EDGE="EDGE", HOTSPOT="HOTSPOT", VRAM="VRAM"
+            ),
+            AmdSmiTemperatureMetric=types.SimpleNamespace(CURRENT="CURRENT", CRITICAL="CRITICAL"),
+        )
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
-        # fclk is unavailable so the non-partition clock exception handler fires.
-        cls.interface.amdsmi_get_clk_freq = _raise_lib_exc
-        # Temperature enum access is not guarded, so the enums must exist; the
-        # sensor fetches degrade to N/A.
-        cls.interface.amdsmi_get_gpu_activity = _raise_lib_exc
-        cls.interface.amdsmi_get_temp_metric = _raise_lib_exc
-        cls.interface.AmdSmiTemperatureType = types.SimpleNamespace(
-            EDGE="EDGE", HOTSPOT="HOTSPOT", VRAM="VRAM"
-        )
-        cls.interface.AmdSmiTemperatureMetric = types.SimpleNamespace(
-            CURRENT="CURRENT", CRITICAL="CRITICAL"
-        )
 
     def _run_metric(self, args):
         partition_calls = []
@@ -480,7 +496,9 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
             partition_calls.append(handle)
             return None
 
-        self.interface.amdsmi_get_gpu_partition_metrics_info = _tracking_partition_metrics
+        setattr(
+            self.interface, "amdsmi_get_gpu_partition_metrics_info", _tracking_partition_metrics
+        )
 
         commands = object.__new__(self.metric_module.MetricCommands)
         commands.logger = _FakeLogger()
@@ -531,7 +549,3 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
         self.assertIn("usage", captured)
         self.assertIn("temperature", captured)
         self.assertEqual(partition_calls, [])
-
-
-if __name__ == "__main__":
-    unittest.main()

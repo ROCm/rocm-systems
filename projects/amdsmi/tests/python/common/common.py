@@ -98,6 +98,105 @@ def print_shadow_error(script, loaded_from, expected_path, file=sys.stderr):
     print(f"\nRefer to `{script} -h` for more details.", file=file)
 
 
+def find_cli_dir(*start_dirs):
+    """Return the amd-smi CLI dir (the one holding amdsmi_cli_exceptions.py), or None.
+
+    Walks up from each start dir, checking the installed (``libexec/amdsmi_cli``)
+    and source (``amdsmi_cli``) layouts. Pass ``amdsmi_path`` first so an
+    AMDSMI_PATH override selects the CLI from the matching install; callers skip
+    the suite when the result is None.
+    """
+    sentinel = "amdsmi_cli_exceptions.py"
+    for start in start_dirs:
+        if not start:
+            continue
+        # abspath rather than Path.resolve(): a symlinked ROCm root
+        # (/opt/rocm -> /opt/rocm-x.y.z) must stay as the caller spelled it.
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
+            for rel in (("libexec", "amdsmi_cli"), ("amdsmi_cli",)):
+                candidate = directory.joinpath(*rel)
+                if (candidate / sentinel).is_file():
+                    return str(candidate)
+    return None
+
+
+def add_class_cleanup(test_cls, func, *args):
+    """Run ``func`` after ``test_cls`` finishes.
+
+    Not ``addClassCleanup`` (3.8+, and Debian 10 ships 3.7). This runs off
+    ``tearDownClass``, which unittest skips when ``setUpClass`` raises, so a
+    class that dies mid-setup leaves its cleanups unrun.
+    """
+    # Own the list rather than inherit a base class's, so subclasses do not share.
+    cleanups = test_cls.__dict__.get("_pending_class_cleanups")
+    if cleanups is None:
+        cleanups = test_cls._pending_class_cleanups = []
+        previous = test_cls.tearDownClass.__func__
+
+        def _run_class_cleanups(cls):
+            try:
+                previous(cls)
+            finally:
+                while cleanups:  # last registered runs first, as addClassCleanup does
+                    cleanup, cleanup_args = cleanups.pop()
+                    cleanup(*cleanup_args)
+
+        test_cls.tearDownClass = classmethod(_run_class_cleanups)
+
+    cleanups.append((func, args))
+
+
+def fake_module(name, **attrs):
+    """Module object carrying *attrs*, for stubbing an import a test cannot satisfy.
+
+    setattr rather than direct assignment: a stub invents attributes the real
+    module type does not declare, which a type checker flags on every line.
+    Pass the result to ``stub_modules`` so it is restored afterwards.
+    """
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def stub_modules_at_import(modules):
+    """Replace ``sys.modules`` entries now; returns the callable that restores them.
+
+    ``modules`` maps a module name to its replacement; a ``None`` value removes the
+    name instead, so the next import re-resolves it. The caller owns the restore --
+    drive it from ``tearDownModule`` when the stub has to exist before the module's
+    own imports run (the CLI does ``from amdsmi_init import *`` at load, which is
+    too early for ``setUpClass``). Prefer ``stub_modules`` when a class can own it.
+    """
+    saved = {name: sys.modules.get(name) for name in modules}
+
+    def _restore():
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+    for name, module in modules.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+    return _restore
+
+
+def stub_modules(test_cls, modules):
+    """Replace ``sys.modules`` entries for the lifetime of ``test_cls``.
+
+    Same contract as ``stub_modules_at_import``, with the restore tied to the class
+    teardown instead of the caller. A stub that outlives its class corrupts every
+    later test module in the same interpreter, which is what the runner's isolation
+    guard reports as a leak.
+    """
+    add_class_cleanup(test_cls, stub_modules_at_import(modules))
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
     os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
 )
@@ -304,10 +403,14 @@ def build_type_lists():
         cond = PASS
         if member.name in ["UNKNOWN"]:
             cond = FAIL
-        elif member.name in ["NPS4", "NPS8"]:
+        elif member.name in ["NPS1", "NPS2", "NPS4", "NPS8"]:
             # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
             # BTW - no asic supports NPS8...
-            cond = [PASS, FAIL]
+            cond = [
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.INVAL,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            ]
         memory_partition_types.append(
             (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
         )
@@ -631,6 +734,178 @@ def run_test_dir(subdir, title, top_level_dir):
     sys.exit(0 if result.wasSuccessful() else 1)
 
 
+# Sentinel distinguishing "module was absent from the baseline" from "present but
+# mapped to None" when snapshotting sys.modules.
+_ISO_MISSING = object()
+
+
+class _IsolationLeakMarker:
+    """Stand-in "test" for attributing a sys.modules leak when the offending
+    class cannot be identified (rare fallback). Implements the minimal
+    ``TestResult`` surface (``id``/``shortDescription``/``str``)."""
+
+    def __init__(self, label):
+        self._label = label
+
+    def id(self):
+        return f"{self._label} (sys.modules cleanup)"
+
+    def shortDescription(self):
+        return None
+
+    def __str__(self):
+        return self.id()
+
+
+class _ModuleIsolationResult(unittest.TextTestResult):
+    """Fail a test class that leaves ``sys.modules`` dirty (cross-test pollution guard).
+
+    A unit test that stubs a module into ``sys.modules`` -- e.g. to import a CLI
+    module without hardware or the compiled ``amdsmi`` package -- MUST restore it:
+    snapshot the originals in ``setUpClass`` and put them back in
+    ``tearDownClass``. If it forgets, the stub leaks into every later test module
+    run by the same interpreter (a "dirty test invocation"). That is exactly how
+    an empty ``AMDSMIHelpers`` stub once hid ``handle_gpus`` and broke every
+    ``test_cli_exit_codes`` set/reset test -- but only in a full run, never when
+    the class ran alone, which makes it painful to diagnose.
+
+    Leaks are judged only at the *end* of the run, after every ``tearDownClass``
+    has had its chance. Whatever module is still replaced or stubbed then is a
+    leak, and it is blamed on the test that *first introduced the object* now
+    occupying that name (tracked by object identity as each test runs). This is
+    robust against save/restore cascades: if one class leaks a stub and a later,
+    well-behaved class snapshots and restores that same leaked object, the blame
+    stays with the original leaker -- never the innocent bystander that merely
+    ran afterward. A class that stubs a name and properly restores it is never
+    blamed, because its object is no longer present at the end.
+    """
+
+    def startTestRun(self):
+        super().startTestRun()
+        # Baseline of already-imported modules; genuine imports carry a __spec__.
+        self._iso_baseline = dict(sys.modules)
+        # id(object) -> the first test seen with that stub/replacement in sys.modules.
+        # A leak is blamed on whoever FIRST introduced the object still sitting in
+        # sys.modules at the end of the run. This survives save/restore cascades:
+        # when a leak persists and a later, innocent class re-exposes the same leaked
+        # object (e.g. by snapshotting then restoring it), the blame stays with the
+        # class that originally created that object -- not the bystander.
+        self._iso_first_seen = {}
+        # Hold a reference to every object we have attributed so its id() cannot be
+        # reused by a later, unrelated object once the original is scrubbed/replaced.
+        self._iso_seen_objs = []
+        # (class label, [leaked module names]) per offending class, so the runner
+        # can print a distinct root-cause banner after the normal summary.
+        self._iso_leaks = []
+
+    @staticmethod
+    def _iso_looks_like_stub(mod):
+        # A hand-built module (``types.ModuleType("x")``) has no import spec and
+        # no backing file; a genuinely imported module always has a __spec__.
+        return (
+            isinstance(mod, types.ModuleType)
+            and getattr(mod, "__spec__", None) is None
+            and not getattr(mod, "__file__", None)
+        )
+
+    def _iso_dirty(self):
+        """name -> module for every entry that differs from the clean baseline: a
+        baseline module replaced by a different object, or a new hand-built stub."""
+        baseline = self._iso_baseline
+        dirty = {}
+        for name, mod in list(sys.modules.items()):
+            # Skip Python-internal dunder modules (e.g. __main__, and __mp_main__
+            # which multiprocessing installs): they look stub-like but are never
+            # test-installed stubs.
+            if name.startswith("__"):
+                continue
+            original = baseline.get(name, _ISO_MISSING)
+            if original is _ISO_MISSING:
+                if self._iso_looks_like_stub(mod):
+                    dirty[name] = mod
+            elif mod is not original:
+                dirty[name] = mod
+        return dirty
+
+    def _iso_note(self, test):
+        """Record the first test to expose each currently-dirty module object.
+
+        Sampled at the start and end of every test. ``setUpClass`` has already run
+        by the first ``startTest``, so a class's stubs are attributed to it. The
+        first test to show a given object keeps it for the rest of the run, even
+        if a later class momentarily replaces and then restores that same object.
+        """
+        for _name, mod in self._iso_dirty().items():
+            key = id(mod)
+            if key not in self._iso_first_seen:
+                self._iso_first_seen[key] = test
+                self._iso_seen_objs.append(mod)
+
+    def startTest(self, test):
+        # setUpClass ran just before this, so its stubs are attributed to `test`.
+        self._iso_note(test)
+        super().startTest(test)
+
+    def stopTest(self, test):
+        # Also sample after the body, in case the test itself installed a stub.
+        super().stopTest(test)
+        self._iso_note(test)
+
+    def stopTestRun(self):
+        # Every tearDownClass has run by now; whatever is still dirty is a real
+        # leak. Blame each leaked name on the first test that introduced the object
+        # now occupying it, scrub it so a re-run starts clean, and fail that class.
+        dirty = self._iso_dirty()
+        if dirty:
+            baseline = self._iso_baseline
+            by_test = {}
+            for name, mod in dirty.items():
+                by_test.setdefault(self._iso_first_seen.get(id(mod)), []).append(name)
+            for name in dirty:
+                original = baseline.get(name, _ISO_MISSING)
+                if original is _ISO_MISSING:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = original
+            for test, names in by_test.items():
+                label = (
+                    f"{type(test).__module__}.{type(test).__qualname__}"
+                    if test is not None
+                    else None
+                )
+                self._iso_record_leak(label, test, names)
+        super().stopTestRun()
+
+    def _iso_record_leak(self, label, test, names):
+        who = label or "a test class"
+        sorted_names = sorted(names)
+        # Remember the leak so the runner can surface it in a root-cause banner;
+        # a leak usually triggers a cascade of downstream failures, and this
+        # banner keeps the actual culprit from being lost in that noise.
+        self._iso_leaks.append((who, sorted_names))
+        msg = (
+            f"{who} left sys.modules dirty: {', '.join(sorted_names)}.\n"
+            "It stubbed or replaced these modules and did not restore them, so the\n"
+            "stub leaks into later test modules run by the same interpreter and\n"
+            "corrupts them (a 'dirty test invocation' -- e.g. an empty AMDSMIHelpers\n"
+            "stub hides handle_gpus from test_cli_exit_codes). It surfaces only when\n"
+            "this class runs before the affected test in the same run; a filtered\n"
+            "run that excludes this class (the runner's -k/-x) hides the problem.\n"
+            "Fix: in setUpClass snapshot the originals\n"
+            "    cls._saved = {n: sys.modules.get(n) for n in NAMES}\n"
+            "and in tearDownClass restore them (put the originals back, or pop the\n"
+            "names you added). See tests/python/unit/gpu/test_cli_metric_partition.py.\n"
+            "(The runner scrubs the leak after the run so a re-run starts clean.)"
+        )
+        try:
+            raise AssertionError(msg)
+        except AssertionError:
+            # Attribute to a representative test of the offending class when known;
+            # otherwise fall back to a synthetic id so the run still fails loudly.
+            target = test if test is not None else _IsolationLeakMarker(who)
+            self.addFailure(target, sys.exc_info())
+
+
 class GTestSummaryRunner(unittest.TextTestRunner):
     """TextTestRunner that appends a GTest-style pass/skip/fail summary.
 
@@ -660,10 +935,16 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         runner = common.GTestSummaryRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
     """
 
+    # Enforce per-class sys.modules hygiene: a test that stubs a module and
+    # forgets to restore it fails (see _ModuleIsolationResult) instead of
+    # silently corrupting later test modules.
+    resultclass = _ModuleIsolationResult
+
     _CYAN = "\033[36m"
     _GREEN = "\033[32m"
     _YELLOW = "\033[33m"
     _RED = "\033[31m"
+    _MAGENTA = "\033[35m"
     _RESET = "\033[0m"
 
     @staticmethod
@@ -684,6 +965,17 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         if test_id.startswith("__main__."):
             return test_id[len("__main__.") :]
         return test_id
+
+    @staticmethod
+    def _owning_test_id(test):
+        """The id of the test that owns *test*, folding subTests onto their parent.
+
+        unittest reports a failing subTest as a separate object whose id is the parent
+        id plus its parameters -- ``Class.test_modes (mode='NPS1')`` -- while a plain
+        test id never contains a space. Cutting at the first space therefore yields the
+        owning test in both cases.
+        """
+        return test.id().split(" ", 1)[0]
 
     def _color(self, code, text):
         """Wrap *text* in *code* only when colors are appropriate.
@@ -713,8 +1005,17 @@ class GTestSummaryRunner(unittest.TextTestRunner):
         # They cause wasSuccessful() to return False, so count them as failures so
         # the summary accurately reflects the overall run status.
         unexpectedSuccesses = len(getattr(result, "unexpectedSuccesses", []))
-        failures = len(result.failures) + len(result.errors) + unexpectedSuccesses
-        passed = result.testsRun - skipped - failures
+        # Failures come in two units: a *record* is one reported failure, and a single
+        # test can add several (a cleanup failing after the body, or one per subTest).
+        # Records are what gets listed below; distinct tests are what testsRun counts,
+        # so that is the unit passed has to net out. Class-level errors and leak
+        # markers arrive as stand-ins that testsRun never counted, so skip those.
+        failure_records = result.failures + result.errors
+        failed_tests = {
+            self._owning_test_id(t) for t, _ in failure_records if isinstance(t, unittest.TestCase)
+        }
+        failures = len(failure_records) + unexpectedSuccesses
+        passed = result.testsRun - skipped - len(failed_tests) - unexpectedSuccesses
 
         stream.writeln()
         stream.writeln(
@@ -731,12 +1032,10 @@ class GTestSummaryRunner(unittest.TextTestRunner):
             stream.writeln(
                 self._color(
                     self._RED,
-                    f"[  FAILED  ] {failures} test{self._plural(failures)}, listed below:",
+                    f"[  FAILED  ] {failures} failure{self._plural(failures)}, listed below:",
                 )
             )
-            for t, _ in result.failures:
-                stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
-            for t, _ in result.errors:
+            for t, _ in failure_records:
                 stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
             # unexpectedSuccesses items are bare TestCase instances (not (test, traceback) tuples).
             for t in getattr(result, "unexpectedSuccesses", []):
@@ -754,6 +1053,40 @@ class GTestSummaryRunner(unittest.TextTestRunner):
             )
             for t, _ in result.skipped:
                 stream.writeln(self._color(self._YELLOW, f"[  SKIPPED ] {self._test_label(t)}"))
+        stream.writeln()
+        self._print_leak_banner(result)
+
+    def _print_leak_banner(self, result):
+        """Print a distinct root-cause banner for any sys.modules leaks.
+
+        A leaked stub typically causes a cascade of unrelated downstream
+        failures; this banner prints last so the real culprit (the class that
+        forgot to restore sys.modules) is the final, unmissable thing on screen.
+        """
+        leaks = getattr(result, "_iso_leaks", None)
+        if not leaks:
+            return
+        bar = "=" * 72
+        stream = self.stream
+        stream.writeln(self._color(self._MAGENTA, bar))
+        stream.writeln(
+            self._color(
+                self._MAGENTA,
+                "[  LEAK    ] sys.modules pollution detected -- likely the ROOT CAUSE of",
+            )
+        )
+        stream.writeln(
+            self._color(
+                self._MAGENTA,
+                "[  LEAK    ] any failures above. Fix the class(es) below first, then re-run:",
+            )
+        )
+        for who, names in leaks:
+            stream.writeln(self._color(self._MAGENTA, f"[  LEAK    ]     {who}"))
+            stream.writeln(
+                self._color(self._MAGENTA, f"[  LEAK    ]         leaked: {', '.join(names)}")
+            )
+        stream.writeln(self._color(self._MAGENTA, bar))
         stream.writeln()
 
 
@@ -778,12 +1111,10 @@ def has_gpu_od_interface(bdf):
     # to remove the dependency on amdsmi_helpers from this common module.
     # Exposing non-public SYSFS API interfaces in the CLI (and in general)
     # is a bad design pattern and needs to be addressed in the future.
-    amdsmi_cli_path = os.path.normpath(
-        os.path.join(amdsmi_path, "..", "..", "libexec", "amdsmi_cli")
-    )
-    if not os.path.exists(amdsmi_cli_path):
+    amdsmi_cli_path = find_cli_dir(amdsmi_path)
+    if not amdsmi_cli_path:
         raise FileNotFoundError(
-            f'amdsmi_cli path "{amdsmi_cli_path}" does not exist. '
+            f'amdsmi_cli directory not found under "{amdsmi_path}". '
             f"Ensure the AMD-SMI CLI is installed, or set AMDSMI_PATH correctly."
         )
     if amdsmi_cli_path not in sys.path:
@@ -950,6 +1281,7 @@ class Common:
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
+        expected_code_name = self._normalize_expected(expected_code_name)
         if isinstance(exc, str) and len(exc) == 0:
             error_code_name = expected_code_name
             error_code = "-1"
@@ -972,8 +1304,13 @@ class Common:
                     if self.verbose > VERBOSITY_QUIET and printIt:
                         if msg:
                             print(f"{msg}\n", end="")
-                        ec_code = self.get_error_code_from_name(ec_name)
-                        print(f"\tTEST SUCCESS, AMDSMI API Returned {ec_code:>2s}, {ec_name}")
+                        status_msg = f"\tTEST SUCCESS, AMDSMI API Returned {error_code:>2s}, {error_code_name}"
+                        for name in expected_code_name:
+                            code = str(self.get_error_code_from_name(name))
+                            status_msg += (
+                                f"\n\t              AMDSMI API Expected {code:>2s}, {name}"
+                            )
+                        print(status_msg)
                     return False
 
             # No expected result matched - print failure (respects same guards as single-condition path)
@@ -984,10 +1321,8 @@ class Common:
                     f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
                 )
                 for ec_name in expected_code_name:
-                    ec_code = self.get_error_code_from_name(ec_name)
-                    status_msg += (
-                        f"\t              AMDSMI API Expected {ec_code:>2s}, {expected_code_name}"
-                    )
+                    ec_code = str(self.get_error_code_from_name(ec_name))
+                    status_msg += f"\t              AMDSMI API Expected {ec_code:>2s}, {ec_name}"
             return True
 
         # Check for single passing condition
@@ -1156,7 +1491,7 @@ class Common:
             lines.append(f"\t              AMDSMI API Accepted {code:>2s}, {name}")
         print("\n".join(lines), flush=True)
 
-    def _check_amdgpu_driver(self):
+    def check_amdgpu_driver(self):
         """Returns true if amdgpu is found in the list of initialized modules"""
         amd_gpu_status_file = pathlib.Path("/sys/module/amdgpu/initstate")
         if amd_gpu_status_file.exists():
@@ -1252,20 +1587,22 @@ class Common:
         Raises:
             AmdSmiLibraryException: If initialization fails for reasons other than driver not loaded
             AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
-            unittest.SkipTest: If no compatible AMD drivers are detected on the system
+            RuntimeError: If no compatible AMD drivers are detected on the system
         """
         # Build init_flag additively from detected drivers (mirrors CLI amdsmi_init.py pattern).
         # Using INIT_AMD_APUS when both GPU and CPU drivers are present is wrong on discrete-GPU
         # servers — use OR-combined flags instead, exactly as the CLI does.
         init_flag = 0
-        if self._check_amdgpu_driver():
+        if self.check_amdgpu_driver():
             init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
         if self._check_amd_hsmp_driver():
             init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
         if init_flag == 0:
+            # Errors rather than skips: a driverless box cannot exercise anything,
+            # and skipping reports OK for a suite that never ran.
             msg = "Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)"
             self.print(msg)
-            raise unittest.SkipTest(msg)
+            raise RuntimeError(msg)
 
         msg = "AMDSMI init failed for detected drivers"
         ret = self._init_with_flag(init_flag, msg)
