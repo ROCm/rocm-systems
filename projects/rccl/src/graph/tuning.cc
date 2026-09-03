@@ -1893,7 +1893,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [1] Reduce          -- not used
     0,                    // [2] AllGather       -- keep symk in graph mode
     0,                    // [3] ReduceScatter   -- keep symk in graph mode
-    0,                    // [4] AllReduce       -- keep symk in graph mode (CE blocked)
+    1ULL*1024,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
