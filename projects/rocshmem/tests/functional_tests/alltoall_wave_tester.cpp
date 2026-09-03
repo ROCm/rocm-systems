@@ -38,12 +38,18 @@ __device__ void alltoall_wave([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unuse
 
 ALLTOALLWAVEGEN(float, float)
 ALLTOALLWAVEGEN(double, double)
-
+ALLTOALLWAVEGEN(char, char)
+// ALLTOALLWAVEGEN(long double, longdouble)
+ALLTOALLWAVEGEN(signed char, schar)
 ALLTOALLWAVEGEN(short, short)
 ALLTOALLWAVEGEN(int, int)
 ALLTOALLWAVEGEN(long, long)
 ALLTOALLWAVEGEN(long long, longlong)
-ALLTOALLWAVEGEN(char, char)
+ALLTOALLWAVEGEN(unsigned char, uchar)
+ALLTOALLWAVEGEN(unsigned short, ushort)
+ALLTOALLWAVEGEN(unsigned int, uint)
+ALLTOALLWAVEGEN(unsigned long, ulong)
+ALLTOALLWAVEGEN(unsigned long long, ulonglong)
 ALLTOALLWAVEGEN(__half, half)
 ALLTOALLWAVEGEN(__hip_bfloat16, bfloat16)
 
