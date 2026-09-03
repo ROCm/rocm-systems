@@ -7,7 +7,6 @@ import warnings
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-import astunparse
 import numpy as np
 import pandas as pd
 
@@ -866,7 +865,7 @@ class db_analysis(OmniAnalyze_Base):
             ast_node = ast.parse(value)
             if not transform_expression(ast_node, original_value):
                 return None
-            value = astunparse.unparse(ast_node)
+            value = ast.unparse(ast_node)
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
         else:
@@ -1187,7 +1186,6 @@ class db_analysis(OmniAnalyze_Base):
 
         non_expression_columns = {
             "Metric",
-            "Channel",
             "Unit",
             "Description",
             "Type",
@@ -1221,12 +1219,12 @@ class db_analysis(OmniAnalyze_Base):
                 )
                 for table_id, metric_df in arch_config.dfs.items()
                 if table_id != 402  # roofline points handled in calc_roofline_data
-                if set(metric_df.columns).intersection({"Metric", "Channel"})
+                if "Metric" in metric_df.columns
             ]
 
             metric_info_rows = [
                 MetricInfoRow(
-                    name=row.get("Metric") or row["Channel"].strip(),
+                    name=row["Metric"],
                     metric_id=metric_id,
                     description=row.get("Description"),
                     unit=row.get("Unit"),
