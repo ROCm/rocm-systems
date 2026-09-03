@@ -635,10 +635,18 @@ class TestExecutor:
         rocm_path = self._rocm_root()
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = list(self.build_config.get("install_flags", []))
+        # Expand env vars / ~ (e.g. ${WORKDIR}, ${ROCM_SYSTEMS:-...}) so build
+        # paths need not be hardcoded. Mirrors build_rccl_tests(); a no-op for
+        # flags/options that contain no ${VAR} references.
+        def _expand(p):
+            return os.path.expanduser(expand_env_vars(str(p)))
+
+        install_flags = [_expand(f) for f in self.build_config.get("install_flags", [])]
         cmake_options = self.build_config.get("cmake_options", "")
         if isinstance(cmake_options, dict):
-            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
+            cmake_options = " ".join(f"-D{k}={_expand(v)}" for k, v in cmake_options.items())
+        else:
+            cmake_options = _expand(cmake_options)
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
@@ -1041,6 +1049,23 @@ class TestExecutor:
                 "duration": 0,
                 "error": msg,
             }
+
+        # num_gpus of 0 declares a test that needs no GPU, which only makes sense
+        # on one node: multi-node placement builds "host:{num_gpus}" and
+        # "--map-by ppr:{num_gpus}:node" from it, and zero there would launch
+        # nothing. The same goes for the resolved rank count, which "auto" derives
+        # from num_gpus, so zero GPUs would ask mpirun for -np 0. Fail the test
+        # rather than launch nothing and call it a pass.
+        if num_ranks < 1 or num_nodes < 1 or num_gpus < 0 or (num_nodes > 1 and num_gpus < 1):
+            msg = (f"Invalid placement for test '{test_name}': {num_ranks} rank(s) over "
+                   f"{num_nodes} node(s) at {num_gpus} GPU(s)/node")
+            print(f"ERROR: {msg}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": msg,
+            }
         timeout = test_config.get("timeout", 0)
         env_vars = test_config.get("env_variables", {})
 
@@ -1141,7 +1166,13 @@ class TestExecutor:
         # per-node rank count (num_gpus). Detection failure (detected_gpus == 0)
         # disables this check. See README "Automatic skipping on insufficient GPUs".
         if detected_gpus > 0:
-            gpus_needed = num_ranks if num_nodes <= 1 else num_gpus
+            # A test that declares num_gpus of 0 needs none, so the node's GPU count
+            # cannot be a reason to skip it -- otherwise a CPU-only test with more
+            # ranks than the node has GPUs is skipped for a resource it never asked
+            # for. Zero here is always explicit: "auto" resolves to the detected
+            # count, or 8 when detection failed, and this branch only runs when
+            # detection succeeded.
+            gpus_needed = 0 if num_gpus == 0 else (num_ranks if num_nodes <= 1 else num_gpus)
             if gpus_needed > detected_gpus:
                 msg = (
                     f"SKIP: test needs {gpus_needed} GPU(s)/node, "
@@ -1279,13 +1310,26 @@ class TestExecutor:
                 # SLURM mode: use --host with slot counts instead of --map-by ppr
                 # Repeat each host num_gpus times to place that many ranks per node
                 hosts = self.mpi_hosts['host_list'].split(',')
-                expanded = ','.join(f"{h}:{num_gpus}" for h in hosts)
+                # Slots, not GPUs: a CPU-only test declares num_gpus of 0, and
+                # "host:0" leaves mpirun with nothing to launch into ("not enough
+                # slots"). Fall back to the ranks the test actually needs per node.
+                slots = num_gpus if num_gpus > 0 else -(-num_ranks // num_nodes)
+                expanded = ','.join(f"{h}:{slots}" for h in hosts)
                 host_arg = f"--host {expanded} "
                 map_by_arg = ""
             elif 'hostfile' in self.mpi_hosts:
                 host_arg = f"--hostfile {self.mpi_hosts['hostfile']} "
-                # Use PPR to control ranks per node with hostfile
-                map_by_arg = f"--map-by ppr:{num_gpus}:node " if num_nodes > 1 else ""
+                # Same fallback as the SLURM branch above: a CPU-only test
+                # declares num_gpus of 0, and ppr:0:node places nothing. Without
+                # an explicit ppr the hostfile's own slot counts govern
+                # placement instead of what this test asked for, which is how a
+                # single-node CPU-only test spilled onto -- or was refused by --
+                # a second host entry in the file. Applied for every node
+                # count, not only num_nodes > 1: a single declared node is a
+                # placement request in its own right, and the hostfile can list
+                # more hosts than that.
+                slots = num_gpus if num_gpus > 0 else -(-num_ranks // num_nodes)
+                map_by_arg = f"--map-by ppr:{slots}:node "
             else:
                 if num_nodes > 1:
                     print("WARNING: Multi-node test without hostfile or SLURM allocation")
@@ -2142,7 +2186,8 @@ class TestExecutor:
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroInit-uncached"]:
+                       "rccl-UnitTestsMicroInit-uncached",
+                       "rccl-UnitTestsMicroEnqueue"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])
