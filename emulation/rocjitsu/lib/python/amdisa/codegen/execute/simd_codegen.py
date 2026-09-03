@@ -1735,10 +1735,12 @@ SIMD_VOPC_VOP3_F64: dict[str, str] = _build_simd_vopc_vop3_f64()
 #
 # 16-bit forms compute a 32-bit add/sub and mask the low 16 bits, matching the
 # scalar body's `uint32_t(uint16_t(int16_t(low16(a)+low16(b))))` (or the u16
-# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` because
+# variant) — both reduce to `(a + b) & 0xFFFFu` / `(a - b) & 0xFFFFu` when
+# CLAMP is clear because
 # unsigned 32-bit wrap-around at the low 16 bits is identical to signed/unsigned
 # 16-bit wrap. 32-bit forms use the wrap-around add/sub on uint32 lanes;
-# signed-vs-unsigned wraps the same way.
+# signed-vs-unsigned wraps the same way. The shared glue falls back to scalar
+# execution when CLAMP requests saturating arithmetic.
 SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # v_bcnt_u32_b32: VOP3-only (no VOP1 twin). D = CountOneBits(S0) + S1 -- the
     # second source is an accumulator, so this is binary, not unary. Keep the

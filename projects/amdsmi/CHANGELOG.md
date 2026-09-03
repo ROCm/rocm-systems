@@ -46,6 +46,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
   - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
 
+- **`cper_decode()` in the internal header `amd_smi/impl/amd_smi_cper.h` takes a new `buf_size` argument**.  
+  - The function needs the caller's buffer length to bound the record it walks. It also now rejects a buffer that does not start with the `CPER` signature, so the record walk is safe for any pointer and size rather than depending on `amdsmi_get_afids_from_cper()` having validated first.
+  - The symbol is not exported: the version script's `amdsmi_*` glob does not match a mangled C++ name, and `libamd_smi_static.a` is not installed. Only an in-tree build that links the archive sees the new signature.
+
+- **`amd_smi/impl/amd_smi_cper.h` and `example/amd_smi_cper.cc` are no longer installed in the dev package**.  
+  - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
+  - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
+
 ### Optimized
 
 ### Resolved Issues
@@ -67,8 +75,27 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed an uninitialized processor index that let the CPU and Core APIs read an unrelated CPU socket**.  
   - Passing a GPU, NIC, or switch handle to a CPU or Core API could return another socket's telemetry with `AMDSMI_STATUS_SUCCESS`. Such handles are now rejected. Calls that pass a CPU or Core handle are unaffected.
 
+- **Fixed `amd-smi metric` printing nothing for a section requested by name on APUs**.  
+  - APUs do not expose the discrete-GPU sensors, so those sections are dropped from the default dump. The same suppression applied to an explicitly named section, leaving `amd-smi metric --energy` printing only the GPU header and exiting 0, with no key at all in `--json` and `--csv` output.
+  - `--energy`, `--ecc-blocks`, `--overdrive`, `--xgmi-err`, `--pcie`, `--voltage-curve`, `--voltage` and `--fan` now report `N/A` when named explicitly. The default `amd-smi metric` dump is unchanged.
+
+- **Fixed `amdsmi_get_clock_info()` reporting an unavailable clock as `65535` instead of `N/A`**.  
+  - `amdsmi_clk_info_t.clk` is a `uint32_t`, but the GFX, MEM, SOC, VCLK and DCLK domains copied the raw `uint16_t` value straight from the GPU metrics table, so the 16-bit unavailable marker surfaced as the literal reading `65535` MHz. The `DF` domain already returned the 32-bit marker.
+  - All domains now report an unavailable clock as `UINT32_MAX`, which the Python interface maps to `N/A`. The field is documented accordingly.
+
+- **Fixed `amd-smi metric --usage` reporting APU IPU read/write bandwidth without a unit**.  
+  - `APU_AVERAGE_IPU_READS` and `APU_AVERAGE_IPU_WRITES` printed bare numbers while the adjacent DRAM counters carried `MB/s`. All four bandwidth counters now report `MB/s`, and the header documents the unit for each.
+
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
+
+- **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
+  - A record whose `record_length` is smaller than a CPER header is now dropped by the ring reader. Such a record was previously copied and then had a product serial number written past the end of the caller's buffer.
+  - `amdsmi_get_afids_from_cper` now returns `AMDSMI_STATUS_UNEXPECTED_SIZE` when `buf_size` is smaller than a CPER header, instead of reading header fields the caller never supplied.
+  - A section descriptor's `fru_id` and `fru_text` are now logged only up to their declared width. Neither field is required to carry a terminator, so logging one walked past the descriptor and printed whatever followed it, up to the first zero byte outside the record.
+  - A crashdump section's registers are now copied into an aligned buffer before decoding. The section sits at a record-supplied offset inside a packed struct, so an odd offset left the decoder loading a `uint64_t` from an address it was not aligned for.
+  - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump is now rejected and logged. In ACA register context (`reg_ctx_type` 1) that size already produced no AFID, so those records decode as before. In boot context (`reg_ctx_type` 9) the decoder previously read registers from past the end of `reg_dump`, and any AFID it derived from them is gone.
+  - A record whose `error_severity` is too large for the severity mask to select is now dropped. Such a value previously wrapped around the 32-bit mask and matched a bit belonging to a different severity, so the record was reported under a severity it never carried.
 
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.

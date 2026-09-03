@@ -107,6 +107,7 @@ function display_help()
     echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
+    echo "       --sqtt-enable           Enable SQTT instrumentation (requires ROCm >= 7.13)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
@@ -141,7 +142,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -192,6 +193,7 @@ while true; do
          --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
+         --sqtt-enable)              sqtt_enabled=true;                                                                                shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
@@ -410,6 +412,11 @@ fi
 # Disable ROCTX
 if [[ "${roctx_enabled}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DROCTX=OFF"
+fi
+
+# Enable SQTT instrumentation
+if [[ "${sqtt_enabled}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSQTT_ENABLED=ON"
 fi
 
 # Dump ASM files from GPU compilation

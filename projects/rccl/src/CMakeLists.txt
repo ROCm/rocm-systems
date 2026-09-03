@@ -1084,6 +1084,20 @@ if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-missing-braces)
 endif()
 
+## Add SQTT instrumentation support if enabled
+if(SQTT_ENABLED)
+  # Check if SQTT markers are already in source code
+  execute_process(
+    COMMAND grep -q "PRIM_SIMPLE_WAIT_PEER" "${CMAKE_CURRENT_SOURCE_DIR}/device/prims_simple.h"
+    RESULT_VARIABLE MARKERS_PRESENT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+
+  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
+  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
+endif()
+
 ## Set RCCL compile and linker options for unit tests and code coverage
 if(ENABLE_CODE_COVERAGE)
   if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
