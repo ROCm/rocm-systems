@@ -70,7 +70,7 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesWhenLargerThanSimpleCap)
     const size_t sizing =
         nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 0, 1, ll128Threshold);
     const size_t ll128Floor = (size_t)2 * nRanks *
-        nccl_dda_detail::ddaLL128AGSlices((size_t)ll128Threshold / nRanks) *
+        nccl_dda_detail::ddaLL128Slices((size_t)ll128Threshold / nRanks) *
         nccl_dda_detail::kDdaLL128WireBytesPerSlice;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
@@ -87,7 +87,7 @@ TEST(DdaFabricScratchSizingTest, LL128FloorArmedByLLFlagAlone)
     const size_t sizing =
         nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0, ll128Threshold);
     const size_t ll128Floor = (size_t)2 * nRanks *
-        nccl_dda_detail::ddaLL128AGSlices((size_t)ll128Threshold / nRanks) *
+        nccl_dda_detail::ddaLL128Slices((size_t)ll128Threshold / nRanks) *
         nccl_dda_detail::kDdaLL128WireBytesPerSlice;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)2 * nRanks * dda::common::kDdaLLMaxBytes);
@@ -124,7 +124,7 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
     const size_t sizing =
         nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 0, 1, ll128Threshold);
     const size_t perRank = ((size_t)ll128Threshold + nRanks - 1) / nRanks;
-    const size_t ll128Floor = (size_t)2 * nRanks * nccl_dda_detail::ddaLL128AGSlices(perRank) *
+    const size_t ll128Floor = (size_t)2 * nRanks * nccl_dda_detail::ddaLL128Slices(perRank) *
         nccl_dda_detail::kDdaLL128WireBytesPerSlice;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
