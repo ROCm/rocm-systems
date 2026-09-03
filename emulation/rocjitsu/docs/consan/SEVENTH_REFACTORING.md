@@ -954,3 +954,60 @@ representation collapse in the same routing/reservoir lifecycle gives the
 combined slice a credible four-digit payoff. In particular, do not relabel
 the live relay-count optimizer as owner machinery or count deletion of its
 tests as production shrinkage.
+
+### 14.8 Macro-slice 2: reset the branch-only routing transaction
+
+The two consecutive economics failures above trigger the whole-tree reset in
+Section 10.8. That reset first examined the broad patch record, synchronization
+evidence projections, validation, and the two SuperCollider access lowerers.
+The patch record and validator retain independent proof facts. Synchronization
+does reconstruct typed evidence plans during both resource planning and
+emission, but the complete repeated builders contain only about 490 lines;
+removing the joins would not clear the macro floor. SuperCollider LDS and FLAT
+share owner/resource and placement vocabulary, but LDS additionally owns dense
+call grouping, generated island banks, and branch-only continuations, while
+FLAT owns a runtime group gate and multiword displacement. A common body would
+therefore be a union-shaped protocol switch. The genuinely common mechanical
+portion is presently too small to justify replacing both working lowerers.
+
+The reset did, however, expose the missing companion to Section 14.7 in the
+same branch-only routing lifecycle. Once deferred owners are removed, the
+router's exact solver still carries the shape of the deleted optimization:
+multiple operating modes, separate feasibility and bounded-improvement
+passes, lower-bound bookkeeping, and detailed meters for a choice that no
+production caller can make. The production contract is smaller: qualify a
+bounded immutable relay inventory; find deterministic, vertex-disjoint
+monotonic routes for a batch when possible; otherwise recover pair-atomically
+without destroying capacity needed by later pairs; and commit only proven
+claims. Paid direct-reservoir provenance is already authoritative outside the
+solver and need not participate in route choice.
+
+This macro-slice will replace that complete transaction rather than polish its
+individual peepholes:
+
+- delete deferred owner identities, materialization state, activation costs,
+  owner grouping, and owner-affinity optimization as already proved safe by
+  Section 14.7;
+- collapse the residual exact solver to one feasibility backtracker with one
+  deterministic work budget and no optimization-mode representation;
+- retain the live per-pair relay-count minimization only where it protects
+  later-pair feasibility, unless the replacement search makes that policy an
+  inherent consequence of its ordering;
+- retain qualification, monotonic reachability, disjointness, transactional
+  rollback, provenance, reservation, and transitive direct-reservoir
+  materialization as observable behavior; and
+- strengthen tests around those behaviors while deleting tests that specify
+  only the removed owner/optimizer representation.
+
+The hard variants are a feasible batch on which naive request-order greedy
+fails, bounded-search fallback, a nonfinal pair whose shortest route preserves
+the next pair, and a transitive direct-reservoir route. The slice must preserve
+those variants across RDNA4, CDNA4, and CDNA5 users and pass the full
+nonphysical ConSan matrix. It forecasts roughly 575 already measured
+implementation lines from the dead owner lifecycle plus at least 250 lines
+from replacing the residual multi-mode exact-search transaction, with one
+small feasibility solver in return. The acceptance floor remains **750 net
+production implementation lines removed**. Abort and revert if preserving
+complete-batch feasibility requires recreating owner or optimization modes, if
+work remains unbounded, if live routing capacity regresses, or if the combined
+result does not clear the floor.
