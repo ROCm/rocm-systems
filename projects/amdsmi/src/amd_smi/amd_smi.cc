@@ -3276,6 +3276,23 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   uint32_t src_id = src_device->get_gpu_id();
   uint32_t dst_id = dst_device->get_gpu_id();
 
+#ifdef ENABLE_WSL_BACKEND
+  // WSL exposes a single WDDM adapter with no xGMI fabric, so the native sysfs
+  // topology calls below do not apply. Mirror amdsmi_topo_get_link_type here: a
+  // self-pair is INTERNAL, any peer is a single PCIe hop.
+  if (src_device->backend() || dst_device->backend()) {
+    if (src_device == dst_device) {
+      topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+      topology_info->fb_sharing = 1;
+    } else {
+      topology_info->link_type = AMDSMI_LINK_TYPE_PCIE;
+      topology_info->num_hops = 1;
+    }
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+#endif
+
   // A device has no link to itself; report a trivial internal, shared result.
   if (src_id == dst_id) {
     topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
