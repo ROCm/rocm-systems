@@ -500,6 +500,11 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
                              task->pipeline, regMode);
       if (id >= 0) task->devFuncId = id;
+      else {
+        WARN("Failed to get devFuncId for coll %d, op %d, type %d, algo %d, proto %d, accFlag %d, regMode %d", task->func,
+             task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag, regMode);
+        return ncclInvalidUsage;
+      }
     }
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
@@ -1479,11 +1484,11 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Add batch first.
     int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
     }
+    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     // Add proxy ops.
     for (int dir = 0; dir < nProxyOps; dir++) {
       // Partition steps across channels.
