@@ -708,6 +708,12 @@ rocprofsys_init_tooling_hidden(void)
             trace_controller->force_initial_pause();
         }
 
+        // The OpenMP runtime discovers tools on its first call, which for a host-only
+        // workload is after this returns and before any of them reaches rocprofiler-sdk
+        // through rocprofiler-register. Re-entry back into this function is expected and
+        // stops at the rocprofsys_init_tooling_done guard above.
+        if(get_use_ompt()) rocprofiler_sdk::setup();
+
         state::process::set(
             state::process::Active);  // set to active as very last operation
     } };
