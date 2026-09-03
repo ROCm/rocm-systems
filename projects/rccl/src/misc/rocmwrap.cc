@@ -136,13 +136,15 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
   }
 
   {
+    // Kernel < 6.8 still runs cuMem; only expected performance is worse. Do not
+    // clear `supported` here -- HIP/VMM/probe gates below remain the real checks.
+    // Advisory only when NCCL_CUMEM_ENABLE is auto (-2) or force (>0), not when
+    // the user explicitly disabled cuMem.
     const int kernelVersionCode = ncclGetKernelVersionCode();
-    if (!NCCL_CUMEM_KERNEL_GATE_FOR(kernelVersionCode, ncclParamCuMemEnable())) {
-      WARN("cuMem support requires Linux kernel >= 6.8");
-      supported = 0;
-    } else if (kernelVersionCode < NCCL_CUMEM_MIN_KERNEL_VERSION) {
-      INFO(NCCL_INIT, "NCCL_CUMEM_ENABLE=%d: enabling cuMem on Linux kernel < 6.8 (auto-detect would disable it)",
-           (int)ncclParamCuMemEnable());
+    if (NCCL_CUMEM_KERNEL_PERF_ADVISORY(kernelVersionCode, ncclParamCuMemEnable())) {
+      INFO(NCCL_INIT,
+           "cuMem on Linux kernel < 6.8 is functional but may not be performant; "
+           "kernel >= 6.8 is recommended");
     }
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);

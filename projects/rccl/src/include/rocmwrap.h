@@ -70,18 +70,17 @@
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
-// Linux kernel floor for cuMem auto-detect. Encoding matches uname major/minor
-// packing used by ncclGetKernelVersionCode() in rocmwrap.cc.
+// Linux kernel version packing used by ncclGetKernelVersionCode() in rocmwrap.cc.
+// cuMem/VMM works below 6.8; >= 6.8 is the recommended floor for expected
+// performance (not a functional requirement).
 #define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
 #define NCCL_CUMEM_MIN_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
-
-// Kernel gate used by ncclCuMemCapabilityCheck. Auto-detect (param <= 0, including
-// the default NCCL_CUMEM_ENABLE=-2) requires Linux >= 6.8. An explicit
-// NCCL_CUMEM_ENABLE>0 overrides the floor so validation hosts on older kernels
-// can still force the VMM path. Both inputs are parameters so unit tests can
-// cover every combination without depending on the host kernel.
-#define NCCL_CUMEM_KERNEL_GATE_FOR(kernelVersionCode, cumemEnableParam) \
-  ((kernelVersionCode) >= NCCL_CUMEM_MIN_KERNEL_VERSION || (cumemEnableParam) > 0)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
+  ((kernelVersionCode) >= NCCL_CUMEM_MIN_KERNEL_VERSION)
+// Emit the <6.8 performance advisory only when cuMem is (or will be) on:
+// NCCL_CUMEM_ENABLE>0 (force) or -2 (auto). Explicit 0 skips it.
+#define NCCL_CUMEM_KERNEL_PERF_ADVISORY(kernelVersionCode, cumemEnableParam) \
+  ((cumemEnableParam) != 0 && !NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode))
 
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
