@@ -209,6 +209,34 @@ def test_rdna35_finalize_soc_fields(
 
 
 @pytest.mark.misc
+@pytest.mark.parametrize(
+    "memory_partition, expected_channels",
+    [
+        ("NPS1", "128"),
+        ("nps2", "64"),
+        ("NPS4", "32"),
+        ("nps8", "16"),
+    ],
+    ids=["nps1", "nps2", "nps4", "nps8"],
+)
+def test_cdna_hbm_channels_nps_divisors(memory_partition, expected_channels):
+    """NPS memory partitions divide HBM channel count by the NPS denominator.
+
+    Uses whole-chip (SPX) XCD count, independent of the active compute partition.
+    """
+    spec = MachineSpecsCDNA(
+        gpu_arch="gfx942",
+        gpu_model="mi300x_a1",
+        l2_banks="16",
+        total_l2_chan="64",
+        memory_partition=memory_partition,
+        compute_partition="CPX",
+    )
+    with patch.object(specs.mi_gpu_specs, "get_num_xcds", return_value=8):
+        assert spec._get_hbm_channels() == expected_channels
+
+
+@pytest.mark.misc
 def test_reconstruct_specs_from_sysinfo_round_trip():
     """generate_machine_specs reconstructs the arch-specific subclass from a
     saved sysinfo dict.
