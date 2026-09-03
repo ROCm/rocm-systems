@@ -1043,6 +1043,51 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                     action(None, argparse.Namespace(), str(existing))
         self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
 
+    # ---- warning prompts: declining or closed stdin -> USER_ABORTED ----
+    def test_warning_prompts_declined_exit_user_aborted(self):
+        """The out-of-spec and memory-partition warnings exit USER_ABORTED
+        whether the user types no or stdin is closed. Before EOF was handled,
+        piping into one of these commands died on an uncaught EOFError and a
+        bare exit 1.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import builtins
+        import contextlib
+        import io
+        from unittest import mock
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        def _eof(*args):
+            raise EOFError
+
+        helpers = AMDSMIHelpers()
+        prompts = (
+            helpers.confirm_out_of_spec_warning,
+            helpers.confirm_changing_memory_partition_gpu_reload_warning,
+        )
+
+        for prompt in prompts:
+            for stdin_state, responder in (("declined", lambda *a: "n"), ("closed", _eof)):
+                with self.subTest(prompt=prompt.__name__, stdin=stdin_state):
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(builtins, "input", responder))
+                        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                        with self.assertRaises(SystemExit) as ctx:
+                            prompt()
+                    self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+        # auto_respond answers on the user's behalf, so stdin must stay untouched.
+        for prompt in prompts:
+            with self.subTest(prompt=prompt.__name__, stdin="auto_respond"):
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(builtins, "input", _eof))
+                    stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    prompt(auto_respond="y")
+
+    # ---- direct-call guards: no target -> REQUIRED_COMMAND ----
     def test_set_cpu_without_target_raises_required_command(self):
         """set_cpu with no CPU target raises AmdSmiRequiredCommandException
         (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call
