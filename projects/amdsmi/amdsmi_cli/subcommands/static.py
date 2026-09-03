@@ -144,8 +144,6 @@ class StaticCommands:
         multiple_devices=False,
         gpu=None,
         asic=None,
-        cuid=None,
-        cuid_primary=None,
         bus=None,
         vbios=None,
         limit=None,
@@ -165,6 +163,8 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        cuid=None,
+        cuid_primary=None,
     ):
         """Get Static information for target gpu
 
@@ -175,9 +175,6 @@ class StaticCommands:
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
             asic (bool, optional): Value override for args.asic. Defaults to None.
-            cuid (bool, optional): Value override for args.cuid. Defaults to None.
-            cuid_primary (bool, optional): Value override for args.cuid_primary.
-                Defaults to None.
             bus (bool, optional): Value override for args.bus. Defaults to None.
             vbios (bool, optional): Value override for args.vbios. Defaults to None.
             limit (bool, optional): Value override for args.limit. Defaults to None.
@@ -194,6 +191,9 @@ class StaticCommands:
             soc_pstate (bool, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
