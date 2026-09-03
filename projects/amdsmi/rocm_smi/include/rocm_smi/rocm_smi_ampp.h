@@ -38,22 +38,18 @@
 
 namespace amd::smi {
 
-// Highest profile slot index the current AMPP sysfs layout can ever expose
-// (today: 8 total slots, indices 0-7; see the driver spec's Design
-// Consideration #1). Used purely as a defensive sanity bound when parsing
-// config/writable_slot_mask -- see kAmppWritableSlotsMaxKnownIndex usage in
-// parse_ampp_writable_slot_mask() below.
-constexpr uint32_t kAmppWritableSlotsMaxKnownIndex = 7;
-
 // Parses the trimmed content of app_modes/config/writable_slot_mask (e.g.
 // "0xe0") into the set of writable slot indices its set bits designate
 // (bit N set => slot N writable). Pure string parsing -- no filesystem I/O
 // -- so it can be unit-tested directly with arbitrary (including
 // malformed/adversarial) input.
 //
-// config/writable_slot_mask is driver-owned but not trusted blindly: every
-// parse failure or out-of-range bit returns RSMI_STATUS_UNEXPECTED_DATA
-// instead of silently truncating or masking, matching the convention used
+// The slot count is discovered at runtime, so no slot-count ceiling is
+// imposed here: any bit the driver sets within the 64-bit mask is honored,
+// letting a future driver publish more than today's 8 slots without an
+// amdsmi rebuild. config/writable_slot_mask is still not trusted blindly --
+// syntactically malformed content returns RSMI_STATUS_UNEXPECTED_DATA
+// instead of being silently truncated, matching the convention used
 // elsewhere in this codebase for malformed sysfs numeric content.
 //
 // @param[in]  trimmed_line Whitespace-trimmed content of
@@ -64,8 +60,7 @@ constexpr uint32_t kAmppWritableSlotsMaxKnownIndex = 7;
 //             slot indices whose bit is set in the mask on success.
 // @retval RSMI_STATUS_SUCCESS on a well-formed (possibly empty) mask.
 // @retval RSMI_STATUS_UNEXPECTED_DATA if the content does not parse as a
-//         "0x"-prefixed hex value, overflows an unsigned long, or has any
-//         bit set above the valid known slot range.
+//         "0x"-prefixed hex value or overflows a 64-bit unsigned value.
 rsmi_status_t parse_ampp_writable_slot_mask(const std::string& trimmed_line,
                                             std::vector<uint32_t>* out_slots);
 

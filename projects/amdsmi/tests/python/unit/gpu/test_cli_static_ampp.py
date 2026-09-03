@@ -332,6 +332,20 @@ class TestCliStaticAmpp(unittest.TestCase):
         for profile in static_dict["ampp"]["profiles"]:
             self.assertEqual(profile["fields"], "N/A")
 
+    def test_per_profile_fields_fetch_failure_other_error_yields_na_human(self):
+        # The "N/A" sentinel is a str, not a list -- the human-readable
+        # branch must not iterate it character by character.
+        self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
+
+        def _raise_other(_name):
+            raise _FakeLibraryException(9999, "some other error")
+
+        self.holder["get_fields"] = _raise_other
+        static_dict = self._run_ampp("human")
+        ampp_text = static_dict["ampp"]
+        self.assertIn("ABI_VERSION: 1.0", ampp_text)
+        self.assertIn("FIELDS: N/A", ampp_text)
+
     def test_human_readable_output_zero_profiles_reports_na(self):
         self.holder["get_profiles"] = lambda: ("1.0", [])
         static_dict = self._run_ampp("human")

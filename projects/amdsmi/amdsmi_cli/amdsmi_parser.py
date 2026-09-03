@@ -366,6 +366,22 @@ class AMDSMIParser(argparse.ArgumentParser):
                 sys.argv[1], string_value, outputformat
             )
 
+    def _valid_ampp_profile_name(self, profile_name):
+        # Argument type validator. Same constraints as an AMPP field name:
+        # amdsmi_activate_ampp_profile() encodes the name to UTF-8, which
+        # raises for a lone surrogate (reachable through argv's
+        # surrogateescape) unless it is rejected here.
+        if AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+            return profile_name
+
+        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+            sys.argv[1],
+            ascii(profile_name),
+            self.helpers.get_output_format(),
+            hint="Profile name cannot be empty or exceed "
+            f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes.",
+        )
+
     def _is_command_supported(self, user_input, acceptable_values, command_name):
         if acceptable_values == "N/A":
             outputformat = self.helpers.get_output_format()
@@ -1332,6 +1348,15 @@ class AMDSMIParser(argparse.ArgumentParser):
 
                 profile_name = values[0]
                 field_tokens = values[1:]
+
+                if not AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1],
+                        ascii(profile_name),
+                        output_format,
+                        hint="Profile name cannot be empty or exceed "
+                        f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes.",
+                    )
 
                 if not field_tokens:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
@@ -2772,17 +2797,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
-                set_ampp_help = (
+                set_ampp_activate_help = (
                     "Activate an AMPP (amdsmi power profile) by name."
                     "\n\tUse `amd-smi static --ampp` to see available profiles."
                 )
                 set_value_exclusive_group.add_argument(
                     "-A",
-                    "--ampp",
+                    "--ampp-activate",
                     action="store",
-                    type=str,
+                    type=self._valid_ampp_profile_name,
                     required=False,
-                    help=set_ampp_help,
+                    help=set_ampp_activate_help,
                     metavar="PROFILE_NAME",
                 )
 

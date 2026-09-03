@@ -290,6 +290,34 @@ class TestAmppConfigureParserAction(unittest.TestCase):
         result = self._invoke(["profile_2", "PPT0_Limit=300"])
         self.assertIsNone(result.file_path)
 
+    def test_profile_name_with_lone_surrogate_raises(self):
+        # A lone UTF-16 surrogate reaches argv via surrogateescape and is not
+        # UTF-8-encodable, so amdsmi_configure_ampp_profile()'s name.encode()
+        # would raise an unhandled UnicodeEncodeError without this check.
+        with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
+            self._invoke(["\ud800", "PPT0_Limit=300"])
+
+    def test_profile_name_oversized_raises(self):
+        with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
+            self._invoke(["P" * 256, "PPT0_Limit=300"])
+
+    def test_activate_profile_name_validator_accepts_valid_name(self):
+        parser_self = _StubParserSelf()
+        validator = self.parser_module.AMDSMIParser._valid_ampp_profile_name
+        self.assertEqual(validator(parser_self, "profile_5"), "profile_5")
+
+    def test_activate_profile_name_validator_rejects_invalid_names(self):
+        parser_self = _StubParserSelf()
+        validator = self.parser_module.AMDSMIParser._valid_ampp_profile_name
+        saved_argv = sys.argv[:]
+        sys.argv = ["amd-smi", "set"]
+        try:
+            for bad_name in ("", "\ud800", "P" * 256):
+                with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
+                    validator(parser_self, bad_name)
+        finally:
+            sys.argv = saved_argv
+
 
 class _RecordingLogger:
     """Minimal ``self.logger`` stub capturing ``store_output`` payloads."""
@@ -390,7 +418,7 @@ class TestSetGpuAmppConfigureCallSite(unittest.TestCase):
             ptl_format=None,
             mem_carveout=None,
             compute_partition_mem_alloc_mode=None,
-            ampp=None,
+            ampp_activate=None,
             ampp_configure=ampp_configure,
         )
         cmd.set_gpu(args)
@@ -516,7 +544,7 @@ class TestSetGpuAmppConfigureFromFile(unittest.TestCase):
             ptl_format=None,
             mem_carveout=None,
             compute_partition_mem_alloc_mode=None,
-            ampp=None,
+            ampp_activate=None,
             ampp_configure=_AmppConfigureArgs(None, None, file_path),
         )
         cmd.set_gpu(args)
@@ -722,6 +750,46 @@ class TestSetGpuAmppConfigureFromFile(unittest.TestCase):
         logger = self._run_set_gpu(file_path)
         results = logger.last_output("ampp_configure")
         self.assertIn("Malformed 'fields' entry", results[0])
+
+    def test_profile_name_with_lone_surrogate_reports_malformed_name(self):
+        # A crafted JSON restore file can carry a lone UTF-16 surrogate;
+        # amdsmi_configure_ampp_profile()'s name.encode() would raise an
+        # unhandled UnicodeEncodeError mid-restore without this check.
+        set_calls = []
+        self.interface.amdsmi_configure_ampp_profile = lambda gpu, name, fields=None: (
+            set_calls.append((gpu, name, fields))
+        )
+        file_path = self._write_json(
+            {
+                "gpu_data": [
+                    {
+                        "gpu": 0,
+                        "ampp": {
+                            "profiles": [
+                                {
+                                    "name": "\ud800",
+                                    "is_writable": True,
+                                    "fields": [{"name": "PPT0_Limit", "value": 550}],
+                                },
+                                {
+                                    "name": "profile_6",
+                                    "is_writable": True,
+                                    "fields": [{"name": "MaxGfxclkFreq", "value": 1900}],
+                                },
+                            ]
+                        },
+                    }
+                ]
+            }
+        )
+
+        logger = self._run_set_gpu(file_path)
+        results = logger.last_output("ampp_configure")
+        self.assertIn("Malformed profile 'name'", results[0])
+        # The bad entry doesn't abort the restore of the remaining profiles.
+        self.assertIn("profile_6: Successfully configured", results[1])
+        self.assertEqual(len(set_calls), 1)
+        self.assertEqual(set_calls[0][1], "profile_6")
 
     def test_partial_failure_reports_per_profile_result(self):
         def _configure(gpu, name, fields=None):

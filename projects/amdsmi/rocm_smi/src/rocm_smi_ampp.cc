@@ -271,20 +271,15 @@ rsmi_status_t parse_ampp_writable_slot_mask(const std::string& trimmed_line,
 
   errno = 0;
   char* end_ptr = nullptr;
-  unsigned long mask = std::strtoul(trimmed_line.c_str(), &end_ptr, 16);  // NOLINT(runtime/int)
+  uint64_t mask = std::strtoull(trimmed_line.c_str(), &end_ptr, 16);
   if (end_ptr != trimmed_line.c_str() + trimmed_line.size() || errno == ERANGE) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
-  // Reject any bit above the real profile-slot space regardless of which
-  // subset the driver currently designates writable.
-  const unsigned long kMaxValidMask = (1UL << (kAmppWritableSlotsMaxKnownIndex + 1)) - 1;
-  if (mask > kMaxValidMask) {
-    return RSMI_STATUS_UNEXPECTED_DATA;
-  }
-
-  for (uint32_t bit = 0; bit <= kAmppWritableSlotsMaxKnownIndex; ++bit) {
-    if (mask & (1UL << bit)) {
+  // No slot-count ceiling: the number of published slots is a runtime
+  // property of the driver, so every set bit in the mask is honored.
+  for (uint32_t bit = 0; bit < 64; ++bit) {
+    if (mask & (UINT64_C(1) << bit)) {
       out_slots->push_back(bit);
     }
   }

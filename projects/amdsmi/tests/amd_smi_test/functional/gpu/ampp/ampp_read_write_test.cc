@@ -139,9 +139,6 @@ void TestAmppReadWrite::Run(void) {
     // instead of overflowing it, and num_profiles must still be updated to
     // the true required count so the caller can retry correctly.
     if (num_profiles > 0) {
-      // Fixed 1-element buffer (not sized to num_profiles - 1): an empty
-      // vector's .data() returns nullptr, which the API treats as a sizing
-      // call rather than an undersized buffer, so this must stay non-null.
       amdsmi_ampp_profile_t undersized[1];
       uint32_t requested = num_profiles - 1;
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles",
@@ -151,6 +148,19 @@ void TestAmppReadWrite::Run(void) {
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(requested, num_profiles);
+
+      // A non-null buffer declaring zero capacity is an undersized buffer,
+      // not a sizing call -- it must not be mistaken for the latter and
+      // silently "succeed" while copying into a zero-capacity destination.
+      uint32_t zero_capacity = 0;
+      DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles",
+                         "gpu=" + std::to_string(dv_ind) + " (zero-capacity buffer)",
+                         VERB(STANDARD));
+      ret = amdsmi_get_ampp_profiles(handle, version, undersized, &zero_capacity);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
+                            AMDSMI_STATUS_OUT_OF_RESOURCES);
+      ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
+      ASSERT_EQ(zero_capacity, num_profiles);
     }
 
     std::vector<amdsmi_ampp_profile_t> profiles(num_profiles);
@@ -213,8 +223,7 @@ void TestAmppReadWrite::Run(void) {
       CHK_ERR_ASRT(ret)
       ASSERT_GT(num_fields, 0u);
 
-      // Same under-sized-buffer contract as amdsmi_get_ampp_profiles above;
-      // fixed 1-element buffer for the same nullptr-.data() reason.
+      // Same under-sized-buffer contract as amdsmi_get_ampp_profiles above.
       amdsmi_ampp_field_t undersized_fields[1];
       uint32_t requested_fields = num_fields - 1;
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_fields",
@@ -227,6 +236,18 @@ void TestAmppReadWrite::Run(void) {
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(requested_fields, num_fields);
+
+      uint32_t zero_capacity_fields = 0;
+      DISPLAY_AMDSMI_API("amdsmi_get_ampp_fields",
+                         "gpu=" + std::to_string(dv_ind) + ", profile=" + configured_profile_name +
+                             " (zero-capacity buffer)",
+                         VERB(STANDARD));
+      ret = amdsmi_get_ampp_fields(handle, configured_profile_name.c_str(), &zero_capacity_fields,
+                                   undersized_fields);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
+                            AMDSMI_STATUS_OUT_OF_RESOURCES);
+      ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
+      ASSERT_EQ(zero_capacity_fields, num_fields);
 
       std::vector<amdsmi_ampp_field_t> fields(num_fields);
       DISPLAY_AMDSMI_API(

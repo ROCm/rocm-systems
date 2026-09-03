@@ -943,6 +943,12 @@ class SetValueCommands:
         for profile_entry in writable_profiles:
             profile_name = profile_entry["name"]
             fields = profile_entry["fields"]
+            # amdsmi_activate/configure_ampp_profile() encodes the name to
+            # UTF-8, which raises for a lone surrogate; reject it here so one
+            # bad entry can't abort the restore part-way through.
+            if not AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+                results.append(f"{ascii(profile_name)}: Malformed profile 'name', skipping")
+                continue
             if not all(self._is_valid_ampp_field(f) for f in fields):
                 results.append(f"{profile_name}: Malformed 'fields' entry, skipping")
                 continue
@@ -982,7 +988,7 @@ class SetValueCommands:
         ptl_format=None,
         mem_carveout=None,
         compute_partition_mem_alloc_mode=None,
-        ampp=None,
+        ampp_activate=None,
         ampp_configure=None,
     ):
         """Issue reset commands to target gpu(s)
@@ -1046,8 +1052,8 @@ class SetValueCommands:
             args.mem_carveout = mem_carveout
         if compute_partition_mem_alloc_mode is not None:
             args.compute_partition_mem_alloc_mode = compute_partition_mem_alloc_mode
-        if ampp is not None:
-            args.ampp = ampp
+        if ampp_activate is not None:
+            args.ampp_activate = ampp_activate
         if ampp_configure is not None:
             args.ampp_configure = ampp_configure
 
@@ -1088,7 +1094,7 @@ class SetValueCommands:
                     getattr(args, "process_isolation", None) is not None,
                     getattr(args, "mem_carveout", None) is not None,
                     getattr(args, "compute_partition_mem_alloc_mode", None) is not None,
-                    getattr(args, "ampp", None) is not None,
+                    getattr(args, "ampp_activate", None) is not None,
                     getattr(args, "ampp_configure", None) is not None,
                 ]
             ):
@@ -2030,11 +2036,13 @@ class SetValueCommands:
             self.logger.clear_multiple_devices_output()
             return
 
-        if getattr(args, "ampp", None):
+        if getattr(args, "ampp_activate", None):
             try:
-                amdsmi_interface.amdsmi_activate_ampp_profile(args.gpu, args.ampp)
+                amdsmi_interface.amdsmi_activate_ampp_profile(args.gpu, args.ampp_activate)
                 self.logger.store_output(
-                    args.gpu, "ampp", f"Successfully set AMPP profile to {args.ampp}"
+                    args.gpu,
+                    "ampp_activate",
+                    f"Successfully activated AMPP profile {args.ampp_activate}",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -2054,10 +2062,10 @@ class SetValueCommands:
                     )
 
                 error_msg = (
-                    f"[{e.get_error_info(detailed=False)}] Unable to set AMPP profile to "
-                    f"{args.ampp}"
+                    f"[{e.get_error_info(detailed=False)}] Unable to activate AMPP profile "
+                    f"{args.ampp_activate}"
                 )
-                self.logger.store_output(args.gpu, "ampp", error_msg)
+                self.logger.store_output(args.gpu, "ampp_activate", error_msg)
                 print(f"\nValid AMPP Profiles: [{available_str}]\n")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -2185,7 +2193,7 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
-        ampp=None,
+        ampp_activate=None,
         ampp_configure=None,
     ):
         """Issue reset commands to target gpu(s)
@@ -2201,7 +2209,7 @@ class SetValueCommands:
             compute_partition (amdsmi_interface.AmdSmiComputePartitionType, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (amdsmi_interface.AmdSmiMemoryPartitionType, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
-            ampp (str, optional): Value override for args.ampp (profile name to ACTIVATE). Defaults to None.
+            ampp_activate (str, optional): Value override for args.ampp_activate (profile name to ACTIVATE). Defaults to None.
             ampp_configure (namedtuple, optional): Value override for args.ampp_configure
                 (profile_name, fields) to CONFIGURE. Defaults to None.
 
@@ -2298,7 +2306,7 @@ class SetValueCommands:
             "ptl_format",
             "mem_carveout",
             "compute_partition_mem_alloc_mode",
-            "ampp",
+            "ampp_activate",
             "ampp_configure",
         ]
         for attr in gpu_attributes:
@@ -2369,7 +2377,7 @@ class SetValueCommands:
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
                         args.compute_partition_mem_alloc_mode is not None,
-                        args.ampp is not None,
+                        args.ampp_activate is not None,
                         args.ampp_configure is not None,
                     ]
                 )
@@ -2518,7 +2526,7 @@ class SetValueCommands:
                     ptl_status,
                     ptl_format,
                     mem_carveout,
-                    ampp=ampp,
+                    ampp_activate=ampp_activate,
                     ampp_configure=ampp_configure,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
@@ -2583,6 +2591,6 @@ class SetValueCommands:
                 ptl_status,
                 ptl_format,
                 mem_carveout,
-                ampp=ampp,
+                ampp_activate=ampp_activate,
                 ampp_configure=ampp_configure,
             )

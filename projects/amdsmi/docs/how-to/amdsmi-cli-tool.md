@@ -673,7 +673,7 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
-  -A, --ampp PROFILE_NAME                     Activate an AMPP (amdsmi power profile) by name.
+  -A, --ampp-activate PROFILE_NAME            Activate an AMPP (amdsmi power profile) by name.
                                                 Use `amd-smi static --ampp` to see available profiles.
   --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]
                                                Configure an AMPP (amdsmi power profile) custom slot by staging one or
@@ -1650,7 +1650,7 @@ shared GPU memory on those platforms instead.
 
 ## AMPP: power profile activation and configuration
 
-`amd-smi static --ampp` / `amd-smi set --ampp PROFILE_NAME` /
+`amd-smi static --ampp` / `amd-smi set --ampp-activate PROFILE_NAME` /
 `amd-smi set --ampp-configure PROFILE_NAME KEY=VALUE ...` let users inspect,
 activate, and (for writable custom slots) configure AMPP (amdsmi power
 profile) recipes -- predefined power/performance settings exposed by the
@@ -1668,7 +1668,7 @@ lists each field's name, unit, current value, and (when published by the
 driver) guidance-only min/max bounds.
 
 ```shell-session
-~$ sudo amd-smi set --ampp profile_2
+~$ sudo amd-smi set --ampp-activate profile_2
 ```
 
 ```shell-session
@@ -1701,7 +1701,7 @@ the remaining profiles.
   `/sys/class/drm/<device>/device/`; on ASICs/VBIOS combinations that do not
   publish it, `amd-smi static --ampp` reports
   `N/A (AMPP is not supported on this ASIC/VBIOS)`.
-- `amd-smi set --ampp` / `--ampp-configure` require root/`CAP_SYS_ADMIN`.
+- `amd-smi set --ampp-activate` / `--ampp-configure` require root/`CAP_SYS_ADMIN`.
 - `--ampp-configure` may only target a slot listed in
   `app_modes/config/writable_slot_mask`; use `amd-smi static --ampp` first to
   find writable profiles and their field names.

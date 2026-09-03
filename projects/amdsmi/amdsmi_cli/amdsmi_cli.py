@@ -192,7 +192,7 @@ if __name__ == "__main__":
         "--core",
         "--profile",
         "--cper-file",
-        "--ampp",
+        "--ampp-activate",
     ]
     case_sensitive_prefixes = [
         "--folder=",
@@ -202,7 +202,7 @@ if __name__ == "__main__":
         "--core=",
         "--profile=",
         "--cper-file=",
-        "--ampp=",
+        "--ampp-activate=",
     ]
     # Arguments whose *entire* remaining value list (nargs="+") must keep case
     # -- e.g. --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...], where

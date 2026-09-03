@@ -1715,9 +1715,14 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
   }
 #endif
 
+  // Only a null caller buffer means "sizing call". A non-null buffer with
+  // *num_profiles == 0 is an undersized buffer, so the staging vector must
+  // still hand a non-null pointer down -- resize(0) yields data() == nullptr,
+  // which would otherwise be indistinguishable from a sizing call and would
+  // bypass the capacity check below.
   std::vector<rsmi_ampp_profile_t> rsmi_profiles;
   if (profiles != nullptr) {
-    rsmi_profiles.resize(*num_profiles);
+    rsmi_profiles.resize(std::max<size_t>(1, *num_profiles));
   }
 
   amdsmi_status_t amdsmi_status =
@@ -1752,9 +1757,10 @@ amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
   }
 #endif
 
+  // Same non-null-but-zero-capacity reasoning as amdsmi_get_ampp_profiles.
   std::vector<rsmi_ampp_field_t> rsmi_fields;
   if (fields != nullptr) {
-    rsmi_fields.resize(*num_fields);
+    rsmi_fields.resize(std::max<size_t>(1, *num_fields));
   }
 
   amdsmi_status_t amdsmi_status =

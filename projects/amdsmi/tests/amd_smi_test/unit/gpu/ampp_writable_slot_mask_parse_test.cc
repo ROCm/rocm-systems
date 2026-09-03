@@ -91,11 +91,18 @@ TEST(GpuUnit, AmppWritableSlotMaskParseTrailingGarbageIsRejected) {
   EXPECT_EQ(parse_ampp_writable_slot_mask("0xe0garbage", &slots), RSMI_STATUS_UNEXPECTED_DATA);
 }
 
-// The core repro: a mask with bits set above the highest known valid slot
-// index (7) must be rejected, not silently truncated or accepted.
-TEST(GpuUnit, AmppWritableSlotMaskParseBitAboveKnownSlotRangeIsRejected) {
+// The slot count is a runtime driver property, so a mask describing more
+// than today's 8 slots must parse, not hard-fail on a compile-time ceiling.
+TEST(GpuUnit, AmppWritableSlotMaskParseBitsAboveEightSlotsAreAccepted) {
   std::vector<uint32_t> slots;
-  EXPECT_EQ(parse_ampp_writable_slot_mask("0x100", &slots), RSMI_STATUS_UNEXPECTED_DATA);
+  ASSERT_EQ(parse_ampp_writable_slot_mask("0xe000", &slots), RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slots, (std::vector<uint32_t>{13, 14, 15}));
+}
+
+TEST(GpuUnit, AmppWritableSlotMaskParseHighestBitAccepted) {
+  std::vector<uint32_t> slots;
+  ASSERT_EQ(parse_ampp_writable_slot_mask("0x8000000000000000", &slots), RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slots, (std::vector<uint32_t>{63}));
 }
 
 TEST(GpuUnit, AmppWritableSlotMaskParseOverflowedValueIsRejected) {

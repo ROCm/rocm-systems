@@ -9682,7 +9682,10 @@ typedef struct {
   int64_t min_value;                    //!< Guidance-only lower bound from limits/min/<field>
   int64_t max_value;                    //!< Guidance-only upper bound from limits/max/<field>
   bool has_limits;                      //!< True if min_value/max_value were found in limits/
-  uint32_t reserved[4];                 //!< Reserved for future expansion
+  //! Reserved for future expansion. Callers MUST zero-initialize this (e.g.
+  //! `= {}` or memset) before passing the struct to
+  //! ::amdsmi_configure_ampp_profile -- it is forwarded to the implementation.
+  uint32_t reserved[4];
 } amdsmi_ampp_field_t;
 
 /**

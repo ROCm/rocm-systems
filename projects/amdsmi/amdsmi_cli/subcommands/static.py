@@ -1289,15 +1289,20 @@ class StaticCommands:
                             f"({state_str})"
                         )
                         field_lines = []
-                        for field in profile_entry["fields"]:
-                            field_line = (
-                                f"        {field['name']}: {field['value']} {field['unit']}"
-                            )
-                            if field["has_limits"]:
-                                field_line += (
-                                    f" (min={field['min_value']}, max={field['max_value']})"
+                        if not isinstance(profile_entry["fields"], list):
+                            # Per-profile field fetch failed; "fields" holds the
+                            # "N/A" sentinel rather than a list.
+                            field_lines.append("        FIELDS: N/A")
+                        else:
+                            for field in profile_entry["fields"]:
+                                field_line = (
+                                    f"        {field['name']}: {field['value']} {field['unit']}"
                                 )
-                            field_lines.append(field_line)
+                                if field["has_limits"]:
+                                    field_line += (
+                                        f" (min={field['min_value']}, max={field['max_value']})"
+                                    )
+                                field_lines.append(field_line)
                         formatted_profiles.append(
                             "\n".join([header] + field_lines) if field_lines else header
                         )
