@@ -39,6 +39,7 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
+#include <gda/gda_enums.hpp>
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/debug_gda.hpp>
