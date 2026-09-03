@@ -772,6 +772,55 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Bool()),
     CtxOnlyName);
 
+// The RMA IB proxy is documented as not supporting NCCL_IB_MERGE_NICS, and it
+// reads mrs[0] and posts on qps[0], so a fused vNIC costs it the second NIC's
+// bandwidth. "Not supported" has to mean exactly that and no more: the bytes
+// still have to arrive, because the capability derivation in init.cc offers the
+// proxy to GIN on fused NICs. This is the same put as IPutBasic, over a vNIC
+// built from two physical NICs rather than over a single one.
+TEST_F(RmaMPIFusedNicTest, IPutOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0xE7);
+    }
+
+    void *sendMh = nullptr, *recvMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh));
+
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, /*context=*/0,
+                             /*srcOff=*/0, sendMh, kSize,
+                             /*dstOff=*/0, recvMh,
+                             /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0xE7));
+    }
+}
+
 } // namespace RCCLRmaTests
 
 #else // !RCCL_HAS_RMA_IB_PROXY
