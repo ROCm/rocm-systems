@@ -219,8 +219,9 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
         // required.
       memset(sendReqs[r]->events, 0, sizeof(sendReqs[r]->events));
 
-        // Populate events
-      int nqps = IbCastCommBaseGetNqpsPerRequest(sendReqs[r]->base);
+        // Resiliency forces the scheduler off (see IbCastInit), so the original
+        // send used the default QP selection; recompute the same QP set.
+      int nqps = IbCastCommBaseGetDefaultNqpsPerRequest(sendReqs[r]->base);
       int qpIndex = -1;
       ncclIbQp* qp = NULL;
       for (int i = 0; i < nqps; i++) {
@@ -714,12 +715,12 @@ ncclResult_t IbCastResiliencyDataCqSizeGet(struct ncclIbResiliency* resCtx, uint
   struct ncclIbNetCommBase* baseComm = resCtx->baseComm;
   if (baseComm->isSend) {
     // Every send request generates one completion on every QP it uses.
-    *cqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetNqpsPerRequest(baseComm);
+    *cqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   } else {
     // In the worst case, a receive is not a multi-receive request, so every
     // request generates two completions (one for the CTS messages and one for
     // the receive request).
-    *cqSize = NET_IB_MAX_REQUESTS * 2 * IbCastCommBaseGetNqpsPerRequest(baseComm);
+    *cqSize = NET_IB_MAX_REQUESTS * 2 * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   }
   // In the worst case, all devices failed except for one device, so the single
   // device remaining must bear all be able to accommodate for all the
@@ -741,7 +742,7 @@ ncclResult_t IbCastResiliencyDataRqSizeGet(struct ncclIbResiliency* resCtx, uint
   // When resiliency is enabled, the RQ size should accommodate receive requests
   // assuming all other devices have failed so instead of transferring every
   // request on all QPs, a single QP is used and this QP should bear the load.
-  *rqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetNqpsPerRequest(baseComm);
+  *rqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   assert(*rqSize > 0);
   return ncclSuccess;
 }
