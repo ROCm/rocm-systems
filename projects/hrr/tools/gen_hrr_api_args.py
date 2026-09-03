@@ -672,6 +672,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     #   Device initialization is handled by the replay harness / lazy runtime
     #   init, so replaying it is unnecessary for correctness.
     "hipInitDevice",
+    # hipMemGetDefaultMemPool takes a hipMemLocation* whose pointed-to value
+    # cannot be safely reconstructed from the recorded payload on all playback
+    # SDKs. A null location can return hipErrorInvalidValue and abort replay;
+    # leave this query as a harmless no-op instead.
+    "hipMemGetDefaultMemPool",
 }
 
 # ---------------------------------------------------------------------------

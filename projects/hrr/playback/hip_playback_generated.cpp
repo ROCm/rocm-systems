@@ -4747,11 +4747,14 @@ static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemGetDefaultMemPool*>(payload);
-  hipMemPool_t _out_memPool = nullptr;
-  hipMemLocation* _s_location{};
-  hipError_t _r = (hipError_t)hipMemGetDefaultMemPool(&_out_memPool, _s_location, (hipMemAllocationType)a->type);
-  return _r;
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetDefaultMemPool — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
 }
 
 
