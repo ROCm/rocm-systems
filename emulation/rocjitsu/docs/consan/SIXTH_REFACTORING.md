@@ -934,3 +934,73 @@ Macro-slice 5 total of **84,536 implementation lines**, so the campaign remains
 at **3,479 net implementation lines removed** from baseline. This negative
 result rejects dense synchronization routing as a current macro-replacement
 candidate and returns selection to the whole production tree.
+
+### 10.7 Macro-slice 7: one fault resolution and mutation transaction
+
+The next whole-tree comparison again rejected large-file size as sufficient
+evidence. Automatic MOI placement still consists predominantly of genuinely
+different lifetime, capacity, spill, and owner-partition fallbacks. The
+remaining SuperCollider LDS and FLAT bodies share low-level action and route
+helpers, but their large regions are still different protocols: LDS owns
+dense generated-island and multi-owner policy, while FLAT owns direct/local/
+appended placement and runtime address-space gating. Synchronization analysis
+constructs several related graphs, but barrier lifecycle, atomic ordering,
+ordinary release/acquire, execution ownership, and move-destination proofs do
+not currently expose 500 lines that one smaller graph operation would delete.
+
+Fault injection has a stronger duplicate-authority boundary. Its roughly 470
+implementation-line dry-run planner selects and semantically qualifies exact
+barrier, atomic, LDS, and ordinary-memory objects, then serializes those
+decisions through one wide optional-field `ConSanFaultMutationPlan`. A separate
+roughly 1,087-line family of mutation functions immediately resolves the same
+identities back into the same immutable inventory, repeats much of the
+qualification, and emits bytes. A 124-line kind dispatcher recomposes related
+atomic and ordinary plans, while a roughly 137-line `well_formed()` switch
+proves that the wide optional payload happens to describe one of the admitted
+shapes. The stale-plan boundary is locally robust and tested, but it protects
+an internal handoff between two adjacent passes over the same pristine image;
+it is not an independent final validation proof.
+
+The deletion thesis is:
+
+- replace planning followed by identity re-resolution with one private fault
+  transaction that resolves each requested semantic target exactly once;
+- let the same resolved transaction either publish only the existing dry-run
+  diagnostic presentation or continue directly into mutation against the
+  pristine image;
+- keep kind-specific selection and encoding explicit, but pass resolved sites,
+  sequences, lifecycle groups, destinations, and ordering boundaries directly
+  from qualification to emission instead of flattening and reconstructing
+  them through optional strings;
+- preserve atomic and ordinary multi-effect composition as one transaction on
+  one selected semantic target, rather than rediscovering that equality in a
+  second kind scan;
+- retain the public diagnostic facts currently projected from fault plans,
+  while deleting private source identities, reconstruction-only fields, the
+  wide-shape validator, stale-plan application API, and displaced second-pass
+  checks; and
+- leave final mutated-image validation fully independent: it continues to
+  reconstruct fault semantics from pristine and replacement executable bytes,
+  patch geometry, inventory, and mutation proof rather than trusting the
+  resolver's pointers or conclusions.
+
+The current planner, application family, kind dispatcher, and shape validator
+total about 1,818 production implementation lines before composition staging.
+The conservative target is at least 750 gross lines removed and no more than
+200 lines of transaction control and retained diagnostic projection, for at
+least 550 net deleted lines. The attempt is abandoned and reverted if explicit
+dry runs cease to preserve their selection diagnostics and non-mutating
+behavior, if live mutation retains a full replacement image in a public or
+long-lived dry-run product, if kind-specific emission becomes a variant DSL or
+callback framework, if final validation starts trusting planning state, or if
+complete convergence cannot clear the 500-line net abort floor.
+
+Focused validation covers plan diagnostics and exact selected identities,
+malformed and foreign request rejection at the public request boundary,
+transactional multi-effect atomic and ordinary mutations, every barrier drop/
+move/retarget/participant form, LDS address mutation, fault-plus-perturbation
+composition, exact-byte results, rollback, cardinality, and adversarial final
+validation across all five emulated targets. Existing tests that manufacture
+or corrupt the deleted internal plan bridge will be replaced by tests of the
+new resolver boundary and unchanged externally visible behavior, not silently
+dropped. The cutover gate remains the complete nonphysical RocJitsu matrix.
