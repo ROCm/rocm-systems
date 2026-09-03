@@ -17,8 +17,8 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_versioned_publication.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
+#include "rocjitsu/code/patch/consan/consan_moi_versioned_publication.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
@@ -787,8 +787,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   MoiPublicationExec valid_exec_masks(words, exec_base, arch);
   MoiPublicationExec low_match_exec_masks(words, static_cast<uint16_t>(exec_base + 2u), arch);
   MoiPublicationExec high_match_exec_masks(words, static_cast<uint16_t>(exec_base + 4u), arch);
-  MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u),
-                                                arch);
+  MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u), arch);
   MoiPublicationExec other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u), arch);
   InstructionSequence sequence(words);
   // The low/high address-match journals are dead once owner qualification
@@ -1588,67 +1587,47 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   // complete, while the finite bound still terminates on a permanently stuck
   // odd slot.
   failure.stage = "release-slot reservation";
-  constexpr uint16_t kScalarLiteralSource = 255u;
-  words.push_back(build_s_mov_b32(retry_count_sgpr, kScalarLiteralSource, arch));
-  words.push_back(kConSanMoiInlineMetadataPublicationRetryLimit);
-  const InstructionSequence::Label retry_begin = sequence.mark_label();
-  if (!append_atomic_load_u32(words, slot_address, prior_version, arch)) {
-    errors.emplace_back("ConSan MOI inline release could not begin its version retry");
+  const auto append_release_candidate = [&]() {
+    if (!append_atomic_load_u32(words, slot_address, prior_version, arch)) {
+      errors.emplace_back("ConSan MOI inline release could not begin its version retry");
+      return false;
+    }
+    if (!require_literal(prior_version, 0, /*equal=*/true) || !save_exec(empty_exec) ||
+        !restore_exec(eligible_exec) || !require_literal(prior_version, 0, /*equal=*/false) ||
+        !sequence.emit(
+            instrumentation::build_v_and_b32_literal(temporary, 1u, prior_version, arch)) ||
+        !require_literal(temporary, 0, /*equal=*/true) ||
+        !sequence.emit(instrumentation::build_v_mov_b32_literal(
+            temporary, std::numeric_limits<uint32_t>::max() - 1u, arch))) {
+      return false;
+    }
+    // Any stable even direct-mapped record is replaceable. Readers, rather
+    // than publishers, own identity qualification.
+    return exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(temporary),
+                                                                     prior_version, arch)) &&
+           append_atomic_load_u32(words, slot_address, temporary, arch) &&
+           exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
+               vector_source_vgpr(prior_version), temporary, arch)) &&
+           save_exec(ready_exec) &&
+           sequence.emit(
+               instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec, arch));
+  };
+  if (!append_moi_bounded_version_claim(
+          words, sequence, exec_masks,
+          {.slot_address_vgpr = slot_address,
+           .eligible_exec_sgpr = eligible_exec,
+           .claimed_exec_sgpr = claimed_exec,
+           .retry_exec_sgpr = committed_exec,
+           .retry_count_sgpr = retry_count_sgpr,
+           .base_version_vgpr = prior_version,
+           .desired_vgpr = cas_new,
+           .expected_vgpr = cas_expected,
+           .version_offset = offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+           .retry_limit = kConSanMoiInlineMetadataPublicationRetryLimit,
+           .sleep_delay = kConSanMoiInlineMetadataPublicationSleepDelay},
+          append_release_candidate, arch)) {
     return false;
   }
-
-  if (!require_literal(prior_version, 0, /*equal=*/true) || !save_exec(empty_exec) ||
-      !restore_exec(eligible_exec) || !require_literal(prior_version, 0, /*equal=*/false))
-    return false;
-  if (!sequence.emit(instrumentation::build_v_and_b32_literal(temporary, 1u, prior_version, arch)))
-    return false;
-  if (!require_literal(temporary, 0, /*equal=*/true) ||
-      !sequence.emit(instrumentation::build_v_mov_b32_literal(
-          temporary, std::numeric_limits<uint32_t>::max() - 1u, arch)))
-    return false;
-  // This is a direct-mapped object table: any stable even record is a legal
-  // replacement candidate. Identity is checked by acquire lookup, not by a
-  // publisher, so stale records from earlier dispatches and ordinary hash
-  // collisions cannot permanently pin a slot.
-  if (!exec_masks.narrow(instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(temporary),
-                                                                 prior_version, arch)) ||
-      !append_atomic_load_u32(words, slot_address, temporary, arch))
-    return false;
-  if (!exec_masks.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(prior_version),
-                                                                 temporary, arch)) ||
-      !save_exec(ready_exec))
-    return false;
-
-  if (!append_add_literal_field(words, slot_address,
-                                offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                arch) ||
-      !sequence.emit(instrumentation::build_s_xor_b64(kAmdGpuExecLo, empty_exec, ready_exec,
-                                                       arch)) ||
-      !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
-                                     cas_new, cas_expected, /*desired_delta=*/1u,
-                                     /*expected_delta=*/0u, arch) ||
-      !save_exec(claimed_exec))
-    return false;
-
-  if (!sequence.emit_all(
-          instrumentation::build_s_andn2_b64(committed_exec, eligible_exec, claimed_exec, arch),
-          instrumentation::build_s_mov_b64(kAmdGpuExecLo, claimed_exec, arch)))
-    return false;
-  const InstructionSequence::Label claimed_exit = sequence.make_label();
-  if (!sequence.emit_branch(claimed_exit, InstructionSequence::BranchKind::ExecNonzero))
-    return false;
-  if (!sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec, arch)))
-    return false;
-  words.push_back(build_s_sleep(kConSanMoiInlineMetadataPublicationSleepDelay, arch));
-  if (!sequence.emit_all(instrumentation::build_s_sub_u32(retry_count_sgpr, retry_count_sgpr,
-                                                          scalar_positive_inline_u32(1), arch),
-                         instrumentation::build_s_cmp_lg_u32(retry_count_sgpr,
-                                                             scalar_positive_inline_u32(0), arch),
-                         instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch)))
-    return false;
-  if (!sequence.emit_branch(retry_begin, InstructionSequence::BranchKind::ExecNonzero) ||
-      !sequence.bind(claimed_exit))
-    return false;
 
   failure.stage = "reservation outcome journaling";
   if (import_claimed_predecessor) {

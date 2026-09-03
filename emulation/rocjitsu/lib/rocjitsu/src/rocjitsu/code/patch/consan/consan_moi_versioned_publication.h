@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -59,6 +60,26 @@ private:
   rj_code_arch_t arch_{};
 };
 
+/// Register and policy description for one direct-mapped version claim.
+///
+/// The protocol deliberately uses the same bounded loop for a cheap metadata
+/// record and for a larger payload snapshot. `append_candidate` below owns
+/// only the domain's stable-snapshot and replacement predicates; this object
+/// owns retry, reservation, and winner selection.
+struct MoiVersionClaim {
+  uint16_t slot_address_vgpr = 0;
+  uint16_t eligible_exec_sgpr = 0;
+  uint16_t claimed_exec_sgpr = 0;
+  uint16_t retry_exec_sgpr = 0;
+  uint16_t retry_count_sgpr = 0;
+  uint16_t base_version_vgpr = 0;
+  uint16_t desired_vgpr = 0;
+  uint16_t expected_vgpr = 0;
+  uint32_t version_offset = 0;
+  uint32_t retry_limit = 0;
+  uint32_t sleep_delay = 0;
+};
+
 /// Emit one odd/even version transition through a device-scope compare-swap.
 ///
 /// `desired_vgpr` and `expected_vgpr` are the adjacent data pair required by
@@ -69,16 +90,14 @@ private:
 [[nodiscard]] inline bool append_moi_version_transition(
     std::vector<uint32_t> &words, InstructionSequence &sequence, MoiPublicationExec &exec,
     uint16_t slot_address_vgpr, uint16_t base_version_vgpr, uint16_t desired_vgpr,
-    uint16_t expected_vgpr, uint32_t desired_delta, uint32_t expected_delta,
-    rj_code_arch_t arch) {
+    uint16_t expected_vgpr, uint32_t desired_delta, uint32_t expected_delta, rj_code_arch_t arch) {
   if (expected_vgpr != static_cast<uint16_t>(desired_vgpr + 1u))
     return false;
   const auto materialize = [&](uint16_t destination, uint32_t delta) {
     return delta == 0u
                ? std::optional<std::vector<uint32_t>>{{build_v_mov_b32_e32(
                      destination, vector_source_vgpr(base_version_vgpr), arch)}}
-               : instrumentation::build_v_add_u32(destination,
-                                                  scalar_positive_inline_u32(delta),
+               : instrumentation::build_v_add_u32(destination, scalar_positive_inline_u32(delta),
                                                   base_version_vgpr, arch);
   };
   const auto desired = materialize(desired_vgpr, desired_delta);
@@ -91,8 +110,69 @@ private:
       !append_moi_global_atomic_wait(words, arch)) {
     return false;
   }
-  return exec.narrow(instrumentation::build_v_cmp_eq_u32_vcc(
-      vector_source_vgpr(expected_vgpr), desired_vgpr, arch));
+  return exec.narrow(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected_vgpr),
+                                                             desired_vgpr, arch));
+}
+
+/// Claim one stable versioned slot through a bounded common transaction.
+///
+/// `append_candidate` runs with the eligible lanes in EXEC. It must load the
+/// authoritative even version into `base_version_vgpr` and narrow EXEC to the
+/// lanes permitted to replace the slot. A zero retry limit requests exactly
+/// one attempt. On return EXEC and `claimed_exec_sgpr` contain the winners;
+/// exhausted or ineligible lanes are absent.
+template <typename AppendCandidate>
+[[nodiscard]] bool
+append_moi_bounded_version_claim(std::vector<uint32_t> &words, InstructionSequence &sequence,
+                                 MoiPublicationExec &exec, const MoiVersionClaim &claim,
+                                 AppendCandidate &&append_candidate, rj_code_arch_t arch) {
+  if (claim.expected_vgpr != static_cast<uint16_t>(claim.desired_vgpr + 1u))
+    return false;
+
+  if (claim.retry_limit != 0u) {
+    constexpr uint16_t kScalarLiteralSource = 255u;
+    words.push_back(build_s_mov_b32(claim.retry_count_sgpr, kScalarLiteralSource, arch));
+    words.push_back(claim.retry_limit);
+  }
+
+  const InstructionSequence::Label retry = sequence.mark_label();
+  if (!exec.restore(claim.eligible_exec_sgpr) || !append_candidate() ||
+      !append_add_literal_field(words, claim.slot_address_vgpr, claim.version_offset,
+                                claim.desired_vgpr, arch) ||
+      !append_moi_version_transition(words, sequence, exec, claim.slot_address_vgpr,
+                                     claim.base_version_vgpr, claim.desired_vgpr,
+                                     claim.expected_vgpr, /*desired_delta=*/1u,
+                                     /*expected_delta=*/0u, arch) ||
+      !exec.save(claim.claimed_exec_sgpr)) {
+    return false;
+  }
+
+  if (claim.retry_limit == 0u)
+    return true;
+
+  if (!sequence.emit_all(
+          instrumentation::build_s_andn2_b64(claim.retry_exec_sgpr, claim.eligible_exec_sgpr,
+                                             claim.claimed_exec_sgpr, arch),
+          instrumentation::build_s_mov_b64(kAmdGpuExecLo, claim.claimed_exec_sgpr, arch))) {
+    return false;
+  }
+  const InstructionSequence::Label claimed = sequence.make_label();
+  if (!sequence.emit_branch(claimed, InstructionSequence::BranchKind::ExecNonzero) ||
+      !exec.restore(claim.retry_exec_sgpr)) {
+    return false;
+  }
+  words.push_back(build_s_sleep(claim.sleep_delay, arch));
+  if (!sequence.emit_all(instrumentation::build_s_sub_u32(claim.retry_count_sgpr,
+                                                          claim.retry_count_sgpr,
+                                                          scalar_positive_inline_u32(1), arch),
+                         instrumentation::build_s_cmp_lg_u32(claim.retry_count_sgpr,
+                                                             scalar_positive_inline_u32(0), arch),
+                         instrumentation::build_s_cbranch_scc0(/*simm16=*/1, arch)) ||
+      !sequence.emit_branch(retry, InstructionSequence::BranchKind::ExecNonzero) ||
+      !sequence.bind(claimed)) {
+    return false;
+  }
+  return exec.restore(claim.claimed_exec_sgpr);
 }
 
 } // namespace rocjitsu::consan_moi_impl

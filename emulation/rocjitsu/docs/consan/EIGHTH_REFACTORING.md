@@ -614,3 +614,25 @@ still contain claim/retry/commit control flow, if the protocol needs a mode
 switch, if exact dispatch and version semantics cannot be retained, or if the
 complete hard-pair migration forecasts less than 1,000 net lines after actual
 prototype measurements.
+
+### 12.4 Bounded-claim hard-pair checkpoint
+
+Exact-shadow replacement and atomic-release publication now enter one shared
+`append_moi_bounded_version_claim` lifecycle. The common authority owns the
+eligible-lane restore, retry counter, stable-candidate invocation, odd CAS,
+winner mask, finite sleep/retry loop, exhaustion, and final claimed EXEC.
+Each consumer retains only its stable-snapshot and replacement predicates.
+
+The exact-shadow consumer deliberately gave up its bespoke cheap first read
+and cache-refresh re-entry path. It now takes the same coherent atomic first
+version read on every attempt as atomic release. This is the intended bounded
+representational slack: exact shadow no longer has the locally optimal retry
+shape, but both domains have one claim protocol and unchanged evidence
+semantics. The architecture-boundary test now pins that shared authority.
+
+The focused exact-publication and versioned-release tests pass, as does the
+architecture-boundary test. This checkpoint is not an accepted macro-slice:
+the common protocol plus its two first adapters is still approximately
+line-neutral. Commit/rollback, multi-slot cardinality, typed payload stores,
+and loser accounting remain mode-local and are the deletion frontier for the
+rest of Thesis B.

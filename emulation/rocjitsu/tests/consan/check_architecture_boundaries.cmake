@@ -2594,17 +2594,24 @@ file(READ
     "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.cpp"
     _moi_inline_atomic_emission_owner
 )
-if(NOT _moi_inline_atomic_emission_owner MATCHES "class InlineExecMaskEmission")
+file(READ
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.cpp"
+    _moi_inline_shadow_emission_owner
+)
+file(READ
+    "${_consan_dir}/consan_moi_versioned_publication.h"
+    _moi_versioned_publication_owner
+)
+if(NOT _moi_versioned_publication_owner MATCHES "class MoiPublicationExec" OR
+   NOT _moi_versioned_publication_owner MATCHES "append_moi_bounded_version_claim")
     message(FATAL_ERROR
-        "ConSan InlineShadow synchronization lost its shared EXEC-mask emitter"
+        "ConSan versioned publication lost its shared EXEC-mask or bounded-claim authority"
     )
 endif()
-string(REGEX MATCHALL "InlineExecMaskEmission[ \t]+exec_masks"
-       _inline_exec_mask_consumers "${_moi_inline_atomic_emission_owner}")
-list(LENGTH _inline_exec_mask_consumers _inline_exec_mask_consumer_count)
-if(NOT _inline_exec_mask_consumer_count EQUAL 3)
+if(NOT _moi_inline_atomic_emission_owner MATCHES "append_moi_bounded_version_claim" OR
+   NOT _moi_inline_shadow_emission_owner MATCHES "append_moi_bounded_version_claim")
     message(FATAL_ERROR
-        "ConSan InlineShadow synchronization must share EXEC-mask emission across three transactions"
+        "ConSan exact-shadow and atomic-release publication must share one bounded claim loop"
     )
 endif()
 _consan_assert_no_match(
