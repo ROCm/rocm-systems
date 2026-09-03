@@ -17,6 +17,27 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+// Size ladders shared by the threaded and serial bodies of the tests below. Held
+// here because each was written out once per body, and a size added to one copy
+// while the other kept its own list would quietly narrow half the coverage.
+static const std::vector<size_t> kBarrageSizes = {
+    1, 7, 13, 64, 127, 128, 129, 255, 256, 512,
+    1023, 1024, 4095, 4096, 8191, 8192, 8193,
+    16384, 32768, 65536, 131072,
+    1048576,   // 1 MB
+    4194304,   // 4 MB
+    16777216,  // 16 MB
+    67108864   // 64 MB
+};
+
+// Alignment boundaries either side of the 128B split threshold and the page and
+// 64K marks, for both multi-QP bodies.
+static const std::vector<size_t> kMultiQpAlignmentSizes = {
+    127, 128, 129, 255, 256, 257,
+    1023, 1024, 1025, 4095, 4096, 4097,
+    65535, 65536, 65537
+};
+
 // =====================================================================
 //  Group E: Branch-coverage (2-rank)
 // =====================================================================
@@ -276,7 +297,7 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
                 // One pattern per worker, held for the whole loop, rather than one
                 // per iteration. makeBytePattern sees the seed modulo 256, and
                 // WorkerSeed only guarantees distinctness between workers at the
-                // same sequence number -- across 16 workers and 25 unsynchronized
+                // same sequence number -- across 16 workers and 50 unsynchronized
                 // iterations half the byte patterns are shared by some pair of
                 // different workers, so a payload delivered on the wrong connection
                 // could still verify. Holding the seed constant makes any
@@ -407,13 +428,6 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
-    static const std::vector<size_t> kBarrageSizes = {
-        1, 7, 13, 64, 127, 128, 129, 255, 256, 512,
-        1023, 1024, 4095, 4096, 8191, 8192, 8193,
-        16384, 32768, 65536, 131072,
-        1048576, 4194304, 16777216, 67108864
-    };
-
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         RunThreadedSizeSweep(ThreadDevPolicy::Spread(), nThreads, kBarrageSizes,
@@ -434,18 +448,8 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
     ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
-    const size_t sizes[] = {
-        1, 7, 13, 64, 127, 128, 129, 255, 256, 512,
-        1023, 1024, 4095, 4096, 8191, 8192, 8193,
-        16384, 32768, 65536, 131072,
-        1048576,   // 1 MB
-        4194304,   // 4 MB
-        16777216,  // 16 MB
-        67108864   // 64 MB
-    };
-
     int tag = 0;
-    for (size_t sz : sizes) {
+    for (size_t sz : kBarrageSizes) {
         int timeout = (sz > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
         DoSendRecv(cp.sendComm, cp.recvComm,
                    buf.get(), buf.get(), sz,
@@ -495,17 +499,18 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                 if (!result.ok) return result;
                 NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
 
+                // One pattern per worker, held for the whole run rather than
+                // varying per message. makeBytePattern sees the seed modulo 256
+                // and these workers advance independently, so a per-message seed
+                // aliases across them -- worker 0 at message 8 and worker 8 at
+                // message 0 land on the same byte, and a delivery to the wrong
+                // worker's communicator would verify clean. The tag identifies
+                // the message; the pattern identifies the worker.
+                const int seed = WorkerSeed(threadIdx, 0);
+
                 int nullCount = 0;
                 for (int i = 0; i < kThreadedMsgs; i++) {
                     void* request = nullptr;
-                    // One pattern per worker, held for the whole run rather than
-                    // varying per message. makeBytePattern sees the seed modulo 256
-                    // and these workers advance independently, so a per-message seed
-                    // aliases across them -- worker 0 at message 8 and worker 8 at
-                    // message 0 land on the same byte, and a delivery to the wrong
-                    // worker's communicator would verify clean. The tag identifies
-                    // the message; the pattern identifies the worker.
-                    const int seed = WorkerSeed(threadIdx, 0);
                     if (rank == 0) {
                         if (i > 0) usleep(kThreadedRecvDelayUs);
                         memset(buffer, 0, sz);
@@ -770,7 +775,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 //      in various patterns to stress the MR cache.
 //      Parameterized by MPIEnvironment::nThreads: the MR cache is per physical
 //      device behind a single mutex, so concurrent storms are the only way to
-//      race its insert, lookup and eviction paths against each other.
+//      race its insert, lookup and release paths against each other.
 TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -813,9 +818,13 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
                 // every later test. deregisterOrder nulls what it releases, so this
                 // only ever sees leftovers.
                 auto handleCleanup = makeScopeGuard([&]() {
+                    // Through the same deleter the guards use, so a deregMr refused
+                    // on this path lands in g_workerDeregFailures rather than being
+                    // dropped -- this is the path the guard was added for.
+                    NetMHandleWorkerDeleter release(net_, comm);
                     for (auto*& h : handles) {
                         if (h) {
-                            DeregisterMemory(comm, h);
+                            release(h);
                             h = nullptr;
                         }
                     }
@@ -1302,9 +1311,7 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     // single-worker body already covers.
     if (MPIEnvironment::nThreads > 1) {
         RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), MPIEnvironment::nThreads,
-                             {127, 128, 129, 255, 256, 257, 1023, 1024, 1025,
-                              4095, 4096, 4097, 65535, 65536, 65537},
-                             /*repeats=*/2, "threaded MultiQpSplitDataStress");
+                             kMultiQpAlignmentSizes, /*repeats=*/2, "threaded MultiQpSplitDataStress");
         return;
     }
 
@@ -1321,16 +1328,9 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
-    // Alignment boundary sizes (128B is the split threshold)
-    const size_t sizes[] = {
-        127, 128, 129, 255, 256, 257,
-        1023, 1024, 1025, 4095, 4096, 4097,
-        65535, 65536, 65537
-    };
-
     static constexpr int kRepeats = 10;
     int tag = 0;
-    for (size_t sz : sizes) {
+    for (size_t sz : kMultiQpAlignmentSizes) {
         for (int r = 0; r < kRepeats; r++) {
             DoSendRecv(cp.sendComm, cp.recvComm,
                        buf.get(), buf.get(), sz,
@@ -1357,9 +1357,7 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
     // and pinned to one device for the same reason as the split variant.
     if (MPIEnvironment::nThreads > 1) {
         RunThreadedSizeSweep(ThreadDevPolicy::Fixed(0), MPIEnvironment::nThreads,
-                             {127, 128, 129, 255, 256, 257, 1023, 1024, 1025,
-                              4095, 4096, 4097, 65535, 65536, 65537},
-                             /*repeats=*/2, "threaded MultiQpNoSplitStress");
+                             kMultiQpAlignmentSizes, /*repeats=*/2, "threaded MultiQpNoSplitStress");
         return;
     }
 
@@ -1376,15 +1374,9 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
     ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
     NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
-    const size_t sizes[] = {
-        127, 128, 129, 255, 256, 257,
-        1023, 1024, 1025, 4095, 4096, 4097,
-        65535, 65536, 65537
-    };
-
     static constexpr int kRepeats = 10;
     int tag = 0;
-    for (size_t sz : sizes) {
+    for (size_t sz : kMultiQpAlignmentSizes) {
         for (int r = 0; r < kRepeats; r++) {
             DoSendRecv(cp.sendComm, cp.recvComm,
                        buf.get(), buf.get(), sz,

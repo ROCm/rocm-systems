@@ -173,6 +173,16 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "A17_NetIB_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent workers each walk the size ladder on an independent connection.",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_LongRunningEndurance",
+          "description": "Concurrent workers each run a long transfer loop, so a leak or a slow drift shows up.",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
           "name": "A17_NetIB_MultiThread_MemoryRegistrationStorm",
           "description": "Concurrent register/deregister storms contend on the shared per-device MR cache.",
           "test_filter": "NetIbMPITest.MemoryRegistrationStorm"

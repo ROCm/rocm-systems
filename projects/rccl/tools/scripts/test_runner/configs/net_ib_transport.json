@@ -1031,7 +1031,7 @@
         },
         {
           "name": "NetIB_MultiThread_MemoryRegistrationStorm",
-          "description": "Concurrent register/deregister storms race the insert, lookup and eviction paths of the per-device MR cache",
+          "description": "Concurrent register/deregister storms race the insert, lookup and release paths of the per-device MR cache",
           "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
         },
         {
