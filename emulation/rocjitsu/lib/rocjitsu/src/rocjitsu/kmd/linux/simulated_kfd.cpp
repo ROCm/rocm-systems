@@ -3320,7 +3320,7 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     // message. Classify the actual control-flow site instead of inspecting the
     // TTMP values: a signal pointer can equal saved M0, and a concurrent trap
     // can legitimately rewrite those registers before the second interrupt.
-    constexpr uint32_t kSMovM0Ttmp7 = 0xBEFC0080u;
+    constexpr uint32_t kSMovM0Ttmp7 = 0xBEFC0073u;
     constexpr uint32_t kSMovM0Ttmp3 = 0xBEFC006Fu;
     constexpr uint32_t kSNop0 = 0xBF800000u;
     if (wave.pc >= 2 * sizeof(uint32_t)) {

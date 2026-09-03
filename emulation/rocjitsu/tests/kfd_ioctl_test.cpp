@@ -842,7 +842,7 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
 
   constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
   const uint32_t handler[] = {
-      0xBEFC0080u, // s_mov_b32 m0, ttmp7 (profiling event id)
+      0xBEFC0073u, // s_mov_b32 m0, ttmp7 (profiling event id)
       0xBF800000u, // s_nop 0
       0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT)
       0xBEFC006Fu, // s_mov_b32 m0, ttmp3 (packed queue exception)
@@ -869,6 +869,7 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
   wave->set_ttmp(11, wave->ttmp(11) | (1u << 22));
   wave->set_ttmp(13, wave->ttmp(13) | (1u << 21));
   cu->step(); // s_mov_b32 m0, ttmp7
+  EXPECT_EQ(wave->m0(), 0x400u);
   cu->step(); // s_nop
   cu->step(); // Send the profiling completion from its distinct site.
 
@@ -883,6 +884,7 @@ TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSend
   wave->set_ttmp(13, wave->ttmp(13) | 0x800u);
   wave->set_ttmp(3, 0x407u);
   cu->step(); // s_mov_b32 m0, ttmp3
+  EXPECT_EQ(wave->m0(), 0x407u);
   cu->step(); // s_nop
   cu->step(); // Route the queue exception from its distinct site.
   EXPECT_TRUE(delivered.load(std::memory_order_acquire));
