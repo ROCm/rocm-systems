@@ -1480,4 +1480,66 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastRegistrationRejectsBadArguments
+//
+// Regression cover for the production guard this branch adds to net_ib_cast's
+// regMr/regMrDmaBuf/deregMr. On develop each of these dereferences the
+// communicator or the handle before looking at them, so the suite's reaction to a
+// failed connection setup was a SIGSEGV inside librccl rather than a readable
+// failure; the guard returns ncclInvalidArgument instead.
+//
+// The existing negative registration tests pass a null *buffer* with a valid
+// communicator, and the new setup wrappers return before registration when setup
+// fails, so nothing else in the suite reaches these arms.
+//
+// A null communicator needs no connection: the guard is the first thing the entry
+// point does and the arguments never reach the device. The zero-size arm does need
+// a live communicator, since with a null one the null-comm check answers first.
+// Both ranks run the same checks and reach the barrier from the same place.
+// =============================================================================
+TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Fixed, not allocated: a rank-local allocation failure would end this rank
+    // before the barrier below while its peer waited there.
+    static char buffer[4096];
+    void* mhandle = nullptr;
+
+    // No connection required for these three.
+    EXPECT_EQ(RegisterMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a null communicator instead of dereferencing it";
+    EXPECT_EQ(RegisterDmaBufMemory(nullptr, buffer, sizeof(buffer), NCCL_PTR_HOST,
+                                   /*offset=*/0, /*fd=*/-1, &mhandle),
+              ncclInvalidArgument)
+        << "regMrDmaBuf must reject a null communicator";
+    EXPECT_EQ(DeregisterMemory(nullptr, mhandle), ncclInvalidArgument)
+        << "deregMr must reject a null communicator";
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+
+    const int rank = MPIEnvironment::world_rank;
+    void* comm = (rank == 0) ? recvComm : sendComm;
+    ASSERT_NE(comm, nullptr);
+
+    EXPECT_EQ(RegisterMemory(comm, buffer, /*size=*/0, NCCL_PTR_HOST, &mhandle),
+              ncclInvalidArgument)
+        << "regMr must reject a zero size";
+    EXPECT_EQ(RegisterMemory(comm, buffer, sizeof(buffer), NCCL_PTR_HOST, nullptr),
+              ncclInvalidArgument)
+        << "regMr must reject a null out-handle";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+}
+
 #endif // MPI_TESTS_ENABLED

@@ -870,18 +870,30 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
             if (!handshake.status) {
                 connectFailed = 1;
             } else {
+                // Bounded and paced. Accept is asynchronous, so it can keep
+                // returning ncclSuccess with a null comm -- the state the shared
+                // setup helper guards against -- and an unbounded spin here would
+                // hang this rank while the peer waits in the reduction below, which
+                // is the failure this test exists to have reported instead.
                 ncclResult_t r = ncclSuccess;
-                while (!pair.recvComm && r == ncclSuccess)
+                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.recvComm
+                                      && r == ncclSuccess; attempt++) {
                     r = AcceptConnection(pair.listenComm, &pair.recvComm);
+                    if (!pair.recvComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
                 if (r != ncclSuccess || !pair.recvComm) connectFailed = 1;
             }
         } else {
             if (!handshake.status) {
                 connectFailed = 1;  // rank 0's listen failed
             } else {
+                // Bounded and paced, for the same reason as the accept side.
                 ncclResult_t r = ncclSuccess;
-                while (!pair.sendComm && r == ncclSuccess)
+                for (int attempt = 0; attempt < kMaxRetryAttempts && !pair.sendComm
+                                      && r == ncclSuccess; attempt++) {
                     r = ConnectToRemote(mergedDev, &pair.handle, &pair.sendComm);
+                    if (!pair.sendComm && r == ncclSuccess) usleep(kPollIntervalUs);
+                }
                 if (r != ncclSuccess || !pair.sendComm) connectFailed = 1;
             }
         }
