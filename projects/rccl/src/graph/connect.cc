@@ -13,13 +13,13 @@
 #include "rings.h"
 #include "topo.h"
 #include "bootstrap.h"
+#include "rccl_graph_gen.h"
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
 #include <stdint.h>     // For uint8_t and other fixed-width types
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
-#include "rccl_graph_gen.h"
 
 // Allgather *value across the comm and reduce it to the global minimum. Leak-safe
 // on the allgather error path. See declaration in graph.h for why grow needs this.
@@ -420,10 +420,11 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   int nNodes = comm->nNodes;
   int nRanks = comm->nRanks;
   if (nChannels <= 0 || nNodes <= 0 || nRanks <= 0) return ncclInvalidArgument;
+  ncclResult_t res = ncclSuccess;
 
   // 1. Allocate flat memory for nodeOrder [nChannels * nNodes]
   int* nodeOrder = nullptr;
-  NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
+  NCCLCHECKGOTO(ncclCalloc(&nodeOrder, nChannels * nNodes),res,fail);
 
   // Note: generateGreedyNodeOrder needs to handle the flat indexing (c * nNodes + i)
   if (nChannels > MAXCHANNELS || nChannels >= 255) {
@@ -433,7 +434,7 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   }
 
   // 2. Populate the Diverse/Greedy Node Order
-  NCCLCHECK(generateRings(nNodes, nChannels, nodeOrder));
+  NCCLCHECKGOTO(generateRings(nNodes, nChannels, nodeOrder),res,fail);
 
   for (int c = 0; c < nChannels; c++) {
     // Correct offsets for global arrays
@@ -469,6 +470,10 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   }
 
   return ncclSuccess;
+  
+  fail:
+    free(nodeOrder);
+    return res;
 }
 
 /**

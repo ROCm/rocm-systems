@@ -597,47 +597,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   }
 }
 
-
-ncclResult_t ncclAllReduceReduceBroadcast(const void* sendbuff, void* recvbuff, size_t count,
-                                           ncclDataType_t datatype, ncclRedOp_t op,
-                                           ncclComm* comm, cudaStream_t stream) {
-    INFO(NCCL_COLL, "AllReduce: taking Chunk-wise Reduce+Broadcast path: nRanks=%d count=%zu", comm->nRanks, count);
-    int nRanks = comm->nRanks;
-    size_t typeSize = ncclTypeSize(datatype);
-
-    if (count == 0) return ncclSuccess;
-
-    // Calculate base chunk size and handle edge-case remainder distribution
-    size_t baseCount = count / nRanks;
-    size_t remainder = count % nRanks;
-
-    size_t currentOffset = 0;
-    // Iterate through each rank chunk domain
-    for (int r = 0; r < nRanks; ++r) {
-        // Edge case: distribute remainder across the first few chunks 
-        // (or adjust to align strictly with vectorization boundaries if needed)
-        size_t cCount = baseCount + (r < remainder ? 1 : 0);
-        if (cCount == 0) {
-            currentOffset += cCount;
-            continue;
-        }
-
-        const void* send_ptr = static_cast<const char*>(sendbuff) + currentOffset * typeSize;
-        void* recv_ptr = static_cast<char*>(recvbuff) + currentOffset * typeSize;
-           // Step 1: Reduce Chunk r across all ranks, targeting Rank r as root
-        NCCLCHECK(ncclReduce(send_ptr, recv_ptr, cCount, datatype, op, r, comm, stream));
-
-        // Step 2: Broadcast the reduced Chunk r from Rank r back to all ranks
-        // Note: Using recv_ptr in-place since Rank r already holds the reduced result
-        NCCLCHECK(ncclBcast(recv_ptr, cCount, datatype, r, comm, stream));
-      
-    }
-
-    return ncclSuccess;
-}
-
-
-
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

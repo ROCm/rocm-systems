@@ -31,7 +31,6 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
   }
 
 #define RCCL_PARAM_DECLARE(name) int64_t rcclParam##name()
-#define NCCL_PARAM_DECLARE(name) int64_t ncclParam##name()
 
 #define RCCL_PARAM(name, env, deftVal) \
   pthread_mutex_t rcclParamMutex##name = PTHREAD_MUTEX_INITIALIZER; \

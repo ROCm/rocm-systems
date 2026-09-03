@@ -28,7 +28,6 @@
 
 // alloc.h first, so its macros are visible to be #undef'd before init.cc's transitive includes see them.
 #include "alloc.h"
-#include "rccl_graph_gen.h"
 
 #include "fakes/param_redirect.h"
 
