@@ -98,15 +98,20 @@ public:
   bool write_json_file(const std::string &path) const;
 
 private:
+  /// The static instruction pair a hazard belongs to. Both PCs are named: a
+  /// race message keeps neither once dedup_message_key() has taken the waves
+  /// and addresses out of it, so without the producer's PC two instructions
+  /// racing with one consumer would fold into whichever was found first.
   struct DedupKey {
     hazard_core::EntityId dispatch_id;
     uint64_t pc;
+    uint64_t source_pc;
     std::string message;
     std::string suggestion;
 
     bool operator==(const DedupKey &other) const noexcept {
-      return dispatch_id == other.dispatch_id && pc == other.pc && message == other.message &&
-             suggestion == other.suggestion;
+      return dispatch_id == other.dispatch_id && pc == other.pc && source_pc == other.source_pc &&
+             message == other.message && suggestion == other.suggestion;
     }
   };
 
