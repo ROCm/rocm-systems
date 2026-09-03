@@ -1594,6 +1594,64 @@ void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
   }
 }
 
+struct MoiScalarSiteAvailability {
+  std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
+  RegisterSet unavailable;
+  bool saw_site = false;
+};
+
+[[nodiscard]] RegisterSet
+dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uint64_t text_offset);
+
+[[nodiscard]] MoiScalarSiteAvailability collect_moi_scalar_site_availability(
+    const MoiResourcePlanningState &state, std::span<const ConSanCandidateResourcePlan> site_plans,
+    const ConSanObservationPlan &observation_plan, const ProgramInventory &inventory,
+    bool include_kernel_entries) {
+  MoiScalarSiteAvailability result;
+  std::unordered_map<BasicBlock *, std::vector<const MoiKernelResourceContext *>> owners_by_block;
+  for (const MoiKernelResourceContext &context : state.contexts) {
+    for (BasicBlock *block : context.scope.blocks) {
+      if (block != nullptr)
+        owners_by_block[block].push_back(&context);
+    }
+  }
+
+  std::unordered_set<uint64_t> included_offsets;
+  included_offsets.reserve(site_plans.size() + observation_plan.probe_intents.size() +
+                           inventory.kernels().size());
+  const auto include = [&](uint64_t text_offset) {
+    if (!included_offsets.insert(text_offset).second)
+      return;
+    BasicBlock *block = block_for_offset(state.block_index, text_offset);
+    const Instruction *instruction = instruction_at(block, text_offset);
+    if (block == nullptr || instruction == nullptr)
+      return;
+    const auto owners = owners_by_block.find(block);
+    if (owners == owners_by_block.end())
+      return;
+    result.saw_site = true;
+    for (const MoiKernelResourceContext *context : owners->second) {
+      RegisterSet site_unavailable = context->liveness->live_before(*instruction);
+      const InstDefUse def_use(*instruction);
+      site_unavailable |= def_use.defs | def_use.uses;
+      if (context->kernel != nullptr && context->kernel->uses_dynamic_stack.value_or(false))
+        site_unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
+      result.unavailable |= site_unavailable;
+      if (context->kernel != nullptr)
+        result.unavailable_by_owner[context->kernel->descriptor_file_offset] |= site_unavailable;
+    }
+  };
+  for (const ConSanCandidateResourcePlan &plan : site_plans)
+    include(plan.text_offset);
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents)
+    include(intent.physical_site.original_text_offset);
+  if (include_kernel_entries) {
+    for (const ConSanKernelInfo &kernel : inventory.kernels())
+      include(kernel.entry_text_offset);
+  }
+  return result;
+}
+
 [[nodiscard]] std::optional<std::vector<ConSanMoiPrologueScratchVgprAssignment>>
 plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
                                  const MoiScalarOwnerContextResolution &resolution,
@@ -3093,60 +3151,14 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     return false;
   const std::vector<std::vector<uint64_t>> owner_components =
       moi_scalar_owner_components(site_plans);
-
-  std::unordered_map<BasicBlock *, std::vector<const MoiKernelResourceContext *>> contexts_by_block;
-  for (const MoiKernelResourceContext &context : state.contexts) {
-    if (context.kernel == nullptr)
-      continue;
-    for (BasicBlock *block : context.scope.blocks) {
-      if (block != nullptr)
-        contexts_by_block[block].push_back(&context);
-    }
-  }
-
-  std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
-  std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(site_plans.size() +
-                                problem.observation_plan().probe_intents.size() +
-                                problem.inventory().kernels().size());
-  const auto include_site = [&](uint64_t text_offset) {
-    // Several semantic intents can name one physical instruction. Liveness and
-    // def/use are set unions and need only be incorporated once per instruction.
-    if (!included_site_offsets.insert(text_offset).second)
-      return;
-    BasicBlock *block = block_for_offset(state.block_index, text_offset);
-    const Instruction *instruction = instruction_at(block, text_offset);
-    if (block == nullptr || instruction == nullptr)
-      return;
-    const auto owners = contexts_by_block.find(block);
-    if (owners == contexts_by_block.end())
-      return;
-    for (const MoiKernelResourceContext *context : owners->second) {
-      RegisterSet &unavailable = unavailable_by_owner[context->kernel->descriptor_file_offset];
-      unavailable |= context->liveness->live_before(*instruction);
-      const InstDefUse def_use(*instruction);
-      unavailable |= def_use.defs | def_use.uses;
-      // Dynamic-stack helpers save their caller's frame base before establishing
-      // a callee frame.  Recovered CFGs do not always connect a helper return to
-      // its entry, so ordinary liveness can miss that long-lived scalar.  A
-      // transient instrumentation window must never overwrite it.
-      if (context->kernel->uses_dynamic_stack.value_or(false))
-        unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
-    }
-  };
-  for (const ConSanCandidateResourcePlan &plan : site_plans)
-    include_site(plan.text_offset);
-  for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
-    include_site(intent.physical_site.original_text_offset);
   // Inline's component-local transient window is established only inside an
   // access or synchronization body. Its RDNA entry relay and return use
   // special state, while persistent owner/epoch values live in VGPRs. Do not
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
-  if (options.moi_initialize_owner_epoch && !inline_layout) {
-    for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
-      include_site(kernel.entry_text_offset);
-  }
+  const MoiScalarSiteAvailability availability = collect_moi_scalar_site_availability(
+      state, site_plans, problem.observation_plan(), problem.inventory(),
+      options.moi_initialize_owner_epoch && !inline_layout);
 
   const uint16_t count = moi_exec_save_sgpr_count(
       resolve_moi_exec_save_requirement(request, resources, options, problem.mode_semantics()),
@@ -3185,7 +3197,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       continue;
     RegisterSet unavailable;
     for (uint64_t owner : owners) {
-      if (const auto it = unavailable_by_owner.find(owner); it != unavailable_by_owner.end())
+      if (const auto it = availability.unavailable_by_owner.find(owner);
+          it != availability.unavailable_by_owner.end())
         unavailable |= it->second;
     }
     // A code-object-wide EXEC window may already have a complete liveness
@@ -3749,51 +3762,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // Prove one common window with the existing CFG liveness before falling
   // back to an unsupported resource result.
   const MoiResourcePlanningState &state = planning_state;
-  std::unordered_map<const BasicBlock *, std::vector<const MoiKernelResourceContext *>>
-      contexts_by_block;
-  contexts_by_block.reserve(state.blocks.size());
-  for (const MoiKernelResourceContext &context : state.contexts) {
-    for (const BasicBlock *block : context.scope.blocks)
-      contexts_by_block[block].push_back(&context);
-  }
-  RegisterSet unavailable;
-  bool saw_site = false;
-  std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(site_plans.size() +
-                                problem.observation_plan().probe_intents.size() +
-                                problem.inventory().kernels().size());
-  const auto include_site = [&](uint64_t text_offset) {
-    if (!included_site_offsets.insert(text_offset).second)
-      return;
-    BasicBlock *block = block_for_offset(state.block_index, text_offset);
-    const Instruction *instruction = instruction_at(block, text_offset);
-    if (block == nullptr || instruction == nullptr)
-      return;
-    const auto owners = contexts_by_block.find(block);
-    if (owners == contexts_by_block.end())
-      return;
-    for (const MoiKernelResourceContext *context : owners->second) {
-      unavailable |= context->liveness->live_before(*instruction);
-      const InstDefUse def_use(*instruction);
-      unavailable |= def_use.defs | def_use.uses;
-      if (context->kernel != nullptr && context->kernel->uses_dynamic_stack.value_or(false))
-        unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
-      saw_site = true;
-    }
-  };
-  for (const ConSanCandidateResourcePlan &plan : site_plans)
-    include_site(plan.text_offset);
-  for (const ConSanProbeIntent &intent : problem.observation_plan().probe_intents)
-    include_site(intent.physical_site.original_text_offset);
-  for (const ConSanCandidateResourcePlan &plan : site_plans) {
-    if (!plan.owner_descriptor_file_offsets.empty())
-      include_site(plan.text_offset);
-  }
-  if (options.moi_initialize_owner_epoch) {
-    for (const ConSanKernelInfo &kernel : problem.inventory().kernels())
-      include_site(kernel.entry_text_offset);
-  }
-  if (state.valid && saw_site) {
+  const MoiScalarSiteAvailability availability =
+      collect_moi_scalar_site_availability(state, site_plans, problem.observation_plan(),
+                                           problem.inventory(), options.moi_initialize_owner_epoch);
+  const RegisterSet &unavailable = availability.unavailable;
+  if (state.valid && availability.saw_site) {
     const uint32_t liveness_search_floor = scalar_tail_covers_implicit_references ? first : 0u;
     MoiScalarPlacementDomain liveness_domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries,
                                              &unavailable);
@@ -3817,7 +3790,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   // cross-site visible-evidence state still require genuinely dead/fresh
   // registers outside that window.
   if (consan_uses_gfx12_encoding(arch) && inline_layout &&
-      problem.mode_semantics().inline_access_present && state.valid && saw_site) {
+      problem.mode_semantics().inline_access_present && state.valid && availability.saw_site) {
     const size_t ordinary_access_count =
         std::ranges::count_if(candidates, [](const ConSanMoiCandidate &candidate) {
           return candidate.kind == ConSanLdsAccessKind::Read ||
