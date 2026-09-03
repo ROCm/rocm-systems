@@ -94,8 +94,11 @@ static constexpr int    kBroadcastRingMinChunks        = 16;            // fill 
 inline size_t parseSize(const char* v) {
   // strtoull() accepts a leading '-' and wraps it into a huge unsigned value,
   // which would read as a ~16 EiB threshold and silently pin every message to
-  // the LSA tier. Reject the sign before parsing.
-  if (v == nullptr || v[0] == '\0' || v[0] == '-') return kThresholdUnset;
+  // the LSA tier. Reject the sign before parsing. strtoull also skips leading
+  // whitespace before the sign, so trim it first (" -4K" must not slip through).
+  if (v == nullptr) return kThresholdUnset;
+  while (*v == ' ' || *v == '\t') v++;
+  if (v[0] == '\0' || v[0] == '-') return kThresholdUnset;
   char* end = nullptr;
   unsigned long long val = strtoull(v, &end, 10);
   if (end == v) return kThresholdUnset;  // no digits consumed
@@ -261,7 +264,7 @@ GIN_SDMA_HD inline int bcastHybridPoolCtas(int deviceCtaCount) {
   return (deviceCtaCount > maxTier) ? deviceCtaCount : maxTier;
 }
 
-// Full pool covering hybrid/SAG/P2P grids AND the ring's independent CTA count.
+// Full pool covering the hybrid/SAG grids AND the ring's independent CTA count.
 GIN_SDMA_HD inline int bcastPoolCtas(int deviceCtaCount, int ringCtasPeak) {
   int pool = bcastHybridPoolCtas(deviceCtaCount);
   return (ringCtasPeak > pool) ? ringCtasPeak : pool;

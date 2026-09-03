@@ -260,7 +260,12 @@ static inline int bcastRingCtasUncached() {
   if (e != nullptr && e[0] != '\0' && e[0] != '-') {
     char* end = nullptr;
     long p = strtol(e, &end, 10);
-    if (end != e && *end == '\0' && p >= 1) pref = (int)p;
+    // Clamp in long before narrowing to int: huge values wrap to small positives
+    // (e.g. 4294967296 -> 0 -> floored to 1) instead of hitting the 128 hard cap.
+    if (end != e && *end == '\0' && p >= 1) {
+      if (p > 128) p = 128;
+      pref = (int)p;
+    }
   }
   int v = pref;                           // ring's own count, independent of -V
   if (v < 1) v = 1;
@@ -1026,12 +1031,13 @@ static int buildBcastRingDecomp(int N, int* succ, int* pos) {
   for (int i = 0; i < N; i++) for (int j = 0; j < N; j++) d.used[i][j] = false;
   d.budget = 20000000L;                                   // ample for N<=8; else fall back
   if (!d.solve(0)) return 0;
-  for (int r = 0; r < N - 1; r++)
+  for (int r = 0; r < N - 1; r++) {
     for (int k = 0; k < N; k++) {
       const int rk = d.order[r][k];
       succ[r * N + rk] = d.order[r][(k + 1) % N];
       pos[r * N + rk]  = k;
     }
+  }
   return N - 1;
 }
 #endif
@@ -1148,10 +1154,10 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
                 const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_STREAM");
                 return (e && e[0] == '0') ? 0 : 1;
               }();
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastNRings, &rs.builtNRings, sizeof(int)));
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings));
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings));
-              CUDACHECK(cudaMemcpyToSymbol(c_bcastStream, &streamStores, sizeof(int)));
+              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastNRings, &rs.builtNRings, sizeof(int), 0, stream));
+              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
+              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
+              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastStream, &streamStores, sizeof(int), 0, stream));
             }
             rs.builtN = sagRanks;
           }

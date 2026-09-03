@@ -142,12 +142,24 @@ _bcast_enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_BCAST", "") not in (
     "False",
 )
 
-BCAST_NP = int(os.environ.get("RCCL_TESTS_BCAST_NP", "0")) or ngpus
+
+def _env_int(name, default):
+    """Parse an integer env var; bad values fall back so collection stays usable."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+BCAST_NP = _env_int("RCCL_TESTS_BCAST_NP", 0) or ngpus
 BCAST_LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 BCAST_CTAS = os.environ.get("RCCL_TESTS_BCAST_CTAS", "8")
 BCAST_GIN_TYPE = os.environ.get("RCCL_TESTS_BCAST_GIN_TYPE", "6")
-BCAST_TIMEOUT_S = int(os.environ.get("RCCL_TESTS_BCAST_TIMEOUT_S", "900"))
-BCAST_CONN_RETRIES = int(os.environ.get("RCCL_TESTS_BCAST_CONN_RETRIES", "5"))
+BCAST_TIMEOUT_S = _env_int("RCCL_TESTS_BCAST_TIMEOUT_S", 900)
+BCAST_CONN_RETRIES = _env_int("RCCL_TESTS_BCAST_CONN_RETRIES", 5)
 BCAST_MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 BCAST_XENV = shlex.split(os.environ.get("RCCL_TESTS_BCAST_XENV", ""))
 BCAST_EXE = os.environ.get(
@@ -420,11 +432,50 @@ def test_BroadcastGinSdma2GiBHangGuard(request):
 
 @_bcast_skip
 def test_BroadcastGinSdma4GiBHangGuard(request):
-    """4 GiB completion guard with default tier selection (ring / SAG path)."""
+    """4 GiB completion guard with default tier selection (ring path at 4 GiB)."""
     rc, out, debug = _run_bcast_gin_sdma(
         request, 4 * GiB, "int32", force_flat_gin=False
     )
     _assert_bcast_ok(rc, out, debug, "4 GiB default-tier")
+
+
+# Offline parsing guards: no GIN hardware required. These pin the regression where
+# _DATA_FAIL_RE matched the "#wrong" column header and made the connectivity retry
+# unreachable, and where scientific-notation timings broke the row regex.
+def test_bcast_row_regex_accepts_scientific_notation():
+    line = (
+        "  134217728  134217728  int32  none  0"
+        "  1.23e+02  1.00e+02  1.00e+02  0"
+        "  1.23e+02  1.00e+02  1.00e+02  0"
+    )
+    rows = _bcast_rows(line)
+    assert rows == [(134217728, 0, "0", "0")]
+
+
+def test_bcast_data_failed_ignores_column_header():
+    header = (
+        "#       size         count      type   redop    root"
+        "     time   algbw   busbw  #wrong"
+    )
+    assert not _data_failed(header)
+
+
+def test_bcast_data_failed_detects_nonzero_wrong():
+    line = (
+        "  1048576  1048576  int32  none  0"
+        "  12.34  1.00  1.00  1"
+        "  12.34  1.00  1.00  0"
+    )
+    assert _data_failed(line)
+
+
+def test_bcast_data_failed_treats_na_as_unchecked_not_failed():
+    line = (
+        "  1048576  1048576  int32  none  0"
+        "  12.34  1.00  1.00  N/A"
+        "  12.34  1.00  1.00  0"
+    )
+    assert not _data_failed(line)
 
 
 @pytest.mark.parametrize(
