@@ -57,26 +57,9 @@
   X(unsigned short,      "unsigned short") \
   X(unsigned int,        "unsigned int") \
   X(unsigned long,       "unsigned long") \
-  X(unsigned long long,  "unsigned long long")
-
-// broadcast_wave
-#define ROCSHMEM_BCAST_WAVE_TYPES_FULL(X) \
-  X(float,      "float") \
-  X(double,     "double") \
-  X(short,      "short") \
-  X(int,        "int") \
-  X(long,       "long") \
-  X(long long,  "long long")
-
-// alltoall_wave
-#define ROCSHMEM_ALLTOALL_WAVE_TYPES_FULL(X) \
-  X(float,      "float") \
-  X(double,     "double") \
-  X(char,       "char") \
-  X(short,      "short") \
-  X(int,        "int") \
-  X(long,       "long") \
-  X(long long,  "long long")
+  X(unsigned long long,  "unsigned long long") \
+  X(__half,  "half") \
+  X(__hip_bfloat16,  "bfloat16")
 
 // ---------------------------------------------------------------------------
 // AMO type lists
@@ -132,44 +115,44 @@
 // Only ROCSHMEM_SUM is exercised; operation coverage is a separate concern.
 // ---------------------------------------------------------------------------
 
-#define ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, T, args, testers) \
-  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>( \
-      args, \
-      [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); }, \
-      [](T v, T n_pes) { \
-        return (v == n_pes) \
-            ? std::make_pair(true, std::string("")) \
-            : std::make_pair(false, \
-                  "Got " + std::to_string(static_cast<long long>(v)) + \
+#define ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, T, args, testers)                 \
+  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>(                              \
+      args,                                                                     \
+      [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); },     \
+      [](T v, T n_pes) {                                                        \
+        return (v == n_pes)                                                     \
+            ? std::make_pair(true, std::string(""))                             \
+            : std::make_pair(false,                                             \
+                  "Got " + std::to_string(static_cast<long long>(v)) +          \
                   ", Expect " + std::to_string(static_cast<long long>(n_pes))); \
       }));
 
-#define ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, T, args, testers) \
-  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>( \
-      args, \
-      [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); }, \
-      [](T v, T n_pes) { \
-        return (v == n_pes) \
-            ? std::make_pair(true, std::string("")) \
-            : std::make_pair(false, \
-                  "Got " + std::to_string(v) + \
-                  ", Expect " + std::to_string(n_pes)); \
+#define ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, T, args, testers)                 \
+  (testers).push_back(new TESTER<T, ROCSHMEM_SUM>(                              \
+      args,                                                                     \
+      [](T& f1, T& f2) { f1 = static_cast<T>(1); f2 = static_cast<T>(1); },     \
+      [](T v, T n_pes) {                                                        \
+        return (v == n_pes)                                                     \
+            ? std::make_pair(true, std::string(""))                             \
+            : std::make_pair(false,                                             \
+                  "Got " + std::to_string(v) +                                  \
+                  ", Expect " + std::to_string(n_pes));                         \
       }));
 
 // All types compiled by team_reduction / team_reduce_scatter / reduce_wave /
 // team_reduce_scatter_wave, each gated the same way the X-macro lists are.
-#define ROCSHMEM_PUSH_REDUCTION_ALL(TESTER, args, testers) \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("float")) \
-    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, float,     args, testers) } \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("double")) \
-    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, double,    args, testers) } \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("int")) \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, int,       args, testers) } \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("short")) \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, short,     args, testers) } \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long")) \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long,      args, testers) } \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long")) \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers) }
+#define ROCSHMEM_PUSH_REDUCTION_ALL(TESTER, args, testers)                                \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("float"))         \
+    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, float,     args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("double"))        \
+    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, double,    args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("int"))           \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, int,       args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("short"))         \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, short,     args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long"))          \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long,      args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))     \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}
 
 #endif // _TYPE_LISTS_HPP_
