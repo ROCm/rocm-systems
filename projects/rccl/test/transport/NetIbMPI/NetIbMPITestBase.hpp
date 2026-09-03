@@ -1941,7 +1941,9 @@ protected:
     // waited out -- the failed send consumed its FIFO slot -- and the work request holds
     // the memory region until the queue pair dies, which is after the worker must
     // deregister. Driving this side to error flushes it instead.
-    ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request) {
+    ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request,
+                                              NetMHandleWorkerGuard* registration = nullptr,
+                                              HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         if (!request) return result;
 
@@ -1963,9 +1965,19 @@ protected:
             if (done) return result;
             usleep(kPollIntervalUs);
         }
+        // This failure says precisely that the receive is still live, so releasing the
+        // memory now is the one thing that must not happen: the caller's guards would
+        // free a buffer the device can still write into. Keeping the registration
+        // without the allocation would not be safer, so both are retained.
         result.ok = false;
         result.msg = "the abandoned receive was still outstanding after its queue pairs were "
                      "driven to error";
+        if (registration || allocation) {
+            result.msg += "; the buffer and its registration are retained, since the request "
+                          "may still reference them";
+            if (registration) registration->release();
+            if (allocation) allocation->release();
+        }
         return result;
     }
 
