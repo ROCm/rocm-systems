@@ -62,7 +62,7 @@ get_kfd_fd();
  * @param pcs_ioctl_version - The PC sampling IOCTL version
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS - The method is supported
- * Other values informs users about the reason why the method is not supported.
+ * Other values inform users about the reason why the method is not supported.
  */
 rocprofiler_status_t
 is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,

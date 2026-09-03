@@ -33,6 +33,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
