@@ -1,0 +1,619 @@
+# ConSan seventh refactoring: discover the next structural collapse
+
+## 1. Status and mandate
+
+The sixth refactoring succeeded. It replaced five subsystems, reverted three
+economically unsuccessful experiments, and reduced the governing production
+implementation count from 88,023 to 83,516 lines without reducing supported
+modes, targets, or test coverage. Its final audit found no already-proven next
+replacement of comparable value.
+
+That conclusion is a starting condition for this plan, not a claim that ConSan
+is irreducibly an 83,000-line program. The seventh refactoring must discover
+the next large deletion opportunity by exerting pressure on the architecture
+that now exists. It may move component boundaries, replace representations,
+or replace whole subsystems when the evidence supports a large payoff. It may
+not resume an indefinite sequence of locally tidy, low-yield edits.
+
+The direction of travel is:
+
+> Make extension and change pressure reveal duplicated authority, then replace
+> the widest duplicated representation or lifecycle with one smaller semantic
+> path and delete every displaced implementation.
+
+Code shrinkage is a required outcome of the campaign, but line count is not a
+license to erase necessary distinctions, generate hidden code, weaken
+validation, or move implementation into tests. Better ownership and a smaller
+representation should cause deletion; deletion must then be reaped in the
+same macro-slice.
+
+The exact subsystem to replace remains a variable being solved for. The
+candidate examples in this document guide investigation but do not bound it.
+
+## 2. Consolidated starting tree
+
+Before writing this plan, the post-sixth tree was consolidated around its two
+extension axes.
+
+Architecture-owned code now lives under `targets/`:
+
+```text
+targets/
+  rdna3/
+  rdna4/
+  cdna3/
+  cdna4/
+  cdna5/
+  shared/
+    cdna3_cdna4/
+    gfx11_gfx12/
+    gfx12/
+    pregfx12/
+    rdna3_rdna4/
+  consan_*_target_ops.*       # normalized contracts and dispatch
+```
+
+The public generation names describe genuinely generation-specific owners.
+Exact product names such as gfx1100, gfx1201, gfx942, gfx950, and gfx1250
+remain in filenames where a file is about that exact target. Cross-generation
+encoding implementations are not copied into an arbitrary marketed
+generation: the shared gfx12 implementation, for example, is used by RDNA4
+and CDNA5, while the shared gfx9-CDNA implementation is used by CDNA3 and
+CDNA4.
+
+Mode-owned transformer code now lives under:
+
+```text
+modes/
+  record_replay/
+  sampled/
+  inline_shadow/
+  supercollider/
+```
+
+The host report stack mirrors this organization for Record/Replay, Sampled,
+and InlineShadow decoders, analyzers, renderers, and mode-only replay helpers.
+Mechanisms with real multiple-mode consumers remain in the shared directory.
+In particular, dynamic record emission, exact-shadow emission, common
+placement, report transport, patch publication, and shared lowering were not
+duplicated merely to make directory ownership look pure.
+
+The empty `consan_validation_gfx11_target_ops.cpp` tombstone was deleted. The
+production CMake ownership check is recursive, and the architecture-boundary
+test now rejects:
+
+- a concrete architecture-named production file outside `targets/`;
+- a mode-named production or host-report file outside `modes/`, except for
+  architecture providers under `targets/`;
+- target-operation files inside a mode directory;
+- generated ISA or concrete architecture knowledge in mode providers; and
+- mode policy in target providers.
+
+The hypothetical-target exercise now registers two independent normalized
+operation packages and proves exact selection plus fail-closed lookup of an
+unregistered target. The hypothetical-mode exercise does the analogous work
+with two independent policy packages, including target-neutral scratch,
+report, prologue, and call-form behavior.
+
+This consolidation was deliberately not a seventh-refactoring shrinkage
+slice. Relative to the sixth-refactoring final tree it removes one comment-only
+file and two lexically counted implementation lines introduced by formatting:
+
+| Signal | Sixth final | Consolidated baseline | Change |
+| --- | ---: | ---: | ---: |
+| Production files | 312 | 311 | -1 |
+| Physical production lines | 97,525 | 97,513 | -12 |
+| Nonblank production lines | 91,118 | 91,107 | -11 |
+| Production implementation lines | 83,516 | **83,514** | -2 |
+
+The consolidated implementation is distributed as follows:
+
+| Physical owner | Files | Implementation lines |
+| --- | ---: | ---: |
+| Shared static transformer | 174 | 47,618 |
+| Target packages and dispatch | 42 | 2,294 |
+| Record/Replay transformer mode | 12 | 5,887 |
+| Sampled transformer mode | 18 | 6,547 |
+| InlineShadow transformer mode | 14 | 5,941 |
+| SuperCollider transformer mode | 12 | 5,714 |
+| Shared host report/hook stack | 20 | 7,839 |
+| Record/Replay host mode | 7 | 559 |
+| Sampled host mode | 7 | 743 |
+| InlineShadow host mode | 5 | 372 |
+
+The full local-toolchain rebuild passed. The complete nonphysical ConSan gate
+passed 4,787/4,787 tests. The complete nonphysical RocJitsu gate then passed
+all 9,571 executed tests, with one disabled test and nine expected environment
+skips. These results cover all four modes and the gfx942, gfx950, gfx1100,
+gfx1201, and gfx1250 emulated targets.
+
+## 3. What the physical layout reveals
+
+The new tree makes the two intended growth axes visible, but physical locality
+does not by itself prove semantic independence.
+
+Target locality is already strong. Only 2,294 implementation lines are in the
+target component, and exact target packages are small: 7 lines for the CDNA3
+profile, 9 for CDNA4, 87 for RDNA3, 130 for RDNA4, and 293 for CDNA5. Most
+target implementation is correctly shared through normalized dispatch and
+encoding-family packages. Architecture code is therefore unlikely to be the
+largest direct deletion source. Its more valuable role in the seventh
+refactoring is as an extension-pressure probe: a hypothetical new encoding
+family can reveal common code that still assumes the current closed set.
+
+Mode locality is physically strong but semantically less complete. Several
+shared aggregation or coordination files import mode-owned products:
+
+- `consan_moi_report_contract.h` aggregates every mode's report ABI;
+- `consan_moi_barrier.cpp` assembles Record/Replay and InlineShadow barrier
+  bodies into a shared placement mechanism;
+- `consan_moi_pipeline.cpp`, `consan_moi_placement.cpp`, and
+  `consan_moi_prologue.cpp` consume selected mode products;
+- `consan.h` aggregates SuperCollider route and spill types; and
+- the generic host decoder, analyzer, renderer, and hook coordinator consume
+  mode-owned report stages.
+
+Some of these are legitimate one-way registries or public umbrella contracts.
+Others may indicate that a common mechanism and a mode policy still meet in
+more than one place, or that an intermediate representation is too broad.
+Directory movement intentionally does not answer which is which. The seventh
+refactoring must trace the values crossing each seam and distinguish a narrow
+composition edge from a repeated lifecycle.
+
+The largest remaining files are also not automatic refactoring targets. The
+4,653-line HSA hook coordinator, 4,502-line MOI placement body, 3,788-line
+validation body, 3,053-line SuperCollider LDS body, 2,716-line MOI prologue,
+2,631-line synchronization emitter, 2,475-line synchronization analysis, and
+2,419-line Sampled synchronization body contain substantial distinct behavior.
+Sixth-refactoring experiments demonstrated that similarity of control-flow
+shape or file size alone can yield a larger abstraction and almost no net
+deletion.
+
+The useful post-consolidation question is therefore not "which file is
+largest?" It is:
+
+> Which fact, decision, or lifecycle is independently reconstructed across
+> these now-visible owners, and what smaller authority could make the
+> reconstructions disappear?
+
+## 4. Proposed executable goal
+
+Carry out a discovery-driven structural refactoring of ConSan from the
+83,514-line consolidated baseline. Use extension pressure, change-impact
+tracing, comparative mode reads, and representation-lifetime analysis to find
+large duplicated authorities. For every accepted macro-slice, state a
+falsifiable deletion thesis, replace the complete subsystem boundary, delete
+the displaced implementations and compatibility paths, preserve independent
+validation and all behavior, and measure the net result. Continue until at
+least 3,000 net production implementation lines have been removed and a fresh
+whole-tree audit finds no comparably strong remaining candidate, or until
+multiple serious experiments produce concrete evidence that the remaining
+distinctions cannot be collapsed economically. Do not substitute
+micro-refactoring for this outcome.
+
+The 3,000-line value is a review floor, not an automatic completion condition.
+A 5,000-line reduction is the stretch objective. If a credible high-payoff
+candidate remains after either number, the campaign continues. If a candidate
+fails, record the negative result, revert its production scaffold, and change
+the hypothesis rather than weakening the economics.
+
+## 5. Discovery phase: pressure the extension seams
+
+### 5.1 Full hypothetical-target exercise
+
+The current target exercise proves the generic registry, which is necessary
+but intentionally small. The next exercise should temporarily model a sixth
+target deeply enough to touch the complete target-normalization surface:
+
+- immutable target profile and exact target identity;
+- program-analysis decoding;
+- fault mutation operations;
+- validation operations;
+- target LDS/VGPR-bank behavior where applicable; and
+- the target operations consumed by SuperCollider and MOI.
+
+The exercise need not invent a real ISA or remain as a production target. A
+test-owned synthetic encoding package is sufficient if it compiles and drives
+the real normalized consumers. Maintain an edit ledger containing every
+production file outside the new target package that had to change. Each such
+edit is either a legitimate single registry insertion or evidence that target
+knowledge remains distributed. Multiple edits expressing the same new target
+fact identify a candidate authority to collapse.
+
+The exercise is successful as discovery even if its temporary target is later
+removed. Any generic seam strengthened by it should remain in executable
+tests. Do not retain a fake production architecture merely to demonstrate the
+point.
+
+### 5.2 Full hypothetical-mode exercise
+
+Similarly, temporarily model a fifth mode through a vertical but deliberately
+small behavior:
+
+- request and mode selection;
+- object planning and resource demand;
+- at least one access and one synchronization evidence path;
+- report layout and static attribution;
+- host snapshot, decode, analysis, and rendering; and
+- independent final-validation obligations for its patches.
+
+The hypothetical mode should use the existing normalized target interface and
+must not add per-target implementations. Record every production edit outside
+its new mode directories. A single explicit registry or umbrella import is
+acceptable. Repeated switches, parallel field projections, mode-sized arrays,
+or shared structs that must grow in several stages are evidence of an axis
+leak.
+
+This is not a request to ship a toy mode. Its purpose is to measure the real
+cost of adding one and expose the representations responsible for edit fanout.
+Keep the strongest generic extension tests and delete the temporary product
+once the experiment has selected its macro candidate.
+
+### 5.3 Cross the axes deliberately
+
+Run the hypothetical target and hypothetical mode together. The new mode must
+work over the synthetic target by composition, without a mode-by-target file,
+switch, or adapter. Any required pair-specific edit is high-priority evidence
+of `O(N*M)` structure.
+
+The exercise should distinguish three costs:
+
+1. unavoidable registration of a new public identity;
+2. one-axis implementation inside the new target or mode package; and
+3. edits to old common, old target, or old mode owners.
+
+The third category is the deletion frontier. Do not hide it by adding a broad
+callback table or generated registry before understanding what every edit
+means.
+
+## 6. Discovery phase: trace representations, not tokens
+
+### 6.1 Representation-lifetime ledger
+
+For one semantic fact at a time, trace its complete lifetime from request or
+decoded instruction to host verdict. Record:
+
+- the authority that first knows the fact;
+- every struct, optional field, enum, string, index, or pointer that carries
+  it;
+- every place that re-derives or revalidates it;
+- every consumer and the exact subset it needs;
+- the point at which it becomes dead; and
+- the code required only to translate between two adjacent representations.
+
+Prefer facts that cross many of the newly visible boundaries: owner/epoch
+identity, access geometry, synchronization edges, report identity, patch
+geometry, dispatch/workgroup identity, scratch and persistent state, and
+failure diagnostics. A candidate becomes strong when deleting one middle
+representation removes several producer projections, consumer reconstruction
+passes, well-formedness switches, and compatibility tests at once.
+
+### 6.2 Change-impact archaeology
+
+Use recent behavioral fixes and accepted sixth-refactoring slices as probes.
+For each change, map the files and representations that had to move together.
+Repeatedly co-edited fields across analysis, planning, emission, validation,
+and host reporting reveal an implicit component even when the code is not
+textually duplicated. Conversely, files that merely changed together because
+an include path moved are not evidence.
+
+Issue fixes are especially useful because they start from observable behavior
+rather than a desired abstraction. A bug that required parallel corrections
+to multiple authorities is a candidate for structural collapse. A bug fixed
+in one semantic owner with broad tests is evidence that the current boundary
+is already sound.
+
+### 6.3 Comparative reads inside the new directories
+
+Read corresponding responsibilities side by side across all four mode
+directories and all target packages. Classify regions as:
+
+- identical mechanism with different typed inputs;
+- same semantic state machine encoded with different storage;
+- shared prefix or suffix around a genuinely different core;
+- independently reconstructed common fact; or
+- legitimately different behavior that only looks structurally similar.
+
+The output is a responsibility matrix with approximate line ownership and a
+proposed smaller representation, not a token-hit or clone count. Similar
+syntax without a common semantic lifecycle does not qualify.
+
+### 6.4 Delete-the-middle prototypes
+
+When the ledger identifies adjacent representations of the same decision,
+prototype bypassing the middle representation for one difficult path. Measure
+the producer code, consumer code, validators, adapters, and tests that would
+disappear after complete convergence. This is more informative than first
+building a general framework.
+
+The prototype must include the hardest mode and target variants early. A
+design tested only on the simplest path often grows into a union-shaped
+abstraction during convergence and loses its expected deletion.
+
+## 7. Current candidate families -- examples, not scope
+
+These are the strongest places to begin the discovery instruments. They are
+not a promise to refactor all or any of them.
+
+### 7.1 One report identity from device layout to host verdict
+
+The report path spans mode-owned device layouts, common report aggregation,
+static runtime mapping, host snapshotting, mode decoders, analyzers, renderers,
+and the hook coordinator. Investigate whether the same identity, bounds,
+completeness, and provenance facts are represented and checked in several
+forms. A smaller immutable validated report view could potentially delete
+field-by-field projections and repeated bounds/lifecycle code while leaving
+mode interpretation local.
+
+This candidate is rejected if it becomes a generic field-schema DSL, generated
+implementation, or variant containing every mode's semantics. The payoff must
+come from deleting real repeated ownership, not from moving decoder code into
+tables.
+
+### 7.2 Evidence intent through planning, emission, and proof
+
+Accesses, atomics, barriers, and fences travel through intent, site planning,
+resource plans, mode-local emission plans, patch commits, runtime mappings,
+and final proof. Investigate whether one or more middle products merely
+serialize a decision that the next stage reconstructs. A direct immutable
+semantic transaction or a smaller proof-carrying emission plan could delete
+translation and validation scaffolding across several site kinds.
+
+This is not permission to retry the failed sixth-refactoring monolithic access
+transaction. That experiment proved that callbacks and a union of mode
+policies do not pay. A new attempt requires a different representation insight
+that removes a lifecycle rather than wrapping the existing ones.
+
+### 7.3 Persistent state from prologue through placement
+
+The sixth refactoring removed repeated scalar-range reconstruction, but MOI
+placement and prologue remain large and communicate through broad operating,
+resource, private-layout, and owner-local state. Use the hypothetical-mode
+exercise to determine which of those fields every new mode must understand.
+Look for state that is selected, projected, requalified, and restored through
+parallel scalar, vector, and private-media paths.
+
+A credible replacement would unify the semantic lifetime of persistent state
+while keeping storage-specific emission explicit. It is rejected if it
+becomes a general constraint solver, changes fallback priority, or merely
+moves the existing branches behind virtual callbacks.
+
+### 7.4 Synchronization knowledge across analysis and modes
+
+Synchronization analysis, shared synchronization emission, Sampled
+synchronization, Record/Replay barriers/fences, and InlineShadow causal state
+all consume related ordering events. Trace whether they share one normalized
+edge or repeatedly rebuild association, scope, owner, epoch, and attachment
+facts. A smaller immutable synchronization event graph might remove multiple
+projections and mode-local searches.
+
+This candidate must preserve the genuine differences between barrier
+lifecycle, atomic ordering, ordinary acquire/release, execution ownership, and
+move-destination proof. The earlier estimate that simply merging fault and
+synchronization inventories saves only 250--350 lines is not sufficient. It
+becomes a macro candidate only if a deeper representation replaces at least
+one substantial mode-side lifecycle as well.
+
+### 7.5 Shared-to-mode reverse dependencies
+
+Audit every shared file that imports a mode-owned header or fragment. For each
+edge, decide whether it is:
+
+- the one legitimate registry/umbrella edge;
+- a common mechanism parameterized by a narrow mode product;
+- a mode implementation physically assembled into a common owner; or
+- evidence of a broad product that forces common code to know mode details.
+
+The desired result is not zero imports at any cost. The desired result is one
+obvious composition boundary per responsibility. If several reverse edges
+exist because a mode decision is split across planning, placement, prologue,
+and emission, replacing that split authority may delete more code than
+mechanically introducing interfaces.
+
+### 7.6 Host hook lifetime and registry state
+
+The shared host stack is 7,839 implementation lines, including a 4,653-line
+hook coordinator. The sixth audit found largely distinct HSA interception,
+process lifetime, allocation, report collection, and verdict policy, so size
+alone does not justify replacement. Reconsider it only through lifetime
+tracing: if the same executable/report/allocation identity is maintained in
+parallel registries or reconstructed at several callbacks, one ownership
+object could remove cleanup, recovery, and cross-map synchronization code.
+
+Do not split the file merely for readability and count that as progress. The
+candidate qualifies only when a registry or lifecycle disappears.
+
+### 7.7 SuperCollider access protocols
+
+The LDS and FLAT bodies are now clearly isolated inside the SuperCollider mode
+and share target operations outside it. The sixth audit found their routing
+and address-space protocols genuinely different. Reopen this region only if a
+new comparison identifies a representation below those protocols—for example,
+one already-resolved access action whose construction, publication, and proof
+are still repeated. A common body that encodes both protocols as options is a
+rejected result.
+
+## 8. Negative knowledge that must be preserved
+
+Do not repeat a failed sixth-refactoring experiment without a materially new
+deletion thesis:
+
+- the monolithic MOI access transaction moved mode differences into callbacks
+  and did not produce the forecast deletion;
+- decoded validation restated independent proof obligations and added 617
+  physical lines;
+- the fully converged dense-relay transaction removed only 147 net lines
+  because the apparent repetition was mostly distinct site admission,
+  placement, body construction, routing identity, and fallback policy.
+
+Likewise, preserve the accepted sixth-refactoring authorities. Do not
+reintroduce parallel instruction builders, enum spelling tables, a private
+SuperCollider direct reservoir, split fault planning and re-resolution,
+ad-hoc scalar range reconstruction, or the fixed all-expected-CAS validation
+bug.
+
+Negative results are architectural evidence. Record why an experiment failed,
+revert all of its production scaffold, and require a different underlying
+representation before revisiting the region.
+
+## 9. Macro-slice protocol
+
+### 9.1 Bound and deep-read
+
+Trace one complete semantic lifecycle and all difficult consumers. Quantify
+the existing implementation that the replacement would actually delete.
+Include the hardest mode and architecture cases in the initial read.
+
+### 9.2 State a falsifiable deletion thesis
+
+Before substantial implementation, record:
+
+- the duplicated authority or representation;
+- the smaller replacement and its owner;
+- every old producer, consumer, adapter, field, and test scaffold that will be
+  deleted;
+- the semantic distinctions that remain explicit;
+- estimated gross deletion, new implementation cost, and net reduction;
+- focused differential and corruption tests; and
+- abort conditions.
+
+An accepted macro candidate should forecast at least 1,000 net implementation
+lines of deletion. A 750-line net result is the normal abort floor. A smaller
+enabling change is allowed only inside the same macro-slice when complete
+convergence still has a credible four-digit payoff; it is not an independent
+checkpoint.
+
+### 9.3 Attack the hard variant first
+
+Prototype the representation on the mode/target combination that puts the
+most pressure on it. If the design immediately needs mode enums, target
+switches, opaque callbacks, a union of every old product, or parallel old/new
+state, stop and reassess before migrating easy cases.
+
+### 9.4 Converge completely and delete
+
+Move all consumers required by the thesis. Delete old entry points, fields,
+reconstruction passes, compatibility adapters, well-formedness switches, and
+tests that exist only for the removed representation. Preserve their behavior
+through tests of the new semantic boundary. No accepted slice ends with two
+authorities pending a later cleanup.
+
+### 9.5 Validate, account, and reassess globally
+
+Run focused tests during convergence, the complete nonphysical ConSan matrix
+at meaningful cutovers, and the complete nonphysical RocJitsu matrix before
+closing a macro-slice. Record exact implementation accounting and any new
+regression tests. Then return to the whole tree and choose the strongest
+remaining candidate; do not continue polishing the just-completed subsystem
+by inertia.
+
+## 10. Anti-circling and code-economics rules
+
+1. File movement, renaming, wrapper extraction, and interface introduction do
+   not count as seventh-refactoring shrinkage.
+2. Do not start a candidate because a file is large or two loops look alike.
+   Identify the duplicated semantic authority first.
+3. Do not build a framework speculatively. Prove the smaller value or
+   lifecycle on one hard vertical path, then converge or revert.
+4. Count all new common code, adapters, tables, and external enabling changes
+   against the deletion result.
+5. Do not move implementation into tests, generators, build scripts, data
+   tables, templates, or comments to improve the metric.
+6. Do not keep compatibility paths for private ConSan internals after their
+   callers migrate.
+7. A new abstraction with one consumer must justify itself by immediate gross
+   deletion or disappear with the slice.
+8. If two serious candidates fail their economics consecutively, stop
+   implementation and repeat the cross-axis and representation discovery
+   passes before choosing a third.
+9. Do not fill a numeric gap with micro-deletions. Small dead-code harvesting
+   is required inside a macro-slice but is not a substitute for structural
+   collapse.
+10. A bug found during any experiment is fixed immediately and receives a
+    regression test, even if the experiment itself is later reverted.
+
+## 11. Fixed invariants
+
+- Preserve Record/Replay, Sampled, InlineShadow, and SuperCollider behavior.
+- Preserve gfx942/CDNA3, gfx950/CDNA4, gfx1100/RDNA3, gfx1201/RDNA4, and
+  gfx1250/CDNA5 support.
+- Keep concrete architecture implementation under `targets/`, using public
+  generation names for generation owners and exact gfx names for exact-target
+  files.
+- Keep mode implementation under its mode directory; shared mechanisms remain
+  single implementations outside those directories.
+- Do not introduce a mode-by-target implementation matrix.
+- Keep target providers free of mode policy and mode providers free of raw ISA
+  architecture decoding.
+- Preserve independent final validation. A producer's plan, pointers, or
+  success verdict cannot become the validator's proof.
+- Preserve fail-closed behavior, transactional mutation, exact resource and
+  liveness semantics, runtime report trust, and public diagnostics.
+- Preserve or strengthen tests. When a representation-specific test is
+  retired, replace it with the strongest behavioral or corruption contract
+  that pins the same obligation.
+- Build and test with the local TheRock toolchain at `-j16`.
+- Run nonphysical tests as the normal gate. Physical gfx1201 testing is an
+  infrequent, deliberate milestone rather than a routine iteration cost.
+- Make frequent coherent local commits and never push.
+
+## 12. Accounting and completion
+
+The seventh-refactoring baseline is the consolidated 311-file tree at 83,514
+production implementation lines. The governing scope remains:
+
+- `lib/rocjitsu/src/rocjitsu/code/patch/consan/` and
+  `lib/rocjitsu/src/rocjitsu/hooks/consan/`;
+- production `*.cpp`, `*.h`, and `*.inc` files only; and
+- tests, generated code, documentation, comments, and blank lines excluded.
+
+For every macro-slice, record physical, nonblank, and implementation lines;
+gross deletions; new implementation; net reduction; deleted representations;
+retained distinctions; tests added or strengthened; modes and targets run;
+and any production cost outside the governing directories.
+
+The seventh refactoring is complete only when all of the following hold:
+
+1. At least 3,000 net governing implementation lines have been removed, with
+   no metric displacement or product-scope reduction.
+2. At least one accepted subsystem replacement has removed 750 net lines, and
+   the campaign is not merely an accumulation of small cleanups.
+3. The full hypothetical target and mode pressure exercises have been
+   performed, including their cross-axis composition, and their production
+   edit fanout has either been eliminated or justified as a narrow registry
+   boundary.
+4. Every accepted slice has one surviving authority and no compatibility
+   adapter, parallel representation, abandoned scaffold, or deferred deletion.
+5. The target and mode directory boundaries remain truthful, and common code
+   does not regain raw axis-specific policy.
+6. Independent validation and runtime fail-closed behavior remain intact.
+7. Every discovered bug has a regression test.
+8. The complete nonphysical ConSan and RocJitsu gates pass; a deliberately
+   selected physical milestone is used only when the behavioral risk warrants
+   it.
+9. A fresh whole-tree deep read, not just the initial candidate list, finds no
+   comparably strong unattempted macro replacement that belongs in this
+   campaign, or records concrete negative evidence for the remaining options.
+
+Reaching 3,000 lines does not end the work while a stronger candidate remains.
+Conversely, if repeated hard prototypes show that the remaining apparent
+duplication is semantic rather than representational, stop with the measured
+evidence instead of manufacturing an abstraction or silently changing the
+goal.
+
+## 13. Deliberately deferred and deliberately open
+
+Broader design-document rewrites and CI integration are deferred to a later
+phase. The executable boundary test remains the local enforcement mechanism
+during this campaign. Documentation of macro-slice theses, measurements, and
+negative results belongs in this file because it directly controls execution;
+general user or maintainer documentation does not.
+
+The destination design is deliberately not prescribed. The seventh
+refactoring may discover that the correct collapse lies in report identity,
+evidence planning, persistent-state lifetime, synchronization representation,
+host registries, or a component not named here. Component boundaries may move
+substantially. The stable direction is that a fact is decided once, represented
+for only as long as necessary, consumed through one obvious path, independently
+validated where trust requires it, and never multiplied by both mode and
+architecture.
