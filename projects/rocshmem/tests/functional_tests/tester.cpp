@@ -1550,13 +1550,19 @@ void Tester::print(uint64_t size) {
   int float_precision = 2;
 
   if (_print_header) {
-    printf("%-*s%-*s%-*s%*s%*s%*s",
+    const std::string tname = typeName();
+    std::string type_header = "";
+    if (!tname.empty()) {
+      type_header = "   Type: " + tname;
+    }
+    printf("%-*s%-*s%-*s%*s%*s%*s%s\n",
            15, "# Volume (B)",
            15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
            field_width, "Bandwidth (GB/s)",
-           field_width + 1, "Msg Rate (Msg/s)\n");
+           field_width + 1, "Msg Rate (Msg/s)",
+           type_header.c_str());
     _print_header = 0;
   }
 
