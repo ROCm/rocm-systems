@@ -86,17 +86,20 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   case 4:
     dda::common::ddaAllGatherFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen,
+                                                                        comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaAllGatherFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen,
+                                                                        comm->abortFlagDev);
     break;
   default:
     dda::common::ddaAllGatherFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen,
+                                                                        comm->abortFlagDev);
     break;
   }
 

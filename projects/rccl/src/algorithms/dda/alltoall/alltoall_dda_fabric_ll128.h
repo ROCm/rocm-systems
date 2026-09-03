@@ -55,7 +55,8 @@ __launch_bounds__(1024)
                                          size_t perChunkBytes, // per-peer chunk payload; multiple of 16
                                          int selfRank, int nRanksRt,
                                          uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                         int epochLen) { // number of cells in epochDev
+                                         int epochLen, // number of cells in epochDev
+                                         const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
@@ -135,7 +136,8 @@ __launch_bounds__(1024)
     for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       // all 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
+      if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, abortFlag)) {
+        break;
       }
       if (lane < kDdaLL128DataElems) {
         const size_t e = base + (size_t)lane;

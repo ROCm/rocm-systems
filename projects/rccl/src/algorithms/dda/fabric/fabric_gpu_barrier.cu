@@ -20,7 +20,7 @@ namespace dda::common {
 
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
 FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
-                                struct ncclMemManager* manager) {
+                                struct ncclMemManager* manager, const uint32_t* abortFlag) {
   if (nRanks <= 0 || nRanks > kDdaMaxNranks) {
     WARN("FabricGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)", nRanks, kDdaMaxNranks);
     return {nullptr, FabricGpuBarrier{}};
@@ -96,7 +96,7 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()));
+  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()), abortFlag);
 
   auto resources = std::make_unique<FabricGpuBarrierResources>();
   resources->fabricMemHandler = std::move(memHandler);

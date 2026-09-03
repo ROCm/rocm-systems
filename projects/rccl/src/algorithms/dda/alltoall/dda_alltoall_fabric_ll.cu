@@ -74,17 +74,20 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   case 4:
     dda::common::ddaAllToAllFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                        static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+                                                                       comm->rank, nRanks, epochDev, epochLen,
+                                                                       comm->abortFlagDev);
     break;
   case 8:
     dda::common::ddaAllToAllFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                        static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+                                                                       comm->rank, nRanks, epochDev, epochLen,
+                                                                       comm->abortFlagDev);
     break;
   default:
     dda::common::ddaAllToAllFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                        static_cast<const T*>(sendbuff), perChunkBytes,
-                                                                       comm->rank, nRanks, epochDev, epochLen);
+                                                                       comm->rank, nRanks, epochDev, epochLen,
+                                                                       comm->abortFlagDev);
     break;
   }
 
