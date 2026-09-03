@@ -27,6 +27,7 @@
 #cmakedefine BUILD_DEBUG_TRACE_DEVICE
 #cmakedefine BUILD_DEBUG_DEVICE
 #cmakedefine USE_RO
+#cmakedefine USE_VERBS
 #cmakedefine USE_IPC
 #cmakedefine USE_GDA
 #cmakedefine USE_SDMA
