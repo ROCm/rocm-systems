@@ -32,8 +32,8 @@ inline constexpr std::size_t kMaxNestedArgItems = 8;
 // Maximum number of characters taken from a string IValue.
 inline constexpr std::size_t kMaxStringChars = 32;
 
-// Truncate an over-length args blob to kMaxArgsLen characters and append an
-// ellipsis, keeping the closing ')' when the blob is parenthesized.
+// Truncate an args blob to kMaxArgsLen characters and append an ellipsis,
+// preserving a closing ')' for parenthesized blobs.
 inline std::string cap_args_blob(std::string blob)
 {
     if (blob.size() <= kMaxArgsLen)
