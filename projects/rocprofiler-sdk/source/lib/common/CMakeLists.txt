@@ -65,10 +65,9 @@ if(NOT TARGET rocm-sha256)
     # sha256.cpp got these through common_sources. Applied only when this project created
     # the target, so another consumer is not given our flags.
     #
-    # The headers/abseil/fmt entries and the definition restore ROCP_CI_LOG_IF to
-    # the macro logging.hpp defines. Without them sha256.cc falls back to a stderr
-    # note and this project silently loses the fatal-under-CI check on updating a
-    # finalized digest.
+    # The headers/abseil/fmt entries and the definition restore ROCP_CI_LOG_IF to the
+    # macro logging.hpp defines. Without them sha256.cc falls back to a stderr note and
+    # this project silently loses the fatal-under-CI check on updating a finalized digest.
     target_compile_definitions(rocm-sha256 PRIVATE ROCM_SHA256_ROCPROFILER_LOGGING)
     target_link_libraries(
         rocm-sha256
