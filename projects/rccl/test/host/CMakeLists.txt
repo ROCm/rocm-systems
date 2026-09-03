@@ -48,6 +48,13 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
+  # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
+  # Inheriting ENABLE_ROCSHMEM_GIN defaults NCCL_GIN_ANVIL_SDMA_ENABLE to 1, which pulls
+  # in rocSHMEM's sdma device headers.
+  if(ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(rccl-UnitTestsMicro PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+  endif()
+
   # Apply HIP's *compile* usage requirements (headers, device intrinsics/codegen,
   # compile defs) WITHOUT linking the HIP runtime. $<COMPILE_ONLY:hip::host> would
   # express this in one line but requires CMake >= 3.27; pulling the interface
@@ -188,6 +195,9 @@ if(BUILD_TESTS)
     # init.cc), so hipify keeps its name -- no _tmp suffix.
     target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(${_init_tgt} PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    endif()
     if(_variant STREQUAL "-uncached")
       target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
     endif()
@@ -407,6 +417,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_compile_options(-Wno-tautological-constant-out-of-range-compare)
 
+# Wrapper around add_executable() that also records the target in
+# HOST_TEST_BINARIES, so the coverage block at the end of this file instruments
+# every host-only test binary without a separately-maintained list. A macro
+# (not a function) so list(APPEND) mutates the caller's variable. Use this
+# instead of add_executable() for every test binary in the standalone build.
+macro(add_test_executable _name)
+  list(APPEND HOST_TEST_BINARIES ${_name})
+  add_executable(${_name} ${ARGN})
+endmacro()
+
 find_package(Threads REQUIRED)
 include(FetchContent)
 
@@ -573,7 +593,7 @@ target_link_libraries(rccl-source-wrappers PRIVATE
 )
 
 # --- Main test executable ---
-add_executable(rccl-HostUnitTests
+add_test_executable(rccl-HostUnitTests
   main.cpp
   ${RCCL_TEST_DIR}/BitOpsTests.cpp
   ${RCCL_TEST_DIR}/IommuPassthrough_test.cpp
@@ -612,27 +632,6 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-# llvm source-based coverage (host-only build: no -Xarch_device split needed
-# because --offload-host-only never runs the amdgcn device pass; see the
-# CMAKE_CXX_FLAGS_INIT above). On by default so the binary always produces a
-# profile; disable with -DHOST_UT_COVERAGE=OFF.
-#
-# RCCL_TEST_CODE_COVERAGE is what makes process-isolated tests flush their
-# counters in the forked child (test/common/ProcessIsolatedTestRunner.cpp).
-# Without it those tests run but contribute nothing to the profile, so it is
-# tied to the same switch rather than exposed separately.
-# rccl-source-wrappers must be instrumented too: mem_manager.cc reaches the
-# binary through that static library, so instrumenting only the executable
-# silently drops it from the report -- the profile still looks healthy, it just
-# has no record of that file at all.
-option(HOST_UT_COVERAGE "Build rccl-HostUnitTests with llvm source-based coverage" ON)
-if(HOST_UT_COVERAGE)
-  target_compile_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_compile_definitions(rccl-HostUnitTests PRIVATE RCCL_TEST_CODE_COVERAGE=1)
-  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-endif()
-
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 
 target_link_libraries(rccl-HostUnitTests PRIVATE
@@ -657,7 +656,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # DEVCOMM_V22907_CC_PATH) and
 # satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
 # HIP runtime.
-add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+add_test_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
 
 target_compile_options(rccl-UnitTestsMicro PRIVATE
   -Wno-unused-parameter -Wno-unused-variable)
@@ -694,15 +693,6 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
   fmt::fmt-header-only
 )
 
-# llvm source-based coverage (host-only build: no -Xarch_device split needed
-# because --offload-host-only never runs the amdgcn device pass).
-# On by default; disable with -DMICRO_COVERAGE=OFF.
-option(MICRO_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" ON)
-if(MICRO_COVERAGE)
-  target_compile_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-endif()
-
 # --- Standalone init micro-test binaries --------------------------------
 # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc,
 # same model as rccl-UnitTestsMicro. Compiles the real host-only oracle TUs
@@ -735,7 +725,7 @@ set(TEST_MICRO_INIT_SOURCE_FILES
 # with different -D (see the in-build block above for the full rationale).
 foreach(_variant "" "-uncached")
   set(_init_tgt "rccl-UnitTestsMicroInit${_variant}")
-  add_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
+  add_test_executable(${_init_tgt} ${TEST_MICRO_INIT_SOURCE_FILES})
 
   target_compile_options(${_init_tgt} PRIVATE
     -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
@@ -768,13 +758,7 @@ foreach(_variant "" "-uncached")
     Threads::Threads
     fmt::fmt-header-only
   )
-
-  if(MICRO_COVERAGE)
-    target_compile_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(${_init_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  endif()
 endforeach()
-
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (standalone mode) -- see the in-build block for the
@@ -823,7 +807,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
 # the shipping arm would go untested by that workflow entirely.
 foreach(_enq_variant "" "-devlinker")
   set(_enq_tgt "rccl-UnitTestsMicroEnqueue${_enq_variant}")
-  add_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
+  add_test_executable(${_enq_tgt} ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
 
   target_compile_options(${_enq_tgt} PRIVATE
     -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
@@ -856,14 +840,37 @@ foreach(_enq_variant "" "-devlinker")
     Threads::Threads
     fmt::fmt-header-only
   )
-
-  if(MICRO_COVERAGE)
-    target_compile_options(${_enq_tgt} PRIVATE
-      -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(${_enq_tgt} PRIVATE
-      -fprofile-instr-generate -fcoverage-mapping)
-  endif()
 endforeach()
+
+# --- Coverage (all host-only test binaries) -----------------------------
+# Single switch for the whole standalone build: llvm source-based coverage is
+# either on for every host-only test binary or off for all of them. Host-only
+# build, so no -Xarch_device split is needed -- --offload-host-only never runs
+# the amdgcn device pass (see CMAKE_CXX_FLAGS_INIT above). On by default so the
+# binaries always produce a profile; disable with -DHOST_TEST_COVERAGE=OFF.
+#
+# Applied uniformly, per target:
+#  - the -fprofile-instr-generate/-fcoverage-mapping instrumentation flags;
+#  - RCCL_TEST_CODE_COVERAGE=1, which is what makes process-isolated tests flush
+#    their counters in the forked child (common/ProcessIsolatedTestRunner.cpp).
+#    Without it those tests run but contribute nothing to the profile;
+#  - libdl, which the RCCL_TEST_CODE_COVERAGE dlsym() path in that runner needs
+#    (empty where libdl is folded into libc, glibc >= 2.34).
+# rccl-source-wrappers is a static library reached by rccl-HostUnitTests, so it
+# only takes the instrumentation flags -- mem_manager.cc reaches the binary
+# through it and otherwise disappears from the report entirely.
+option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
+if(HOST_TEST_COVERAGE)
+  # HOST_TEST_BINARIES is populated by add_test_executable() above, so new test
+  # binaries are instrumented automatically.
+  foreach(_cov_tgt ${HOST_TEST_BINARIES})
+    target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_compile_definitions(${_cov_tgt} PRIVATE RCCL_TEST_CODE_COVERAGE=1)
+    target_link_libraries(${_cov_tgt} PRIVATE ${CMAKE_DL_LIBS})
+  endforeach()
+  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
 
 # NOTE: the standalone project intentionally does not register these binaries
 # with CTest (matching test/host from #9320); run them directly, e.g.

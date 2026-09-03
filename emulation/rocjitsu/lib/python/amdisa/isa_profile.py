@@ -581,6 +581,77 @@ class IsaProfile(ABC):
         return frozenset()
 
     @property
+    def integer_clamp_dtypes(self) -> dict[str, str]:
+        """Integer instructions that require saturation-aware lowering.
+
+        CLAMP is present in the shared VOP3 encoding, but it is not legal for
+        every opcode in that encoding. Keep the instruction-level policy here
+        instead of inferring support from the encoding field alone. ADD_MIN/MAX
+        always saturate their internal addition; the remaining instructions use
+        this policy to apply their encoded CLAMP modifier.
+        """
+        return {
+            'V_ADDC_CO_U32': 'u32',
+            'V_ADD_MAX_I32': 'i32',
+            'V_ADD_MAX_U32': 'u32',
+            'V_ADD_MIN_I32': 'i32',
+            'V_ADD_MIN_U32': 'u32',
+            'V_ADD_CO_CI_U32': 'u32',
+            'V_ADD_CO_U32': 'u32',
+            'V_ADD_I16': 'i16',
+            'V_ADD_I32': 'i32',
+            'V_ADD_NC_I16': 'i16',
+            'V_ADD_NC_I32': 'i32',
+            'V_ADD_NC_U16': 'u16',
+            'V_ADD_NC_U32': 'u32',
+            'V_ADD_NC_U64': 'u64',
+            'V_ADD_U16': 'u16',
+            'V_ADD_U32': 'u32',
+            'V_MAD_I16': 'i16',
+            'V_MAD_I32_I16': 'i32',
+            'V_MAD_I32_I24': 'i32',
+            'V_MAD_I64_I32': 'i64',
+            'V_MAD_CO_I64_I32': 'i64',
+            'V_MAD_CO_U64_U32': 'u64',
+            'V_MAD_NC_I64_I32': 'i64',
+            'V_MAD_NC_U64_U32': 'u64',
+            'V_MAD_U16': 'u16',
+            'V_MAD_U32_U16': 'u32',
+            'V_MAD_U32_U24': 'u32',
+            'V_MAD_U64_U32': 'u64',
+            'V_MQSAD_PK_U16_U8': 'u16',
+            'V_MQSAD_U32_U8': 'u32',
+            'V_MSAD_U8': 'u32',
+            'V_MUL_I32_I24': 'i32',
+            'V_MUL_U32_U24': 'u32',
+            'V_PK_MAD_I16': 'i16',
+            'V_PK_MAD_U16': 'u16',
+            'V_SAD_HI_U8': 'u32',
+            'V_SAD_U8': 'u32',
+            'V_SAD_U16': 'u32',
+            'V_SAD_U32': 'u32',
+            'V_QSAD_PK_U16_U8': 'u16',
+            'V_SUBBREV_CO_U32': 'u32',
+            'V_SUBB_CO_U32': 'u32',
+            'V_SUBREV_CO_CI_U32': 'u32',
+            'V_SUBREV_CO_U32': 'u32',
+            'V_SUBREV_NC_U32': 'u32',
+            'V_SUBREV_U16': 'u16',
+            'V_SUBREV_U32': 'u32',
+            'V_SUB_CO_CI_U32': 'u32',
+            'V_SUB_CO_U32': 'u32',
+            'V_SUB_I16': 'i16',
+            'V_SUB_I32': 'i32',
+            'V_SUB_NC_I16': 'i16',
+            'V_SUB_NC_I32': 'i32',
+            'V_SUB_NC_U16': 'u16',
+            'V_SUB_NC_U32': 'u32',
+            'V_SUB_NC_U64': 'u64',
+            'V_SUB_U16': 'u16',
+            'V_SUB_U32': 'u32',
+        }
+
+    @property
     def dpp_ctrl_dialect(self) -> DppCtrlDialect:
         """DPP_CTRL naming and validity rules for this ISA."""
         return DppCtrlDialect.GFX9
