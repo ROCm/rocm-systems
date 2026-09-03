@@ -2194,7 +2194,7 @@
         },
         {
           "name": "SymWin_WindowLifecycle_ReregisterAsymmetricPattern",
-          "description": "Re-registration with a pattern where a different rank owns the largest window",
+          "description": "Re-registration of one allocation at a different size, where a different rank registers the most",
           "test_filter": "SymWin_WindowLifecycle.ReregisterWithDifferentAsymmetricPattern"
         },
         {
@@ -2264,12 +2264,12 @@
         },
         {
           "name": "SymWin_AsymLsa_PeerPointerStride",
-          "description": "Peer pointer stride sized from the LSA team maximum, not a rank's own size",
+          "description": "Peer pointer stride fixed at init and window slots sized from the LSA team maximum, not a rank's own size",
           "test_filter": "SymWin_AsymLsa.PeerPointerStride_IndependentOfRankSizes"
         },
         {
           "name": "SymWin_AsymLsa_OffsetBound",
-          "description": "Peer pointer offset past the local window end is rejected",
+          "description": "Peer pointer offset past the local window end is rejected, while a smaller peer's end is not bounds-checked",
           "test_filter": "SymWin_AsymLsa.PointerOffsetAtLocalWindowEnd_Rejected"
         }
       ]
