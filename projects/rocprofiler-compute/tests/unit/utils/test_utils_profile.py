@@ -13,7 +13,7 @@ import pytest
 import utils.utils_profile as utils_profile
 from utils.utils_profile import (
     _augment_marker_csv,
-    _parse_function_backend,
+    _parse_function_fields,
 )
 
 # Long-form rocpd counter CSV header used by the run_prof tests.
@@ -983,45 +983,54 @@ def test_file_lock_unopenable_file_raises(tmp_path, monkeypatch):
             pass
 
 
-def test_parse_function_backend_untagged_is_unknown():
+def test_parse_function_fields_untagged_is_unknown():
     """Untagged rows surface as Backend='unknown'."""
-    clean, backend = _parse_function_backend("torch.empty:#1@linear.py:109")
+    clean, backend, args = _parse_function_fields("torch.empty:#1@linear.py:109")
     assert clean == "torch.empty:#1@linear.py:109"
     assert backend == "unknown"
+    assert args == ""
 
 
-def test_parse_function_backend_tagged_torch_is_stripped():
+def test_parse_function_fields_tagged_torch_is_stripped():
     """Tagged single-frame markers expose backend and lose the suffix."""
-    clean, backend = _parse_function_backend(
+    clean, backend, args = _parse_function_fields(
         "nn.Module.MyModel.forward:#1@train.py:42|torch"
     )
     assert clean == "nn.Module.MyModel.forward:#1@train.py:42"
     assert backend == "torch"
+    assert args == ""
 
 
-def test_parse_function_backend_tagged_triton_leaf():
+def test_parse_function_fields_tagged_triton_leaf():
     """Row-level suffix attributes the entire wire to its producing backend."""
-    clean, backend = _parse_function_backend(
+    clean, backend, args = _parse_function_fields(
         "torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2|triton"
     )
     assert clean == ("torch.compile.fn/triton.CompiledKernel.foo:#1@a.py:1/#1@b.py:2")
     assert backend == "triton"
+    assert args == ""
 
 
-def test_parse_function_backend_aten_leaf_is_unknown():
+def test_parse_function_fields_aten_leaf_is_unknown():
     """Untagged ATen leaf surfaces as Backend='unknown'."""
-    clean, backend = _parse_function_backend(
+    clean, backend, args = _parse_function_fields(
         "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0"
     )
     assert clean == "nn.Module.X.forward/aten::add:#1@m.py:9/#1@aten:0"
     assert backend == "unknown"
+    assert args == ""
 
 
-def test_parse_function_backend_edge_cases():
+def test_parse_function_fields_edge_cases():
     """Bogus suffix, empty string, and None all fall back to 'unknown'."""
-    assert _parse_function_backend("op|bogus") == ("op|bogus", "unknown")
-    assert _parse_function_backend("") == ("", "unknown")
-    assert _parse_function_backend(None) == ("", "unknown")
+    assert _parse_function_fields("op|bogus") == ("op|bogus", "unknown", "")
+    assert _parse_function_fields("") == ("", "unknown", "")
+    assert _parse_function_fields(None) == ("", "unknown", "")
+
+
+def _write_gzip_csv(path, df):
+    with gzip.open(path, "wt", newline="", encoding="utf-8") as f:
+        df.to_csv(f, index=False)
 
 
 def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
@@ -1030,7 +1039,7 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
 
     src = tmp_path / "src_marker_api_trace.csv.gz"
     dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
-    pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
+    _write_gzip_csv(src, pd.DataFrame({"Function": ["aten::sum"]}))
 
     warnings: list[tuple] = []
     monkeypatch.setattr(utils_profile, "console_warning", lambda *a: warnings.append(a))
@@ -1060,7 +1069,7 @@ def test_augment_marker_csv_adds_backend_column(tmp_path):
         "Start_Timestamp": [100, 200, 300],
         "End_Timestamp": [150, 250, 350],
     })
-    src_df.to_csv(src, index=False)
+    _write_gzip_csv(src, src_df)
 
     _augment_marker_csv(str(src), str(dst))
 

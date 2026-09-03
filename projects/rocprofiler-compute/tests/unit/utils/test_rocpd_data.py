@@ -28,6 +28,12 @@ from utils.utils_profile import (
 
 GUID = "abc-1234-def"
 
+
+def _write_gzip_csv(path, df):
+    with gzip.open(path, "wt", newline="", encoding="utf-8") as f:
+        df.to_csv(f, index=False)
+
+
 MARKER_ROWS = [
     (
         "roctx",
@@ -331,8 +337,8 @@ def write_rocpd_layout(workload_dir, fbase="run0"):
         Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv.gz"
     )
 
-    marker_df.to_csv(marker_path, index=False)
-    counter_df.to_csv(counter_path, index=False)
+    _write_gzip_csv(marker_path, marker_df)
+    _write_gzip_csv(counter_path, counter_df)
 
 
 def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
@@ -346,8 +352,8 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     marker_path = subdir / f"ml_api_trace_{pid}_marker_api_trace.csv.gz"
     counter_path = subdir / f"ml_api_trace_{pid}_counter_collection.csv.gz"
 
-    marker_df.to_csv(marker_path, index=False)
-    counter_df.to_csv(counter_path, index=False)
+    _write_gzip_csv(marker_path, marker_df)
+    _write_gzip_csv(counter_path, counter_df)
 
 
 def read_ml_api_trace_csvs(ml_api_trace_dir):
@@ -527,15 +533,18 @@ def test_parse_function_fields_splits_args(
 
 def test_augment_marker_csv_splits_args_into_dedicated_column(tmp_path):
     """The wire args segment is moved into a dedicated Args column."""
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
-    pd.DataFrame({
-        "Function": [
-            "aten::mm:#1@m.py:7|args=(f32[2x2])|torch",
-            "aten::relu:#2@m.py:8|torch",
-        ],
-        "Start": [1, 2],
-    }).to_csv(src, index=False)
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
+    _write_gzip_csv(
+        src,
+        pd.DataFrame({
+            "Function": [
+                "aten::mm:#1@m.py:7|args=(f32[2x2])|torch",
+                "aten::relu:#2@m.py:8|torch",
+            ],
+            "Start": [1, 2],
+        }),
+    )
 
     _augment_marker_csv(str(src), str(dst))
 
@@ -553,9 +562,9 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
     """Untagged rows are tagged 'unknown' and emit a warning."""
     from utils import utils_profile
 
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
-    pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
+    _write_gzip_csv(src, pd.DataFrame({"Function": ["aten::sum"]}))
 
     warnings: list[tuple] = []
     monkeypatch.setattr(utils_profile, "console_warning", lambda *a: warnings.append(a))
@@ -571,8 +580,8 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
 
 def test_augment_marker_csv_adds_backend_column(tmp_path):
     """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
 
     src_df = pd.DataFrame({
         "Domain": ["MARKER_CORE_RANGE_API"] * 3,
@@ -585,7 +594,7 @@ def test_augment_marker_csv_adds_backend_column(tmp_path):
         "Start_Timestamp": [100, 200, 300],
         "End_Timestamp": [150, 250, 350],
     })
-    src_df.to_csv(src, index=False)
+    _write_gzip_csv(src, src_df)
 
     _augment_marker_csv(str(src), str(dst))
 
@@ -603,13 +612,14 @@ def test_augment_marker_csv_adds_backend_column(tmp_path):
 
 def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     """A CSV without a Function column copies verbatim instead of corrupting."""
-    src = tmp_path / "src.csv"
-    dst = tmp_path / "dst.csv"
-    src.write_text("Foo,Bar\n1,2\n3,4\n", encoding="utf-8")
+    src = tmp_path / "src.csv.gz"
+    dst = tmp_path / "dst.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("Foo,Bar\n1,2\n3,4\n")
 
     _augment_marker_csv(str(src), str(dst))
 
-    assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    assert dst.read_bytes() == src.read_bytes()
 
 
 def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
@@ -635,7 +645,7 @@ def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
     df = pd.read_csv(marker_path)
     df["Backend"] = ["torch", "torch", "triton"]
-    df.to_csv(marker_path, index=False)
+    _write_gzip_csv(marker_path, df)
 
     consolidated_df, _ = process_ml_api_trace_output(workload_dir)
 
@@ -665,14 +675,14 @@ def test_process_ml_api_trace_output_preserves_per_row_args(tmp_path):
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
-    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv"
+    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv.gz"
     df = pd.read_csv(marker_path)
     df["Args"] = [
         "(input=float32[2x2])",
         "(input=float32[2x2])",
         "(self=float32[2x2])",
     ]
-    df.to_csv(marker_path, index=False)
+    _write_gzip_csv(marker_path, df)
 
     consolidated_df, _ = process_ml_api_trace_output(workload_dir)
 
