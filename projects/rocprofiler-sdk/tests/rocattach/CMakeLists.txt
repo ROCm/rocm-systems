@@ -191,8 +191,8 @@ if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ATTACHMENT_CLIENT_SEL
         PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-    # FORCE_LOAD=0 suppresses startup loading, but must not suppress the explicit
-    # SDK load requested later by rocprofiler_register_attach().
+    # FORCE_LOAD=0 suppresses startup loading, but must not suppress the explicit SDK load
+    # requested later by rocprofiler_register_attach().
     rocprofiler_add_integration_execute_test(
         rocattach-implicit-configure-force-load-zero-test-execute
         COMMAND
@@ -202,9 +202,7 @@ if(rocprofiler-register_FOUND AND rocprofiler-register_HAS_ATTACHMENT_CLIENT_SEL
         DEPENDS rocattach-parallel-attach-test
         TIMEOUT 45
         LABELS "attachment"
-        ENVIRONMENT
-            "${rocattach-test-env}"
-            "ROCPROFILER_REGISTER_FORCE_LOAD=0"
+        ENVIRONMENT "${rocattach-test-env}" "ROCPROFILER_REGISTER_FORCE_LOAD=0"
         DISABLED ${IS_DISABLED}
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
