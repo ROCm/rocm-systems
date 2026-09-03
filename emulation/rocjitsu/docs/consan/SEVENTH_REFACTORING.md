@@ -727,3 +727,68 @@ mode stages, validation, and the synthetic-target composition still need to be
 driven. The remaining question is whether those implementations reveal a
 duplicated lifecycle, not whether another callback should be added to the
 already broad operations product.
+
+### 14.3 Full synthetic-target pressure
+
+The unsupported-by-ConSan gfx1151/RDNA3.5 product was temporarily admitted as
+a sixth target, using the existing RocJitsu decoder and an RDNA3-equivalent
+ConSan profile solely as an extension probe. It was driven through native-LDS
+lowering in Record/Replay, Sampled, InlineShadow, and SuperCollider, then all
+temporary target and test code was removed.
+
+Inside ConSan, the edit ledger was narrow:
+
+1. one target-owned profile;
+2. the central profile registry plus its two profile-invariant predicates;
+3. one program-analysis operations registration; and
+4. one SuperCollider operation dispatch case.
+
+No mode needed target-specific policy or a mode-by-target adapter. Program
+inventory and target lookup worked immediately. Initially, however, all three
+MOI engines degraded to their fail-closed inventory-only result: common
+special-state emission could not obtain instructions for the new architecture.
+SuperCollider would have failed for the same underlying reason. The dependency
+was below ConSan: RocJitsu's architecture-neutral `instrumentation_builder.h`
+contains 70 direct `RDNA3` backend selections, and its RDNA3 backend admits only
+the exact RDNA3 architecture identity. Temporarily routing RDNA3.5 through
+that backend made all four ConSan modes pass without another ConSan edit.
+
+This is strong negative evidence for a target-normalization macro-slice inside
+the governing ConSan scope. The ConSan target boundary already composes modes
+with a newly admitted architecture, and its remaining fanout is small explicit
+registration or dispatch. The wider instruction-builder facade is a real
+RocJitsu architecture-extension boundary, but it is outside this campaign's
+governing implementation scope and cannot provide ConSan shrinkage. Any later
+work there should be a separately scoped RocJitsu refactoring based on actual
+RDNA3.5 encoding compatibility, not an alias retained from this synthetic
+exercise.
+
+The target half of the full pressure exercise is therefore complete. Its
+cross-axis result so far is also favorable: every existing mode composed with
+the synthetic target once the lower builder dependency admitted it. The
+remaining fifth-mode vertical exercise still needs to determine whether a new
+mode's own implementation and host report path expose an axis leak.
+
+### 14.4 Representation and host-lifetime rejection evidence
+
+A complete trace from `ConSanObservationPlan` through planned patches,
+`ConSanCommittedLowering`, the coverage ledger, final validation, and runtime
+mapping found some repeated projections: original physical and semantic sites
+are derived from intent IDs, and per-intent outcome state mirrors accepted
+commits. Removing them would save only a few hundred lines while forcing the
+independent validator to trust producer-owned state or repeatedly join mutable
+offsets. The current plan/commit split is a deliberate trust boundary, not a
+macro-sized duplicated authority.
+
+The host hook registries were likewise traced through reader creation,
+transform admission, executable load, report allocation, dispatch, unload,
+reader destruction, and process shutdown. The reader registry, transformed
+replacement storage, SuperCollider reports, MOI reports, and private dispatch
+state have different keys and retirement events. Combining them into one
+executable-owner object would retain the maps internally and add optional
+lifecycle state rather than delete a registry. Shared report cleanup and
+summary mechanics are already factored below the two mode-specific policies.
+
+These regions should not be reopened on field similarity alone. A later
+candidate must show that an entire trust or lifecycle transition disappears,
+not merely that two products contain comparable IDs or counters.
