@@ -1068,7 +1068,7 @@ static struct tuningModel tuning_model_10{
       /*AllReduce*/
       // LL  wins 0 – 128KB/rank (=512KB total); LL128 wins 128KB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
-       /*LL128 (min/max/factor/thread_threshold)*/ {131072, 33554432, 3145728, 0}},
+       /*LL128 (min/max/factor/thread_threshold)*/ {131072, 16777216, 3145728, 0}},
       /*Reduce*/
       {/*LL (min/max/factor/thread_threshold)*/ {0, 16383, 1, 0},
        /*LL128 (min/max/factor/thread_threshold)*/ {16383, 16777216, 1, 0}},
@@ -1766,7 +1766,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
     4ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
-    16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
+    8ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
