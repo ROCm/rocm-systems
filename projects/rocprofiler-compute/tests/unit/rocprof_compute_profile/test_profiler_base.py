@@ -15,6 +15,7 @@ from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
     _partition_warning_messages,
+    _pmc_power_gating_warning,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
@@ -92,6 +93,31 @@ def test_partition_warning_messages(
     )
 
     assert len(_partition_warning_messages(mspec)) == expected
+
+
+@pytest.mark.parametrize(
+    "gpu_arch, affected",
+    [
+        pytest.param("gfx1150", True, id="gfx1150"),
+        pytest.param("gfx1151", True, id="gfx1151"),
+        pytest.param("gfx1152", True, id="gfx1152"),
+        pytest.param("gfx942", False, id="cdna"),
+        pytest.param("gfx1100", False, id="rdna3"),
+        pytest.param("gfx1250", False, id="gfx1250"),
+        pytest.param(None, False, id="unknown_arch"),
+    ],
+)
+def test_pmc_power_gating_warning(gpu_arch, affected):
+    """Perfmon clock gating at AUTO applies to gfx115x only."""
+    message = _pmc_power_gating_warning(SimpleNamespace(gpu_arch=gpu_arch))
+
+    if not affected:
+        assert message is None
+        return
+
+    assert "STABLE_STD" in message
+    assert "TCP_REQ" in message
+    assert "rocprofiler-sdk" in message
 
 
 # ---------------------------------------------------------------------------

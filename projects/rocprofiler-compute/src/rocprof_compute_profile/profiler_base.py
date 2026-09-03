@@ -46,6 +46,35 @@ _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
+# Architectures whose perfmon clock is gated at the AUTO performance level.
+_PMC_POWER_GATED_ARCHS: tuple[str, ...] = ("gfx115",)
+
+_PMC_POWER_GATING_DOC_URL = (
+    "https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/"
+    "how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling"
+)
+
+
+def _pmc_power_gating_warning(mspec: MachineSpecs) -> Optional[str]:
+    """Return the STABLE_STD notice for architectures that gate the perfmon clock.
+
+    On gfx115x the AUTO performance level can gate the perfmon clock, so PMC
+    clock, so PMC counters such as TCP_REQ report zero even when the kernel
+    issues global memory traffic.
+    """
+    gpu_arch = getattr(mspec, "gpu_arch", None)
+    if not gpu_arch or not gpu_arch.startswith(_PMC_POWER_GATED_ARCHS):
+        return None
+
+    return (
+        f"{gpu_arch}: AUTO performance level can gate the perfmon clock, so "
+        "counters such as TCP_REQ may report zero even when the kernel issues "
+        "global memory traffic.\n"
+        "Set the GPU performance level to STABLE_STD before profiling:\n"
+        "  sudo amd-smi set --perf-level STABLE_STD\n"
+        f"See: {_PMC_POWER_GATING_DOC_URL}"
+    )
+
 
 def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     """Return notices on how active partition modes shape analysis metrics."""
@@ -346,6 +375,10 @@ class RocProfCompute_Base:
 
         for message in _partition_warning_messages(self._soc._mspec):
             console_warning(message)
+
+        power_gating_warning = _pmc_power_gating_warning(self._soc._mspec)
+        if power_gating_warning is not None:
+            console_warning(power_gating_warning)
 
     def profile(
         self,

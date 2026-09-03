@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
+* Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
+
 ### Changed
 
 * gfx115x Memory Chart improvements.
@@ -43,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 ### Known issues
+
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level. Set `STABLE_STD` before profiling (`sudo amd-smi set --perf-level STABLE_STD`). See the [FAQ](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/reference/faq.html) and the [ROCprofiler-SDK PMC performance-level guide](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
 
 ## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
 
