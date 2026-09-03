@@ -40,6 +40,8 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "count",
     "count_issue",
     "count_stall",
+    "wave_occupancy_percent",
+    "active_thread_percent",
     "stall_reason",
 ]
 
@@ -144,6 +146,8 @@ def add_pc_sampling_state(
     total_count: int = 3,
     issue_count: int | None = 1,
     stall_count: int | None = 2,
+    wave_occupancy_percent: float | None = None,
+    active_thread_percent: float | None = None,
     stall_reasons: dict[str, int] | None = None,
     code_object_id: int = 5,
 ) -> PCSampleState:
@@ -164,6 +168,8 @@ def add_pc_sampling_state(
         total_count=total_count,
         issue_count=issue_count,
         stall_count=stall_count,
+        wave_occupancy_percent=wave_occupancy_percent,
+        active_thread_percent=active_thread_percent,
         instruction_line=instruction_line,
     )
     session.add(sample_state)
@@ -497,6 +503,8 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
         workload=workload,
         kernel=kernel,
         pid=42,
+        wave_occupancy_percent=75.0,
+        active_thread_percent=50.0,
         stall_reasons={"WAITCNT": 2},
     )
     Database.create_views()
@@ -515,13 +523,15 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
             "count": 3,
             "count_issue": 1,
             "count_stall": 2,
+            "wave_occupancy_percent": 75.0,
+            "active_thread_percent": 50.0,
             "stall_reason": {"WAITCNT": 2},
         }
     ]
 
 
-def test_pc_sample_state_placeholder_columns_default_to_none(db_session):
-    """The unpopulated PCSampleState columns exist and stay null."""
+def test_pc_sample_state_optional_metrics_and_dispatch_default_to_none(db_session):
+    """Optional metrics default to null; the dispatch placeholder stays null."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     sample_state = add_pc_sampling_state(
@@ -710,7 +720,7 @@ def test_pc_sampling_summary_view_keeps_different_workloads_separate(db_session)
 
 
 def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_session):
-    """Host-trap rows stay per code object with null issue, stall, and reason."""
+    """Host-trap rows keep active threads but have no issue, stall, or occupancy."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -721,6 +731,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
         total_count=3,
         issue_count=None,
         stall_count=None,
+        active_thread_percent=50.0,
     )
     add_pc_sampling_state(
         db_session,
@@ -731,6 +742,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
         total_count=5,
         issue_count=None,
         stall_count=None,
+        active_thread_percent=50.0,
     )
     Database.create_views()
     db_session.commit()
@@ -742,6 +754,9 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
     assert all(row["count_issue"] is None for row in rows)
     assert all(row["count_stall"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
+    # A host-trap record carries an execution mask but no wave count.
+    assert all(row["active_thread_percent"] == 50.0 for row in rows)
+    assert all(row["wave_occupancy_percent"] is None for row in rows)
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])

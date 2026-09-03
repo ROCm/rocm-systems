@@ -156,16 +156,10 @@ def test_pc_sampling_analyze_database_output(
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, source, count, "
-                "count_issue, count_stall, stall_reason "
+                "count_issue, count_stall, wave_occupancy_percent, "
+                "active_thread_percent, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
-                conn,
-            )
-            # Derived wave metrics live on the state table; the summary view
-            # does not carry them.
-            db_wave_metrics = pd.read_sql_query(
-                "SELECT active_thread_percent, wave_occupancy_percent "
-                "FROM compute_pc_sample_state",
                 conn,
             )
             pc_sampling_views = conn.execute(
@@ -208,19 +202,14 @@ def test_pc_sampling_analyze_database_output(
         assert inst_sample_total == state_total
         assert len(db_pc_sampling) == 19
         assert db_pc_sampling["count"].sum() == 857
-        assert len(db_wave_metrics) == state_count
         # Every sample in this workload carries a full wave64 mask
         # (0xFFFFFFFFFFFFFFFF) against sysinfo wave_size 64, so each line is
         # exactly 100% active. This pins the popcount against mask precision loss.
-        assert (db_wave_metrics["active_thread_percent"] == 100.0).all()
+        assert db_pc_sampling["active_thread_percent"].eq(100.0).all()
         # wave_cnt varies per sample (4..32) against max_waves_per_cu 32, so
         # occupancy differs per line; assert only that it is populated and sane.
-        assert db_wave_metrics["wave_occupancy_percent"].notna().all()
-        assert (
-            db_wave_metrics["wave_occupancy_percent"]
-            .between(0, 100, inclusive="right")
-            .all()
-        )
+        assert db_pc_sampling["wave_occupancy_percent"].gt(0).all()
+        assert db_pc_sampling["wave_occupancy_percent"].le(100).all()
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
         assert db_dispatch_count == 3
         assert db_code_object_process_ids == [(698961,)]
@@ -303,6 +292,11 @@ def test_pc_sampling_analyze_csv_output(
         assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
         assert set(csv_pc_sampling["pid"]) == {698961}
+        # The CSV exports the summary view, so it carries the same values the
+        # database test pins.
+        assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
+        assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
+        assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {
