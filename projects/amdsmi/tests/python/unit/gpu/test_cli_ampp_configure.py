@@ -92,6 +92,7 @@ def _install_fake_modules():
     # to the ampp-configure paths exercised here.
     interface.AMDSMI_MAX_PPT_LIMIT = 0
     interface.AMDSMI_MAX_UTIL = 100
+    interface.AMDSMI_MAX_STRING_LENGTH = 256
     # Overwritten per-test; the default keeps the CONFIGURE path a no-op.
     interface.amdsmi_configure_ampp_profile = lambda *a, **k: None
     interface.amdsmi_get_ampp_profiles = lambda _h: ("1.0", [])

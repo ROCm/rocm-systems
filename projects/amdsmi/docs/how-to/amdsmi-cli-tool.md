@@ -634,7 +634,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
-                   [-A PROFILE_NAME] [--ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...] | @FILE]
+                   [-A PROFILE_NAME | --ampp-configure PROFILE_NAME [KEY=VALUE ...]]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -1676,8 +1676,8 @@ driver) guidance-only min/max bounds.
 ```
 
 `--ampp-configure` also accepts `@<path>` in place of `PROFILE_NAME
-KEY=VALUE ...`, restoring every writable, configured profile found in a
-JSON file for the current GPU in one call. The file must be shaped like
+KEY=VALUE ...`, restoring every writable profile with staged fields found in
+a JSON file for the current GPU in one call. The file must be shaped like
 `amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
 per-GPU objects, each identified by an integer `"gpu"` index and containing
 an `"ampp"."profiles"` list.
@@ -1686,6 +1686,11 @@ an `"ampp"."profiles"` list.
 ~$ sudo amd-smi static --ampp --json --file profiles.json
 ~$ sudo amd-smi set --gpu 0 --ampp-configure @profiles.json
 ```
+
+Profiles are restored one at a time and independently: a failure on one
+profile (for example, a malformed `fields` entry, or the driver rejecting a
+value) is reported per-profile and does not stop the remaining profiles in
+the file from being applied, nor roll back ones already applied.
 
 ### Prerequisites
 

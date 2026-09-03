@@ -1352,12 +1352,16 @@ class AMDSMIParser(argparse.ArgumentParser):
                     key, _, raw_value = token.partition("=")
                     key = key.strip()
                     raw_value = raw_value.strip()
-                    if not key:
+                    if (
+                        not key
+                        or len(key.encode("utf-8")) >= amdsmi_interface.AMDSMI_MAX_STRING_LENGTH
+                    ):
                         raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                             sys.argv[1],
                             token,
                             output_format,
-                            hint="Field name cannot be empty in KEY=VALUE.",
+                            hint="Field name cannot be empty or exceed "
+                            f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes in KEY=VALUE.",
                         )
                     try:
                         value = int(raw_value)
@@ -1367,6 +1371,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                             token,
                             output_format,
                             hint=f"Field value must be an integer (got '{raw_value}').",
+                        )
+                    if not -(2**63) <= value < 2**63:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint=f"Field value out of int64 range (got '{raw_value}').",
                         )
                     fields.append({"name": key, "value": value})
 

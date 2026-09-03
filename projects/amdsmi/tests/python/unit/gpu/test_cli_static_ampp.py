@@ -254,6 +254,12 @@ class TestCliStaticAmpp(unittest.TestCase):
             else:
                 sys.modules[name] = saved
 
+    def setUp(self):
+        # Tests mutate the shared class-level holder; reset it so one test's
+        # override can't leak into another regardless of run order.
+        self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
+        self.holder["get_fields"] = lambda name: copy.deepcopy(_FIELDS_BY_PROFILE[name])
+
     def _run_ampp(self, fmt="human"):
         commands = object.__new__(self.static_module.StaticCommands)
         commands.logger = _FakeLogger(fmt)
@@ -325,6 +331,40 @@ class TestCliStaticAmpp(unittest.TestCase):
         static_dict = self._run_ampp("json")
         for profile in static_dict["ampp"]["profiles"]:
             self.assertEqual(profile["fields"], "N/A")
+
+    def test_human_readable_output_zero_profiles_reports_na(self):
+        self.holder["get_profiles"] = lambda: ("1.0", [])
+        static_dict = self._run_ampp("human")
+        self.assertEqual(static_dict["ampp"], "N/A")
+
+    def test_csv_output_zero_profiles_reports_na(self):
+        self.holder["get_profiles"] = lambda: ("1.0", [])
+        static_dict = self._run_ampp("csv")
+        self.assertEqual(static_dict["ampp_version"], "1.0")
+        self.assertEqual(static_dict["ampp"], "N/A")
+
+    def test_csv_output_includes_flattened_profile_state(self):
+        self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
+        self.holder["get_fields"] = lambda name: copy.deepcopy(_FIELDS_BY_PROFILE[name])
+        static_dict = self._run_ampp("csv")
+        self.assertEqual(static_dict["ampp_version"], "1.0")
+        self.assertIn("profile_0(active=True,configured=True,writable=False)", static_dict["ampp"])
+        self.assertIn("profile_2(active=False,configured=True,writable=True)", static_dict["ampp"])
+
+    def test_field_with_empty_unit_displayed_without_extra_formatting(self):
+        self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
+        self.holder["get_fields"] = lambda _name: [
+            {
+                "name": "SomeCount",
+                "unit": "",
+                "value": 5,
+                "min_value": 0,
+                "max_value": 0,
+                "has_limits": False,
+            }
+        ]
+        static_dict = self._run_ampp("human")
+        self.assertIn("SomeCount: 5 ", static_dict["ampp"])
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ import sys
 from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException, AmdSmiRequiredCommandException
 
 from amdsmi import amdsmi_exception, amdsmi_interface
-from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
+from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_STRING_LENGTH, AMDSMI_MAX_UTIL
 
 
 class SetValueCommands:
@@ -847,15 +847,25 @@ class SetValueCommands:
 
     @staticmethod
     def _is_valid_ampp_field(field):
-        # amdsmi_configure_ampp_profile() does int(field["value"]) internally,
-        # which raises a bare ValueError/TypeError (not AmdSmiLibraryException)
-        # for a non-numeric value -- reject it here so one bad field can't
-        # abort the whole file-restore loop with an unhandled traceback.
+        # amdsmi_configure_ampp_profile() does field["name"].encode()/int(field["value"])
+        # and assigns straight into ctypes struct fields, which raise a bare
+        # TypeError/ValueError/OverflowError (not AmdSmiLibraryException) for a
+        # non-string name or an out-of-range value -- reject those here so one bad
+        # field can't abort the whole file-restore loop with an unhandled traceback.
         if not isinstance(field, dict) or "name" not in field or "value" not in field:
             return False
+        name = field["name"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name.encode("utf-8")) >= AMDSMI_MAX_STRING_LENGTH
+        ):
+            return False
         try:
-            int(field["value"])
+            value = int(field["value"])
         except (TypeError, ValueError):
+            return False
+        if not -(2**63) <= value < 2**63:
             return False
         return True
 
