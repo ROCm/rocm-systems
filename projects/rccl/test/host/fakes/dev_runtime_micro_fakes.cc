@@ -421,14 +421,20 @@ extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, 
 #define HIP_FAKE /* sole definition: this binary links neither librccl nor HIP */
 
 // A reserved VA range: mirror the real cuMemAddressReserve semantics with an
-// uncommitted anonymous mapping (MAP_NORESERVE). This makes multi-GB flat-VA
-// reservations cheap and never dereferenced (all cuMemMap/SetAccess are no-ops),
-// so no physical memory is committed.
+// uncommitted anonymous mapping (MAP_NORESERVE), so multi-GB flat-VA
+// reservations stay cheap and commit no physical memory until touched.
+//
+// PROT_READ | PROT_WRITE, not PROT_NONE. Nothing in this file's own tests
+// dereferences the range, but the mapping stands in for the flat VA that
+// windows are carved out of, and any test that writes through win->userPtr --
+// which the resource-window path does, via cudaMemsetAsync -- faults on a
+// PROT_NONE range. MAP_NORESERVE means the pages still cost nothing until
+// written.
 static hipError_t DefaultMemAddressReserve(void** ptr, size_t size, size_t, void*, unsigned long long) {
   // The real driver rejects a zero-size reservation; a zero here would be a bug
   // in the code under test, so surface it rather than silently substituting one.
   assert(size != 0);
-  void* p = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
   if (p == MAP_FAILED) return hipErrorOutOfMemory;
   *ptr = p;
   return hipSuccess;
@@ -756,9 +762,10 @@ void ResetDevRuntimeMicroFakes() {
   // them for the rest of the process. Clearing it keeps the header's "a test
   // cannot leak behaviour into the next one" true rather than nearly true.
   //
-  // Cleared, not freed. Several fixtures free shadow-pool buffers themselves
-  // in TearDown (they hold the only pointer to them once the window is gone),
-  // so freeing here as well is a double free. What leaks is a bounded number
-  // of small per-test buffers; what is fixed is the stale oracle.
+  // Frees, not just clears: this set is the single owner of every buffer
+  // DefaultShadowPoolAlloc handed out and DefaultShadowPoolFree did not take
+  // back. Fixtures must not free these themselves -- doing both is a double
+  // free, and doing neither is what LeakSanitizer reports at exit.
+  for (void* p : ShadowPoolLive()) free(p);
   ShadowPoolLive().clear();
 }

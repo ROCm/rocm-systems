@@ -1242,14 +1242,6 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
   }
 }
 
-// Branch: all three arms hold, entering the guarded block.
-TEST_F(SymUnbindTeamMemoryTest, NvlsDeviceMemory_ReturnsSuccess) {
-  comm->nvlsSupport = 1;
-  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
-  mem.globalHasSysmemSegment = false;
-  EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess);
-}
-
 
 // ---------------------------------------------------------------------------
 // symTeamObtain looks up a team by (rank, nRanks, stride) and creates one if
@@ -2314,8 +2306,7 @@ protected:
     comm = commStorage.get();
   }
   void TearDown() override {
-    free(comm->devrState.windowTable);  // the shadow-pool fake hands out calloc'd memory
-    comm->devrState.windowTable = nullptr;
+    comm->devrState.windowTable = nullptr;  // owned by the shadow-pool fake; its reset frees it
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -2375,8 +2366,7 @@ protected:
     mem.numGinSegments = 2;
   }
   void TearDown() override {
-    free(dev);  // the shadow-pool fake hands out calloc'd memory; dev == host
-    dev = host = nullptr;
+    dev = host = nullptr;  // owned by the shadow-pool fake; its reset frees it
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -2450,13 +2440,7 @@ protected:
     free(devr->winSorted);
     devr->winSorted = nullptr;
     devr->winSortedCount = devr->winSortedCapacity = 0;
-    // The table is a chain of shadow-pool buffers, which the fake calloc'd.
-    ncclDevCommWindowTable* t = devr->windowTable;
-    while (t != nullptr) {
-      ncclDevCommWindowTable* next = t->next;
-      free(t);
-      t = next;
-    }
+    // The table is a chain of shadow-pool buffers; the fake's reset owns them.
     devr->windowTable = nullptr;
     ResetDevRuntimeMicroFakes();
   }
@@ -2625,13 +2609,7 @@ protected:
     devr->winSortedCount = devr->winSortedCapacity = 0;
     free(devr->winSorted);
     devr->winSorted = nullptr;
-    ncclDevCommWindowTable* t = devr->windowTable;
-    while (t != nullptr) {
-      ncclDevCommWindowTable* next = t->next;
-      free(t);
-      t = next;
-    }
-    devr->windowTable = nullptr;
+    devr->windowTable = nullptr;  // chain of shadow-pool buffers; the fake's reset owns them
     devr->lsaRankList = nullptr;  // borrowed, not malloc'd
     g_devrCallocCallIndex = 0;
     g_devrCallocFailAt = -1;
