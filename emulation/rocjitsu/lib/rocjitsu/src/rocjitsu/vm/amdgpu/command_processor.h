@@ -207,11 +207,7 @@ public:
                     uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
-  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const {
-    return memory_ && memory_->is_fetchable(address, process_id)
-               ? memory_->read64(address, process_id)
-               : 0;
-  }
+  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const;
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();

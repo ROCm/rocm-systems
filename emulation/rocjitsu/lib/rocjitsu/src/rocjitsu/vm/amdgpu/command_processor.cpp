@@ -814,6 +814,19 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
   return true;
 }
 
+uint64_t CommandProcessor::read_process_memory64(uint64_t address, uint32_t process_id) const {
+  if (!memory_)
+    return 0;
+  uint64_t value = 0;
+  // The exact read covers page-table mappings, local identity mappings, and
+  // daemon client-memory access without fabricating a partial record. Gating
+  // this with is_fetchable() rejects ROCr's local host-backed CWSR header for a
+  // nonzero VMID before the passthrough path gets a chance to read it.
+  const auto bytes = std::span<uint8_t>(reinterpret_cast<uint8_t *>(&value), sizeof(value));
+  return memory_->read_block_exact(address, bytes, process_id) == AccessOutcome::Complete ? value
+                                                                                          : 0;
+}
+
 void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
   bool drop_replicas = false;
   {

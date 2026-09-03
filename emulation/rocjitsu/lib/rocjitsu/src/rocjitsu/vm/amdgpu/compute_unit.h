@@ -870,6 +870,17 @@ public:
   virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
 
 protected:
+  /// @brief Defer a runtime queue exception until the wave-state lock is released.
+  /// @details Instruction callbacks run under @ref wave_state_mutex_. The command
+  /// processor takes its queue lock before this lock, so reporting synchronously
+  /// here would invert that order against queue dispatch and destruction.
+  bool defer_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status) {
+    if (!cp_ || status == 0)
+      return false;
+    pending_queue_exceptions_.push_back({queue_id, process_id, status});
+    return true;
+  }
+
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
 
@@ -935,8 +946,8 @@ protected:
   /// under this lock must not reach back into the CP and take hw_queue_mutex_ --
   /// a wave hitting s_endpgm on the engine thread would otherwise close an AB-BA
   /// cycle against a concurrent dispatch or DESTROY_QUEUE. release_wf() therefore
-  /// queues its completions instead of sending them, and the outermost guard
-  /// delivers them here, after the lock is dropped and in the same order.
+  /// queues its notifications instead of sending them, and the outermost guard
+  /// delivers them here, after the lock is dropped.
   class WaveStateGuard {
   public:
     explicit WaveStateGuard(ComputeUnitCore &cu) : cu_(cu), lock_(cu.wave_state_mutex_) {
@@ -948,7 +959,7 @@ protected:
       const bool outermost = --cu_.wave_state_depth_ == 0;
       lock_.unlock();
       if (outermost)
-        cu_.flush_wg_completions();
+        cu_.flush_cp_notifications();
     }
 
   private:
@@ -956,9 +967,15 @@ protected:
     std::unique_lock<std::recursive_mutex> lock_;
   };
 
-  /// @brief Send the workgroup completions queued under the wave-state lock.
+  /// @brief Send command-processor notifications queued under the wave-state lock.
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
-  void flush_wg_completions();
+  void flush_cp_notifications();
+
+  struct PendingQueueException {
+    uint32_t queue_id;
+    uint32_t process_id;
+    uint64_t status;
+  };
 
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
@@ -966,8 +983,12 @@ protected:
   /// belongs to whichever thread currently owns it.
   unsigned wave_state_depth_ = 0;
   /// @brief Workgroups that finished while the wave-state lock was held.
-  /// @details Drained by @ref flush_wg_completions once the lock is dropped.
+  /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
+  /// @brief Runtime queue exceptions raised while the wave-state lock was held.
+  /// @details Drained before workgroup completions so an error cannot race a
+  /// successful completion from a later instruction.
+  std::vector<PendingQueueException> pending_queue_exceptions_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
 
@@ -1059,6 +1080,7 @@ protected:
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class InstructionComputeUnitView;
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 

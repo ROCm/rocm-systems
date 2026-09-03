@@ -3210,6 +3210,8 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   constexpr uint32_t kMessageIdMask = 0xFu;
   constexpr uint32_t kMessageInterrupt = 1;
   constexpr uint32_t kMessageGetDoorbell = 10;
+  constexpr uint32_t kDoorbellIdBits = 10;
+  constexpr uint32_t kRuntimeQueueExceptionMask = 0x3Fu;
   const uint32_t message_id = message & kMessageIdMask;
 
   auto proc = find_process(wave.process_id());
@@ -3231,7 +3233,23 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   if (message_id != kMessageInterrupt || !wave.in_trap_handler())
     return false;
 
+  // The ROCr trap-handler ABI packs the 10-bit doorbell id below six KFD queue
+  // exception bits in M0. A debugger owns exception routing while attached; its
   // CWSR publication is deferred until s_rfe applies the handler's STATUS.HALT.
+  // Without a debugger, deliver the exception to ROCr's queue error event. The
+  // CU defers the CP call until its wave-state lock is released.
+  const uint64_t exception_status = (wave.m0() >> kDoorbellIdBits) & kRuntimeQueueExceptionMask;
+  if (exception_status != 0) {
+    bool debugger_attached = false;
+    {
+      std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+      auto session = debug_sessions_.find(proc->client_pid());
+      debugger_attached = session != debug_sessions_.end() && session->second.enabled;
+    }
+    if (!debugger_attached)
+      wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), exception_status);
+  }
+
   return true;
 }
 

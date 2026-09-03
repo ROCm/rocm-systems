@@ -554,6 +554,98 @@ protected:
   void SetUp() override { SetUpWithConfig(CDNA5_CONFIG_PATH); }
 };
 
+TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
+  constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
+  constexpr uint32_t kExceptionEventId = 37;
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+
+  std::array<uint8_t, 4096> code_page{};
+  std::array<uint8_t, 4096> trap_handler_page{};
+  alignas(4096) std::array<uint8_t, 4096> cwsr{};
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kTrapHandlerAddress, trap_handler_page.data(), trap_handler_page.size());
+  const uint64_t exception_status_address = reinterpret_cast<uint64_t>(exception_page.data());
+  process->map_pages(exception_status_address, exception_page.data(), exception_page.size());
+
+  // ROCr allocates this header as host-backed identity memory rather than a
+  // KFD allocation. Queue creation must still discover the error signal and
+  // event from the first-level CWSR header.
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &exception_status_address,
+              sizeof(exception_status_address));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kExceptionEventId,
+              sizeof(kExceptionEventId));
+
+  kfd_ioctl_set_trap_handler_args set_handler{};
+  set_handler.gpu_id = kCdna5GpuId;
+  set_handler.tba_addr = kTrapHandlerAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
+
+  std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna5GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  ASSERT_NE(cu, nullptr);
+  auto *memory = soc_->memory();
+  ASSERT_NE(memory, nullptr);
+
+  uint64_t delivered_status = 0;
+  uint32_t delivered_event_id = 0;
+  cp->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+    EXPECT_EQ(process_id, driver_->local_process_id());
+    delivered_status = memory->read64(exception_status_address, process_id);
+    delivered_event_id = event_id;
+    // ROCr consumes and clears the queue error signal before returning from
+    // its asynchronous callback.
+    memory->write64(exception_status_address, 0, process_id);
+  });
+
+  constexpr uint32_t kSTrapAbort = 0xBF900002u;
+  constexpr uint32_t kSSendmsgInterrupt = 0xBFB60001u;
+  const uint32_t handler[] = {
+      0xBEFD00FFu,        0x00000007u,              // s_mov_b32 m0, doorbell_id
+      kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000407u, // s_mov_b32 m0, WAVE_ABORT | doorbell_id
+      kSSendmsgInterrupt,
+  };
+  memory->write32(kKernelAddress, kSTrapAbort, driver_->local_process_id());
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    memory->write32(kTrapHandlerAddress + i * sizeof(uint32_t), handler[i],
+                    driver_->local_process_id());
+
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(driver_->local_process_id());
+  wave->set_queue_id(create.queue_id);
+
+  cu->step(); // Enter the configured trap handler.
+  cu->step(); // Load a doorbell-only M0 value.
+  cu->step(); // A plain interrupt must not become a queue exception.
+  EXPECT_EQ(delivered_status, 0u);
+  cu->step(); // Add EC_QUEUE_WAVE_ABORT above the doorbell bits.
+  cu->step(); // Deliver it after releasing the CU wave-state lock.
+
+  EXPECT_EQ(delivered_status, kWaveAbort);
+  EXPECT_EQ(delivered_event_id, kExceptionEventId);
+  EXPECT_TRUE(wave->debug_suspended());
+}
+
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
   args.gpu_id = kGpuId;
