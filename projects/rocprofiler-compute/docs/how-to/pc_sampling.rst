@@ -76,8 +76,8 @@ Two columns describe how well each instruction used the machine:
 
 Both are averaged over the samples that landed on the instruction. A kernel
 built for wave64 on a device that reports a wave size of 32 sets more lanes
-than that size, so ``active_thread_percent`` is capped at 100 and analyze warns
-once with how many lines were capped.
+than that size, so ``active_thread_percent`` is capped at 100, and analyze warns
+once when that happens.
 
 **Sample command:**
 

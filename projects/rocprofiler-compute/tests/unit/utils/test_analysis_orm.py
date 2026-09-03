@@ -720,7 +720,7 @@ def test_pc_sampling_summary_view_keeps_different_workloads_separate(db_session)
 
 
 def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_session):
-    """Host-trap rows stay per code object with null issue, stall, and reason."""
+    """Host-trap rows keep active threads but have no issue, stall, or occupancy."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_pc_sampling_state(
@@ -731,6 +731,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
         total_count=3,
         issue_count=None,
         stall_count=None,
+        active_thread_percent=50.0,
     )
     add_pc_sampling_state(
         db_session,
@@ -741,6 +742,7 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
         total_count=5,
         issue_count=None,
         stall_count=None,
+        active_thread_percent=50.0,
     )
     Database.create_views()
     db_session.commit()
@@ -752,6 +754,9 @@ def test_pc_sampling_summary_view_keeps_host_trap_states_with_null_counts(db_ses
     assert all(row["count_issue"] is None for row in rows)
     assert all(row["count_stall"] is None for row in rows)
     assert all(row["stall_reason"] is None for row in rows)
+    # A host-trap record carries an execution mask but no wave count.
+    assert all(row["active_thread_percent"] == 50.0 for row in rows)
+    assert all(row["wave_occupancy_percent"] is None for row in rows)
 
 
 @pytest.mark.parametrize("nullable_field", ["offset", "instruction", "source"])
