@@ -57,10 +57,22 @@ repos:
     rev: 0.25.1
     hooks:
       - id: gersemi
-        # rocprofiler-sdk formats its CMake with cmake-format, enforced by the
-        # cmake job in rocprofiler-sdk-formatting.yml, and the two tools disagree
-        # about the same files. Running gersemi there rewrites files cmake-format
-        # considers clean and breaks that project's CI. It has no
-        # pre-commit-config.yaml of its own, so it is excluded here rather than
-        # in the top-level exclude, which would also drop the generic hooks.
+        # rocprofiler-sdk is formatted by the cmake-format hook below. The two
+        # tools disagree about the same files, so whichever runs second reports
+        # the other's output as unformatted.
         exclude: ^projects/rocprofiler-sdk/
+
+  # rocprofiler-sdk formats its CMake with cmake-format, enforced by the cmake job
+  # in rocprofiler-sdk-formatting.yml. Running it here is what makes a root
+  # pre-commit produce what that job expects; dropping the project from CMake
+  # formatting altogether would leave contributors to discover the difference in
+  # CI. cmake-format reads projects/rocprofiler-sdk/.cmake-format.yaml, which it
+  # finds by walking up from each file it is given.
+  - repo: local
+    hooks:
+      - id: cmake-format
+        name: cmake-format (rocprofiler-sdk)
+        language: python
+        additional_dependencies: ["cmake-format==0.6.13", "pyyaml"]
+        entry: cmake-format -i
+        files: ^projects/rocprofiler-sdk/.*(CMakeLists\.txt|\.cmake)$
