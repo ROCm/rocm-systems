@@ -157,6 +157,31 @@ unlikely to be the largest direct deletion source. Its more valuable role in
 the seventh refactoring is as an extension-pressure probe: a hypothetical new
 architecture can reveal common code that still assumes the current closed set.
 
+The canonical-name correction has reaped only its immediate consequences so
+far. Deleting `ConSanEncodingFamily`, its profile field, its projections, and
+their plumbing removed 33 implementation lines. It did not merge two large
+implementations: the former `targets/shared/gfx12/` code was already one copy
+consumed by RDNA4 and CDNA5. Renaming that ownership made the relationship
+truthful, but did not by itself create a duplicate body to delete.
+
+The larger downstream opportunity remains open. There are currently 56 calls
+outside `targets/` to predicates such as `consan_arch_is_cdna3_or_cdna4`,
+`consan_arch_is_rdna4_or_cdna5`, and `consan_arch_is_cdna5`. Some name genuine
+shared ISA mechanisms. Others may be common or mode code reconstructing a
+semantic target capability that should already have been normalized by a
+target provider. The seventh refactoring must classify these call sites by the
+individual fact they need and look for repeated branches, duplicated
+admission, or parallel lowering paths that can disappear. It must not simply
+replace them with another broad family enum or a bag of booleans: a normalized
+capability is worthwhile only when it removes downstream authority and code.
+
+This opportunity is primarily indirect. With only 2,297 implementation lines
+in the complete target component, target-local cleanup alone cannot supply the
+campaign's multi-thousand-line objective. The higher-payoff hypothesis is that
+truthful target normalization can collapse architecture-dependent lifecycles
+inside the much larger shared and mode implementations. That hypothesis has
+not yet been pursued or credited as a seventh-refactoring macro-slice.
+
 Mode locality is physically strong but semantically less complete. Several
 shared aggregation or coordination files import mode-owned products:
 
