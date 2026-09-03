@@ -340,7 +340,16 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
     return false;
   }
-  if (ncclTeamLsa(comm).nRanks < comm->nRanks) {
+  // Prefer the initialized LSA team. Calling ncclTeamLsa before device-runtime
+  // init (unit-test mocks, pre-init comms) runs ncclDevrInitOnce on incomplete
+  // state and can SIGSEGV on a null peerInfo.
+  int lsaRanks = comm->nRanks;
+  if (comm->devrState.bigSize != 0) {
+    lsaRanks = ncclTeamLsa(comm).nRanks;
+  } else if (comm->localRanks > 0) {
+    lsaRanks = comm->localRanks;
+  }
+  if (lsaRanks < comm->nRanks) {
     TRACE(NCCL_TUNING, "Skipping CE collective: not all ranks have direct GPU-to-GPU connectivity");
     return false;
   }

@@ -107,6 +107,9 @@ def _missing_prerequisite():
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
     if not os.path.isfile(HIPCC):
         return f"hipcc not found at {HIPCC} (set ROCM_PATH)"
+    llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
+    if not os.path.isfile(llvm_dis):
+        return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "

@@ -10,6 +10,7 @@
 
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 
 #include "nccl_device.h"
@@ -56,15 +57,7 @@ std::string ginTypeReason() {
   return "";
 }
 
-std::string cuMemReason() {
-  const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
-  if (!cumem || cumem[0] == '\0')
-    return "Symmetric memory required (set NCCL_CUMEM_ENABLE to a non-zero value)";
-  errno = 0;
-  if (std::strtoll(cumem, nullptr, 0) == 0 && errno == 0)
-    return "Symmetric memory required (NCCL_CUMEM_ENABLE must be non-zero)";
-  return "";
-}
+std::string cuMemReason() { return symmetricMemEnvAndRuntimeSkipReason(); }
 
 // Number of MPI ranks co-located on this rank's node.
 int nodeLocalRanks() {

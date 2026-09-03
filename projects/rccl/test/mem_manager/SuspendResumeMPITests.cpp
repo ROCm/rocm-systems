@@ -63,6 +63,7 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 
 #include <algorithm>
@@ -122,6 +123,11 @@ struct VmmAlloc
 
 void allocateVmmPosixFd(int dev, size_t requestedSize, VmmAlloc* out)
 {
+    // These tests allocate raw HIP VMM with posix-fd export, independent of
+    // NCCL_CUMEM_ENABLE. Skip when the kernel/runtime cannot back cuMem.
+    if (!ncclCuMemRuntimeSupported())
+        GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
+
     ASSERT_NE(out, nullptr);
 
     hipMemAllocationProp prop            = {};

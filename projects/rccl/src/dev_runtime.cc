@@ -158,6 +158,7 @@ bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) {
 
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
+  if (comm == nullptr) return ncclInvalidArgument;
   struct ncclDevrState* devr = &comm->devrState;
   if (devr->bigSize != 0) return ncclSuccess;
 
@@ -187,6 +188,11 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   ncclShadowPoolConstruct(&devr->shadows);
 
   if (comm->symmetricSupport) {
+    if (comm->peerInfo == nullptr) {
+      INFO(NCCL_INIT, "ncclDevrInitOnce: symmetricSupport set but peerInfo is null");
+      ret = ncclInternalError;
+      goto fail_lsaRankList;
+    }
     CUmemAllocationProp memProp = {};
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memProp.type = hipMemAllocationTypeUncached;
@@ -217,6 +223,14 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
     // over the full node-local team, which the gcd-based consecutive LSA
     // team above cannot represent. Reuse the lsa* fields for this team
     free(devr->lsaRankList);
+    if (comm->localRanks <= 0 || comm->localRankToRank == nullptr) {
+      // Host-only / mock communicators have no node-local rank map yet.
+      devr->lsaSize = 0;
+      devr->lsaSelf = 0;
+      devr->nLsaTeams = 0;
+      devr->lsaRankList = nullptr;
+      return ncclSuccess;
+    }
     devr->lsaSize = comm->localRanks;
     devr->lsaSelf = comm->localRank;
     devr->nLsaTeams = comm->nRanks / devr->lsaSize;

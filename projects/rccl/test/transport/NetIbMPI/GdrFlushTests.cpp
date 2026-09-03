@@ -20,6 +20,7 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbFaultInject.hpp"
+#include "rocmwrap.h"
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -30,6 +31,9 @@ protected:
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
     // that used to fault). Absent/0 selects the legacy peermem reg_mr path.
     static bool cuMemEnabledEnv() {
+        // Honor the effective library gate, not just the env var. Forcing
+        // NCCL_CUMEM_ENABLE=1 on a kernel without dma-buf still disables cuMem.
+        if (!ncclCuMemEnable()) return false;
         const char* v = getenv("NCCL_CUMEM_ENABLE");
         return v && atoi(v) != 0;
     }

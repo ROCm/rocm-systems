@@ -64,5 +64,6 @@ double GetDeviceWallClockRateInKhz(int deviceId) {
 
 bool IsArchMatch(char const* arch, char const* target) {
   // helper function to reduce clutter in code elsewhere.  Returns true on match.
+  if (arch == nullptr || target == nullptr) return false;
   return (strncmp(arch, target, strlen(target)) == 0);
 }

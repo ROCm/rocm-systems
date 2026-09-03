@@ -169,6 +169,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
+    memset(comm, 0, sizeof(*comm));
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -211,6 +212,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
+    memset(comm, 0, sizeof(*comm));
     // Manually populate minimal fields for comm
     comm->nRanks                    = 1;
     comm->nNodes                    = 2; // triggers inter-node logic
@@ -252,6 +254,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
     ncclComm_t comm = new ncclComm();
+    memset(comm, 0, sizeof(*comm));
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -286,6 +289,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     unsetenv("NCCL_PROTO");
 
     ncclComm_t comm = new ncclComm();
+    memset(comm, 0, sizeof(*comm));
     // Manually populate minimal fields for comm
     comm->nRanks = 1;
     comm->nNodes = 2; // triggers inter-node logic
@@ -1622,40 +1626,49 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
 // satisfied, and must still choose the direct path for the unscaled ops.
 TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
 {
-    ncclComm_t            mockComm = nullptr;
-    struct ncclTopoSystem mockTopo;
-    struct ncclTopoNode   mockGpu;
-    CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
-    SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
-    // CreateMockComm leaves archName null, which the DDA gate dereferences.
-    mockComm->archName = const_cast<char*>("gfx950");
-    // The direct path needs PXN; seed the per-comm cache so this does not depend on
-    // NCCL_PXN_DISABLE or on the rank-count auto-detect heuristic.
-    mockComm->pxnDisable = 0;
+    // DDA_ENABLE defaults to 1 and RCCL_PARAM values are process-cached. Isolate
+    // with DDA off so a prior test cannot change selector behavior, and so DDA
+    // eligibility cannot run against this incomplete mock communicator.
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ReduceScatterSelectionKeepsDirectPathOffScaledOps",
+        []()
+        {
+            ncclComm_t            mockComm = nullptr;
+            struct ncclTopoSystem mockTopo;
+            struct ncclTopoNode   mockGpu;
+            CreateMockComm(mockComm, mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+            SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
+            // CreateMockComm leaves archName null, which the DDA gate dereferences.
+            mockComm->archName = const_cast<char*>("gfx950");
+            // The direct path needs PXN; seed the per-comm cache so this does not depend on
+            // NCCL_PXN_DISABLE or on the rank-count auto-detect heuristic.
+            mockComm->pxnDisable = 0;
 
-    // rcclSelectReduceScatter compares nRanks * recvcount * typeSize against the
-    // window, so this lands at 256 KiB, inside the 2-node 128 KiB .. 2 MiB range.
-    const size_t recvcount = (256 * 1024) / (16 * sizeof(float));
-    // Only inspected to look up symmetric windows, which a mock comm never has, so
-    // these are never dereferenced.
-    char sendbuff = 0;
-    char recvbuff = 0;
+            // rcclSelectReduceScatter compares nRanks * recvcount * typeSize against the
+            // window, so this lands at 256 KiB, inside the 2-node 128 KiB .. 2 MiB range.
+            const size_t recvcount = (256 * 1024) / (16 * sizeof(float));
+            // Only inspected to look up symmetric windows, which a mock comm never has, so
+            // these are never dereferenced.
+            char sendbuff = 0;
+            char recvbuff = 0;
 
-    auto selectedAlgo = [&](ncclRedOp_t op) {
-        struct rcclCollDecision decision = {};
-        EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op,
-                                          /*query=*/false, &decision),
-                  ncclSuccess);
-        return decision.algo;
-    };
+            auto selectedAlgo = [&](ncclRedOp_t op) {
+                struct rcclCollDecision decision = {};
+                EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op,
+                                                  /*query=*/false, &decision),
+                          ncclSuccess);
+                return decision.algo;
+            };
 
-    ASSERT_EQ(selectedAlgo(ncclSum), static_cast<int>(RCCL_DIRECT_REDUCESCATTER))
-        << "mock comm must be direct-eligible for the redop expectations below to mean anything";
-    EXPECT_EQ(selectedAlgo(ncclMin), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
-    EXPECT_NE(selectedAlgo(ncclAvg), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
-    EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+            ASSERT_EQ(selectedAlgo(ncclSum), static_cast<int>(RCCL_DIRECT_REDUCESCATTER))
+                << "mock comm must be direct-eligible for the redop expectations below to mean anything";
+            EXPECT_EQ(selectedAlgo(ncclMin), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+            EXPECT_NE(selectedAlgo(ncclAvg), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+            EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
 
-    CleanupMockComm(mockComm);
+            CleanupMockComm(mockComm);
+        },
+        {{"RCCL_DDA_ENABLE", "0"}});
 }
 
 TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)

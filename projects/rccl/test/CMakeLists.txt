@@ -114,8 +114,19 @@ if(BUILD_TESTS)
         message(FATAL_ERROR "Could not find MPI library (libmpi.so) in ${MPI_PATH}/lib or ${MPI_PATH}/lib64")
     endif()
 
+    # OpenMPI C++ bindings live in libmpi_cxx (Debian/Ubuntu) and are required
+    # when test code includes <mpi.h> from C++ (MPI::Comm, MPI::Op, ...).
+    find_library(MPI_CXX_BINDING_LIBRARY
+        NAMES mpi_cxx mpi++
+        PATHS ${MPI_PATH}/lib ${MPI_PATH}/lib64
+        NO_DEFAULT_PATH
+    )
+
     # Set up MPI variables
     set(MPI_CXX_LIBRARIES ${MPI_LIBRARY})
+    if(MPI_CXX_BINDING_LIBRARY)
+        list(APPEND MPI_CXX_LIBRARIES ${MPI_CXX_BINDING_LIBRARY})
+    endif()
     set(MPI_CXX_INCLUDE_DIRS ${MPI_PATH}/include)
     set(MPI_CXX_LINK_FLAGS "-L${MPI_PATH}/lib -Wl,-rpath,${MPI_PATH}/lib")
     set(MPIEXEC_EXECUTABLE ${MPI_PATH}/bin/mpirun CACHE FILEPATH "MPI executable")
@@ -365,6 +376,11 @@ if(BUILD_TESTS)
   endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # Unit tests pass generic hipMalloc pointers into load16global/store16global.
+    # The gfx942 b128 global-aperture builtins fault on those pointers; use the
+    # nontemporal dword-pair fallback in op128.h for this target only.
+    target_compile_definitions(rccl-UnitTestsFixtures PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device

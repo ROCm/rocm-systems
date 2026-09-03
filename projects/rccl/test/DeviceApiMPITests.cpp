@@ -15,6 +15,7 @@
 
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 
 #include "nccl_device.h"
@@ -37,15 +38,7 @@ namespace {
 // Symmetric memory (cuMem) is required for window registration used by the LSA
 // paths; the Local paths only need plain device memory but we keep a single
 // gate for simplicity of the suite. Match RCCL NCCL_PARAM parsing (strtoll).
-std::string cuMemReason() {
-  const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
-  if (!cumem || cumem[0] == '\0')
-    return "Symmetric memory required (set NCCL_CUMEM_ENABLE to a non-zero value)";
-  errno = 0;
-  if (std::strtoll(cumem, nullptr, 0) == 0 && errno == 0)
-    return "Symmetric memory required (NCCL_CUMEM_ENABLE must be non-zero)";
-  return "";
-}
+std::string cuMemReason() { return symmetricMemEnvAndRuntimeSkipReason(); }
 
 // Number of MPI ranks co-located on this rank's node.
 int nodeLocalRanks() {

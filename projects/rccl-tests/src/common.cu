@@ -2526,6 +2526,27 @@ testResult_t run() {
     //if parallel init is not selected, use main thread to initialize NCCL
     TESTCHECK(initComms(comms, nGpus*nThreads, ncclProc*nThreads*nGpus, ncclProcs*nThreads*nGpus, gpus.data(), ncclId));
 
+    {
+      extern int ncclCuMemRuntimeSupported();
+      if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !ncclCuMemRuntimeSupported()) {
+        if (ncclProc == 0) {
+          printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
+        }
+        for (int i = 0; i < nGpus * nThreads; ++i) {
+          NCCLCHECK(ncclCommDestroy(comms[i]));
+        }
+        free(initFreeGpuMem);
+        free(comms);
+#ifdef MPI_SUPPORT
+        MPI_Barrier(mpi_comm);
+        MPI_Comm_free(&mpi_comm);
+        MPI_Finalize();
+#endif
+        cudaDeviceReset();
+        return testSuccess;
+      }
+    }
+
      // Capture the memory used by the GPUs after initializing the NCCL communicators
      for (int g = 0; g < nGpus; ++g) {
        CUDACHECK(cudaSetDevice(gpus[g]));
