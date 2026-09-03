@@ -38,6 +38,8 @@ class TeamAlltoallvTester : public Tester {
   explicit TeamAlltoallvTester(TesterArguments args);
   virtual ~TeamAlltoallvTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 
