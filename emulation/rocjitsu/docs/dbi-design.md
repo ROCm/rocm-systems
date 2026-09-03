@@ -76,7 +76,7 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 - `BeforeInst` kind only (other kinds are fatal).
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` and `force_full_exec` are still reserved milestone guardrails — non-default values are fatal until each gains a real consumer.
-- Probe calls require the probe body to read no register its calling convention does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncNoArgsReturnS30S31` any such input is fatal.
+- Probe calls require the probe body to read no register its calling convention does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` any such input is fatal.
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch/special-state temps to be within the kernel's SGPR allocation (bounded by `kernel_sgpr_count`); auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
@@ -157,7 +157,7 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 | --- | --- | --- |
 | `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, reserved fields |
 | `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls) |
-| `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, calling convention, `body_words`, `output_text_offset` |
+| `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, verified `ProbeAbi`, `body_words`, `output_text_offset` |
 | `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
@@ -218,7 +218,7 @@ The same `RegisterSet` limit bounds the probe live-in gate in the other directio
 
 **Files:** `code/patch/probe_live_in.h`, `code/patch/probe_live_in.cpp`
 
-The complement of `probe_clobber`: what does the probe body *read* before defining it? `analyze_probe_live_ins()` builds the probe object's CFG (probe entry passed as an `extra_split_point`), forms the block scope with `reachable_kernel_blocks()`, runs `LivenessAnalysis` over it, and returns the entry block's live-in set minus the registers the calling convention supplies. Today that subtraction is the `s[30:31]` return link alone.
+The complement of `probe_clobber`: what does the probe body *read* before defining it? `analyze_probe_live_ins()` builds the probe object's CFG (probe entry passed as an `extra_split_point`), forms the block scope with `reachable_kernel_blocks()`, runs `LivenessAnalysis` over it, and returns the entry block's live-in set minus `supplied_registers(abi)`. Today that subtraction is the `s[30:31]` return link alone.
 
 A non-empty result is a probe expecting state that only exists at kernel entry — `workitem_id_x` in `v31`, written by the kernel's own prologue — which a trampoline at an arbitrary anchor cannot reproduce. `Instrumentor::resolve_points()` rejects the site. This is also the mechanism a convention that *declares* argument registers gets checked against, so it precedes any argument passing rather than competing with it.
 
@@ -348,7 +348,7 @@ Lines above are conditional: the EXEC/VCC/M0 saves and restores appear only when
 
 ### Register requirement
 
-The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncNoArgsReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's SGPR allocation*.
+The probe's calling convention fixes the **link pair** at `s[30:31]` (`AmdGpuFuncReturnS30S31`): `s_swappc_b64` writes the return address there and the body's `s_setpc_b64 s[30:31]` reads it back. The planner additionally picks a dead, even-aligned **target pair** (holds the materialized address) and a dead **SCC temp** from the anchor's liveness. All of these must be *granted by the kernel's SGPR allocation*.
 
 The planner also reserves, from the same dead-SGPR pool bounded by `plan.kernel_sgpr_count`, a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (`min(kernel_vgpr_count, accum_base)`, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.
 

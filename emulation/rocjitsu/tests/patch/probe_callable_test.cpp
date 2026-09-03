@@ -163,7 +163,7 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   EXPECT_EQ(callable->symbol, "rj_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
   EXPECT_EQ(callable->target, ROCJITSU_CODE_TARGET_GFX90A);
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words, body);
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
 }
@@ -258,7 +258,7 @@ TEST(ProbeCallableTest, AcceptsRelocationOutsideBody) {
   const auto callable =
       build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err);
   ASSERT_TRUE(callable.has_value()) << err;
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
 }
 
 TEST(ProbeCallableTest, RejectsNonDwordBodySize) {
@@ -309,9 +309,9 @@ TEST(ProbeCallableTest, RejectsStValueOverflow) {
 
 TEST(ProbeAbiTest, DerivesTheLinkPairFromTheConvention) {
   const std::optional<ProbeAbi> abi =
-      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   ASSERT_TRUE(abi.has_value());
-  EXPECT_EQ(abi->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(abi->cc, ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   EXPECT_EQ(abi->link_pair_base, 30);
 }
 
@@ -321,7 +321,7 @@ TEST(ProbeAbiTest, RejectsAnUnrecognizedConvention) {
 
 TEST(ProbeAbiTest, SuppliesExactlyTheLinkPair) {
   const std::optional<ProbeAbi> abi =
-      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   ASSERT_TRUE(abi.has_value());
 
   RegisterSet expected;
@@ -331,7 +331,7 @@ TEST(ProbeAbiTest, SuppliesExactlyTheLinkPair) {
 
 TEST(ProbeAbiTest, ADerivedAbiIsValid) {
   const std::optional<ProbeAbi> abi =
-      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
   ASSERT_TRUE(abi.has_value());
   EXPECT_TRUE(is_valid_probe_abi(*abi));
 }
@@ -347,7 +347,7 @@ TEST(ProbeAbiTest, RejectsAnOddLinkPairBase) {
   // A 64-bit scalar operand must name an even-aligned pair, so an odd base
   // cannot have come from a convention even with one named.
   EXPECT_FALSE(is_valid_probe_abi(
-      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31, .link_pair_base = 31}));
+      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 31}));
 }
 
 TEST(ProbeAbiTest, RejectsAnEvenLinkPairBaseWithNoConvention) {
@@ -359,10 +359,9 @@ TEST(ProbeAbiTest, AnInvalidAbiSuppliesNothing) {
   // Reporting a pair here would let a live-in subtraction excuse a register
   // nothing had committed to writing.
   EXPECT_TRUE(supplied_registers(ProbeAbi{}).none());
-  EXPECT_TRUE(
-      supplied_registers(ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31,
-                                  .link_pair_base = 31})
-          .none());
+  EXPECT_TRUE(supplied_registers(ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31,
+                                          .link_pair_base = 31})
+                  .none());
 }
 
 } // namespace

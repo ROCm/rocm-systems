@@ -119,7 +119,7 @@ RegisterSet supplied_registers(const ProbeAbi &abi) {
   // this ABI never committed to writing would excuse the probe reading it cold.
   if (!is_valid_probe_abi(abi))
     return regs;
-  regs.expand(RegisterRef{RegClass::SGPR, abi.link_pair_base, 2});
+  regs.expand(probe_link_pair(abi));
   return regs;
 }
 
@@ -241,7 +241,13 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.arch = arch;
   callable.target = target;
   callable.body_words.assign(words.begin(), words.begin() + num_words);
-  callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+  // The body was just verified to return through s[30:31], which is the whole
+  // of this convention, so the derivation cannot fail. static_assert rather
+  // than a runtime check, since derive_probe_abi is constexpr.
+  constexpr std::optional<ProbeAbi> kVerifiedAbi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  static_assert(kVerifiedAbi.has_value());
+  callable.abi = *kVerifiedAbi;
   // output_text_offset stays 0 — assigned by the later layout step.
   return callable;
 }

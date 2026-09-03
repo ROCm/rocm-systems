@@ -3,7 +3,7 @@
 
 /// @file probe_callable.h
 /// @brief Turn a resolved probe symbol into a self-contained, callable probe
-///        body: its instruction words plus a verified calling convention.
+///        body: its instruction words plus its verified ABI.
 
 #pragma once
 
@@ -20,26 +20,15 @@ namespace rocjitsu {
 class AmdGpuCodeObject;
 struct ResolvedProbeSymbol;
 
-/// @brief The ABI a verified probe body conforms to.
+/// @brief The return-link rule a verified probe body conforms to.
 ///
-/// Only one shape is supported today: a no-argument function that returns
-/// through the s[30:31] link pair. More enums will be added as more
-/// arguments are passed
+/// @details Names only how the body returns. The registers a convention
+/// implies are reported by derive_probe_abi(), so this enum does not carry one
+/// enumerator per combination of the properties an ABI has.
 enum class ProbeCallingConvention {
-  Unknown,                      ///< Not yet verified / unrecognized.
-  AmdGpuFuncNoArgsReturnS30S31, ///< void(void), returns via s_setpc_b64 s[30:31].
+  Unknown,                ///< Not yet verified / unrecognized.
+  AmdGpuFuncReturnS30S31, ///< Returns via s_setpc_b64 s[30:31].
 };
-
-/// @brief The return-link SGPR pair base for a verified calling convention.
-[[nodiscard]] inline constexpr std::optional<uint16_t> link_pair_for(ProbeCallingConvention cc) {
-  switch (cc) {
-  case ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31:
-    return 30;
-  case ProbeCallingConvention::Unknown:
-  default:
-    return std::nullopt;
-  }
-}
 
 /// @brief A link-pair base no calling convention can select.
 ///
@@ -59,6 +48,8 @@ inline constexpr uint16_t kUnsetLinkPairBase = 1;
 struct ProbeAbi {
   ProbeCallingConvention cc = ProbeCallingConvention::Unknown;
   uint16_t link_pair_base = kUnsetLinkPairBase; ///< Base of the return-link SGPR pair.
+
+  constexpr bool operator==(const ProbeAbi &) const = default;
 };
 
 /// @brief Could @p abi have come out of derive_probe_abi()?
@@ -72,10 +63,22 @@ struct ProbeAbi {
 
 /// @brief The ABI @p cc implies, or std::nullopt if it is unrecognized.
 [[nodiscard]] inline constexpr std::optional<ProbeAbi> derive_probe_abi(ProbeCallingConvention cc) {
-  const std::optional<uint16_t> link_pair = link_pair_for(cc);
-  if (!link_pair)
+  switch (cc) {
+  case ProbeCallingConvention::AmdGpuFuncReturnS30S31:
+    return ProbeAbi{.cc = cc, .link_pair_base = 30};
+  case ProbeCallingConvention::Unknown:
+  default:
     return std::nullopt;
-  return ProbeAbi{.cc = cc, .link_pair_base = *link_pair};
+  }
+}
+
+/// @brief The return-link register pair @p abi returns through.
+///
+/// @details Meaningful only for an @p abi that passes is_valid_probe_abi(),
+/// like the field it wraps. Exists so consumers reason about "the link pair"
+/// rather than re-deriving that it is two SGPRs starting at link_pair_base.
+[[nodiscard]] inline constexpr RegisterRef probe_link_pair(const ProbeAbi &abi) {
+  return RegisterRef{RegClass::SGPR, abi.link_pair_base, 2};
 }
 
 /// @brief The registers @p abi has the framework supply to the probe body.
@@ -96,7 +99,7 @@ struct ProbeCallable {
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;          ///< ISA the body decodes as.
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
   std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
-  ProbeCallingConvention cc = ProbeCallingConvention::Unknown; ///< Verified ABI.
+  ProbeAbi abi;                     ///< Verified convention and the registers it implies.
 
   /// Byte offset of the body once it has been laid out in the instrumented
   /// code object's text.
@@ -118,8 +121,8 @@ struct ProbeCallable {
 ///     addressing is not statically detectable here and is not rejected, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
-/// On success the returned ProbeCallable has cc ==
-/// AmdGpuFuncNoArgsReturnS30S31. Returns std::nullopt (with a reason written to
+/// On success the returned ProbeCallable carries the ABI derived from
+/// AmdGpuFuncReturnS30S31. Returns std::nullopt (with a reason written to
 /// @p error_out, if non-null) on any failure.
 [[nodiscard]] std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                                 const ResolvedProbeSymbol &sym,

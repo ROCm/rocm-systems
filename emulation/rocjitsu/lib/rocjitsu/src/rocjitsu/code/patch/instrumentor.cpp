@@ -191,19 +191,16 @@ bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *
 }
 
 // Check that the probe does not clobber the link pair.
-bool check_probe_link_pair(const ProbeClobberSummary &summary, ProbeCallingConvention cc,
+bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &abi,
                            std::string *error_out) {
-  const std::optional<uint16_t> link_base = link_pair_for(cc);
-  if (!link_base)
-    return true; // Unknown convention: plan_probe_call rejects it with a cc-specific error.
-  RegisterSet link_pair;
-  link_pair.expand(RegisterRef{RegClass::SGPR, *link_base, 2});
-  if (!summary.ordinary_clobbers.intersects(link_pair))
+  if (!is_valid_probe_abi(abi))
+    return true; // plan_probe_call rejects an unusable ABI with its own error.
+  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi)))
     return true;
   if (error_out != nullptr) {
-    const uint16_t hi = static_cast<uint16_t>(*link_base + 1);
-    *error_out = "probe body overwrites its own return-link pair s[" + std::to_string(*link_base) +
-                 ":" + std::to_string(hi) +
+    const uint16_t hi = static_cast<uint16_t>(abi.link_pair_base + 1);
+    *error_out = "probe body overwrites its own return-link pair s[" +
+                 std::to_string(abi.link_pair_base) + ":" + std::to_string(hi) +
                  "] before returning; it would return through a corrupted PC";
   }
   return false;
@@ -692,7 +689,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     // which a trampoline at an arbitrary site cannot reproduce, so the probe
     // would read whatever the instrumented kernel left behind. An ordinary
     // uninitialized read lands here too, and is equally unusable.
-    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->cc, &perr);
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
     if (!live_ins)
       return std::nullopt;
     if (!live_ins->none()) {
@@ -870,13 +867,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The kernel must own the fixed return-link pair.
-      if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+      if (const uint16_t link_base = probe.abi.link_pair_base;
+          is_valid_probe_abi(probe.abi) &&
+          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
         result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
-            std::to_string(*link_base + 1) + "] but the kernel allocates only " +
+            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+            std::to_string(link_base + 1) + "] but the kernel allocates only " +
             std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(*link_base + 2) + " SGPRs");
+            std::to_string(link_base + 2) + " SGPRs");
         continue;
       }
 
@@ -895,7 +893,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The probe must not overwrite its own return-link pair before returning.
-      if (!check_probe_link_pair(*summary, probe.cc, &err)) {
+      if (!check_probe_link_pair(*summary, probe.abi, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -924,7 +922,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.kernel_sgpr_count = *kernel_sgpr_count;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
-      if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,
+      if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
                                               &err)) {
         result.errors.push_back(std::move(err));
         continue;
