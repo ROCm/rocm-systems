@@ -575,6 +575,7 @@ if(BUILD_TESTS)
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      CeAlltoAllDdaDecisionTests.cpp
       GinAlltoAllEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
