@@ -376,6 +376,8 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int* startQpIndex
   *wrrSched = false;
 
   if (!parms->enable) {
+    // Scheduler off: use the static QP selection, bypassing WRR.
+    nqps = IbCastCommBaseGetDefaultNqpsPerRequest(req->base);
     qpIndex = req->id % req->base->nqps;
     goto exit;
   }
