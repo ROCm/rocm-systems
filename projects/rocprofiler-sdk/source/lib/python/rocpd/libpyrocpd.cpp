@@ -68,6 +68,7 @@
 #include <future>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -192,6 +193,118 @@ struct jinja_variables
     py::str guid = py::none{};
 };
 }  // namespace rocpd
+
+namespace
+{
+std::string
+sql_single_quoted_literal(std::string_view s)
+{
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('\'');
+    for(const char c : s)
+    {
+        if(c == '\'') out.push_back('\'');
+        out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+// Build SQL string: CASE PMC_I.units WHEN ... THEN <expr> ... ELSE PMC_I.units END AS units
+std::string
+build_pmc_units_case_stmt_for_sql()
+{
+    // These are the mappings for the rocprof-sys PMC units to strings we want to show in perfetto.
+    static constexpr std::pair<std::string_view, std::string_view>
+        pmc_units_to_user_friendly_names[] = {
+            {"W", "watts"},
+            {"°C", "deg C"},
+        };
+
+    std::string when_clauses;
+    for(const auto& [units, tail] : pmc_units_to_user_friendly_names)
+    {
+        when_clauses += fmt::format("\n                                    WHEN {} THEN {}",
+                                    sql_single_quoted_literal(units),
+                                    sql_single_quoted_literal(tail));
+    }
+    return fmt::format("CASE PMC_I.units{}"
+                       "\n                                    ELSE PMC_I.units"
+                       "\n                                END AS units",
+                       when_clauses);
+}
+
+// Build SQL string: CASE WHEN PMC_I.symbol = <expr> ... THEN <expr> ... ELSE PMC_I.description END
+// AS short_description
+std::string
+build_pmc_symbol_short_description_case_stmt_for_sql()
+{
+    constexpr std::string_view pmc_arch_sql_string = "COALESCE(PMC_I.target_arch, A.type, 'Agent')";
+
+    // These names map well, just prefix with "target_arch"
+    static constexpr std::string_view pmc_symbols_already_user_friendly[] = {
+        "Context Switches",
+        "GFX Busy",
+        "Kernel Time",
+        "MM Busy",
+        "Peak Memory",
+        "UMC Busy",
+        "User Time",
+        "Virtual Memory Usage",
+    };
+
+    // These are mappings for the rocprof-sys PMC symbols to friendly names we want to show
+    static constexpr std::pair<std::string_view, std::string_view>
+        pmc_symbol_to_user_friendly_names[] = {
+            {"MemUsg", " || ' Memory Usage'"},
+            {"Memory Usage", " || ' Page Faults'"},
+            {"Pow", " || ' Current Power'"},
+            {"Temp", " || ' Temperature'"},
+        };
+
+    // These are mappings for the rocprof-sys thread PMC symbols to friendly names we want to show
+    static constexpr std::pair<std::string_view, std::string_view> pmc_symbols_for_threads[] = {
+        {"thread_context_switch", "'Thread' || ' Context Switches'"},
+        {"thread_cpu_time", "'Thread' || ' CPU Time'"},
+        {"thread_page_fault", "'Thread' || ' Page Faults'"},
+        {"thread_peak_memory", "'Thread' || ' Peak Memory Usage'"},
+    };
+
+    std::string when_clauses;
+    // rocprof-sys may store a leading space before "GPU ". Trim & match so LIKE 'GPU %' applies
+    when_clauses +=
+        "\n                                    WHEN TRIM(PMC_I.symbol) LIKE 'GPU %' THEN "
+        "TRIM(PMC_I.symbol)";
+    for(const std::string_view sym : pmc_symbols_already_user_friendly)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {} "
+                        "|| ' ' || PMC_I.symbol",
+                        sql_single_quoted_literal(sym),
+                        pmc_arch_sql_string);
+    }
+    for(const auto& [sym, tail] : pmc_symbol_to_user_friendly_names)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {}{}",
+                        sql_single_quoted_literal(sym),
+                        pmc_arch_sql_string,
+                        tail);
+    }
+    for(const auto& [sym, then_sql] : pmc_symbols_for_threads)
+    {
+        when_clauses +=
+            fmt::format("\n                                    WHEN PMC_I.symbol = {} THEN {}",
+                        sql_single_quoted_literal(sym),
+                        then_sql);
+    }
+    return fmt::format("\n                                CASE{}"
+                       "\n                                    ELSE PMC_I.description"
+                       "\n                                END AS short_description",
+                       when_clauses);
+}
+}  // namespace
 
 PYBIND11_MODULE(libpyrocpd, pyrocpd)
 {
@@ -504,12 +617,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) -> bool {
             auto _create_agent_index =
                 [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
-                auto ret_index = tool::create_agent_index(
-                    output_cfg.agent_index_value,
-                    _agent.node_id,                                      // absolute index
-                    static_cast<uint32_t>(_agent.logical_node_id),       // relative index
-                    static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
+                auto ret_index = tool::create_agent_index(output_cfg.agent_index_value,
+                                                          _agent.absolute_index,  // absolute index
+                                                          _agent.logical_index,   // relative index
+                                                          _agent.type_index,  // type-relative index
+                                                          std::string_view(_agent.type));
                 return ret_index;
             };
             // ORDER BY expression for kernel dispatches
@@ -534,8 +646,113 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
+            auto pmc_symbol_sql_string = build_pmc_symbol_short_description_case_stmt_for_sql();
+            auto pmc_units_sql_string  = build_pmc_units_case_stmt_for_sql();
             for(auto obj : {data.connection})
             {
+                // Suggestions for the future schema updates:
+                // - Make info_pmc joinable with samples via the name field
+                // - Add short_description for perfetto counter tracks.
+                auto create_info_pmc_table = std::string{};
+                create_info_pmc_table.append(R"(
+                            CREATE TEMP TABLE IF NOT EXISTS
+                                `info_pmc_schema_3_0` AS
+                            SELECT
+                                CASE A.type
+                                    WHEN 'GPU' THEN PMC_I.name || ' [' || A.type_index || ']'
+                                    ELSE PMC_I.name
+                                END AS name,
+                                PMC_I.name AS name_plain,
+                                PMC_I.description,
+                                PMC_I.symbol,
+                                )");
+                create_info_pmc_table.append(pmc_units_sql_string);
+                create_info_pmc_table.append(R"(,)");
+                create_info_pmc_table.append(pmc_symbol_sql_string);
+                create_info_pmc_table.append(R"(,
+                                A.absolute_index AS agent_abs_index,
+                                A.type_index AS agent_type_index,
+                                PMC_I.guid
+                            FROM
+                                `rocpd_info_pmc` PMC_I
+                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
+                                AND A.guid = PMC_I.guid;
+                        )");
+
+                execute_raw_sql_statements(conn, create_info_pmc_table);
+
+                const std::string create_samples_view = R"(
+                            CREATE TEMP VIEW IF NOT EXISTS
+                                `samples_schema_3_0` AS
+                            SELECT
+                                P.pid,
+                                R.id,
+                                R.guid,
+                                R.timestamp,
+                                R.event_id,
+                                T.nid,
+                                TH.tid,
+                                TH.id AS thread_index,
+                                CN.string AS category,
+                                PMC_I.name,
+                                PMC_I.symbol,
+                                PMC_I.units,
+                                PMC_I.description,
+                                PMC_I.short_description,
+                                PMC_I.agent_abs_index AS agent_abs_index,
+                                PMC_I.agent_type_index AS agent_type_index,
+                                E.stack_id AS stack_id,
+                                E.parent_stack_id AS parent_stack_id,
+                                E.correlation_id AS corr_id,
+                                E.extdata AS extdata,
+                                E.call_stack AS call_stack,
+                                E.line_info AS line_info
+                            FROM
+                                `rocpd_sample` R
+                                INNER JOIN `rocpd_track` T ON T.id = R.track_id
+                                AND T.guid = R.guid
+                                INNER JOIN `rocpd_event` E ON E.id = R.event_id
+                                AND E.guid = R.guid
+                                INNER JOIN `rocpd_info_process` P ON P.id = T.pid
+                                AND P.guid = T.guid
+                                INNER JOIN `rocpd_string` SN ON SN.id = T.name_id
+                                AND SN.guid = T.guid
+                                INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
+                                AND CN.guid = T.guid
+                                LEFT OUTER JOIN `info_pmc_schema_3_0` PMC_I
+                                ON PMC_I.guid = T.guid
+                                AND (SN.string = PMC_I.name OR SN.string = PMC_I.name_plain)
+                                LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
+                                AND TH.guid = T.guid;
+                        )";
+
+                execute_raw_sql_statements(conn, create_samples_view);
+
+                const std::string create_pmc_event_view = R"(
+                            CREATE TEMP VIEW IF NOT EXISTS
+                                `pmc_events_schema_3_0` AS
+                            SELECT
+                                PMC_E.id,
+                                PMC_E.guid,
+                                PMC_I.nid,
+                                PMC_I.pid,
+                                PMC_E.pmc_id,
+                                PMC_E.event_id,
+                                PMC_I.name,
+                                PMC_I.symbol,
+                                A.absolute_index AS agent_abs_index,
+                                PMC_E.value AS value,
+                                PMC_E.extdata AS extdata
+                            FROM
+                                `rocpd_pmc_event` PMC_E
+                                INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
+                                AND PMC_I.guid = PMC_E.guid
+                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
+                                AND A.guid = PMC_I.guid;
+                        )";
+
+                execute_raw_sql_statements(conn, create_pmc_event_view);
+
                 auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
@@ -607,11 +824,14 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
                             conn,
-                            select_guid_nid_pid("samples", samples_condition),
+                            select_guid_nid_pid("samples_schema_3_0", samples_condition),
                             sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
+
+                        auto pmc_events = rocpd::sql_generator<rocpd::types::pmc_event>{
+                            conn, select_guid_nid_pid("pmc_events_schema_3_0")};
 
                         // absolute_index |-> (agent, agent_index)
                         auto agents_map =
@@ -640,7 +860,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       graph_launches,
                                                       scratch_memory,
                                                       memory_allocations,
-                                                      counters);
+                                                      counters,
+                                                      pmc_events);
                     }
                 }
             }

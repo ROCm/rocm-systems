@@ -25,6 +25,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- Improved `rocpd` capability to convert sampling data from `rocprofiler-systems` database to Perfetto trace.
 
 ### Resolved issues
 
@@ -118,6 +119,21 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - SPM API reference guide (`api-reference/spm.rst`).
   - SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
   - `--spm-config` documentation to `rocprofv3-avail` usage guide.
+
+### Changed
+- Bump rocpd schema to version 3.0.1 which supports NIC agent types.
+- Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
+- Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
+- Improved `rocpd` capability to convert sampling data from `rocprofiler-systems` database to Perfetto trace.
+
+### Removed
+
+
+## ROCprofiler-SDK 1.3.5
+
+### Added
+- HipFile API tracing support
+
 
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.2.4
 
