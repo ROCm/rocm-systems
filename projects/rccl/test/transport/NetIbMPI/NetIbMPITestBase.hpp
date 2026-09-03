@@ -1396,12 +1396,13 @@ protected:
     // the receive buffer is cleared to.
     static constexpr int kWorkerSeedBase   = 55;
     static constexpr int kWorkerSeedStride = 100001;
-    // An odd stride gives every worker a distinct pattern only while the worker
-    // index stays below 256; past that two workers share one modulo 256 and a
-    // payload delivered on the wrong connection would verify clean. Fail the build
-    // rather than the verification if the cap is ever raised that far.
-    static_assert(MPIEnvironment::kMaxThreads < 256,
-                  "WorkerSeed patterns alias once the worker cap reaches 256; widen the "
+    // With an odd stride the 256 indices a cap of 256 permits still land on 256
+    // distinct values modulo 256, one each. Worker 256 would be the first to share
+    // a pattern with worker 0, and a payload delivered on the wrong connection would
+    // then verify clean, so the cap is what the build refuses to let past 256 -- not
+    // the count of usable indices below it.
+    static_assert(MPIEnvironment::kMaxThreads <= 256,
+                  "WorkerSeed patterns alias once the worker cap exceeds 256; widen the "
                   "pattern before raising it");
     static_assert(kWorkerSeedStride % 2 == 1,
                   "WorkerSeed stride must be odd, or workers a power of two apart collide");
