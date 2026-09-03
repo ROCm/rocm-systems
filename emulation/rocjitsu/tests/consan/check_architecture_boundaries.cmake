@@ -293,6 +293,26 @@ foreach(_file IN LISTS _transform_component_sources)
     )
 endforeach()
 
+# Branch-only routing owns capacity, provenance, and route selection. Direct
+# reservoir ownership is already authoritative in reservoir_by_relay; the
+# retired deferred-owner lifecycle duplicated that state and must not return.
+foreach(_relay_router_file IN ITEMS
+    consan_branch_only_relay_router.h
+    consan_branch_only_relay_router.cpp
+)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_relay_router_file}"
+        "BranchOnlyRelayOwner|owner_affinity|owner_materialization|offer_materialized_owner|has_deferred_owner_affinity|RelayOwnerGrouping|route_optimization|BoundedOptimizationMode"
+        "branch-only routing must not regain parallel owner or optimizer lifecycles"
+    )
+endforeach()
+file(READ "${_consan_dir}/consan_branch_only_relay_router.cpp" _branch_only_router_owner)
+if(NOT _branch_only_router_owner MATCHES
+   "reservoir_by_relay[.]contains[(]claim[.]offset[)]")
+    message(FATAL_ERROR
+        "direct relay-reservoir dependencies lost their single ownership authority")
+endif()
+
 # Descriptor resource mutation has one mechanical owner. MOI contributes its
 # narrow policy adapter; SuperCollider's two access regions submit batches
 # directly. Retired per-field and mode-local mutation APIs must not reappear.

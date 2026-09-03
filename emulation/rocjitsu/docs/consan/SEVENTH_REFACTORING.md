@@ -1011,3 +1011,39 @@ production implementation lines removed**. Abort and revert if preserving
 complete-batch feasibility requires recreating owner or optimization modes, if
 work remains unbounded, if live routing capacity regresses, or if the combined
 result does not clear the floor.
+
+The hard prototype accepted the thesis. The router now owns only relay
+capacity, provenance, deterministic bounded route search, reservation, and
+commit. Direct-reservoir ownership remains solely in `reservoir_by_relay`.
+Deferred owner kinds, identities, grouping, materialization, activation-cost
+search, and duplicate ownership tags are gone. The exact-pair fallback retains
+the feasibility baseline for every nonfinal pair and still refines to a shorter
+subset when its bounded work permits, but feasibility and refinement now share
+one exact-search transaction, configuration, meter, and failure channel. The
+separate optimizer mode, invariant state, limits, telemetry, and tests no
+longer exist.
+
+Fresh accounting is:
+
+| Signal | Baseline | Accepted slice | Change |
+| --- | ---: | ---: | ---: |
+| Production files | 311 | 311 | 0 |
+| Physical production lines | 97,460 | 96,544 | **-916** |
+| Nonblank production lines | 91,055 | 90,187 | **-868** |
+| Production implementation lines | 83,481 | **82,719** | **-762** |
+
+The production diff has 173 added and 1,089 deleted physical lines. Nineteen
+tests tied only to deferred-owner or independent-optimizer representation were
+removed. The 71 retained router tests cover global backtracking, entry/return
+contention, shortest-route capacity preservation, bounded exact and greedy
+fallback, transactional rollback, deterministic randomized comparison against
+a brute-force oracle, pristine reservation, provenance, and transitive direct
+reservoirs. The architecture-boundary test now rejects reintroduction of both
+parallel owner state and a second optimizer lifecycle.
+
+The focused 71-test router suite and the architecture-boundary test pass. The
+complete nonphysical ConSan gate passes **4,768/4,768** tests at `-j16`, across
+Record/Replay, Sampled, InlineShadow, and SuperCollider on RDNA3, RDNA4, CDNA3,
+CDNA4, and CDNA5. No physical gfx1201 test was run. The slice therefore clears
+the macro floor without reducing product scope or the live routing-capacity
+behavior that caused Section 14.7's narrower prototype to abort.

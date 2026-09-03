@@ -50,56 +50,9 @@ enum class BranchOnlyRelayProvenance : uint8_t {
   OwnedReservoir,
 };
 
-enum class BranchOnlyRelayOwnerKind : uint8_t {
-  LdsReservoir,
-  DirectReservoir,
-};
-
-enum class BranchOnlyRelayOwnerMaterialization : uint8_t {
-  Paid,
-  Deferred,
-};
-
-/// Identifies one relay-storage owner. The producer kind is part of the
-/// identity, so equal producer-local keys from different domains cannot share
-/// planning or commit state. Whether using the owner adds a materialization
-/// cost belongs to each router offer rather than to this identity: the same
-/// owner may be deferred in one planning view and already paid in another.
-struct BranchOnlyRelayOwnerIdentity {
-  BranchOnlyRelayOwnerIdentity() = delete;
-
-  [[nodiscard]] static constexpr BranchOnlyRelayOwnerIdentity lds_reservoir(uint64_t producer_key) {
-    return BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind::LdsReservoir, producer_key);
-  }
-
-  [[nodiscard]] static constexpr BranchOnlyRelayOwnerIdentity
-  direct_reservoir(uint64_t producer_key) {
-    return BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind::DirectReservoir, producer_key);
-  }
-
-  [[nodiscard]] constexpr BranchOnlyRelayOwnerKind kind() const { return kind_; }
-  [[nodiscard]] constexpr uint64_t producer_key() const { return producer_key_; }
-
-  auto operator<=>(const BranchOnlyRelayOwnerIdentity &) const = default;
-
-private:
-  constexpr BranchOnlyRelayOwnerIdentity(BranchOnlyRelayOwnerKind kind, uint64_t producer_key)
-      : kind_(kind), producer_key_(producer_key) {}
-
-  BranchOnlyRelayOwnerKind kind_;
-  uint64_t producer_key_;
-};
-
 struct BranchOnlyRelayClaim {
   uint64_t offset = 0;
   BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
-  /// Optional owner shared by every relay from the same producer. Deferred
-  /// owners participate in materialization-cost planning; pre-materialized
-  /// owners remain visible for claim and commit identity. Neither changes
-  /// relay emission.
-  std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
-  BranchOnlyRelayOwnerMaterialization owner_materialization =
-      BranchOnlyRelayOwnerMaterialization::Paid;
 };
 
 struct BranchOnlyRelayRoute {
@@ -159,11 +112,6 @@ enum class BranchOnlyRelayPlanStrategy : uint8_t {
   GreedyPairFallback,
 };
 
-struct BranchOnlyRelayOptimizationWorkLimits {
-  PlanningWorkLimit search;
-  PlanningWorkLimit scan;
-};
-
 struct BranchOnlyRelayQualificationWorkLimits {
   /// Base allowance for endpoint lookup and placement-occupancy inspections
   /// while qualifying the offered relay inventory. This phase is separate
@@ -184,29 +132,24 @@ struct BranchOnlyRelayBatchWorkLimits {
   /// headroom keeps a larger request/relay inventory from shrinking the
   /// useful exact-search window solely because its summaries cost more.
   PlanningWorkLimit feasibility_scan{2'000'000u, 256u};
-  /// A separate bounded pass may improve the first exact route
-  /// lexicographically. Search headroom scales with demands and scan headroom
-  /// with demand-relay pairs.
-  BranchOnlyRelayOptimizationWorkLimits optimization{{25'000u, 1'024u}, {500'000u, 64u}};
   /// One-time construction of the ordered fallback inventory. Selected-route
   /// removal and rollback work is charged by the per-pair meters.
   size_t fallback_setup = 100'000u;
 };
 
 struct BranchOnlyRelayPairWorkLimits {
-  /// Exact routing, minimization, greedy routing, and classification are all
+  /// Exact routing and its best-known route refinement share one bounded
+  /// transaction. Greedy routing and classification are independently
   /// metered, so total fallback work remains linear in the number of pairs.
-  /// Each recursive frame charges its first complete inventory traversal; a
-  /// bounded second owner-cost traversal reuses that charge. Physical
-  /// inspections are therefore at most twice the charged traversal units.
+  /// Each recursive exact-search frame charges its complete inventory
+  /// traversal.
   /// Zero base/tier limits are normalized to one unit; zero per-input
   /// headroom is allowed.
   ///
   /// Fixed per-pair allowance. Keeping this unscaled preserves a total bound
   /// linear in the number of pairs.
-  size_t feasibility_search = 8'192u;
-  PlanningWorkLimit feasibility_scan{100'000u, 64u};
-  BranchOnlyRelayOptimizationWorkLimits optimization{{2'048u, 512u}, {25'000u, 16u}};
+  PlanningWorkLimit exact_search{10'240u, 512u};
+  PlanningWorkLimit exact_scan{125'000u, 96u};
   /// Fixed allowance for one greedy routing or independent-classification
   /// phase. Each pair can consume at most one allowance for each phase.
   size_t greedy = 8'192u;
@@ -221,18 +164,18 @@ struct BranchOnlyRelaySearchLimits {
 /// Configures a bounded plan to skip exponential exact routing and use the
 /// pair-atomic greedy tier after one ordered-inventory construction. This is
 /// appropriate for large monotonic corridors where feasibility, rather than
-/// owner-group optimization, is the caller's contract.
+/// route minimization, is the caller's contract.
 [[nodiscard]] BranchOnlyRelaySearchLimits branch_only_relay_greedy_pair_limits(size_t relay_count);
 
 static_assert(sizeof(BranchOnlyRelayQualificationWorkLimits) == 3u * sizeof(size_t));
-static_assert(sizeof(BranchOnlyRelayBatchWorkLimits) == 9u * sizeof(size_t));
-static_assert(sizeof(BranchOnlyRelayPairWorkLimits) == 8u * sizeof(size_t));
-static_assert(sizeof(BranchOnlyRelaySearchLimits) == 20u * sizeof(size_t),
+static_assert(sizeof(BranchOnlyRelayBatchWorkLimits) == 5u * sizeof(size_t));
+static_assert(sizeof(BranchOnlyRelayPairWorkLimits) == 5u * sizeof(size_t));
+static_assert(sizeof(BranchOnlyRelaySearchLimits) == 13u * sizeof(size_t),
               "update the phase-scoped relay search-limit tests");
 
 /// Returns a saturating conservative bound for one plan call. It includes
-/// qualification, exact-batch routing and minimization, fallback setup, and
-/// every per-pair exact, minimization, greedy, and classification allowance.
+/// qualification, exact-batch routing, fallback setup, and every per-pair
+/// exact, minimization, greedy, and classification allowance.
 /// Some tiers are mutually exclusive, so the actual charged work cannot
 /// exceed this discoverable configuration bound.
 [[nodiscard]] size_t
@@ -251,46 +194,28 @@ struct BranchOnlyRelayPlanFlags {
   /// inputs or output. A later exact-pair or greedy tier may still recover the
   /// plan. This is not a budget event.
   bool routing_invariant_failed = false;
-  /// True when at least one independent lexicographic route-minimization pass
-  /// retained its best known feasible route after reaching its own bound. A
-  /// later pair may still degrade for an independent routing-limit reason.
-  bool route_optimization_exhausted = false;
-  /// True when defensive validation found inconsistent route-minimization
-  /// inputs and retained the feasibility route. This is not a budget event.
-  bool route_optimization_invariant_failed = false;
-
   /// True when qualification or a routing tier reached its configured limit,
-  /// including successful plans recovered by a later fallback tier. The
-  /// independent route-minimization allowance is reported separately.
+  /// including a successful exact-pair plan that retained its best-known
+  /// route when refinement exhausted the remainder of the shared allowance.
   [[nodiscard]] bool work_budget_exhausted() const {
     return relay_qualification_exhausted || routing_work_exhausted;
   }
 };
 
-static_assert(sizeof(BranchOnlyRelayPlanFlags) == 5u * sizeof(bool));
+static_assert(sizeof(BranchOnlyRelayPlanFlags) == 3u * sizeof(bool));
 
 struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
   BranchOnlyRelayPlanStrategy strategy = BranchOnlyRelayPlanStrategy::ExactBatch;
-  /// All compatibility search work is feasibility-search work. Compatibility
-  /// scan work is derived from the independently bounded phases below. Both
-  /// exclude the independent route-minimization pass.
+  /// Search work includes exact feasibility and best-known route refinement.
+  /// Scan work is derived from the independently bounded phases below.
   size_t search_work_consumed = 0u;
-  /// Route-minimization work is reported independently even when a later
-  /// routing reservation discards the improved route.
-  size_t route_optimization_search_work_consumed = 0u;
-  size_t route_optimization_scan_work_consumed = 0u;
   /// These phase counters saturating-sum to the compatibility scan total.
   size_t relay_qualification_work_consumed = 0u;
   size_t fallback_setup_work_consumed = 0u;
   size_t feasibility_scan_work_consumed = 0u;
   /// Pristine offers rejected by placement occupancy before routing.
   size_t pristine_relay_occupancy_rejection_count = 0u;
-  /// Exact-batch claims retained above the first feasibility route while
-  /// improving the primary owner-group objective. Exact-pair minimization is
-  /// relay-count capped and therefore cannot contribute.
-  size_t route_optimization_excess_relay_claim_count = 0u;
-
   [[nodiscard]] size_t scan_work_consumed() const {
     return saturated_add(
         saturated_add(relay_qualification_work_consumed, fallback_setup_work_consumed),
@@ -298,9 +223,7 @@ struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   }
 
   [[nodiscard]] size_t total_work_consumed() const {
-    return saturated_add(saturated_add(search_work_consumed, scan_work_consumed()),
-                         saturated_add(route_optimization_search_work_consumed,
-                                       route_optimization_scan_work_consumed));
+    return saturated_add(search_work_consumed, scan_work_consumed());
   }
 };
 
@@ -365,35 +288,9 @@ struct BranchOnlyDirectReservoirWorkLimits {
 /// planners are for interchangeable island destinations instead.
 class BranchOnlyRelayRouter {
 public:
-  /// Offers one capacity-one relay. Relays with the same non-null owner
-  /// identity form one owner group within this router instance; identities
-  /// from independent routers have no shared namespace. The domain is
-  /// structural, so different producer kinds cannot collide on a numeric
-  /// value. Storage with no producer identity uses the ownerless overload.
-  ///
-  /// The three overloads distinguish ownerless storage, a deferred owner, and
-  /// a paid owner without an optional identity or cost-state sentinel at call
-  /// sites. For lazily selected LDS reservoirs, a newly used deferred group
-  /// represents one materialization and convergence replay, so group count is
-  /// the primary objective even though reservoir byte sizes vary. Preplanned
-  /// direct reservoirs use `offer_materialized_owner` because their appended
-  /// storage is already committed before routing. The objective is intentionally
-  /// unweighted; retained appended bytes are reported separately rather than
-  /// used as a secondary score.
-  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance) {
-    return offer_with_owner_materialization(offset, provenance, std::nullopt,
-                                            BranchOnlyRelayOwnerMaterialization::Paid);
-  }
-  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance,
-                           BranchOnlyRelayOwnerIdentity deferred_owner) {
-    return offer_with_owner_materialization(offset, provenance, deferred_owner,
-                                            BranchOnlyRelayOwnerMaterialization::Deferred);
-  }
-  [[nodiscard]] bool offer_materialized_owner(uint64_t offset, BranchOnlyRelayProvenance provenance,
-                                              BranchOnlyRelayOwnerIdentity paid_owner) {
-    return offer_with_owner_materialization(offset, provenance, paid_owner,
-                                            BranchOnlyRelayOwnerMaterialization::Paid);
-  }
+  /// Offers one capacity-one relay. Storage ownership is established before
+  /// it is offered; the router tracks only relay capacity and provenance.
+  [[nodiscard]] bool offer(uint64_t offset, BranchOnlyRelayProvenance provenance);
   void retire_range(uint64_t offset, uint64_t size);
 
   [[nodiscard]] std::optional<BranchOnlyRelayRoute>
@@ -411,32 +308,19 @@ public:
   /// still complete from the proven subset. A failed plan leaves the planner
   /// unchanged.
   ///
-  /// Exact routing first preserves a complete route, then minimizes the number
-  /// of newly used owner groups in an independent bounded pass; group count
-  /// outranks relay count. A complete batch deliberately does not use route
-  /// length as a secondary objective because proving that wider optimum would
-  /// enlarge the bounded search. The result remains capacity-safe but may
-  /// retain more relay claims than the feasibility baseline. Exact-pair
-  /// fallback searches only routes no longer than its feasibility baseline.
+  /// Exact routing first preserves a complete route. Exact-pair fallback then
+  /// uses the remainder of that same bounded transaction to search only routes
+  /// shorter than its feasibility baseline.
   /// For every nonfinal pair, optimization is restricted to that baseline's
   /// relay set and the complete set remains unavailable to later pairs until
   /// batch planning ends. This preserves the deterministic feasibility path
   /// while shorter subset routes reduce the claims retained after the batch.
   /// The final pair may optimize over the remaining inventory. The tier
-  /// minimizes relay count at the zero-owner lower bound and among equal-owner
-  /// improvements. It minimizes each pair against owners selected by earlier
-  /// pairs, so it is greedy across the batch rather than globally minimal.
-  /// Owner carry is intentionally scoped to one batch; independent plan calls
-  /// have no implicit shared ownership state. Offers may retain a paid owner
-  /// identity at zero cost; the exact-pair tier also treats deferred identities
-  /// selected by earlier fallback pairs in that same call as paid. The final
-  /// greedy fallback is owner-oblivious and preserves pair feasibility rather
-  /// than any minimization guarantee. `route_optimization_exhausted` reports a
-  /// retained feasible route whose independent minimization pass reached its
-  /// bound. `routing_invariant_failed` reports an exact tier rejected for
-  /// inconsistent routing inputs or output, while
-  /// `route_optimization_invariant_failed` reports inconsistent minimizer
-  /// inputs whose validated feasibility route was retained.
+  /// minimizes relay count independently for each pair. The final greedy
+  /// fallback preserves pair feasibility rather than any minimization
+  /// guarantee. `routing_work_exhausted` may accompany a successful retained
+  /// route when refinement reaches the shared bound. `routing_invariant_failed`
+  /// reports an exact tier rejected for inconsistent routing inputs or output.
   /// If no complete disjoint assignment exists, returned partial routes are
   /// pair-atomic. `rejection_reasons` is indexed like the requests, and
   /// `rejected_pair_indices` identifies every omitted pair; callers may inspect
@@ -483,23 +367,11 @@ public:
 private:
   struct RelayOffer {
     BranchOnlyRelayProvenance provenance = BranchOnlyRelayProvenance::PristineNop;
-    std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity;
-    BranchOnlyRelayOwnerMaterialization owner_materialization =
-        BranchOnlyRelayOwnerMaterialization::Paid;
 
     bool operator==(const RelayOffer &) const = default;
   };
 
-  [[nodiscard]] bool
-  offer_with_owner_materialization(uint64_t offset, BranchOnlyRelayProvenance provenance,
-                                   std::optional<BranchOnlyRelayOwnerIdentity> owner_affinity,
-                                   BranchOnlyRelayOwnerMaterialization owner_materialization);
-
   std::map<uint64_t, RelayOffer> relays_;
-  // Monotonic: false enables the common no-deferred-owner fast path. Keeping
-  // true after the final deferred relay retires only permits a redundant
-  // bounded scan.
-  bool has_deferred_owner_affinity_ = false;
 };
 
 } // namespace rocjitsu

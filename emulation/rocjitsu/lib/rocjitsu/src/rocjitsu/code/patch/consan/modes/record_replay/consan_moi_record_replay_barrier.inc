@@ -1,7 +1,6 @@
 /// Record/Replay-owned barrier planning, direct/branch-only routing, and
 /// fallback coordination over the shared exact-epoch/record barrier mechanism.
 
-
 // Access planning may materialize a conservative direct-reservoir frontier
 // for the later Record/Replay barrier pass. Once barrier routes have been
 // emitted, restore every unclaimed reservoir and its recursive route while
@@ -299,9 +298,7 @@ void try_apply_record_replay_barrier_record_patch(
       uint32_t word = 0u;
       std::memcpy(&word, old_text.data() + offset, sizeof(word));
       if (word == pristine_nop) {
-        (void)barrier_branch_router.offer_materialized_owner(
-            offset, BranchOnlyRelayProvenance::OwnedReservoir,
-            BranchOnlyRelayOwnerIdentity::direct_reservoir(patch.anchor_offset));
+        (void)barrier_branch_router.offer(offset, BranchOnlyRelayProvenance::OwnedReservoir);
       }
     }
   }
@@ -434,8 +431,7 @@ void try_apply_record_replay_barrier_record_patch(
           .entry_source = site.text_offset,
           .entry_target =
               staged.borrowed_entry ? site.text_offset + sizeof(uint32_t) : cave_text_offset,
-          .return_source =
-              cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t),
+          .return_source = cave_text_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t),
           .return_target = return_text_offset,
           .entry_preplaced = staged.borrowed_entry.has_value(),
       });
@@ -462,8 +458,7 @@ void try_apply_record_replay_barrier_record_patch(
         StagedBarrierRecord &staged = staged_barriers[branch_only_staged_indices[route_index]];
         staged.branch_only_route = std::move(route_plan.routes[route_index]);
         const uint64_t return_branch_offset =
-            staged.placement.body_offset +
-            (staged.cave_words.size() - 1u) * sizeof(uint32_t);
+            staged.placement.body_offset + (staged.cave_words.size() - 1u) * sizeof(uint32_t);
         const uint64_t return_hop_target =
             staged.branch_only_route->return_relay_offsets.empty()
                 ? staged.return_text_offset
@@ -630,11 +625,12 @@ void try_apply_record_replay_barrier_record_patch(
                                std::move(lowering_commits), std::move(patches));
 }
 
-[[nodiscard]] std::optional<MoiRecordEventEmissionPlan> plan_record_replay_barrier_emission(
-    const ConSanOptions &options, ConSanMoiOperatingPoint &point,
-    const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr, MoiOwnerAssignments assignments,
-    std::span<const uint64_t> owners, rj_code_arch_t arch,
-    const ConSanMoiPrivateStateLayout *private_layout = nullptr) {
+[[nodiscard]] std::optional<MoiRecordEventEmissionPlan>
+plan_record_replay_barrier_emission(const ConSanOptions &options, ConSanMoiOperatingPoint &point,
+                                    const MoiScalarAbiPlan &scalar_abi, uint16_t scratch_vgpr,
+                                    MoiOwnerAssignments assignments,
+                                    std::span<const uint64_t> owners, rj_code_arch_t arch,
+                                    const ConSanMoiPrivateStateLayout *private_layout = nullptr) {
   return apply_record_replay_entry_workgroup_assignment(point, assignments, owners, private_layout)
              ? resolve_moi_record_event_emission_plan(options, options, point, scalar_abi,
                                                       scratch_vgpr, arch, private_layout)
@@ -650,16 +646,16 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   const auto resources = resolve_moi_scratch_plan(resource_plan, point, assignments,
                                                   /*expected_count=*/6u);
   if (!resources || !private_state_layout.exact_workgroup_offsets.complete()) {
-    warnings.emplace_back(
-        "ConSan MOI Record/Replay dense barrier has no complete private exact-workgroup layout in " +
-        candidate.container_name);
+    warnings.emplace_back("ConSan MOI Record/Replay dense barrier has no complete private "
+                          "exact-workgroup layout in " +
+                          candidate.container_name);
     return std::nullopt;
   }
   const MoiScalarAbiPlan scalar_abi =
       plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
-  auto record_emission = plan_record_replay_barrier_emission(
-      options, point, scalar_abi, resources->base, assignments, owners, arch,
-      &private_state_layout);
+  auto record_emission =
+      plan_record_replay_barrier_emission(options, point, scalar_abi, resources->base, assignments,
+                                          owners, arch, &private_state_layout);
   if (!record_emission) {
     warnings.emplace_back("ConSan MOI Record/Replay dense barrier has no owner-local emission");
     return std::nullopt;
@@ -679,17 +675,16 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
   std::optional<VgprSpillSequence> spill;
   if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
       moi_scalar_spill_requires_dynamic_vgpr_frame(inventory, *resources, point)) {
-    spill = build_moi_spill_sequence(inventory, *resources, options, options, point,
-                                     semantics, spill_managers, arch, warnings,
-                                     ephemeral_base);
+    spill = build_moi_spill_sequence(inventory, *resources, options, options, point, semantics,
+                                     spill_managers, arch, warnings, ephemeral_base);
     if (!spill)
       return std::nullopt;
   }
   std::optional<SgprSpillSequence> scalar_spill;
   if (point.has_compact_moi_scalar_spill()) {
-    scalar_spill = build_moi_sgpr_spill_sequence(
-        inventory, *resources, options, options, point, semantics, spill_managers, arch, warnings,
-        ephemeral_base, spill ? &*spill : nullptr);
+    scalar_spill = build_moi_sgpr_spill_sequence(inventory, *resources, options, options, point,
+                                                 semantics, spill_managers, arch, warnings,
+                                                 ephemeral_base, spill ? &*spill : nullptr);
     if (!scalar_spill)
       return std::nullopt;
   }
@@ -698,9 +693,9 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
     required_private_bytes = std::max(required_private_bytes, spill->total_private_bytes);
   if (scalar_spill)
     required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);
-  ConSanPatchAbiEffects patch_abi = plan_barrier_patch_abi(
-      owners, resources->base, private_state_layout, spill ? &*spill : nullptr,
-      required_private_bytes);
+  ConSanPatchAbiEffects patch_abi =
+      plan_barrier_patch_abi(owners, resources->base, private_state_layout,
+                             spill ? &*spill : nullptr, required_private_bytes);
   return PlannedBarrierLowering{
       .candidate = candidate,
       .body = *record_emission,
@@ -713,9 +708,8 @@ plan_record_replay_private_barrier(MoiPrivateBarrierPlanningContext context) {
 [[nodiscard]] std::optional<MoiBarrierBodyPlan> plan_record_replay_barrier_body(
     const ConSanOptions &options, ConSanMoiOperatingPoint &point,
     const MoiScalarAbiPlan &scalar_abi, std::optional<uint16_t> scratch_vgpr,
-    std::span<const uint64_t> owners, rj_code_arch_t arch,
-    MoiOwnerAssignments assignments, std::vector<std::string> &warnings,
-    std::vector<std::string> &) {
+    std::span<const uint64_t> owners, rj_code_arch_t arch, MoiOwnerAssignments assignments,
+    std::vector<std::string> &warnings, std::vector<std::string> &) {
   if (!scratch_vgpr) {
     warnings.emplace_back(
         "ConSan MOI Record/Replay dense barrier fallback has no scratch VGPR state");
