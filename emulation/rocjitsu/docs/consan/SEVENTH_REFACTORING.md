@@ -1104,3 +1104,28 @@ new macro-floor result by itself, but it is accepted as consolidation directly
 enabled by the prior subsystem replacement: it deletes an entire parallel
 lifecycle and leaves one result authority rather than polishing individual
 stage peepholes.
+
+### 14.10 InlineShadow atomic-emission ownership checkpoint
+
+The post-pipeline physical-boundary audit found one material discrepancy
+between the documented mode locality and the actual tree. The shared
+`consan_moi_sync_emission.cpp` still owned roughly 2,350 lines of
+InlineShadow-only atomic release, acquire-token, causal-snapshot, and nested
+EXEC-mask emission. Its public header consequently imported an InlineShadow
+emission plan and exposed the InlineShadow atomic body builder.
+
+That protocol now lives under `modes/inline_shadow/` behind its own narrow
+header. The shared synchronization emitter retains only multi-mode intent
+commit publication, target-neutral resource sizing and semantic projection,
+and scalar-clause mutation. The architecture-boundary test now rejects a
+return of the causal transaction or its emission plan to the shared owner and
+continues to enforce the single address-hash and EXEC-mask mechanisms inside
+the mode owner.
+
+This is an architectural checkpoint, not shrinkage credit: splitting the
+translation unit adds one small header and does not delete implementation.
+Its value is to put InlineShadow access, atomic, and causal protocols beside
+one another so the next comparative read can distinguish a removable shared
+state machine from superficially similar instruction emission. The complete
+641-test nonphysical InlineShadow-focused selection passed across all five
+emulated targets; the updated architecture-boundary test also passes.

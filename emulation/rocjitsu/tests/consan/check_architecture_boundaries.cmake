@@ -126,6 +126,18 @@ function(_consan_assert_match_count_at_most file regex maximum rule)
     endif()
 endfunction()
 
+# InlineShadow's atomic causal protocol is a mode implementation, not shared
+# synchronization infrastructure. Keep the common synchronization boundary
+# limited to typed planning, resource sizing, scalar-clause neutralization,
+# commit publication, and other genuinely multi-mode mechanics.
+foreach(_file IN ITEMS consan_moi_sync_emission.cpp consan_moi_sync_emission.h)
+    _consan_assert_no_match(
+        "${_consan_dir}/${_file}"
+        "InlineExecMaskEmission|MoiInlineAtomicEmissionPlan|build_inline_atomic_ordering_cave_words|append_inline_(atomic_table|causal_snapshot|acquired_token_transaction|versioned_release_transaction)"
+        "InlineShadow atomic emission must remain in its mode owner"
+    )
+endforeach()
+
 # The production build graph is intentionally small and forward-only:
 # contracts -> target normalization -> analysis -> transformation ->
 # independent validation -> orchestration. Validation also reads analysis
@@ -2558,19 +2570,22 @@ _consan_assert_no_match(
     "shared lowering must not redeclare unrelated emission-owner helpers"
 )
 _consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.cpp"
     "0x85ebca6bu"
     1
     "InlineShadow atomic release and causal-snapshot tables must share one address hash"
 )
-file(READ "${_consan_dir}/consan_moi_sync_emission.cpp" _moi_sync_emission_owner)
-if(NOT _moi_sync_emission_owner MATCHES "class InlineExecMaskEmission")
+file(READ
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.cpp"
+    _moi_inline_atomic_emission_owner
+)
+if(NOT _moi_inline_atomic_emission_owner MATCHES "class InlineExecMaskEmission")
     message(FATAL_ERROR
         "ConSan InlineShadow synchronization lost its shared EXEC-mask emitter"
     )
 endif()
 string(REGEX MATCHALL "InlineExecMaskEmission[ \t]+exec_masks"
-       _inline_exec_mask_consumers "${_moi_sync_emission_owner}")
+       _inline_exec_mask_consumers "${_moi_inline_atomic_emission_owner}")
 list(LENGTH _inline_exec_mask_consumers _inline_exec_mask_consumer_count)
 if(NOT _inline_exec_mask_consumer_count EQUAL 3)
     message(FATAL_ERROR
@@ -2578,13 +2593,13 @@ if(NOT _inline_exec_mask_consumer_count EQUAL 3)
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.cpp"
     "const auto (restore_exec|save_exec|narrow_vcc)[^;]*instrumentation::build_"
     "InlineShadow transactions must not redeclare EXEC-mask instruction recipes"
 )
-if(NOT _moi_sync_emission_owner MATCHES
+if(NOT _moi_inline_atomic_emission_owner MATCHES
        "append_inline_atomic_table_address<ConSanMoiInlineAtomicReleaseSlot>" OR
-   NOT _moi_sync_emission_owner MATCHES
+   NOT _moi_inline_atomic_emission_owner MATCHES
        "append_inline_atomic_table_address<ConSanMoiInlineCausalSnapshot>")
     message(FATAL_ERROR
         "ConSan InlineShadow atomic tables lost their one ABI-typed address mechanism"
@@ -2607,6 +2622,7 @@ _consan_assert_no_match(
 )
 foreach(
     _source IN ITEMS
+    modes/inline_shadow/consan_moi_inline_atomic_emission.cpp
     modes/sampled/consan_moi_sampled_access_emission.cpp
     modes/sampled/consan_moi_sampled_atomic_emission.cpp
     modes/sampled/consan_moi_sampled_sync.inc
@@ -2635,7 +2651,7 @@ string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"
     _moi_sync_indexed_address_calls
-    "${_moi_sync_emission_owner}"
+    "${_moi_inline_atomic_emission_owner}"
 )
 list(LENGTH _moi_sync_indexed_address_calls _moi_sync_indexed_address_call_count)
 if(NOT _moi_sync_indexed_address_call_count EQUAL 2)
@@ -3337,8 +3353,11 @@ _consan_assert_no_match(
     "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|resolve_moi_access_resource_facts|direct_sampled_scratch_count|moi_bound_dispatch_id_sources"
     "Sampled access emission may not rediscover retained mode, resource, or placement facts"
 )
-file(READ "${_consan_dir}/consan_moi_sync_emission.h" _moi_sync_emission_contract)
-if(_moi_sync_emission_contract MATCHES
+file(READ
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.h"
+    _moi_inline_atomic_emission_contract
+)
+if(_moi_inline_atomic_emission_contract MATCHES
    "build_inline_atomic_ordering_cave_words[^;]*(ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics)")
     message(
         FATAL_ERROR
@@ -3353,7 +3372,7 @@ if(NOT _moi_inline_emission_contract MATCHES
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sync_emission.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic_emission.cpp"
     "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics|moi_special_state_sgprs|moi_target_dispatch_id_sources|moi_workgroup_key_register_plan|validate_inline_atomic_exec_save_sgpr|resolve_moi_target_facts"
     "InlineShadow atomic body emission may not rediscover retained mode, resource, placement, or target facts"
 )

@@ -76,6 +76,7 @@ rj_add_object_library(
         consan_moi_evidence_planning.cpp
         consan_moi_exact_shadow_emission.cpp
         modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
+        modes/inline_shadow/consan_moi_inline_atomic_emission.cpp
         modes/inline_shadow/consan_moi_inline_shadow.cpp
         modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp
         consan_moi_memory_emission.cpp

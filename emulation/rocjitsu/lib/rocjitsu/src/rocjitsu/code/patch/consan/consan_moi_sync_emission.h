@@ -7,10 +7,8 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_evidence_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
-#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
 
 namespace rocjitsu {
 class CodeObjectPatcher;
@@ -75,16 +73,5 @@ sampled_atomic_semantics_reason_name(SampledAtomicSemanticsReason reason);
 [[nodiscard]] bool neutralize_atomic_scalar_clause(
     std::vector<uint8_t> &text, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
     rj_code_arch_t arch, std::vector<ConSanPatchInfo> &patches, std::vector<std::string> &errors);
-
-[[nodiscard]] bool
-inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPlan &address_plan,
-                                                 uint16_t scalar_base, uint16_t scalar_count);
-
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
-    std::span<const uint8_t> bytes, const consan_detail::MoiAtomicEvidenceSitePlan &candidate,
-    const ConSanMoiAtomicAddressPlan &address_plan, const MoiInlineAtomicEmissionPlan &plan,
-    const VgprSpillSequence *spill, const SgprSpillSequence *scalar_spill, rj_code_arch_t arch,
-    uint64_t cave_text_offset, uint64_t return_text_offset, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors, std::span<const uint32_t> trailing_guest_words = {});
 
 } // namespace rocjitsu::consan_moi_impl
