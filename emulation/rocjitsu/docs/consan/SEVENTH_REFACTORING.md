@@ -1194,3 +1194,53 @@ the existing MOI placement cannot express the dense and bounded variants
 without recreating a second transaction; if exact diagnostics or patch-budget
 selection change; or if independent final validation would need to trust the
 new producer.
+
+The deep prototype read rejected this thesis before adding a second placement
+path. Every apparently duplicate SuperCollider state has a live producer and
+consumer. Native LDS owns generated dense-call groups, local and generated
+island banks, direct-relay reservoirs, max-flow selection, and branch-only
+spill continuations. FLAT owns a runtime group-address gate, a different
+direct/local/appended placement order, scalar VCC preservation, and a
+different indirect-entry contract. They already share the low-level placement,
+relocation, reservoir, descriptor-growth, and patch-publication mechanisms
+that have the same semantics.
+
+Making either path consume the MOI access transaction would therefore require
+the forbidden union of SuperCollider-only candidate and routing state. A
+smaller common decoded owner/CFG context would remove only about 200--300
+implementation lines and would reproduce Section 14.11's incompatible
+large-object epochs. There is also no combined-origin budget to delete:
+SuperCollider deliberately applies LDS and FLAT as successive mutations, and
+the second pass must inventory the first pass's current image. The proposed
+1,500-line deletion was consequently based on similar nouns rather than a
+shared lifecycle. Macro-slice 4 is rejected; no production scaffold was added.
+
+### 14.13 Rejected InlineShadow versioned-publication collapse
+
+The physical-locality checkpoint made the two largest InlineShadow emitters
+directly comparable. Exact-access shadow publication, atomic release
+publication, causal-snapshot capture, and acquired-token publication all use
+versioned global slots, but they do not implement one transaction with
+different payload callbacks.
+
+- exact-access publication claims one slot per serialized address group,
+  validates byte provenance and a complete prior dispatch, retries bounded
+  contention, and retains only successfully committed cross-owner priors for
+  conflict diagnosis;
+- release publication claims one communication-address slot, journals guest
+  address and EXEC state across the guest atomic, imports acquire evidence,
+  and publishes a bounded inherited causal frontier;
+- acquired-token publication reserves up to five destination slots as one
+  all-or-nothing operation, rolls every journal back if any member loses, and
+  then commits direct and inherited edges in a second phase; and
+- causal-snapshot capture is a stable multi-entry read and canonicalization
+  protocol rather than a writer transaction.
+
+Only the mechanical compare-swap claim, wait, and even-version commit fragments
+are alike, totaling a few hundred lines across more than 2,400 lines of live
+protocol. Abstracting those fragments would leave the validation, cardinality,
+rollback, retry, and evidence state machines in place while adding callbacks
+for register aliases and EXEC-mask ownership. This fails both the 750-line
+economics floor and the rule against a union-shaped protocol. The colocated
+files are now truthful ownership boundaries, but locality alone is not evidence
+that their distinct correctness protocols should be merged.
