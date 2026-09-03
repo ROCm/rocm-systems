@@ -160,10 +160,6 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
-      # Map the changed projects to the minimal allowlist of TheRock build
-      # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
-      # this only reads it). Empty output = build all (fan-out / unknown project
-      # / run_all_tests CI-infra change).
       - name: Configure CI for manual run
         id: configure-manual
         if: ${{ github.event_name != 'pull_request' }}
@@ -172,6 +168,10 @@ jobs:
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
           echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
 
+      # Map the changed projects to the minimal allowlist of TheRock build
+      # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
+      # this only reads it). Empty output = build all (fan-out / unknown project
+      # / run_all_tests CI-infra change).
       - name: Compute build-stage allowlist
         id: build_stages
         run: |
