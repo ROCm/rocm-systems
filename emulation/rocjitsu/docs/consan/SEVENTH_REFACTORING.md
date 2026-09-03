@@ -1047,3 +1047,60 @@ Record/Replay, Sampled, InlineShadow, and SuperCollider on RDNA3, RDNA4, CDNA3,
 CDNA4, and CDNA5. No physical gfx1201 test was run. The slice therefore clears
 the macro floor without reducing product scope or the live routing-capacity
 behavior that caused Section 14.7's narrower prototype to abort.
+
+### 14.9 Macro-slice 3: delete transient pipeline observability
+
+A fresh consumer trace found that the public nine-entry pipeline-stage array
+had no production consumer. The lowerer maintained four pass counters solely
+to synthesize that array; automatic prepare and resume then mutated the array
+to describe work whose durable products already expressed the actual state.
+Likewise, `TransformResult` retained the address-free
+`ConSanEvidenceIntentPlan` even though it is only the transient input used to
+derive the mode-owned evidence requirements. Runtime code consumes the
+requirements, never the intermediate plan.
+
+The accepted replacement makes the durable products authoritative:
+
+- `TransformResult` owns the code-object identity, semantic inventory and
+  coverage ledger, mode-owned evidence requirements, dispatch requirements,
+  replacement, outcome, and diagnostics;
+- one compact `ConSanContractIssue` retains the machine-readable request,
+  capability, or binding rejection cause without manufacturing a stage
+  record around it;
+- automatic deferral is recognized from complete evidence requirements that
+  actually require binding, and resume validates those requirements before
+  invoking the mode lowering strategy;
+- the evidence-intent plan remains a local planning value and is not copied
+  into the lasting result; and
+- the unused `ThroughObservationPlan` partial-lowering state is gone. The one
+  live partial boundary is the semantic program inventory used before runtime
+  evidence binding.
+
+Tests that specified enum ordering, stage statuses, or internal execution
+counts were removed. The retained pipeline tests assert outcomes, evidence
+contracts, observation ownership, binding rejection causes, deterministic
+direct/resumed equivalence, replacement bytes, coverage, and dispatch
+requirements. `TransformResult::well_formed()` now explicitly rejects a valid
+observation without its derived evidence requirements, preserving the
+cross-product invariant previously checked through the persisted intermediate
+plan. The architecture-boundary test rejects reintroduction of the deleted
+stage or lowerer-execution representations and rejects a persisted evidence
+intent plan in the result contract.
+
+Fresh accounting is:
+
+| Signal | Before slice | Accepted slice | Slice change | Campaign change |
+| --- | ---: | ---: | ---: | ---: |
+| Production files | 311 | 311 | 0 | 0 |
+| Physical production lines | 96,544 | 96,114 | **-430** | **-1,346** |
+| Nonblank production lines | 90,187 | 89,786 | **-401** | **-1,269** |
+| Production implementation lines | 82,719 | **82,381** | **-338** | **-1,100** |
+
+The production diff for this slice has 153 added and 583 deleted physical
+lines. The focused 32-test pipeline suite passed, followed by the complete
+nonphysical ConSan gate: **4,766/4,766** tests at `-j16` across all four modes
+and all five emulated targets. No physical gfx1201 test was run. This is not a
+new macro-floor result by itself, but it is accepted as consolidation directly
+enabled by the prior subsystem replacement: it deletes an entire parallel
+lifecycle and leaves one result authority rather than polishing individual
+stage peepholes.

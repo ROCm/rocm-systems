@@ -9,7 +9,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_report_contract.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -19,115 +18,6 @@
 #include <vector>
 
 namespace rocjitsu {
-
-/// Names the ordered contracts crossed by one production ConSan transform.
-///
-/// The order is the dependency order visible to callers, not a claim that the
-/// internal native lowerer has already been physically split into one function
-/// per value. The lowerer produces the inventory and
-/// observation artifacts that the pipeline publishes at their logical
-/// boundaries. Every pipeline result records every stage exactly once;
-/// a stage that does not apply or awaits runtime binding still has an explicit
-/// status. `Count` is an iteration sentinel and never denotes work.
-enum class ConSanPipelineStage : uint8_t {
-  Configuration,
-  TargetAndRuntimeCapabilities,
-  ProgramInventory,
-  ObservationPlan,
-  EvidenceRequirements,
-  RuntimeBinding,
-  ResourceSolvingAndLowering,
-  FinalValidation,
-  ResultPublication,
-  Count,
-};
-
-/// Complete dependency-ordered set of ConSan transformation stages.
-inline constexpr auto kConSanPipelineStages = [] {
-  using E = ConSanPipelineStage;
-  return make_consan_enum_vocabulary(
-      "invalid-pipeline-stage", consan_enum(E::Configuration, "configuration"),
-      consan_enum(E::TargetAndRuntimeCapabilities, "target-and-runtime-capabilities"),
-      consan_enum(E::ProgramInventory, "program-inventory"),
-      consan_enum(E::ObservationPlan, "observation-plan"),
-      consan_enum(E::EvidenceRequirements, "evidence-requirements"),
-      consan_enum(E::RuntimeBinding, "runtime-binding"),
-      consan_enum(E::ResourceSolvingAndLowering, "resource-solving-and-lowering"),
-      consan_enum(E::FinalValidation, "final-validation"),
-      consan_enum(E::ResultPublication, "result-publication"));
-}();
-
-/// Return the stable diagnostic spelling of a pipeline stage. Sentinels and
-/// out-of-range values deliberately cannot acquire a plausible stage name.
-[[nodiscard]] constexpr std::string_view consan_pipeline_stage_name(ConSanPipelineStage stage) {
-  return kConSanPipelineStages.name(stage);
-}
-
-static_assert(kConSanPipelineStages.size() == static_cast<size_t>(ConSanPipelineStage::Count));
-
-/// Describes how far one typed pipeline contract progressed.
-///
-/// `Completed` means the stage produced and validated its promised value.
-/// `Deferred` is a successful static result that intentionally awaits a later
-/// runtime allocation or dispatch binding; it is neither an error nor silent
-/// success. `Blocked` means the stage did not execute because an earlier
-/// dependency failed. `NotApplicable` means the selected mode or result needs
-/// no value from that stage. `Unsupported` represents a known input outside
-/// the current contract, while `Invalid` means an input or produced value
-/// violated a required invariant. `Count` is never a recorded status.
-enum class ConSanPipelineStageStatus : uint8_t {
-  Completed,
-  Deferred,
-  Blocked,
-  NotApplicable,
-  Unsupported,
-  Invalid,
-  Count,
-};
-
-/// Complete iterable set of pipeline-stage statuses.
-inline constexpr auto kConSanPipelineStageStatuses = [] {
-  using E = ConSanPipelineStageStatus;
-  return make_consan_enum_vocabulary(
-      "invalid-pipeline-stage-status", consan_enum(E::Completed, "completed"),
-      consan_enum(E::Deferred, "deferred"), consan_enum(E::Blocked, "blocked"),
-      consan_enum(E::NotApplicable, "not-applicable"), consan_enum(E::Unsupported, "unsupported"),
-      consan_enum(E::Invalid, "invalid"));
-}();
-
-/// Return the stable diagnostic spelling of a stage status.
-[[nodiscard]] constexpr std::string_view
-consan_pipeline_stage_status_name(ConSanPipelineStageStatus status) {
-  return kConSanPipelineStageStatuses.name(status);
-}
-
-static_assert(kConSanPipelineStageStatuses.size() ==
-              static_cast<size_t>(ConSanPipelineStageStatus::Count));
-
-/// Status payload for one position in `TransformResult::stages`.
-///
-/// The fixed array position owns the stage identity, and `TransformResult`
-/// owns the pristine code-object identity once for the complete transform.
-/// This value therefore carries only facts that can differ by contract.
-/// `contract_issue` is populated only when typed configuration, capability,
-/// or binding validation produced a `ConSanContractIssue`; other failures use
-/// the transform's structured issue list.
-struct ConSanPipelineStageState {
-  /// Completion, deferral, exclusion, or failure state of the contract.
-  ConSanPipelineStageStatus status = ConSanPipelineStageStatus::Invalid;
-  /// Number of times this stage actually executed across all transaction
-  /// passes. A blocked stage is therefore distinguishable from an executed
-  /// stage whose typed result is unsupported or invalid.
-  uint32_t execution_count = 0;
-  /// Narrow configuration/capability failure, or `None` for other outcomes.
-  ConSanContractIssue contract_issue = ConSanContractIssue::None;
-
-  /// Return whether this payload is coherent for the stage selected by its
-  /// fixed array position.
-  [[nodiscard]] bool well_formed(ConSanPipelineStage stage) const;
-
-  bool operator==(const ConSanPipelineStageState &) const = default;
-};
 
 /// Runtime dispatch facts required by the validated replacement of one kernel.
 ///
@@ -219,30 +109,19 @@ using ConSanTransformExecutor = TransformResult (*)(std::span<const uint8_t>, co
 
 /// Static output of one typed ConSan transformation attempt.
 ///
-/// This type separates caller-facing stage state, immutable semantic artifacts,
-/// address-free evidence requirements, validated replacement bytes, and typed
-/// failures from the prototype's large mutable `ConSanTransformArtifacts`. A result never
+/// This type publishes immutable semantic artifacts, address-free evidence
+/// requirements, validated replacement bytes, and typed failures without
+/// retaining the transform's transient execution history. A result never
 /// contains runtime conflict evidence and makes no race-free claim. Public
 /// fields allow precise construction and invariant testing during the
 /// migration, while production creates values only through `transform_consan`
 /// or `transform_consan_with_mutation`.
 class TransformResult {
 public:
-  TransformResult() {
-    outcome = ConSanTransformOutcome::Invalid;
-    for (ConSanPipelineStageState &state : stages)
-      state.status = ConSanPipelineStageStatus::NotApplicable;
-  }
+  TransformResult() = default;
 
   /// Collision-aware identity of the pristine input image.
   ConSanCodeObjectId code_object;
-  /// Every pipeline contract exactly once, indexed by `ConSanPipelineStage`.
-  std::array<ConSanPipelineStageState, kConSanPipelineStages.size()> stages;
-  /// Canonical, address-free translation of flavor policy into the evidence
-  /// roles that report sizing must retain. This is published independently of
-  /// the ABI-bearing requirement below so later stages never have to recover
-  /// policy meaning by inspecting report capacities or emitted patches.
-  std::optional<ConSanEvidenceIntentPlan> evidence_intent_plan;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
   /// Runtime dispatch contract derived once from validated lowering and typed
@@ -259,15 +138,14 @@ public:
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
+  /// Typed request, capability, or runtime-binding rejection, when present.
+  ConSanContractIssue contract_issue = ConSanContractIssue::None;
   /// Stable machine-readable cause for loader-visible transform rejection.
   std::optional<ConSanTransformFailureCause> transform_failure_cause;
   /// Non-fatal diagnostics from analysis, lowering, and binding.
   std::vector<std::string> warnings;
   /// Fatal static-transform diagnostics.
   std::vector<std::string> errors;
-
-  /// Return the state for one stage, or null when `value` is not a real stage.
-  [[nodiscard]] const ConSanPipelineStageState *stage(ConSanPipelineStage value) const;
 
   /// Return the immutable semantic plan owned by the coverage ledger.
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
@@ -361,19 +239,12 @@ public:
   [[nodiscard]] const ConSanObservationPlan &observation_plan() const {
     return inventory_result_.observation_plan();
   }
-  [[nodiscard]] const std::optional<ConSanEvidenceIntentPlan> &evidence_intent_plan() const {
-    return inventory_result_.evidence_intent_plan;
-  }
   [[nodiscard]] const std::optional<ConSanEvidenceRequirements> &evidence_requirements() const {
     return inventory_result_.evidence_requirements;
   }
-  [[nodiscard]] const std::array<ConSanPipelineStageState, kConSanPipelineStages.size()> &
-  stages() const {
-    return inventory_result_.stages;
-  }
 
-  /// Verify identity, mutation provenance, address-free evidence, executed
-  /// stage state, and the library-owned resume strategy.
+  /// Verify identity, mutation provenance, address-free evidence, and the
+  /// library-owned resume strategy.
   [[nodiscard]] bool well_formed() const;
 
 private:

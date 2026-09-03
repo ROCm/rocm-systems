@@ -26,15 +26,15 @@ struct ConSanMoiRetryInventory {
 [[nodiscard]] ConSanTransformArtifacts
 try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &options,
                      const ConSanMoiOperatingPoint &initial_operating_point,
-                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
-                     ConSanLoweringExecution *execution = nullptr);
+                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch);
 
 /// Re-run only MOI planning, lowering, and validation from the immutable
 /// semantic products prepared for the same bytes and engine. This is used
 /// after a runtime-sized report buffer becomes available.
-[[nodiscard]] ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanMoiRetryInventory inventory, ConSanOptions bound_options,
-    std::span<const uint8_t> code_object_bytes, ConSanLoweringExecution *execution = nullptr,
-    const ConSanLoweringObservation *observation = nullptr);
+[[nodiscard]] ConSanTransformArtifacts
+retry_patch_consan_moi_from_inventory(ConSanMoiRetryInventory inventory,
+                                      ConSanOptions bound_options,
+                                      std::span<const uint8_t> code_object_bytes,
+                                      const ConSanLoweringObservation *observation = nullptr);
 
 } // namespace rocjitsu

@@ -31,8 +31,7 @@ namespace rocjitsu {
 ConSanTransformArtifacts
 try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &options,
                      const ConSanMoiOperatingPoint &initial_operating_point,
-                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch,
-                     ConSanLoweringExecution *execution) {
+                     std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
   using namespace consan_moi_impl;
 
   const major_image_ownership::ScopedOwner result_owner(
@@ -102,8 +101,6 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
           }
         }
       };
-  if (execution != nullptr)
-    execution->note_resource_solving_and_lowering();
   std::vector<ConSanMoiCandidate> moi_candidates = consan_detail::build_moi_candidates(
       result.program_inventory, result.observation_plan(), result.errors);
   if (!result.errors.empty())

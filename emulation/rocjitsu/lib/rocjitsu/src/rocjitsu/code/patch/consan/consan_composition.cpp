@@ -88,17 +88,15 @@ compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSan
                         const ConSanMoiOperatingPoint &initial_operating_point,
                         ConSanPerturbationPlanningState *inspected_perturbation,
                         const ConSanPreappliedMutationLayout &preapplied_mutation,
-                        ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-                        const ConSanLoweringObservation *observation) {
+                        ConSanLoweringExtent extent, const ConSanLoweringObservation *observation) {
   return try_patch_consan_impl(code_object_bytes, options, initial_operating_point, {},
-                               inspected_perturbation, preapplied_mutation, false, false, execution,
-                               extent, observation);
+                               inspected_perturbation, preapplied_mutation, false, false, extent,
+                               observation);
 }
 
 bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
-                                ConSanLoweringExecution *execution,
                                 const ConSanLoweringObservation *prepared_observation) {
-  return initialize_consan_lowering_observation(options, result, execution, prepared_observation);
+  return initialize_consan_lowering_observation(options, result, prepared_observation);
 }
 
 } // namespace rocjitsu

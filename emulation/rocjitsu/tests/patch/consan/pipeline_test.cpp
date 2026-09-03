@@ -14,7 +14,6 @@
 #include <concepts>
 #include <cstdint>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 
 namespace rocjitsu {
@@ -239,72 +238,9 @@ TEST(ConSanPipeline, MoiLoweringSummaryConsumesOnlyTypedPatchKindInventory) {
                           complete_runtime_capabilities(), BoundRuntimeResources{});
 }
 
-TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues) {
-  ASSERT_EQ(kConSanPipelineStages.size(), static_cast<size_t>(ConSanPipelineStage::Count));
-  ASSERT_EQ(kConSanPipelineStageStatuses.size(),
-            static_cast<size_t>(ConSanPipelineStageStatus::Count));
-
-  std::unordered_set<std::string_view> names;
-  for (size_t index = 0; index < kConSanPipelineStages.size(); ++index) {
-    EXPECT_EQ(static_cast<size_t>(kConSanPipelineStages[index]), index);
-    const std::string_view name = consan_pipeline_stage_name(kConSanPipelineStages[index]);
-    EXPECT_FALSE(name.empty());
-    EXPECT_TRUE(names.insert(name).second) << name;
-  }
-  names.clear();
-  for (size_t index = 0; index < kConSanPipelineStageStatuses.size(); ++index) {
-    EXPECT_EQ(static_cast<size_t>(kConSanPipelineStageStatuses[index]), index);
-    const std::string_view name =
-        consan_pipeline_stage_status_name(kConSanPipelineStageStatuses[index]);
-    EXPECT_FALSE(name.empty());
-    EXPECT_TRUE(names.insert(name).second) << name;
-  }
-  EXPECT_EQ(consan_pipeline_stage_name(ConSanPipelineStage::Count), "invalid-pipeline-stage");
-  EXPECT_EQ(consan_pipeline_stage_name(static_cast<ConSanPipelineStage>(255)),
-            "invalid-pipeline-stage");
-  EXPECT_EQ(consan_pipeline_stage_status_name(ConSanPipelineStageStatus::Count),
-            "invalid-pipeline-stage-status");
-  EXPECT_EQ(consan_pipeline_stage_status_name(static_cast<ConSanPipelineStageStatus>(255)),
-            "invalid-pipeline-stage-status");
-}
-
-TEST(ConSanPipeline, StageStateValidatesPositionStatusAndContractPayload) {
-  const ConSanPipelineStageState record{
-      .status = ConSanPipelineStageStatus::Completed,
-      .execution_count = 1,
-  };
-  EXPECT_TRUE(record.well_formed(ConSanPipelineStage::Configuration));
-
-  ConSanPipelineStageState malformed = record;
-  malformed.status = ConSanPipelineStageStatus::Count;
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
-  EXPECT_FALSE(record.well_formed(ConSanPipelineStage::Count));
-  malformed = record;
-  malformed.execution_count = 0;
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
-  malformed.status = ConSanPipelineStageStatus::Blocked;
-  EXPECT_TRUE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
-  malformed.execution_count = 1;
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
-  malformed = record;
-  malformed.contract_issue = ConSanContractIssue::MissingFlavor;
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
-  malformed.status = ConSanPipelineStageStatus::Invalid;
-  EXPECT_TRUE(malformed.well_formed(ConSanPipelineStage::Configuration));
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
-  malformed = record;
-  malformed.contract_issue = ConSanContractIssue::Count;
-  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
-}
-
-TEST(ConSanPipeline, DefaultResultAndInvalidStageLookupFailClosed) {
+TEST(ConSanPipeline, DefaultResultFailsClosed) {
   const TransformResult result;
   EXPECT_FALSE(result.well_formed());
-  ASSERT_NE(result.stage(ConSanPipelineStage::Configuration), nullptr);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
-            ConSanPipelineStageStatus::NotApplicable);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Count), nullptr);
-  EXPECT_EQ(result.stage(static_cast<ConSanPipelineStage>(255)), nullptr);
   EXPECT_EQ(result.install_action(/*fail_closed=*/false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(/*fail_closed=*/true), ConSanInstallAction::Reject);
 }
@@ -564,10 +500,14 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   legacy_kernel_b_segments.owner_descriptor_file_offsets.clear();
   mechanism.patches.push_back(legacy_kernel_b_segments);
 
+  BoundRuntimeResources publication_resources;
+  publication_resources.scope = ConSanRuntimeResourceScope::Executable;
+  publication_resources.moi_report_buffer_address = 0x123456780000ull;
+  publication_resources.moi_report_buffer_size = 128u * 1024u * 1024u;
   const TransformResult published = TransformResultTestAccess::publish(
       bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
-      complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));
+      complete_runtime_capabilities(), publication_resources, std::move(mechanism));
 
   ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.errors);
   EXPECT_EQ(published.replacement, (std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
@@ -623,18 +563,9 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeTargetLoweringWithTypedIssue
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
 
   ASSERT_TRUE(result.well_formed());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->contract_issue,
-            ConSanContractIssue::InvalidSampleStride);
+  EXPECT_EQ(result.contract_issue, ConSanContractIssue::InvalidSampleStride);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(result.errors.empty());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
-            ConSanPipelineStageStatus::Invalid);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::ResultPublication)->status,
-            ConSanPipelineStageStatus::Completed);
 
   EXPECT_TRUE(result.program_inventory.empty());
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
@@ -647,14 +578,7 @@ TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
       BoundRuntimeResources{});
 
   ASSERT_TRUE(result.well_formed());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->contract_issue,
-            ConSanContractIssue::None);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::TargetAndRuntimeCapabilities)->status,
-            ConSanPipelineStageStatus::Invalid);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::TargetAndRuntimeCapabilities)->contract_issue,
-            ConSanContractIssue::MissingRuntimeBackend);
+  EXPECT_EQ(result.contract_issue, ConSanContractIssue::MissingRuntimeBackend);
   EXPECT_TRUE(result.errors.empty());
 }
 
@@ -667,10 +591,6 @@ TEST(ConSanPipeline, InvalidCodeObjectRetainsOneResultIdentity) {
   ASSERT_TRUE(result.well_formed());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_TRUE(result.code_object.valid());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::ObservationPlan)->status,
-            ConSanPipelineStageStatus::Blocked);
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -690,14 +610,12 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
   ASSERT_TRUE(open.well_formed()) << testing::PrintToString(open.errors);
   ASSERT_TRUE(closed.well_formed()) << testing::PrintToString(closed.errors);
   EXPECT_EQ(open.code_object, closed.code_object);
-  EXPECT_EQ(open.stages, closed.stages);
   EXPECT_EQ(open.program_inventory.code_object_id(), closed.program_inventory.code_object_id());
   EXPECT_EQ(open.program_inventory.code_object_parsed(),
             closed.program_inventory.code_object_parsed());
   EXPECT_EQ(open.program_inventory.arch(), closed.program_inventory.arch());
   EXPECT_EQ(open.program_inventory.target(), closed.program_inventory.target());
   EXPECT_EQ(open.observation_plan(), closed.observation_plan());
-  EXPECT_EQ(open.evidence_intent_plan, closed.evidence_intent_plan);
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
   EXPECT_EQ(open.replacement, closed.replacement);
   EXPECT_EQ(open.outcome, closed.outcome);
@@ -715,26 +633,9 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
         bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
         complete_runtime_capabilities(), BoundRuntimeResources{});
     ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.evidence_intent_plan) << testing::PrintToString(result.errors);
-    EXPECT_TRUE(result.evidence_intent_plan->well_formed());
-    EXPECT_EQ(*result.evidence_intent_plan,
-              plan_consan_evidence_intents(result.observation_plan()));
+    EXPECT_TRUE(result.observation_plan().valid());
     ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
     EXPECT_TRUE(std::holds_alternative<ExpectedEvidence>(*result.evidence_requirements));
-    EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
-              ConSanPipelineStageStatus::Completed);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::ObservationPlan)->status,
-              ConSanPipelineStageStatus::Completed);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::EvidenceRequirements)->status,
-              ConSanPipelineStageStatus::Completed);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
-              ConSanPipelineStageStatus::Deferred);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-              ConSanPipelineStageStatus::Blocked);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 0u);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
-              ConSanPipelineStageStatus::Blocked);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->execution_count, 0u);
   };
 
   check.operator()<ConSanRecordReplayEvidenceRequirements>(
@@ -816,12 +717,7 @@ TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyEngine) {
     EXPECT_FALSE(
         std::visit([](const auto &requirements) { return requirements.requires_binding(); },
                    *result.evidence_requirements));
-    EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
-              ConSanPipelineStageStatus::NotApplicable);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-              ConSanPipelineStageStatus::Completed);
-    EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
-              ConSanPipelineStageStatus::Completed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   }
 }
 
@@ -846,20 +742,8 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), bound);
   ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::EvidenceRequirements)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::FinalValidation)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::ResultPublication)->status,
-            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(complete.contract_issue, ConSanContractIssue::None);
 
   RuntimeCapabilities missing_visibility = complete_runtime_capabilities();
   missing_visibility.host_device_visible_memory = false;
@@ -868,10 +752,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
                        ConSanDebugOverrides{}, missing_visibility, bound);
   ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Unsupported);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::MissingVisibleMemory);
+  EXPECT_EQ(rejected.contract_issue, ConSanContractIssue::MissingVisibleMemory);
 
   BoundRuntimeResources undersized = bound;
   --undersized.moi_report_buffer_size;
@@ -879,8 +760,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), undersized);
   ASSERT_TRUE(rejected_size.well_formed()) << testing::PrintToString(rejected_size.errors);
-  EXPECT_EQ(rejected_size.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::InvalidResourceSize);
+  EXPECT_EQ(rejected_size.contract_issue, ConSanContractIssue::InvalidResourceSize);
 
   BoundRuntimeResources explicit_fixed;
   explicit_fixed.scope = ConSanRuntimeResourceScope::CodeObject;
@@ -892,8 +772,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), explicit_fixed);
   ASSERT_TRUE(fixed_complete.well_formed()) << testing::PrintToString(fixed_complete.errors);
   EXPECT_EQ(fixed_complete.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(fixed_complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(fixed_complete.contract_issue, ConSanContractIssue::None);
 
   BoundRuntimeResources dispatch_scoped = explicit_fixed;
   dispatch_scoped.scope = ConSanRuntimeResourceScope::Dispatch;
@@ -901,8 +780,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), dispatch_scoped);
   ASSERT_TRUE(rejected_scope.well_formed()) << testing::PrintToString(rejected_scope.errors);
-  EXPECT_EQ(rejected_scope.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::InvalidResourceScope);
+  EXPECT_EQ(rejected_scope.contract_issue, ConSanContractIssue::InvalidResourceScope);
 
   BoundRuntimeResources wrong_schema;
   wrong_schema.scope = ConSanRuntimeResourceScope::Executable;
@@ -911,8 +789,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), wrong_schema);
   ASSERT_TRUE(rejected_schema.well_formed()) << testing::PrintToString(rejected_schema.errors);
-  EXPECT_EQ(rejected_schema.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::InvalidResourceAddress);
+  EXPECT_EQ(rejected_schema.contract_issue, ConSanContractIssue::InvalidResourceAddress);
 }
 
 TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
@@ -926,8 +803,7 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), marker);
   ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
-  EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(complete.contract_issue, ConSanContractIssue::None);
 
   BoundRuntimeResources code_object_marker = marker;
   code_object_marker.scope = ConSanRuntimeResourceScope::CodeObject;
@@ -936,8 +812,7 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), code_object_marker);
   ASSERT_TRUE(code_object_complete.well_formed())
       << testing::PrintToString(code_object_complete.errors);
-  EXPECT_EQ(code_object_complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(code_object_complete.contract_issue, ConSanContractIssue::None);
 
   BoundRuntimeResources wrong_schema;
   wrong_schema.scope = ConSanRuntimeResourceScope::Executable;
@@ -947,8 +822,7 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), wrong_schema);
   ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::InvalidResourceAddress);
+  EXPECT_EQ(rejected.contract_issue, ConSanContractIssue::InvalidResourceAddress);
 }
 
 TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
@@ -956,22 +830,11 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   ASSERT_TRUE(good.well_formed()) << testing::PrintToString(good.errors);
 
   TransformResult malformed = good;
-  malformed.stages.front().contract_issue = ConSanContractIssue::MissingFlavor;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  malformed.stages.front().status = ConSanPipelineStageStatus::Invalid;
+  malformed.contract_issue = ConSanContractIssue::MissingFlavor;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   ProgramInventoryBuilder foreign(std::array<uint8_t, 2>{7, 8});
   malformed.program_inventory = foreign.view();
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  ASSERT_TRUE(malformed.evidence_intent_plan);
-  ASSERT_FALSE(malformed.evidence_intent_plan->intents.empty());
-  malformed.evidence_intent_plan->intents.front().element_count++;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  malformed.evidence_intent_plan.reset();
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.evidence_requirements.reset();
@@ -992,9 +855,6 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.replacement.push_back(1);
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  malformed.stages.back().status = ConSanPipelineStageStatus::Count;
   EXPECT_FALSE(malformed.well_formed());
 }
 
@@ -1191,10 +1051,7 @@ TEST(ConSanPipeline, AutomaticDynamicReplayTreatsExplicitCapAsRuntimeRingCapacit
   EXPECT_EQ(resumed.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(resumed.warnings);
   EXPECT_EQ(resumed.install_action(false), ConSanInstallAction::LoadReplacement);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Completed);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-            ConSanPipelineStageStatus::Completed);
+  EXPECT_EQ(resumed.contract_issue, ConSanContractIssue::None);
 }
 
 TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedResume) {
@@ -1216,27 +1073,7 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   EXPECT_EQ(deferred.inventory_mutation(), mutation);
   EXPECT_EQ(deferred.program_inventory().code_object_id(), deferred.code_object());
   EXPECT_TRUE(deferred.observation_plan().valid());
-  ASSERT_TRUE(deferred.evidence_intent_plan());
   ASSERT_TRUE(deferred.evidence_requirements());
-  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::RuntimeBinding)].status,
-            ConSanPipelineStageStatus::Deferred);
-  EXPECT_EQ(
-      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ProgramInventory)].execution_count,
-      1u);
-  EXPECT_EQ(
-      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ObservationPlan)].execution_count,
-      1u);
-  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ResourceSolvingAndLowering)]
-                .status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::ResourceSolvingAndLowering)]
-                .execution_count,
-            0u);
-  EXPECT_EQ(deferred.stages()[static_cast<size_t>(ConSanPipelineStage::FinalValidation)].status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(
-      deferred.stages()[static_cast<size_t>(ConSanPipelineStage::FinalValidation)].execution_count,
-      0u);
 
   const auto &requirements =
       std::get<ConSanRecordReplayEvidenceRequirements>(*deferred.evidence_requirements());
@@ -1250,12 +1087,6 @@ TEST(ConSanPipeline, AutomaticMoiBindingPublishesImmutableTokenAndLibraryOwnedRe
   const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
                                                   debug, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan(), direct.observation_plan());
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
@@ -1302,12 +1133,6 @@ TEST(ConSanPipeline, AutomaticSuperColliderBindingRelowersThroughLibraryStrategy
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, capabilities, resources);
   ASSERT_TRUE(resumed.well_formed()) << testing::PrintToString(resumed.errors);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ProgramInventory)->execution_count, 2u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ObservationPlan)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::FinalValidation)->execution_count, 1u);
-  EXPECT_EQ(resumed.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
   EXPECT_EQ(resumed.outcome, direct.outcome);
   EXPECT_EQ(resumed.observation_plan(), direct.observation_plan());
   EXPECT_EQ(resumed.coverage_ledger, direct.coverage_ledger);
@@ -1331,18 +1156,7 @@ TEST(ConSanPipeline, AutomaticResumeRejectsBindingBeforeNativeLowering) {
 
   ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Unsupported);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->execution_count, 2u);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
-            ConSanContractIssue::InvalidResourceScope);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResourceSolvingAndLowering)->execution_count, 0u);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::FinalValidation)->status,
-            ConSanPipelineStageStatus::Blocked);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::FinalValidation)->execution_count, 0u);
-  EXPECT_EQ(rejected.stage(ConSanPipelineStage::ResultPublication)->execution_count, 2u);
+  EXPECT_EQ(rejected.contract_issue, ConSanContractIssue::InvalidResourceScope);
 }
 
 TEST(ConSanPipeline, AutomaticResumeRejectsDifferentInputIdentity) {
@@ -1406,7 +1220,6 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   ASSERT_TRUE(first.well_formed()) << testing::PrintToString(first.errors);
   ASSERT_TRUE(second.well_formed()) << testing::PrintToString(second.errors);
   EXPECT_EQ(first.code_object, second.code_object);
-  EXPECT_EQ(first.stages, second.stages);
   EXPECT_EQ(first.observation_plan(), second.observation_plan());
   EXPECT_EQ(first.evidence_requirements, second.evidence_requirements);
   EXPECT_EQ(first.outcome, second.outcome);
@@ -1474,8 +1287,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
                entry.lowering == ConSanLoweringOutcomeKind::PlacementRejected;
       }));
   EXPECT_EQ(result.warnings.back(), "runtime report allocation failed");
-  EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::Unsupported);
+  EXPECT_EQ(result.contract_issue, ConSanContractIssue::None);
 }
 
 } // namespace

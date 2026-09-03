@@ -40,9 +40,10 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
 /// lowering state. The fallback exists for focused lowerer tests and legacy
 /// mechanism entry points; it uses the same common assembly authority and is
 /// deliberately outside both engine implementations.
-[[nodiscard]] bool initialize_consan_lowering_observation(
-    const ConSanOptions &options, ConSanTransformArtifacts &result,
-    ConSanLoweringExecution *execution, const ConSanLoweringObservation *prepared_observation) {
+[[nodiscard]] bool
+initialize_consan_lowering_observation(const ConSanOptions &options,
+                                       ConSanTransformArtifacts &result,
+                                       const ConSanLoweringObservation *prepared_observation) {
   if (prepared_observation != nullptr) {
     if (!prepared_observation->well_formed()) {
       result.errors.emplace_back("ConSan received an invalid prepared observation product");
@@ -60,8 +61,6 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
   result.errors.insert(result.errors.end(),
                        std::make_move_iterator(observation.diagnostics.begin()),
                        std::make_move_iterator(observation.diagnostics.end()));
-  if (execution != nullptr)
-    execution->note_observation_plan();
   return valid;
 }
 
@@ -252,7 +251,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                       const ConSanPreappliedMutationLayout &preapplied_mutation = {},
                       bool require_applicable_fault_plan = false,
                       bool require_exactly_one_applied_fault = false,
-                      ConSanLoweringExecution *execution = nullptr,
                       ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
                       const ConSanLoweringObservation *observation = nullptr) {
   const major_image_ownership::ScopedPhase incremental_phase(
@@ -296,8 +294,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanPerturbationPlanningState pristine_perturbation;
     ConSanTransformArtifacts pristine_mutation_plan =
         try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
-                              &pristine_perturbation, {}, true,
-                              options.fault_require_exactly_one, execution);
+                              &pristine_perturbation, {}, true, options.fault_require_exactly_one);
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
@@ -316,9 +313,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // that the GPU will actually execute.
     ConSanTransformArtifacts fault_result =
         has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
-    fault_result =
-        finalize_consan_result(std::move(fault_result), code_object_bytes,
-                               options.moi_report_dispatch_id, false, nullptr, execution);
+    fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
+                                          options.moi_report_dispatch_id);
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
@@ -378,10 +374,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, initial_operating_point,
                               instrument_carried, &perturbation, instrument_preapplied, false,
-                              false, execution),
+                              false),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
-        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation,
-        execution);
+        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
     const major_image_ownership::ScopedOwner instrument_result_owner(
         major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
     // Resource ownership is a logical kernel identity, but instrumentation of
@@ -506,9 +501,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (options.flavor == ConSanFlavor::None)
     return result;
 
-  if (execution != nullptr)
-    execution->note_program_inventory();
-
   std::unique_ptr<AmdGpuCodeObject> code_object;
   ConSanProgramAnalysisResult analysis;
   const bool analysis_succeeded = analyze_consan_program_inventory(
@@ -529,11 +521,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (extent == ConSanLoweringExtent::ThroughProgramInventory)
     return result;
   if (options.fault_dry_run) {
-    if (execution != nullptr)
-      execution->note_resource_solving_and_lowering();
-    resolve_consan_fault_mutations(*code_object, arch, options,
-                                   require_applicable_fault_plan, require_applicable_fault_plan,
-                                   require_exactly_one_applied_fault, result);
+    resolve_consan_fault_mutations(*code_object, arch, options, require_applicable_fault_plan,
+                                   require_applicable_fault_plan, require_exactly_one_applied_fault,
+                                   result);
     build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
                             carried_plans);
     return result;
@@ -545,9 +535,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       return result;
   }
 
-  if (!initialize_consan_lowering_observation(options, result, execution, observation))
-    return result;
-  if (extent == ConSanLoweringExtent::ThroughObservationPlan)
+  if (!initialize_consan_lowering_observation(options, result, observation))
     return result;
 
   if (options.flavor == ConSanFlavor::Moi) {
@@ -557,16 +545,13 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // stage's parser, patcher, text, and transaction.
     code_object.reset();
     return try_patch_consan_moi(std::move(result), options, initial_operating_point,
-                                code_object_bytes, arch, execution);
+                                code_object_bytes, arch);
   }
 
   if (options.flavor != ConSanFlavor::SuperCollider) {
     result.errors.emplace_back("ConSan selected unknown flavor");
     return result;
   }
-
-  if (execution != nullptr)
-    execution->note_resource_solving_and_lowering();
 
   const bool has_redundant_access = options.probe_lds_check_trap || options.probe_flat_check_trap;
   const uint32_t overall_patch_budget = std::max<uint32_t>(options.max_patches, 1u);

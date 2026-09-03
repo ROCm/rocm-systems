@@ -22,12 +22,10 @@ compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSan
                         const ConSanMoiOperatingPoint &initial_operating_point,
                         ConSanPerturbationPlanningState *inspected_perturbation,
                         const ConSanPreappliedMutationLayout &preapplied_mutation,
-                        ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
-                        const ConSanLoweringObservation *observation);
+                        ConSanLoweringExtent extent, const ConSanLoweringObservation *observation);
 
 [[nodiscard]] bool
 compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,
-                           ConSanLoweringExecution *execution,
                            const ConSanLoweringObservation *prepared_observation);
 
 } // namespace rocjitsu

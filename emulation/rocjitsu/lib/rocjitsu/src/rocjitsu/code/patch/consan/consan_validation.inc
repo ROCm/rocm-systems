@@ -3887,10 +3887,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
 [[nodiscard]] ConSanTransformArtifacts finalize_consan_result_impl(
     ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
     uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage,
-    const ConSanPerturbationPlanningState *carried_perturbation,
-    ConSanLoweringExecution *execution) {
-  if (execution != nullptr)
-    execution->note_final_validation();
+    const ConSanPerturbationPlanningState *carried_perturbation) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.program_inventory.empty()) {
@@ -3956,11 +3953,10 @@ ConSanTransformArtifacts
 finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
                        uint64_t expected_moi_report_dispatch_id,
                        bool validating_carried_composite_stage,
-                       const ConSanPerturbationPlanningState *carried_perturbation,
-                       ConSanLoweringExecution *execution) {
-  return finalize_consan_result_impl(
-      std::move(result), original_bytes, expected_moi_report_dispatch_id,
-      validating_carried_composite_stage, carried_perturbation, execution);
+                       const ConSanPerturbationPlanningState *carried_perturbation) {
+  return finalize_consan_result_impl(std::move(result), original_bytes,
+                                     expected_moi_report_dispatch_id,
+                                     validating_carried_composite_stage, carried_perturbation);
 }
 
 std::vector<std::string>

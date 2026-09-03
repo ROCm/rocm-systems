@@ -2965,6 +2965,18 @@ if(_pipeline_result_contract MATCHES "take_lowering_artifacts" OR
         "ConSan pipeline result regained a reverse lowerer transaction or dead operating point"
     )
 endif()
+foreach(_source IN LISTS _consan_sources)
+    _consan_assert_no_match(
+        "${_source}"
+        "ConSanPipelineStage|ConSanLoweringExecution"
+        "ConSan must not rebuild a parallel stage-observability lifecycle"
+    )
+endforeach()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_pipeline.h"
+    "ConSanEvidenceIntentPlan"
+    "the pipeline result must retain durable evidence requirements, not their transient planning input"
+)
 foreach(_resource_planning_owner IN ITEMS consan_moi_pipeline.h consan_moi_pipeline.inc)
     _consan_assert_no_match(
         "${_consan_dir}/${_resource_planning_owner}"

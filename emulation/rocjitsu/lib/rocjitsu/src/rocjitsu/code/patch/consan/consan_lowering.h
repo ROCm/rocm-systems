@@ -32,7 +32,6 @@ struct ConSanLoweringObservation {
 /// state cannot cross this boundary while the option input is decomposed.
 [[nodiscard]] ConSanTransformArtifacts
 lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-             ConSanLoweringExecution *execution = nullptr,
              ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
              const ConSanLoweringObservation *observation = nullptr);
 

@@ -156,7 +156,6 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
     const ConSanMoiOperatingPoint &initial_operating_point,
     ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
     const ConSanPreappliedMutationLayout &preapplied_mutation = {},
-    ConSanLoweringExecution *execution = nullptr,
     ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
     const ConSanLoweringObservation *observation = nullptr);
 
