@@ -3310,6 +3310,13 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   if (message_id != kMessageInterrupt || !wave.in_trap_handler())
     return false;
 
+  // Only the GFX12 ROCr handler keeps enough live provenance to distinguish
+  // its queue-exception M0 payload from profiling-completion event ids. Older
+  // handlers clear or stash the sampling cause before MSG_INTERRUPT.
+  const auto arch = wave.cu().arch();
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return true;
+
   // PC-sampling host/perf traps use MSG_INTERRUPT too, but put a completion
   // event id in M0. Their GFX12 EXCP_FLAG_PRIV causes occupy bits 22 and 26 in
   // the common TRAPSTS representation. Do not reinterpret a large event id as
