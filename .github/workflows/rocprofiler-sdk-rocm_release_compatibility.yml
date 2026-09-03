@@ -41,6 +41,7 @@ concurrency:
 env:
   ROCM_PATH: "/opt/rocm"
   PATH: "/usr/bin:$PATH"
+  CMAKE_PREFIX_PATH: "/opt/rocm/lib/rocm_sysdeps:/opt/rocm"
 
 jobs:
   rocm-release-compatibility:

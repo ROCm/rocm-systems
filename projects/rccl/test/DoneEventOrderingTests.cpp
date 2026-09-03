@@ -39,6 +39,12 @@ static constexpr int kIterations = 20;
 // Cap on communicators/GPUs used by single-node tests.
 static constexpr int kMaxGpus = 8;
 
+// Streams created between destroying one stream and creating its replacement, so the replacement
+// cannot draw the freed handle and the stream-change branch is reached. One is enough: an idle
+// stream's refcount hits zero inside hipStreamDestroy, so clr deletes it there and the decoy takes
+// that address. Verified over 100 runs; more decoys only slow the failure path down.
+static constexpr int kDecoyStreams = 1;
+
 class DoneEventOrdering : public ::testing::Test
 {
     // All work runs under process isolation; no fixture setup/teardown.
@@ -106,8 +112,8 @@ static void runAlternatingStreamAllReduces(int nGpus, int nIterations)
 
     // Back-to-back ungrouped launches, alternating stream every iteration, with
     // NO synchronize in between. Ungrouped keeps planner->numStreams == 1
-    // (fast path); the flip forces the lastStream != launchStream doneEvent
-    // edge on every launch from iteration 1 onward.
+    // (fast path); the flip forces the lastStreamTag != ncclStreamTag(launchStream)
+    // doneEvent edge on every launch from iteration 1 onward.
     for(int iter = 0; iter < nIterations; ++iter)
     {
         for(int i = 0; i < nGpus; ++i)
@@ -152,7 +158,7 @@ static void runAlternatingStreamAllReduces(int nGpus, int nIterations)
     // Guards destroy streams, buffers, and comms on scope exit.
 }
 
-// Ungrouped alternating-stream AllReduces — tests the lastStream != launchStream doneEvent edge.
+// Ungrouped alternating-stream AllReduces — tests the doneEvent edge taken on every lastStreamTag change.
 TEST_F(DoneEventOrdering, FastPathStreamAlternation)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -233,8 +239,8 @@ TEST_F(DoneEventOrdering, PostReinitStreamAlternation)
                 const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
 
                 // Simulate checkpoint/restore: init → work → destroy → reinit → work.
-                // Two reinit cycles to exercise that lastStreamValid resets correctly
-                // on each ncclCommInitAll and the doneEvent edge fires on first flip.
+                // Two reinit cycles to exercise that lastStreamTag resets to 0 on each
+                // ncclCommInitAll and the doneEvent edge fires on first flip.
                 for(int cycle = 0; cycle < 2; ++cycle)
                 {
                     std::vector<ncclComm_t> comms(nGpus, nullptr);
@@ -255,7 +261,7 @@ TEST_F(DoneEventOrdering, PostReinitStreamAlternation)
                         HIP_CHECK(RCCLTestHelpers::zeroInitializeBuffer<float>(
                             recvbuf[i], kElemCount));
 
-                    // Two alternating-stream launches: iter=0 → streamA (sets lastStream),
+                    // Two alternating-stream launches: iter=0 → streamA (sets lastStreamTag),
                     // iter=1 → streamB (fires the doneEvent edge — the critical path).
                     for(int iter = 0; iter < 2; ++iter)
                     {
@@ -509,7 +515,7 @@ TEST_F(DoneEventOrdering, GroupedPathBaseline)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
-// First AllReduce on hipStreamDefault, second on a named stream — tests lastStreamValid nullptr handling.
+// Default stream first, named stream second. Tests the default-stream tag (1) vs the no-launch sentinel (0).
 TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -570,7 +576,7 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
 
                 const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
 
-                // Launch 1: default stream (nullptr) — sets lastStream=nullptr, lastStreamValid=true.
+                // Launch 1: default stream (nullptr) — sets lastStreamTag = ncclStreamTag(nullptr) == 1.
                 for(int i = 0; i < nGpus; ++i)
                 {
                     ncclResult_t res = ncclAllReduce(
@@ -581,8 +587,8 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
                         << ncclGetErrorString(res);
                 }
 
-                // Launch 2: named stream — ncclLaunchPrepare must detect lastStream(nullptr) != namedStream
-                // and fire hipEventRecord(doneEvent, nullptr) + hipStreamWaitEvent(namedStream).
+                // Launch 2: named stream — ncclLaunchPrepare detects tag 1 != ncclStreamTag(namedStream) and waits
+                // on doneEvent, which ncclLaunchKernel already recorded on the default stream during launch 1.
                 for(int i = 0; i < nGpus; ++i)
                 {
                     ncclResult_t res = ncclAllReduce(
@@ -619,7 +625,7 @@ TEST_F(DoneEventOrdering, DefaultStreamToNamedStream)
             .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
 }
 
-// kIterations same-stream AllReduces then a single stream switch — tests lazy doneEvent record on stream change.
+// kIterations same-stream AllReduces then a single stream switch — tests the wait-on-doneEvent edge at the change.
 TEST_F(DoneEventOrdering, SameStreamThenSwitch)
 {
     ProcessIsolatedTestRunner::ExecutionOptions options;
@@ -685,9 +691,7 @@ TEST_F(DoneEventOrdering, SameStreamThenSwitch)
                 const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
 
                 // Phase 1: kIterations AllReduces all on streamA with NO synchronize.
-                // No hipEventRecord is emitted during this phase under the lazy scheme;
-                // only lastStream=streamA and lastStreamValid=true are recorded.
-                // This mirrors the real training-loop pattern (many collectives on one stream).
+                // Mirrors the real training-loop pattern (many collectives on one stream).
                 for(int iter = 0; iter < kIterations; ++iter)
                 {
                     for(int i = 0; i < nGpus; ++i)
@@ -702,11 +706,9 @@ TEST_F(DoneEventOrdering, SameStreamThenSwitch)
                 }
 
                 // Phase 2: single AllReduce on streamB per communicator — the stream switch.
-                // ncclLaunchPrepare detects lastStream(=streamA) != streamB, fires
-                // hipEventRecord(doneEvent, streamA) then hipStreamWaitEvent(streamB, doneEvent).
-                // ncclLaunchPrepare detects the stream change, lazily records doneEvent on
-                // streamA, then waits on it from streamB. Without this, streamB starts while
-                // streamA's kernels are still in flight, producing a wrong sum or a hang.
+                // ncclLaunchPrepare detects the change and waits on doneEvent from streamB.
+                // Without that edge, streamB starts while streamA's kernels are still in
+                // flight, producing a wrong sum or a hang.
                 for(int i = 0; i < nGpus; ++i)
                 {
                     ncclResult_t res = ncclAllReduce(
@@ -734,6 +736,142 @@ TEST_F(DoneEventOrdering, SameStreamThenSwitch)
                         kElemCount, 0.0, &errIdx, &expVal, &actVal);
                     EXPECT_TRUE(ok)
                         << "SameStreamThenSwitch rank " << i << ": wrong at index " << errIdx
+                        << " expected " << expVal << " got " << actVal;
+                }
+            })
+            .withNumGpus(kMaxGpus)
+            .withEnvironment({{"NCCL_DEBUG", "WARN"}})
+            .withTimeout(std::chrono::seconds(kDoneEventTimeoutSeconds)));
+}
+
+// Communicator outlives the stream it last launched on. Destroying that stream and then
+// issuing a collective on a fresh one must not touch the dead handle (ROCM-29677).
+TEST_F(DoneEventOrdering, StreamDestroyedThenSwitch)
+{
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    RUN_ISOLATED_TESTS_WITH_OPTIONS(
+        options,
+        ProcessIsolatedTestRunner::TestConfig(
+            "StreamDestroyedThenSwitch",
+            []()
+            {
+                int devCount = 0;
+                HIP_CHECK(hipGetDeviceCount(&devCount));
+                const int nGpus = std::min(devCount, kMaxGpus);
+                if(nGpus < 2)
+                    GTEST_SKIP() << "Requires >= 2 GPUs; found " << devCount;
+
+                std::vector<int> devices(nGpus);
+                std::iota(devices.begin(), devices.end(), 0);
+
+                std::vector<ncclComm_t> comms(nGpus, nullptr);
+                {
+                    ncclResult_t res = ncclCommInitAll(comms.data(), nGpus, devices.data());
+                    ASSERT_EQ(res, ncclSuccess) << ncclGetErrorString(res);
+                }
+                std::vector<RCCLTestGuards::NcclCommAutoGuard> commGuards;
+                commGuards.reserve(nGpus);
+                for(int i = 0; i < nGpus; ++i)
+                    commGuards.push_back(RCCLTestGuards::makeCommAutoGuard(comms[i]));
+
+                std::vector<RCCLTestGuards::HipStreamAutoGuard>    decoyGuards, streamBGuards;
+                std::vector<RCCLTestGuards::DeviceBufferAutoGuard> sendbufGuards, recvbufGuards;
+                decoyGuards.reserve(static_cast<size_t>(nGpus) * kDecoyStreams);
+                streamBGuards.reserve(nGpus);
+                sendbufGuards.reserve(nGpus);
+                recvbufGuards.reserve(nGpus);
+
+                // streamA is destroyed mid-test on purpose, so it is not RAII-guarded.
+                std::vector<hipStream_t> streamA(nGpus, nullptr);
+                std::vector<hipStream_t> streamB(nGpus, nullptr);
+                std::vector<float*>      sendbuf(nGpus, nullptr);
+                std::vector<float*>      recvbuf(nGpus, nullptr);
+
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    HIP_CHECK(hipSetDevice(devices[i]));
+                    HIP_CHECK(hipStreamCreate(&streamA[i]));
+
+                    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&sendbuf[i]), kBufferBytes));
+                    sendbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(sendbuf[i]));
+                    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&recvbuf[i]), kBufferBytes));
+                    recvbufGuards.push_back(RCCLTestGuards::makeDeviceBufferAutoGuard(recvbuf[i]));
+
+                    HIP_CHECK(RCCLTestHelpers::initializeBufferWithPattern<float>(
+                        sendbuf[i], kElemCount,
+                        [i](size_t) { return static_cast<float>(i + 1); }));
+                    HIP_CHECK(RCCLTestHelpers::zeroInitializeBuffer<float>(recvbuf[i], kElemCount));
+                }
+
+                const float expected = static_cast<float>(nGpus * (nGpus + 1) / 2);
+
+                // Phase 1: kIterations collectives on streamA to match the training-loop pattern,
+                // then drain so the destroy below is clean.
+                for(int iter = 0; iter < kIterations; ++iter)
+                {
+                    for(int i = 0; i < nGpus; ++i)
+                    {
+                        ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
+                                                         ncclFloat, ncclSum, comms[i], streamA[i]);
+                        ASSERT_EQ(res, ncclSuccess)
+                            << "phase1 iter=" << iter << " rank=" << i << ": "
+                            << ncclGetErrorString(res);
+                    }
+                }
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    HIP_CHECK(hipSetDevice(devices[i]));
+                    HIP_CHECK(hipStreamSynchronize(streamA[i]));
+                }
+
+                // Each communicator now holds streamA's identity. Destroy it; the comm lives on.
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    HIP_CHECK(hipSetDevice(devices[i]));
+                    HIP_CHECK(hipStreamDestroy(streamA[i]));
+                }
+
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    HIP_CHECK(hipSetDevice(devices[i]));
+                    for(int k = 0; k < kDecoyStreams; ++k)
+                    {
+                        hipStream_t decoy = nullptr;
+                        HIP_CHECK(hipStreamCreate(&decoy));
+                        decoyGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(decoy));
+                    }
+                    HIP_CHECK(hipStreamCreate(&streamB[i]));
+                    streamBGuards.push_back(RCCLTestGuards::makeStreamAutoGuard(streamB[i]));
+                }
+
+                // Phase 2: the stream change. Before the fix this recorded doneEvent on the
+                // destroyed streamA and returned ncclUnhandledCudaError, or segfaulted.
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    ncclResult_t res = ncclAllReduce(sendbuf[i], recvbuf[i], kElemCount,
+                                                     ncclFloat, ncclSum, comms[i], streamB[i]);
+                    ASSERT_EQ(res, ncclSuccess)
+                        << "phase2 rank=" << i << ": " << ncclGetErrorString(res);
+                }
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    HIP_CHECK(hipSetDevice(devices[i]));
+                    HIP_CHECK(hipStreamSynchronize(streamB[i]));
+                }
+
+                for(int i = 0; i < nGpus; ++i)
+                {
+                    size_t errIdx = 0;
+                    float  expVal = 0.0f, actVal = 0.0f;
+                    bool   ok = RCCLTestHelpers::verifyBufferData<float>(
+                        recvbuf[i], kElemCount,
+                        [expected](size_t) { return expected; },
+                        kElemCount, 0.0, &errIdx, &expVal, &actVal);
+                    EXPECT_TRUE(ok)
+                        << "StreamDestroyedThenSwitch rank " << i << ": wrong at index " << errIdx
                         << " expected " << expVal << " got " << actVal;
                 }
             })

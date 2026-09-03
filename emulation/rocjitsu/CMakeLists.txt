@@ -102,6 +102,11 @@ option(
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
+    ROCJITSU_ENABLE_VFIO
+    "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
+    OFF
+)
+option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF
@@ -340,6 +345,16 @@ include(rj_flatbuffers)
 set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
 set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
 
+if(ROCJITSU_ENABLE_VFIO)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_VFIO=ON is Linux-only: the vfio-user protocol reuses the Linux VFIO uapi definitions and the transport relies on AF_UNIX file-descriptor passing."
+        )
+    endif()
+    include(rj_libvfio_user)
+endif()
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -400,6 +415,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

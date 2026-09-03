@@ -39,8 +39,6 @@ using std::min;
 using std::shared_ptr;
 using std::unique_ptr;
 
-static const size_t DefaultChunkSize = 16 * 1024 * 1024;
-
 namespace {
 
 // Makes the buffer's GPU current for the lifetime of the guard (hipMemcpy operates on the current
@@ -201,6 +199,9 @@ Fallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         return;
     }
 
+    size_t chunk_size  = stream->asyncBufferSize();
+    size_t chunk_count = (limited_size + chunk_size - 1) / chunk_size;
+
     auto op = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback(
         type, std::move(file), buffer, stream, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p));
     Context<AsyncMonitor>::get()->addOp(op);
@@ -218,26 +219,29 @@ Fallback::async_io(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
             Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_bind_params,
                                                    op.get());
         }
-
-        switch (op->io_type) {
-            case IoType::Read:
-                Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
-                                                       op.get());
-                Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                                     dim3(static_cast<uint32_t>(max_threads_per_block)),
-                                                     kernel_args, 0, op->stream->getHipStream());
-                break;
-            case IoType::Write:
-                Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel), dim3(1),
-                                                     dim3(static_cast<uint32_t>(max_threads_per_block)),
-                                                     kernel_args, 0, op->stream->getHipStream());
-                Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
-                                                       op.get());
-                break;
-            default:
-                throw std::runtime_error("Invalid IO type");
+        for (size_t i{}; i < chunk_count; ++i) {
+            switch (op->io_type) {
+                case IoType::Read:
+                    Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
+                                                           op.get());
+                    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel),
+                                                         dim3(1),
+                                                         dim3(static_cast<uint32_t>(max_threads_per_block)),
+                                                         kernel_args, 0, op->stream->getHipStream());
+                    break;
+                case IoType::Write:
+                    Context<Hip>::get()->hipLaunchKernel(reinterpret_cast<void *>(hipFileMemcpyKernel),
+                                                         dim3(1),
+                                                         dim3(static_cast<uint32_t>(max_threads_per_block)),
+                                                         kernel_args, 0, op->stream->getHipStream());
+                    Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cpu_copy,
+                                                           op.get());
+                    break;
+                default:
+                    throw std::runtime_error("Invalid IO type");
+            }
+            Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_advance, op.get());
         }
-
         Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
     }
     catch (...) {
@@ -289,11 +293,15 @@ async_io_cpu_copy(void *userargs)
         return;
     }
 
-    while (bytes_transferred < size) {
+    const size_t chunk_offset = static_cast<size_t>(op->bytes_transferred_internal);
+    const size_t chunk_count  = op->io_type == IoType::Read ? min(op->bounce_buffer_size, size - chunk_offset)
+                                                            : op->chunk_bytes_copied;
+
+    while (bytes_transferred < chunk_count) {
         void *cur_buf_position = reinterpret_cast<void *>(
-            reinterpret_cast<uintptr_t>(op->bounceBufferHostPtr()) + bytes_transferred);
-        hoff_t cur_file_offset = file_offset + static_cast<hoff_t>(bytes_transferred);
-        size_t remaining_bytes = size - bytes_transferred;
+            reinterpret_cast<uintptr_t>(op->bounce_buffer_host_ptr) + bytes_transferred);
+        hoff_t cur_file_offset = file_offset + static_cast<hoff_t>(chunk_offset + bytes_transferred);
+        size_t remaining_bytes = chunk_count - bytes_transferred;
         try {
             switch (op->io_type) {
                 case IoType::Read:
@@ -320,6 +328,18 @@ async_io_cpu_copy(void *userargs)
         }
         bytes_transferred += static_cast<size_t>(ret);
     }
-    op->bytes_transferred_internal = static_cast<ssize_t>(bytes_transferred);
+    op->chunk_bytes_copied = bytes_transferred;
+}
+
+void
+async_io_advance(void *userargs)
+{
+    auto op = static_cast<AsyncOpFallback *>(userargs);
+    if (op->bytes_transferred_internal < 0) {
+        return;
+    }
+    if (op->chunk_bytes_copied > 0) {
+        op->bytes_transferred_internal += op->chunk_bytes_copied;
+    }
 }
 }
