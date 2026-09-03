@@ -34,8 +34,9 @@ enum class ProbeCallingConvention {
 ///
 /// @details A 64-bit scalar operand must name an even-aligned register pair, so
 /// an odd base is invalid by construction rather than by convention. Used as
-/// ProbeAbi's default so an ABI that never went through derive_probe_abi() is
-/// detectable instead of merely wrong.
+/// ProbeAbi's default so the field reads as obviously unset to anyone inspecting
+/// one, rather than plausible. Validity does not turn on it -- that is
+/// is_valid_probe_abi()'s job.
 inline constexpr uint16_t kUnsetLinkPairBase = 1;
 
 /// @brief Where a verified convention places the values the framework, rather
@@ -52,24 +53,28 @@ struct ProbeAbi {
   constexpr bool operator==(const ProbeAbi &) const = default;
 };
 
-/// @brief Could @p abi have come out of derive_probe_abi()?
-///
-/// @details Rejects both an unrecognized convention and a link pair that no
-/// convention could have chosen, so a default-constructed or hand-built ABI is
-/// caught alongside an unverified one.
-[[nodiscard]] inline constexpr bool is_valid_probe_abi(const ProbeAbi &abi) {
-  return abi.cc != ProbeCallingConvention::Unknown && abi.link_pair_base % 2 == 0;
-}
-
 /// @brief The ABI @p cc implies, or std::nullopt if it is unrecognized.
 [[nodiscard]] inline constexpr std::optional<ProbeAbi> derive_probe_abi(ProbeCallingConvention cc) {
+  // No default case: a convention added to the enum should fail the build here
+  // rather than silently derive to nullopt. The trailing return keeps a value
+  // cast from outside the enumerators from running off the end.
   switch (cc) {
   case ProbeCallingConvention::AmdGpuFuncReturnS30S31:
     return ProbeAbi{.cc = cc, .link_pair_base = 30};
   case ProbeCallingConvention::Unknown:
-  default:
-    return std::nullopt;
+    break;
   }
+  return std::nullopt;
+}
+
+/// @brief Could @p abi have come out of derive_probe_abi()?
+///
+/// @details Answered by re-deriving and comparing, so the question the name asks
+/// is the question that gets tested. A weaker screen -- "recognized convention,
+/// even-aligned pair" -- would admit an ABI whose link pair its own convention
+/// never chooses, which is the shape a hand-built one takes.
+[[nodiscard]] inline constexpr bool is_valid_probe_abi(const ProbeAbi &abi) {
+  return derive_probe_abi(abi.cc) == abi;
 }
 
 /// @brief The return-link register pair @p abi returns through.

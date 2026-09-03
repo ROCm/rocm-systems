@@ -246,7 +246,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   // than a runtime check, since derive_probe_abi is constexpr.
   constexpr std::optional<ProbeAbi> kVerifiedAbi =
       derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
-  static_assert(kVerifiedAbi.has_value());
+  static_assert(kVerifiedAbi.has_value() && is_valid_probe_abi(*kVerifiedAbi));
   callable.abi = *kVerifiedAbi;
   // output_text_offset stays 0 — assigned by the later layout step.
   return callable;
