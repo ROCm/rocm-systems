@@ -9,8 +9,8 @@ Compute and memory partition modes in analysis
 **********************************************
 
 AMD Instinct™ MI300 and MI350 series GPUs support **compute partition modes**
-(SPX, DPX, QPX, CPX) and **memory partition modes** (NPS1, NPS2, NPS4, and
-others, depending on the product). These modes expose the same physical GPU as
+(SPX, DPX, QPX, CPX) and **memory partition modes** (NPS1, NPS4, and others,
+depending on the product). These modes expose the same physical GPU as
 one or more logical devices and change how memory is grouped into NUMA domains.
 
 ROCm Compute Profiler detects the active modes through AMD System Management
@@ -22,7 +22,7 @@ For hardware background, configuration, and programming guidance, see:
 
 .. seealso::
 
-   * :doc:`cdna-performance-model` — CDNA3/CDNA4 architecture overview
+   * :doc:`cdna-performance-model`: CDNA3/CDNA4 architecture overview
    * `AMD Instinct MI300X GPU Partitioning Overview <https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/overview.html>`_
    * `Deep dive into MI300 compute and memory partition modes (ROCm blog) <https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html>`_
 
@@ -54,11 +54,11 @@ Analyze mode
 
 The **System Info** section lists:
 
-* **Compute Partition** — active compute mode (for example, SPX or CPX)
-* **Memory Partition** — active memory mode (for example, NPS1 or NPS4)
-* **Num XCDs** — logical accelerator complex dies (XCDs) in the compute
+* **Compute Partition**: active compute mode (for example, SPX or CPX)
+* **Memory Partition**: active memory mode (for example, NPS1 or NPS4)
+* **Num XCDs**: logical accelerator complex dies (XCDs) in the compute
   partition
-* **Total L2 Channels** — L2 cache channels used for bandwidth and utilization
+* **Total L2 Channels**: L2 cache channels used for bandwidth and utilization
   peaks in that partition
 
 Use these fields together with the sections below to interpret Speed-of-Light
@@ -96,9 +96,9 @@ Exact counts vary by GPU model; see the product-specific tables in the
 
 Logical XCD count drives:
 
-#. **Kernel active time normalization** — counters such as ``GRBM_GUI_ACTIVE``
+#. **Kernel active time normalization**: counters such as ``GRBM_GUI_ACTIVE``
    (GUI-active cycles) are normalized on a per-logical-XCD basis.
-#. **Total L2 channels** — ``Total L2 Channels = L2 banks per XCD × logical
+#. **Total L2 channels**: ``Total L2 Channels = L2 banks per XCD × logical
    XCDs``. This value feeds L2 bandwidth, busy, and stall metrics and their
    percent-of-peak calculations.
 
@@ -109,7 +109,7 @@ full package.
 How memory partition affects metrics
 ====================================
 
-Memory partition mode (NPS — NUMA Per Socket) controls how HBM stacks are
+Memory partition mode (NPS, NUMA Per Socket) controls how HBM stacks are
 exposed as NUMA domains. It affects **theoretical HBM bandwidth**, which in
 turn drives percent-of-peak metrics such as **L2-Fabric Read BW** and **L2-Fabric
 Write BW**.
@@ -130,12 +130,15 @@ parts. Theoretical HBM bandwidth is then:
 
 .. note::
 
-   HBM is interleaved across the whole chip and does **not** shrink with compute
-   partition the way L2 channels do. For NPS memory modes, **Memory Channels**
-   (``num_memory_channels``), which drive HBM and L2-Fabric percent-of-peak
-   metrics, are derived from the **whole-chip SPX XCD count** and the NPS
-   divisor. **Total L2 Channels** (``total_l2_chan``), which drive L2 bandwidth,
-   busy, and stall peaks, follow the **active compute partition**.
+   The two channel counts in **System Info** are scaled differently:
+
+   * **Total L2 Channels** (``total_l2_chan``) follows the compute partition. It
+     shrinks as the partition gets smaller, and it sets the peaks for L2
+     bandwidth, busy, and stall metrics.
+   * **Memory Channels** (``num_memory_channels``) ignores the compute partition.
+     HBM is interleaved across the whole chip, so this count always starts from
+     the full-chip value and is divided only by the NPS denominator. It sets the
+     peak for L2-Fabric Read and Write BW.
 
 Valid compute and memory mode pairings depend on the GPU model. Refer to the
 `ROCm blog compatibility matrix <https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html>`_
@@ -148,9 +151,7 @@ Example: CPX on MI300X
 .. note::
 
    CPX is fully supported. Metrics are reported for the **logical GPU**
-   (one XCD) you profiled. Do not multiply by eight to obtain full-package
-   numbers unless you are deliberately extrapolating outside what the tool
-   reports.
+   (one XCD) you profiled.
 
 **Setup:**
 
@@ -188,8 +189,8 @@ Example: CPX on MI300X
   HBM channel count (for example, NPS4 on MI300X), not the unified NPS1 view.
 
 To compare against an SPX baseline, profile the same workload in SPX on the
-same node and compare **like scopes** (full GPU vs. one logical GPU), rather
-than scaling CPX numbers manually.
+same node. The SPX report covers the full GPU and the CPX report covers one
+logical GPU, so read each report against its own **System Info** fields.
 
 Cross-partition and fabric metrics
 ==================================
@@ -203,6 +204,6 @@ as authoritative for the device index you selected.
 Further reading
 ===============
 
-* :doc:`../../how-to/analyze/mode` — analyze mode overview and System Info
-* :doc:`../../how-to/profile/mode` — profile mode, including partition warnings
-* :doc:`system-speed-of-light` — metric definitions affected by partition-derived peaks
+* :doc:`../../how-to/analyze/mode`: analyze mode overview and System Info
+* :doc:`../../how-to/profile/mode`: profile mode, including partition warnings
+* :doc:`system-speed-of-light`: metric definitions affected by partition-derived peaks

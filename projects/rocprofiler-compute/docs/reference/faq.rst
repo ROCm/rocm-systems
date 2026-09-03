@@ -47,17 +47,9 @@ This correction primarily affects L2 cache metrics where counter subtraction is 
 How do compute and memory partition modes affect metrics?
 =========================================================
 
-On AMD Instinct MI300 and MI350 series GPUs, **compute partition** (SPX, DPX,
-QPX, CPX) and **memory partition** (NPS1, NPS2, NPS4, and others) change how
-ROCm Compute Profiler normalizes counters and calculates percent-of-peak
-metrics. The tool detects active modes automatically through AMD-SMI and
-records them in the analyze **System Info** section.
-
-You do **not** need manual rescaling when profiling a logical partition (for
-example, one CPX device). Metrics reflect the partition you ran on.
-
-See :doc:`/conceptual/cdna/compute-memory-partition` for formulas, a CPX
-worked example, and links to hardware documentation.
+On AMD Instinct MI300 and MI350 series GPUs, the active partition modes change
+how counters are normalized and how percent-of-peak metrics are calculated. See
+:doc:`/conceptual/cdna/compute-memory-partition`.
 
 How can I SSH tunnel in MobaXterm?
 ==================================

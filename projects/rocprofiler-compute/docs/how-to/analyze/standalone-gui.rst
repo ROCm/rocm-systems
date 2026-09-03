@@ -87,12 +87,6 @@ application's profiling data:
 
 #. Top Stats (Top Kernel Statistics)
 #. System Info
-
-   On MI300 and MI350 series GPUs, this section includes **Compute Partition**,
-   **Memory Partition**, **Num XCDs**, and **Total L2 Channels**. These values
-   drive metric normalization in later sections. See
-   :doc:`/conceptual/cdna/compute-memory-partition`.
-
 #. System Speed-of-Light
 #. Roofline AI Data Metrics
 

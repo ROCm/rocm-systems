@@ -34,12 +34,6 @@ choose.
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 
-.. note::
-
-   On MI300 and MI350 series GPUs, the **System Info** section lists compute
-   and memory partition modes. These fields affect how metrics are normalized
-   during analysis. See :doc:`/conceptual/cdna/compute-memory-partition`.
-
 * :doc:`cli`
 * :doc:`standalone-gui` (experimental feature)
 * :doc:`tui` (experimental feature)
