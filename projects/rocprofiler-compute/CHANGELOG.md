@@ -9,9 +9,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
-* Added a message on failed profiles that loaded two copies of
-  `libamd_comgr` or two rocprofiler libraries, stating that the
-  profiler and the workload must use the same ROCm.
+* ML API tracing requires PyTorch to be pip-installed alongside ROCm from the
+  same package index; separate or incompatible installations can load duplicate
+  ROCm components and fail profiling.
 
 ### Changed
 

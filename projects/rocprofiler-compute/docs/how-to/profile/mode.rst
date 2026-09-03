@@ -1158,7 +1158,6 @@ Requirements
 Triton trace has the same limitations as Torch trace (see
 :ref:`torch-trace-limitations`). It requires a valid Triton installation
 in the profiling environment, using the same ROCm as this tool
-(see :ref:`same-rocm-as-workload`).
 
 Usage
 -----
