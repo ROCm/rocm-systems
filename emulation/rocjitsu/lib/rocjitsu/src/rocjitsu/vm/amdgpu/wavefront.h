@@ -666,6 +666,17 @@ public:
   bool trap_interrupt_sent() const { return trap_interrupt_sent_; }
   void set_trap_interrupt_sent(bool value) { trap_interrupt_sent_ = value; }
 
+  uint64_t trap_queue_exception_status() const { return trap_queue_exception_status_; }
+  void add_trap_queue_exception_status(uint64_t status) { trap_queue_exception_status_ |= status; }
+  uint64_t trap_runtime_exception_status() const { return trap_runtime_exception_status_; }
+  void add_trap_runtime_exception_status(uint64_t status) {
+    trap_runtime_exception_status_ |= status;
+  }
+  void clear_trap_queue_exception_status() {
+    trap_queue_exception_status_ = 0;
+    trap_runtime_exception_status_ = 0;
+  }
+
   /// @brief Whether the live STATUS.HALT was raised by the wave's own
   /// s_sendmsghalt rather than by the trap handler's s_setreg.
   ///
@@ -901,6 +912,7 @@ public:
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
+    clear_trap_queue_exception_status();
     self_halted_ = false;
     trap_saved_status_ = 0;
     trap_saved_exec_ = 0;
@@ -992,18 +1004,20 @@ private:
   WfState state_ = WfState::HALTED;              ///< Current execution state.
   WaitCounters wait_counters_;                   ///< Outstanding memory operation counters.
 
-  uint32_t ttmp_[16] = {};           ///< Trap temporary registers (TTMP0-15).
-  uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
-  uint32_t pending_alu_causes_ = 0;  ///< EXCP causes from the current instruction.
-  uint32_t sleep_cycles_ = 0;        ///< Cycles left on an in-flight S_SLEEP.
-  bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
-  bool trap_interrupt_sent_ = false; ///< Handler issued MSG_INTERRUPT for this entry.
-  bool self_halted_ = false;         ///< STATUS.HALT came from this wave's s_sendmsghalt.
-  uint32_t trap_saved_status_ = 0;   ///< Interrupted STATUS restored after handler completion.
-  uint64_t trap_saved_exec_ = 0;     ///< Interrupted EXEC restored after handler completion.
-  bool debug_halted_ = false;        ///< Stopped by the debugger (skipped by scheduler).
-  bool debug_suspended_ = false;     ///< Queue-suspended for a stable CWSR snapshot.
-  bool runtime_suspended_ = false;   ///< Queue-suspended by the runtime (queue_percentage 0).
+  uint32_t ttmp_[16] = {};                     ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;                       ///< Trap status register (EXCP flags).
+  uint32_t pending_alu_causes_ = 0;            ///< EXCP causes from the current instruction.
+  uint32_t sleep_cycles_ = 0;                  ///< Cycles left on an in-flight S_SLEEP.
+  bool in_trap_handler_ = false;               ///< Executing the configured trap-handler shader.
+  bool trap_interrupt_sent_ = false;           ///< Handler issued MSG_INTERRUPT for this entry.
+  uint64_t trap_queue_exception_status_ = 0;   ///< Queue-exception bits reported by the handler.
+  uint64_t trap_runtime_exception_status_ = 0; ///< Bits already forwarded to ROCr.
+  bool self_halted_ = false;                   ///< STATUS.HALT came from this wave's s_sendmsghalt.
+  uint32_t trap_saved_status_ = 0; ///< Interrupted STATUS restored after handler completion.
+  uint64_t trap_saved_exec_ = 0;   ///< Interrupted EXEC restored after handler completion.
+  bool debug_halted_ = false;      ///< Stopped by the debugger (skipped by scheduler).
+  bool debug_suspended_ = false;   ///< Queue-suspended for a stable CWSR snapshot.
+  bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
   uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).

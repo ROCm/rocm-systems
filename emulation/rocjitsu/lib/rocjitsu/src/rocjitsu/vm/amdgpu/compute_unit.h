@@ -274,6 +274,12 @@ public:
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
 
+  using QueueExceptionHandler =
+      std::function<bool(uint32_t queue_id, uint32_t process_id, uint64_t status)>;
+  void set_queue_exception_handler(QueueExceptionHandler cb) {
+    queue_exception_handler_ = std::move(cb);
+  }
+
   /// @brief Notify KFD after configured TBA code returns with STATUS.HALT.
   using TrapCompletionHandler = std::function<void(Wavefront &wf)>;
   void set_trap_completion_handler(TrapCompletionHandler cb) {
@@ -1075,6 +1081,7 @@ protected:
   std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
+  QueueExceptionHandler queue_exception_handler_;
   TrapCompletionHandler trap_completion_handler_;
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
