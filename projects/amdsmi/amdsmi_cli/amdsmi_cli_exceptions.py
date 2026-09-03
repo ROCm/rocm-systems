@@ -14,34 +14,35 @@ import json
 
 @enum.unique
 class AmdSmiExitCode(enum.IntEnum):
-    """CLI-invented process exit codes, in the reserved 192-255 band.
+    """CLI-invented process exit codes, in the reserved 193-253 band.
+
+    The single byte a process can return is split four ways::
+
+        0         success
+        1-128     library AMDSMI_STATUS_* values (currently 0-56)
+        129-192   POSIX signal codes (128 + signal number, SIGRTMAX = 64).
+                  Owned by the OS, which reports them for any process
+        193-253   the CLI-invented codes below
+        254/255   library sentinels: AMDSMI_STATUS_MAP_ERROR (0xFFFFFFFE) -> 254,
+                  AMDSMI_STATUS_UNKNOWN_ERROR (0xFFFFFFFF) -> 255
 
     Library statuses are NOT redefined here: a library failure surfaces as its
-    real AMDSMI_STATUS_* value (currently 0-56) folded to a byte by
-    library_code_to_exit_code. The two 32-bit library sentinels also fold into
-    the byte range -- AMDSMI_STATUS_MAP_ERROR (0xFFFFFFFE) -> 254 and
-    AMDSMI_STATUS_UNKNOWN_ERROR (0xFFFFFFFF) -> 255. Those two values are
-    *library* errors, NOT CLI codes, even though 254/255 fall inside the 192-255
-    band; the CLI codes below live in 192-208 and deliberately avoid 254/255
-    (enforced by test_cli_codes_never_collide_with_library_exit_codes).
+    real AMDSMI_STATUS_* value via library_code_to_exit_code. 254/255 are
+    *library* errors even though they sit above the CLI band (enforced by
+    test_cli_codes_never_collide_with_library_exit_codes).
     Each member carries a human-readable ``.note``.
 
     Note on "not supported": a *library* AMDSMI_STATUS_NOT_SUPPORTED (2) is a
     runtime result from a device call and is honored as-is (exit code 2). The
-    CLI's own COMMAND_NOT_SUPPORTED (199) is a parse-time decision (the command
+    CLI's own COMMAND_NOT_SUPPORTED (200) is a parse-time decision (the command
     isn't available on this system, so no library call is made), so callers can
     tell the two apart from the exit code alone. DEVICE_INTERFACE_UNAVAILABLE
-    (200) covers the remaining case: the command is valid and the device is
+    (201) covers the remaining case: the command is valid and the device is
     present, but an interface the CLI reads directly yielded no usable data, so
     there is no library status to fold.
 
-    Not emitted by this CLI. An earlier PR intended to use these codes, so they
-    are left unassigned here and are open to be re-assigned:
-      203 - permission-denied; the library NO_PERM (10) surfaces directly instead
-      204 - a CLI platform/build mismatch
-
-    Re-assigning them is free only until they ship: a released code keeps its
-    meaning forever, because scripts branch on the number.
+    Next free code is 208. Assigning one is free only until it ships: a released
+    code keeps its meaning forever, because scripts branch on the number.
     """
 
     def __new__(cls, value, note=""):
@@ -52,32 +53,37 @@ class AmdSmiExitCode(enum.IntEnum):
         return obj
 
     SUCCESS = (0, "all recorded operations succeeded")
-    IMPORT_ERROR = (192, "Python import failure")
-    INVALID_COMMAND = (193, "unrecognized command")
-    INVALID_PARAMETER = (194, "invalid parameter")
-    DEVICE_NOT_FOUND = (195, "target device not found")
-    INVALID_FILE_PATH = (196, "invalid file path")
-    INVALID_PARAMETER_VALUE = (197, "invalid parameter value")
-    MISSING_PARAMETER_VALUE = (198, "missing parameter value")
-    COMMAND_NOT_SUPPORTED = (199, "command not available on this system (parse-time)")
+    IMPORT_ERROR = (193, "Python import failure")
+    INVALID_COMMAND = (194, "unrecognized command")
+    INVALID_PARAMETER = (195, "invalid parameter")
+    DEVICE_NOT_FOUND = (196, "target device not found")
+    INVALID_FILE_PATH = (197, "invalid file path")
+    INVALID_PARAMETER_VALUE = (198, "invalid parameter value")
+    MISSING_PARAMETER_VALUE = (199, "missing parameter value")
+    COMMAND_NOT_SUPPORTED = (200, "command not available on this system (parse-time)")
     # TEMPORARY. Sole user is the gpu_od fan OD_RANGE read, which parses sysfs
     # directly because no API reports the range minimum. Retire this code once
     # amdsmi_get_gpu_fan_speed_range() lands and that branch can record the
     # library status instead (see the TODO in tests/python/common/common.py).
-    DEVICE_INTERFACE_UNAVAILABLE = (200, "required device interface unavailable to the CLI")
-    REQUIRED_COMMAND = (201, "required command/target missing")
-    INVALID_SUBCOMMAND = (202, "invalid subcommand")
-    MIXED_DEVICE_ERRORS = (205, "aggregated: >1 recorded failure with DIFFERING codes")
-    INIT_TIMEOUT = (206, "amdsmi_init() watchdog fired (library call hung)")
-    DRIVERS_NOT_LOADED = (207, "no usable AMD drivers / modules not loaded")
-    USER_ABORTED = (208, "user declined an interactive confirmation prompt")
+    DEVICE_INTERFACE_UNAVAILABLE = (201, "required device interface unavailable to the CLI")
+    REQUIRED_COMMAND = (202, "required command/target missing")
+    INVALID_SUBCOMMAND = (203, "invalid subcommand")
+    MIXED_DEVICE_ERRORS = (204, "aggregated: >1 recorded failure with DIFFERING codes")
+    INIT_TIMEOUT = (205, "amdsmi_init() watchdog fired (library call hung)")
+    DRIVERS_NOT_LOADED = (206, "no usable AMD drivers / modules not loaded")
+    USER_ABORTED = (207, "user declined an interactive confirmation prompt")
+    # Sits at the top of the band as a sentinel, mirroring the library's 254/255.
+    UNREPRESENTABLE_LIBRARY_STATUS = (253, "library status outside 0-128 and not a known sentinel")
 
 
-# Reserved band for the CLI-invented codes above. Sits above the library status
-# range (statuses fold to ~0-56, sentinels to 254/255) so the two never collide;
-# 0xFF is the POSIX single-byte exit-code ceiling.
-CLI_EXIT_CODE_BAND_START = 192
-CLI_EXIT_CODE_BAND_END = 0xFF
+# Reserved band for the CLI-invented codes above. Starts one past the highest
+# POSIX signal code (128 + SIGRTMAX = 192) and stops below the library's 254/255
+# sentinels, so a CLI code can collide with neither.
+CLI_EXIT_CODE_BAND_START = 193
+CLI_EXIT_CODE_BAND_END = 253
+
+# The library's half of the byte. It may not grow past this into signal space.
+LIBRARY_STATUS_MAX = 128
 
 
 class AmdSmiErrorSeverity(enum.Enum):
@@ -424,20 +430,25 @@ class AmdSmiLibraryErrorException(AmdSmiException):
 
 
 def library_code_to_exit_code(error_code):
-    """Fold an AMDSMI_STATUS_* value into a POSIX process exit code (0-255).
+    """Map an AMDSMI_STATUS_* value to a POSIX process exit code (0-255).
 
-    Real status values (currently 0-56) fit in a byte and pass through unchanged,
-    so the exit code *is* the underlying status. The two 32-bit sentinels
-    (``AMDSMI_STATUS_MAP_ERROR`` = 0xFFFFFFFE, ``AMDSMI_STATUS_UNKNOWN_ERROR`` =
-    0xFFFFFFFF) fold to their low byte (254 / 255). No status numbers are
-    hardcoded here.
+    The library owns 0-128 plus its two 32-bit sentinels, which report as their
+    low byte (``AMDSMI_STATUS_MAP_ERROR`` = 0xFFFFFFFE -> 254,
+    ``AMDSMI_STATUS_UNKNOWN_ERROR`` = 0xFFFFFFFF -> 255). Statuses currently run
+    0-56, so real values pass through and the exit code *is* the status.
+
+    Anything else cannot be reported faithfully. 129-192 is signal territory,
+    and a value above 255 loses its identity in a byte -- status 300 would
+    arrive as 44, a real but unrelated status, and status 256 as 0, reporting
+    success. Those report UNREPRESENTABLE_LIBRARY_STATUS instead of a plausible
+    wrong answer.
     """
     status = abs(int(error_code))
-    folded = status & 0xFF
-    # A nonzero status that is an exact multiple of 256 folds to 0, reporting success.
-    if status and not folded:
-        return CLI_EXIT_CODE_BAND_END
-    return folded
+    if status in (AMDSMI_STATUS_MAP_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR):
+        return status & 0xFF
+    if status > LIBRARY_STATUS_MAX:
+        return int(AmdSmiExitCode.UNREPRESENTABLE_LIBRARY_STATUS)
+    return status
 
 
 class AmdSmiErrorCollector:
@@ -479,13 +490,14 @@ class AmdSmiErrorCollector:
 
         none recorded            -> SUCCESS (0)
         all recorded are equal   -> that code
-        mixed different codes    -> MIXED_DEVICE_ERRORS (205)
+        mixed different codes    -> MIXED_DEVICE_ERRORS
 
         "Mixed" is any set of recorded failures with differing codes in a single
         run: across multiple devices, OR across multiple sub-steps/fields of one
-        command (e.g. reset --clocks). So a single GPU can resolve to 205 if its
-        sub-steps fail with different codes -- the name keeps DEVICE for registry
-        compatibility, but the semantics are per-run, not strictly per-device.
+        command (e.g. reset --clocks). So a single GPU can resolve to
+        MIXED_DEVICE_ERRORS if its sub-steps fail with different codes -- the
+        name keeps DEVICE for registry compatibility, but the semantics are
+        per-run, not strictly per-device.
         """
         if not self._codes:
             return int(AmdSmiExitCode.SUCCESS)

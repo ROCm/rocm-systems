@@ -61,8 +61,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Reworked `amd-smi` CLI process exit codes.**  
   How exit codes are chosen:
   - Library failures exit with the underlying `AMDSMI_STATUS_*` value (0-56).
-  - CLI-only errors use dedicated codes in the reserved 192-255 band.
-  - When more than one failure with different codes is recorded in a single run — across devices, or across sub-steps of one command (e.g. `reset --clocks`) — the process exits `205`.
+  - CLI-only errors use dedicated codes in the reserved 193-253 band.
+  - When more than one failure with different codes is recorded in a single run — across devices, or across sub-steps of one command (e.g. `reset --clocks`) — the process exits `204`.
 
   Multi-device `set`/`reset` behavior:
   - A per-device GPU failure is now recorded, and the command continues to the remaining devices.
@@ -72,26 +72,27 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
   | Case | Was | Now |
   | --- | --- | --- |
-  | Import failure | `1` | `192` |
-  | Invalid command | `1` | `193` |
-  | Invalid parameter | `2` | `194` |
-  | Device not found | `3` | `195` |
-  | Invalid file path | `4` | `196` |
-  | Invalid parameter value | `5` | `197` |
-  | Missing parameter value | `6` | `198` |
-  | Command not supported (CLI, parse-time) | `7` | `199` (distinct from library `NOT_SUPPORTED` = `2`) |
-  | Device interface unavailable (CLI, runtime) | — | `200` |
-  | Required target/argument missing | `9` | `201` |
-  | Invalid subcommand | `10` | `202` |
+  | Import failure | `1` | `193` |
+  | Invalid command | `1` | `194` |
+  | Invalid parameter | `2` | `195` |
+  | Device not found | `3` | `196` |
+  | Invalid file path | `4` | `197` |
+  | Invalid parameter value | `5` | `198` |
+  | Missing parameter value | `6` | `199` |
+  | Command not supported (CLI, parse-time) | `7` | `200` (distinct from library `NOT_SUPPORTED` = `2`) |
+  | Device interface unavailable (CLI, runtime) | — | `201` |
+  | Required target/argument missing | `9` | `202` |
+  | Invalid subcommand | `10` | `203` |
   | Permission denied | `11` | `10` (real `AMDSMI_STATUS_NO_PERM`) |
-  | Mixed device/field failures (differing codes) | — | `205` |
-  | `amdsmi_init()` watchdog timeout | `2` | `206` |
-  | Drivers not loaded | `1` | `207` |
-  | Interactive confirmation declined | `1` | `208` |
+  | Mixed device/field failures (differing codes) | — | `204` |
+  | `amdsmi_init()` watchdog timeout | `2` | `205` |
+  | Drivers not loaded | `1` | `206` |
+  | Interactive confirmation declined | `1` | `207` |
   | Library (device) failure | `(1000 + status)` wrapped to a byte | underlying `AMDSMI_STATUS_*` (`0`-`56`) |
   | Unknown/unmapped library error | `100` | `255` (library `UNKNOWN_ERROR` folded to a byte) |
+  | Library status too large to report as an exit code | — | `253` (not reachable with current library versions) |
 
-  The `Was`/`Now` values are process exit codes (`$?`). Previously the printed `code` field showed the *negative* of these (e.g. `-7`) while the process exited with the absolute value (`7`); the rework makes the printed `code` and `$?` agree (both `199`).
+  The `Was`/`Now` values are process exit codes (`$?`). Previously the printed `code` field showed the *negative* of these (e.g. `-7`) while the process exited with the absolute value (`7`); the rework makes the printed `code` and `$?` agree (both `200`).
 
 - **`amd-smi set --power-cap` now applies per GPU instead of aborting on the first out-of-range device.**  
   - Each GPU is validated against its own reported range.
