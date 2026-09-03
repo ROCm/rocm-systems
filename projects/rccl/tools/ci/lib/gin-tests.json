@@ -52,7 +52,7 @@
       "kind": "pytest",
       "bin": "test_Broadcast.py",
       "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0"],
-      "args": "-k gin_sdma -v"
+      "args": "-k GinSdma -v"
     },
     {
       "name": "rccl-gin-fixtures-anvil-gda",
