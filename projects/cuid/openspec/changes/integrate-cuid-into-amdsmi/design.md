@@ -17,10 +17,11 @@ number names one component, and none of it reaches a fleet inventory unless
 
 ## Goals / Non-Goals
 
-**Goals:** make the CUID reportable and provisionable through the tool operators
-already run, with enough context attached that a recorded value can be trusted;
-keep the dependency one-directional, optional, and invisible to a build without
-`libamdcuid`.
+**Goals:** report and provision CUIDs through `amd-smi`, carrying the source,
+the auxiliary flag, the component type and the node seed state alongside each
+value, so a recorded CUID says how it was obtained; keep the dependency
+one-directional and optional, so a build without `libamdcuid` still exports the
+entry points and returns `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 **Non-Goals:** merging the projects or vendoring the library; changing any value
 the library or driver produces, since this change reports rather than computes;
