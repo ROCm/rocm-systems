@@ -36,3 +36,4 @@ void findRingCutIndices(int nChannels, int nNodes /*nodes in the ring graph*/,
 ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder);
 
 #endif  // RCCL_GRAPH_GEN_H_
+
