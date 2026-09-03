@@ -8,7 +8,6 @@
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
-#include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -57,6 +56,7 @@ std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
 bool         use_exp_speedup_scaling =
     get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
+constexpr auto k_ss_duration_width = 3;
 }  // namespace
 
 experiment::sample::sample(const base_type& _b, std::uint64_t _c)
@@ -223,7 +223,7 @@ experiment::start()
     if(!selection) return false;
 
     // sampling period in nanoseconds
-    sampling_period = backtrace_causal::get_period(units::nsec);
+    sampling_period = backtrace_causal::get_period();
 
     // experiment time is scaled up for longer speedups
     index           = experiment_history.size() + 1;
@@ -344,13 +344,19 @@ std::string
 experiment::as_string() const
 {
     std::stringstream _ss{};
-    auto _dur = static_cast<double>(experiment_time) / static_cast<double>(units::sec);
+    const auto        dur = std::chrono::duration<double>{
+        std::chrono::nanoseconds{ experiment_time }
+    }.count();
     _ss << std::boolalpha << "speed-up: " << std::setw(3) << virtual_speedup
         << "%, period: " << std::setw(4) << std::fixed << std::setprecision(2)
-        << (sampling_period / static_cast<double>(units::msec)) << " msec";
+        << std::chrono::duration<double,
+                                 std::milli>{ std::chrono::duration<double, std::nano>{
+                                                  static_cast<double>(sampling_period) } }
+               .count()
+        << " msec";
     if(!config::get_causal_end_to_end())
-        _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
-            << _dur << " sec";
+        _ss << ", duration: " << std::setw(k_ss_duration_width) << std::fixed
+            << std::setprecision(3) << dur << " sec";
     _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";

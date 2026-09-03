@@ -3,7 +3,7 @@
 
 #include "library/sampling.hpp"
 #include "common/env_vars.hpp"
-#include "common/units.hpp"
+#include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -65,6 +65,7 @@
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <set>
@@ -137,9 +138,9 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(provide_backtrace, sampling::sampler_t, std::fa
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(buffer_size, sampling::sampler_t,
                                  TIMEMORY_ESC(std::integral_constant<size_t, 2048>))
 
-namespace rocprofsys
-{
-namespace sampling
+using namespace std::chrono_literals;
+
+namespace rocprofsys::sampling
 {
 namespace
 {
@@ -544,11 +545,12 @@ start_duration_thread()
         // we may need to protect against recursion bc of pthread wrapper
         static bool _protect = false;
         if(_protect) return;
-        _protect   = true;
-        auto _now  = std::chrono::steady_clock::now();
-        auto _end  = _now + std::chrono::nanoseconds{ static_cast<std::uint64_t>(
-                               config::get_sampling_duration() * units::sec) };
-        auto _func = [_end]() {
+        _protect       = true;
+        const auto now = std::chrono::steady_clock::now();
+        const auto end =
+            now + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::duration<double>{ config::get_sampling_duration() });
+        const auto func = [end]() {
             thread_info::init(true);
             threading::set_thread_name("omni.samp.dur");
             get_is_duration_thread() = true;
@@ -558,18 +560,19 @@ start_duration_thread()
                 _wait = false;
                 std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
                 if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, _end);
-                auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (state::process::get() >= state::process::Finalized);
-                if(_premature && !_finalized)
+                get_duration_cv().wait_until(_lk, end);
+                const auto premature = (std::chrono::steady_clock::now() < end);
+                const auto finalized =
+                    (state::process::get() >= state::process::Finalized);
+                if(premature && !finalized)
                 {
                     // protect against spurious wakeups
                     LOG_WARNING("Spurious wakeup of sampling duration thread...");
                     _wait = true;
                 }
-                else if(_finalized)
+                else if(finalized)
                 {
-                    if(_premature)
+                    if(premature)
                     {
                         LOG_INFO("Sampling duration of {:.6f} seconds was "
                                  "interrupted by finalization. Shutting down "
@@ -599,7 +602,7 @@ start_duration_thread()
                  config::get_sampling_duration());
 
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        get_duration_thread() = std::make_unique<std::thread>(_func);
+        get_duration_thread() = std::make_unique<std::thread>(func);
         _protect              = false;
     }
 }
@@ -952,11 +955,13 @@ configure(bool _setup, std::int64_t _tid)
                     dynamic_cast<const timer*>(_sampler->get_trigger(itr));
                 if(_timer)
                 {
+                    constexpr std::int64_t k_nsec_per_sec  = 1'000'000'000;
+                    constexpr std::int64_t k_nsec_per_msec = 1'000'000;
                     LOG_INFO(
                         "[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                         "second of {}-time (every {:.3e} milliseconds)...",
-                        itr, _tid, _timer->get_frequency(units::sec), _type,
-                        _timer->get_period(units::msec));
+                        itr, _tid, _timer->get_frequency(k_nsec_per_sec), _type,
+                        _timer->get_period(k_nsec_per_msec));
                 }
             }
         }
@@ -1947,9 +1952,12 @@ struct sampling_initialization
         sampling_gpu_memory::label()       = "sampling_gpu_memory_usage";
         sampling_gpu_memory::description() = "Memory usage of GPU(s)";
 
-        sampling_gpu_power::label()        = "sampling_gpu_power";
-        sampling_gpu_power::description()  = "Power usage of GPU(s)";
-        sampling_gpu_power::unit()         = units::watt;
+        sampling_gpu_power::label()       = "sampling_gpu_power";
+        sampling_gpu_power::description() = "Power usage of GPU(s)";
+        sampling_gpu_power::unit()        = static_cast<std::int64_t>(
+            rocprofsys::common::units::power_cast<rocprofsys::common::units::nanowatt>(
+                rocprofsys::common::units::watt{ 1.0 })
+                .count());
         sampling_gpu_power::display_unit() = "watts";
         sampling_gpu_power::set_precision(2);
         sampling_gpu_power::set_format_flags(sampling_gpu_power::get_format_flags());
@@ -2051,7 +2059,6 @@ resume()
     unblock_samples();
 }
 
-}  // namespace sampling
-}  // namespace rocprofsys
+}  // namespace rocprofsys::sampling
 
 TIMEMORY_INVOKE_PREINIT(rocprofsys::sampling::sampling_initialization)
