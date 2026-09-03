@@ -936,7 +936,7 @@ endforeach()
 # --- Standalone dev_runtime micro-test binary ---------------------------
 # rccl-UnitTestsMicroDevRuntime: see the in-build block above for why this is
 # its own executable rather than more sources on rccl-UnitTestsMicro.
-add_executable(rccl-UnitTestsMicroDevRuntime
+add_test_executable(rccl-UnitTestsMicroDevRuntime
   dev-runtime-test.cc
   fakes/dev_runtime_micro_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
@@ -971,11 +971,6 @@ target_link_libraries(rccl-UnitTestsMicroDevRuntime PRIVATE
   fmt::fmt-header-only
 )
 
-if(MICRO_COVERAGE)
-  target_compile_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicroDevRuntime PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
 # --- Coverage (all host-only test binaries) -----------------------------
 # Single switch for the whole standalone build: llvm source-based coverage is
 # either on for every host-only test binary or off for all of them. Host-only
