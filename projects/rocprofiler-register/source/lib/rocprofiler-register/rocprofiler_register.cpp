@@ -501,6 +501,9 @@ rocp_reg_scan_for_tools(bool _attachment_enabled, tool_load_context _load_contex
     const auto _attachment_in_progress = (_load_context == tool_load_context::attachment);
     // Preload ownership affects selection only when attachment is enabled, a configure
     // symbol exists, and no explicit environment request has already settled the choice.
+    // Preloading rocprofiler-register only supplies registration infrastructure; it does
+    // not request startup profiling. A preload counts only when that library itself
+    // defines rocprofiler_configure.
     const auto _preloaded_tool =
         (_attachment_enabled && !_attachment_in_progress && _implicit_tool &&
          !_force_tool &&
@@ -534,10 +537,11 @@ rocp_reg_scan_for_tools(bool _attachment_enabled, tool_load_context _load_contex
                    "rocprofiler_configure symbol will not activate "
                    "rocprofiler-sdk at startup. "
                    "Attachment initialization will be attempted instead. To explicitly "
-                   "request startup profiling, set ROCPROFILER_REGISTER_FORCE_LOAD=1; "
-                   "or leave it unset and set ROCP_TOOL_LIBRARIES or "
-                   "ROCPROFILER_REGISTER_LIBRARY; alternatively, directly LD_PRELOAD a "
-                   "tool library that exports rocprofiler_configure.";
+                   "request startup profiling, set ROCPROFILER_REGISTER_FORCE_LOAD=1. "
+                   "Alternatively, leave it unset and set ROCP_TOOL_LIBRARIES or "
+                   "ROCPROFILER_REGISTER_LIBRARY, or list a tool library exporting "
+                   "rocprofiler_configure directly in LD_PRELOAD (for example, "
+                   "librocprofiler-sdk-tool.so).";
         });
     }
 
