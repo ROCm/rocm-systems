@@ -1567,6 +1567,33 @@ private:
   std::vector<MoiSgprRange> selected_;
 };
 
+void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
+                                       const ConSanRequest &request,
+                                       const BoundRuntimeResources &resources,
+                                       const ConSanMoiOperatingPoint &point,
+                                       const ConSanMoiOperatingPoint &allocation,
+                                       const MoiObjectModeSemantics &mode_semantics,
+                                       rj_code_arch_t arch) {
+  const uint16_t exec_width = moi_exec_save_sgpr_count(
+      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
+  domain.occupy(point.moi_exec_save_sgpr, exec_width);
+  domain.occupy(point.moi_owner_sgpr.base(), 1u);
+  domain.occupy(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
+  point.for_each_auxiliary_sgpr_range(
+      [&](std::optional<uint16_t> base, uint16_t width) { domain.occupy(base, width); });
+  for (const ConSanMoiTransientSgprAssignment &assignment : allocation.owner_transient_sgprs) {
+    domain.occupy(assignment.exec_save_sgpr, exec_width);
+    domain.occupy(assignment.owner_sgpr, 1u);
+    domain.occupy(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount);
+    if (assignment.scalar_router) {
+      assignment.scalar_router->for_each_sgpr_range(
+          true, true, [&](uint16_t base, uint16_t width) { domain.occupy(base, width); });
+    }
+    if (assignment.branch_only_spill)
+      domain.occupy(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u);
+  }
+}
+
 [[nodiscard]] std::optional<std::vector<ConSanMoiPrologueScratchVgprAssignment>>
 plan_moi_scalar_prologue_scratch(const MoiResourcePlanningState &state,
                                  const MoiScalarOwnerContextResolution &resolution,
@@ -3039,44 +3066,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
   return plan == nullptr
              ? std::nullopt
              : resolve_moi_scratch_plan(*plan, operating_point, operating_point, expected_count);
-}
-
-[[nodiscard]] bool moi_sgpr_range_overlaps_transient_state(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const ConSanMoiOperatingPoint &allocation, uint16_t base,
-    uint16_t width, const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
-  const auto overlaps = [&](std::optional<uint16_t> state_base, uint16_t state_width = 1u) {
-    return state_base && range_overlaps(base, width, *state_base, state_width);
-  };
-  const auto overlaps_assignment = [&](const ConSanMoiTransientSgprAssignment &assignment) {
-    bool overlaps_router = false;
-    if (assignment.scalar_router) {
-      assignment.scalar_router->for_each_sgpr_range(true, true, [&](uint16_t reg, uint16_t count) {
-        overlaps_router |= overlaps(reg, count);
-      });
-    }
-    return range_overlaps(base, width, assignment.exec_save_sgpr,
-                          moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
-                                                       request, resources, point, mode_semantics),
-                                                   arch)) ||
-           overlaps(assignment.owner_sgpr) ||
-           overlaps(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount) || overlaps_router ||
-           (assignment.branch_only_spill &&
-            overlaps(assignment.branch_only_spill->dynamic_stack_borrowed_sgpr, 2u));
-  };
-  bool overlaps_auxiliary_state = false;
-  point.for_each_auxiliary_sgpr_range(
-      [&](std::optional<uint16_t> state_base, uint16_t state_width) {
-        overlaps_auxiliary_state |= overlaps(state_base, state_width);
-      });
-  return overlaps(point.moi_exec_save_sgpr,
-                  moi_exec_save_sgpr_count(
-                      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics),
-                      arch)) ||
-         overlaps(point.moi_owner_sgpr.base()) ||
-         overlaps(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount) ||
-         overlaps_auxiliary_state ||
-         std::ranges::any_of(allocation.owner_transient_sgprs, overlaps_assignment);
 }
 
 [[nodiscard]] bool configure_automatic_moi_transient_sgpr_assignments(
@@ -4758,26 +4747,19 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // candidate range empty so placement fails closed.
       const uint32_t first =
           resolved_contexts ? resolved_contexts->tail_floor : moi_ordinary_sgpr_limit(arch);
-      const auto unavailable = [&](uint16_t base) {
-        if ((options.moi_exec_save_sgpr &&
-             range_overlaps(base, scalar_count, *options.moi_exec_save_sgpr,
-                            moi_exec_save_sgpr_count(
-                                resolve_moi_exec_save_requirement(request, resources, options,
-                                                                  problem.mode_semantics()),
-                                arch))) ||
-            (options.moi_dispatch_identity.sgpr() &&
-             range_overlaps(base, scalar_count, *options.moi_dispatch_identity.sgpr(),
-                            kMoiDispatchStateSgprCount)) ||
-            (options.moi_owner_sgpr.base() &&
-             range_overlaps(base, scalar_count, *options.moi_owner_sgpr.base(), 1u))) {
-          return true;
-        }
-        return resolved_contexts && moi_scalar_contexts_conflict_with_physical_vcc(
-                                        resolved_contexts->summaries, base, scalar_count, arch);
-      };
-      const auto scalar_tail = first_admitted_moi_register_range(
-          first, scalar_count, moi_ordinary_sgpr_limit(arch), 1u,
-          [&](uint16_t candidate) { return !unavailable(candidate); });
+      const std::span<const consan_detail::ScalarOwnerContextSummary> scalar_summaries =
+          resolved_contexts ? std::span<const consan_detail::ScalarOwnerContextSummary>(
+                                  resolved_contexts->summaries)
+                            : std::span<const consan_detail::ScalarOwnerContextSummary>{};
+      MoiScalarPlacementDomain scalar_domain(arch, moi_ordinary_sgpr_limit(arch), scalar_summaries);
+      scalar_domain.occupy(
+          options.moi_exec_save_sgpr,
+          moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(request, resources, options,
+                                                                     problem.mode_semantics()),
+                                   arch));
+      scalar_domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
+      scalar_domain.occupy(options.moi_owner_sgpr.base(), 1u);
+      const auto scalar_tail = scalar_domain.select_first(first, scalar_count);
       const std::string scalar_state_description =
           "ConSan MOI assigned persistent scalar " +
           std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +
@@ -4850,30 +4832,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           scalar_references.references.expand({RegClass::SGPR, static_cast<uint16_t>(sgpr), 1u});
         }
       }
-      const auto hole_unavailable = [&](uint16_t base) {
-        if (static_cast<uint32_t>(base) + scalar_count > moi_ordinary_sgpr_limit(arch) ||
-            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, scalar_count, arch)) {
-          return true;
-        }
-        for (uint16_t index = 0; index < scalar_count; ++index) {
-          if (scalar_references.references.contains(
-                  {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
-            return true;
-          }
-        }
-        if (moi_sgpr_range_overlaps_transient_state(request, resources, scalar_options, options,
-                                                    base, scalar_count, problem.mode_semantics(),
-                                                    arch)) {
-          return true;
-        }
-        return std::ranges::any_of(scalar_contexts,
-                                   [&](const MoiKernelResourceContext *context) {
-                                     return static_cast<uint32_t>(base) + scalar_count >
-                                            context->current_sgpr_count;
-                                   }) ||
-               (resolved_contexts && moi_scalar_contexts_conflict_with_physical_vcc(
-                                         resolved_contexts->summaries, base, scalar_count, arch));
-      };
       std::optional<uint16_t> persistent_hole;
       // A closed KernelCfgScope includes every direct edge and every member of
       // an explicitly exhaustive recovered target set. Unrelated linked
@@ -4881,11 +4839,15 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // transfer or dynamic scalar index still makes the proof fail closed.
       if (every_owner_resolved && scalar_references.control_flow_closed &&
           !scalar_references.uses_indirect_sgprs) {
-        const uint16_t hole_limit =
+        uint16_t hole_limit =
             static_cast<uint16_t>(std::min<uint32_t>(first, moi_ordinary_sgpr_limit(arch)));
-        persistent_hole = first_admitted_moi_register_range(
-            0u, scalar_count, hole_limit, 1u,
-            [&](uint16_t candidate) { return !hole_unavailable(candidate); });
+        for (const MoiKernelResourceContext *context : scalar_contexts)
+          hole_limit = std::min(hole_limit, context->current_sgpr_count);
+        MoiScalarPlacementDomain hole_domain(arch, hole_limit, resolved_contexts->summaries,
+                                             &scalar_references.references);
+        occupy_moi_transient_scalar_state(hole_domain, request, resources, scalar_options, options,
+                                          problem.mode_semantics(), arch);
+        persistent_hole = hole_domain.select_first(0u, scalar_count);
       }
       if (persistent_hole) {
         commit_exact_workgroup_scalar_state(
@@ -4907,27 +4869,12 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
           !scalar_references.uses_indirect_vgprs) {
         constexpr uint16_t kWorkgroupScalarCount = 3u;
         constexpr uint16_t kOwnerEpochVectorCount = 2u;
-        const auto scalar_tuple_unavailable = [&](uint16_t base) {
-          for (uint16_t index = 0u; index < kWorkgroupScalarCount; ++index) {
-            if (scalar_references.references.contains(
-                    {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
-              return true;
-            }
-          }
-          if (moi_sgpr_range_overlaps_transient_state(request, resources, scalar_options, options,
-                                                      base, kWorkgroupScalarCount,
-                                                      problem.mode_semantics(), arch) ||
-              persistent_sgpr_range_overlaps_reserved_ordinary_range(base, kWorkgroupScalarCount,
-                                                                     arch)) {
-            return true;
-          }
-          return resolved_contexts &&
-                 moi_scalar_contexts_conflict_with_physical_vcc(resolved_contexts->summaries, base,
-                                                                kWorkgroupScalarCount, arch);
-        };
-        const auto workgroup_scalar_base = first_admitted_moi_register_range(
-            0u, kWorkgroupScalarCount, moi_ordinary_sgpr_limit(arch), 1u,
-            [&](uint16_t candidate) { return !scalar_tuple_unavailable(candidate); });
+        MoiScalarPlacementDomain workgroup_domain(arch, moi_ordinary_sgpr_limit(arch),
+                                                  resolved_contexts->summaries,
+                                                  &scalar_references.references);
+        occupy_moi_transient_scalar_state(workgroup_domain, request, resources, scalar_options,
+                                          options, problem.mode_semantics(), arch);
+        const auto workgroup_scalar_base = workgroup_domain.select_first(0u, kWorkgroupScalarCount);
 
         uint16_t common_ordinary_vgpr_limit = kMaxVgprs;
         for (const MoiKernelResourceContext *context : scalar_contexts)
@@ -5063,18 +5010,11 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       // physical VCC before and after descriptor growth.
       const uint32_t first = resolved_contexts->tail_floor;
       const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
-      const auto unavailable = [&](uint16_t base) {
-        if (moi_sgpr_range_overlaps_transient_state(request, resources, options, options, base,
-                                                    scalar_count, problem.mode_semantics(), arch) ||
-            moi_sgpr_range_overlaps_dynamic_stack_state(base, scalar_count)) {
-          return true;
-        }
-        return moi_scalar_contexts_conflict_with_physical_vcc(resolved_contexts->summaries, base,
-                                                              scalar_count, arch);
-      };
-      const auto scalar_tail = first_admitted_moi_register_range(
-          first, scalar_count, scalar_limit, 1u,
-          [&](uint16_t candidate) { return !unavailable(candidate); });
+      MoiScalarPlacementDomain scalar_domain(arch, scalar_limit, resolved_contexts->summaries);
+      occupy_moi_transient_scalar_state(scalar_domain, request, resources, options, options,
+                                        problem.mode_semantics(), arch);
+      scalar_domain.occupy_dynamic_stack_state();
+      const auto scalar_tail = scalar_domain.select_first(first, scalar_count);
       if (scalar_tail) {
         // A prior disconnected component may already have accumulated a VGPR
         // tuple. Commit the scalar transition only after entry scratch has
@@ -5331,39 +5271,25 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
       if (auto complete = summarize_moi_complete_text_register_references(scalar_state))
         scalar_references = std::move(*complete);
     }
-    const auto overlaps_reserved_state = [&](uint16_t base) {
-      return moi_sgpr_range_overlaps_transient_state(request, resources, options, options, base,
-                                                     scalar_count, problem.mode_semantics(),
-                                                     arch) ||
-             (has_dynamic_stack_owner &&
-              (range_overlaps(base, scalar_count, kDynamicStackTopSgpr, 1u) ||
-               range_overlaps(base, scalar_count, kDynamicFrameBaseSgpr, 1u))) ||
-             persistent_sgpr_range_overlaps_reserved_ordinary_range(base, scalar_count, arch);
-    };
-    const auto referenced = [&](uint16_t base) {
-      for (uint16_t index = 0; index < scalar_count; ++index) {
-        if (scalar_references.references.contains(
-                {RegClass::SGPR, static_cast<uint16_t>(base + index), 1u})) {
-          return true;
-        }
-      }
-      return false;
-    };
-    const auto admissible = [&](uint16_t base) {
-      if (overlaps_reserved_state(base))
-        return false;
-      if (base >= resolved_contexts->tail_floor)
-        return true;
-      return scalar_references.control_flow_closed && !scalar_references.uses_indirect_sgprs &&
-             !referenced(base);
-    };
     const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
-    std::optional<uint16_t> scalar_base = first_admitted_moi_register_range(
-        resolved_contexts->tail_floor, scalar_count, scalar_limit, 1u, admissible);
+    MoiScalarPlacementDomain tail_domain(arch, scalar_limit, resolved_contexts->summaries);
+    occupy_moi_transient_scalar_state(tail_domain, request, resources, options, options,
+                                      problem.mode_semantics(), arch);
+    if (has_dynamic_stack_owner)
+      tail_domain.occupy_dynamic_stack_state();
+    std::optional<uint16_t> scalar_base =
+        tail_domain.select_first(resolved_contexts->tail_floor, scalar_count);
     const uint32_t hole_limit = std::min<uint32_t>(resolved_contexts->tail_floor, scalar_limit);
-    if (has_dynamic_stack_owner && !scalar_base)
-      scalar_base = first_admitted_moi_register_range(
-          0u, scalar_count, static_cast<uint16_t>(hole_limit), 1u, admissible);
+    if (has_dynamic_stack_owner && !scalar_base && scalar_references.control_flow_closed &&
+        !scalar_references.uses_indirect_sgprs) {
+      MoiScalarPlacementDomain hole_domain(arch, static_cast<uint16_t>(hole_limit),
+                                           resolved_contexts->summaries,
+                                           &scalar_references.references);
+      occupy_moi_transient_scalar_state(hole_domain, request, resources, options, options,
+                                        problem.mode_semantics(), arch);
+      hole_domain.occupy_dynamic_stack_state();
+      scalar_base = hole_domain.select_first(0u, scalar_count);
+    }
     if (scalar_base) {
       const uint16_t base = *scalar_base;
       assign_scalar_persistent_state(base);
