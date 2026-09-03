@@ -41,6 +41,103 @@ sc_admitted_access_file_offsets(const ProgramInventory &inventory,
   return make_consan_instrumented_patch_lowering(observation, intent_ids, patch);
 }
 
+/// Commit every staged SuperCollider access program through one object-wide
+/// relocation. The staging boundary lets LDS and FLAT retain independent
+/// resource/probe planners while sharing all executable placement mechanics.
+[[nodiscard]] bool finalize_sc_text_rewrites(std::span<const uint8_t> descriptor_image,
+                                             rj_code_arch_t arch,
+                                             const ConSanOptions &options,
+                                             std::string_view subject,
+                                             ConSanTransformArtifacts &result) {
+  if (result.staged_text_rewrites.empty())
+    return true;
+
+  std::vector<ConSanInlineTextRewrite> rewrites;
+  rewrites.reserve(result.staged_text_rewrites.size());
+  for (const ConSanStagedTextRewrite &staged : result.staged_text_rewrites)
+    rewrites.push_back({staged.patch.anchor_offset, staged.words});
+
+  std::vector<SourceTextCodeRange> preexisting_patch_ranges;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.trampoline_size != 0u) {
+      preexisting_patch_ranges.push_back(
+          {.start_offset = patch.trampoline_offset, .size = patch.trampoline_size});
+    }
+  }
+
+  auto relocated = relocate_consan_text(
+      descriptor_image, arch, rewrites, options.patched_image_growth_limit,
+      result.program_inventory.code_object_id(), subject, preexisting_patch_ranges, result.errors,
+      &result.transform_failure_cause);
+  if (!relocated)
+    return false;
+  if (relocated->source_text_size > std::numeric_limits<uint64_t>::max() -
+                                        relocated->relocated_text_size ||
+      relocated->relocated_text_size > std::numeric_limits<uint32_t>::max()) {
+    result.errors.emplace_back("ConSan " + std::string(subject) +
+                               " relocated text is too large");
+    return false;
+  }
+
+  std::vector<ConSanPatchInfo> placed_patches;
+  std::vector<ConSanCommittedLowering> commits;
+  AmdGpuCodeObject relocated_object(relocated->image.data(), relocated->image.size());
+  if (!relocated_object.is_valid() || relocated_object.text_sections().size() != 1u) {
+    result.errors.emplace_back("ConSan " + std::string(subject) +
+                               " cannot inspect relocated executable text");
+    return false;
+  }
+  const uint64_t relocated_text_bytes = relocated_object.text_sections().front()->size();
+  commits.reserve(result.staged_text_rewrites.size());
+  for (const ConSanStagedTextRewrite &staged : result.staged_text_rewrites) {
+    std::optional<ConSanPatchInfo> primary;
+    for (const TranslatedTextPlacement &placement : relocated->placements) {
+      if (placement.source_offset != staged.patch.anchor_offset || !placement.client_rewrite)
+        continue;
+      ConSanPatchInfo placed = staged.patch;
+      placed.trampoline_offset = placement.target_offset;
+      if (placed.trampoline_offset > relocated_text_bytes ||
+          placed.trampoline_size > relocated_text_bytes - placed.trampoline_offset) {
+        result.errors.emplace_back(
+            "ConSan " + std::string(subject) + " placement exceeds relocated text: source=" +
+            std::to_string(staged.patch.anchor_offset) +
+            " target=" + std::to_string(placed.trampoline_offset) +
+            " size=" + std::to_string(placed.trampoline_size) +
+            " text=" + std::to_string(relocated_text_bytes));
+        return false;
+      }
+      if (placed.relocated_guest_instruction_offset) {
+        *placed.relocated_guest_instruction_offset += placement.target_offset;
+      }
+      if (!primary)
+        primary = placed;
+      placed_patches.push_back(std::move(placed));
+    }
+    if (!primary) {
+      result.errors.emplace_back("ConSan " + std::string(subject) +
+                                 " lost a relocated instruction placement");
+      return false;
+    }
+    auto commit = make_consan_instrumented_patch_lowering(
+        result.observation_plan(), staged.intent_ids, *primary);
+    if (!commit) {
+      result.errors.emplace_back("ConSan " + std::string(subject) +
+                                 " produced an invalid intent-bound lowering");
+      result.discard_candidate_modification();
+      return false;
+    }
+    commits.push_back(std::move(*commit));
+  }
+
+  result.text_relocation = ConSanTextRelocationProof{
+      relocated->source_text_size,
+      relocated->relocated_text_size,
+  };
+  result.staged_text_rewrites.clear();
+  return result.publish_access_lowering(std::move(relocated->image), subject, std::move(commits),
+                                        std::move(placed_patches));
+}
+
 /// Publish an explicit placement rejection for every SuperCollider access
 /// intent that no site-local lowering transaction consumed. This fallback
 /// consults only immutable intent identity and the ledger's pending state; it
@@ -142,12 +239,10 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
 }
 
 [[nodiscard]] ConSanPatchKind lds_check_trap_patch_kind(const ConSanAccessInventorySite &access,
-                                                        bool use_local_cave) {
+                                                        bool) {
   if (access.kind == ConSanLdsAccessKind::Write)
-    return use_local_cave ? ConSanPatchKind::LocalCaveLdsStoreCheckTrap
-                          : ConSanPatchKind::InlineLdsStoreCheckTrap;
-  return use_local_cave ? ConSanPatchKind::LocalCaveLdsLoadCheckTrap
-                        : ConSanPatchKind::InlineLdsLoadCheckTrap;
+    return ConSanPatchKind::LdsStoreCheckTrap;
+  return ConSanPatchKind::LdsLoadCheckTrap;
 }
 
 [[nodiscard]] bool is_d16_lds_load(const ConSanAccessInventorySite &access) {

@@ -115,6 +115,14 @@ using InstructionRewriteCallback =
 struct TranslatedTextPlacement {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+  /// @brief True only when the client rewrite callback replaced this instruction.
+  bool client_rewrite = false;
+};
+
+/// @brief One source `.text` range that the translator may decode as executable code.
+struct SourceTextCodeRange {
+  uint64_t start_offset = 0;
+  uint64_t size = 0;
 };
 
 /// @brief Optional controls for DBT translation.
@@ -173,6 +181,16 @@ struct BinaryTranslatorOptions {
   /// source coordinates for an independent patch inventory at the deliberate
   /// cost of a larger output image.
   bool preserve_source_text_prefix = false;
+
+  /// @brief Preserve caller-owned descriptor resource accounting during an
+  /// identity-ISA text relocation.
+  ///
+  /// Instrumentation clients can pre-plan and apply exact descriptor changes
+  /// before asking DBT only to place their text. This suppresses DBT's generic
+  /// resource-limit reinterpretation; it is rejected for cross-ISA use.
+  bool preserve_source_descriptor_resources = false;
+  /// @brief Optional explicit executable ranges; empty retains whole-section decoding.
+  std::vector<SourceTextCodeRange> source_text_code_ranges;
 };
 
 /// @brief Result of translating a code object.

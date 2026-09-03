@@ -29,6 +29,7 @@ struct KdTranslation;
 struct TextOffsetRelocation {
   uint64_t source_offset = 0;
   uint64_t target_offset = 0;
+  bool client_rewrite = false;
 };
 
 /// @brief One relocated literal64 PC builder whose target is outside `.text`.

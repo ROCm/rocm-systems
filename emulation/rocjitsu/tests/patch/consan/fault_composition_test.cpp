@@ -705,15 +705,17 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(composed.mutation.perturbation.applied, 1u);
   ASSERT_EQ(composed.patches.size(), 2u);
-  EXPECT_EQ(composed.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
-  EXPECT_EQ(composed.patches[0].anchor_offset, 8u);
-  EXPECT_EQ(composed.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
-  EXPECT_EQ(composed.patches[1].anchor_offset, 0u);
-  EXPECT_EQ(composed.patches[1].trampoline_offset, text_words.size() * sizeof(uint32_t));
-  EXPECT_TRUE(composed.patches[0].anchor_offset + composed.patches[0].original_size <=
-                  composed.patches[1].anchor_offset ||
-              composed.patches[1].anchor_offset + composed.patches[1].original_size <=
-                  composed.patches[0].anchor_offset);
+  const auto perturb = std::ranges::find(composed.patches,
+                                         ConSanPatchKind::TrampolineScPerturbation,
+                                         &ConSanPatchInfo::kind);
+  const auto lds = std::ranges::find(composed.patches, ConSanPatchKind::LdsLoadCheckTrap,
+                                     &ConSanPatchInfo::kind);
+  ASSERT_NE(perturb, composed.patches.end());
+  ASSERT_NE(lds, composed.patches.end());
+  EXPECT_EQ(perturb->anchor_offset, 0u);
+  EXPECT_EQ(lds->anchor_offset, 8u);
+  ASSERT_TRUE(composed.text_relocation);
+  EXPECT_GE(lds->trampoline_offset, composed.text_relocation->source_text_size);
 
   options.max_patches = 1;
   const ConSanTransformArtifacts capped = test_lower_consan(bytes, options);
@@ -732,8 +734,13 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(all_supported.mutation.perturbation.applied, 1u);
   ASSERT_EQ(all_supported.patches.size(), 2u);
-  EXPECT_EQ(all_supported.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
-  EXPECT_EQ(all_supported.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
+  EXPECT_NE(std::ranges::find(all_supported.patches, ConSanPatchKind::LdsLoadCheckTrap,
+                              &ConSanPatchInfo::kind),
+            all_supported.patches.end());
+  EXPECT_NE(std::ranges::find(all_supported.patches,
+                              ConSanPatchKind::TrampolineScPerturbation,
+                              &ConSanPatchInfo::kind),
+            all_supported.patches.end());
 }
 
 TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan) {
@@ -758,12 +765,17 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   ASSERT_TRUE(local.errors.empty()) << testing::PrintToString(local.errors);
   EXPECT_EQ(local.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(local.patches.size(), 2u);
-  EXPECT_EQ(local.patches[0].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
-  EXPECT_EQ(local.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
-  EXPECT_TRUE(local.patches[0].trampoline_offset + local.patches[0].trampoline_size <=
-                  local.patches[1].trampoline_offset ||
-              local.patches[1].trampoline_offset + local.patches[1].trampoline_size <=
-                  local.patches[0].trampoline_offset);
+  const auto local_lds = std::ranges::find(local.patches, ConSanPatchKind::LdsLoadCheckTrap,
+                                           &ConSanPatchInfo::kind);
+  const auto local_perturb = std::ranges::find(local.patches,
+                                               ConSanPatchKind::TrampolineScPerturbation,
+                                               &ConSanPatchInfo::kind);
+  ASSERT_NE(local_lds, local.patches.end());
+  ASSERT_NE(local_perturb, local.patches.end());
+  EXPECT_TRUE(local_lds->trampoline_offset + local_lds->trampoline_size <=
+                  local_perturb->trampoline_offset ||
+              local_perturb->trampoline_offset + local_perturb->trampoline_size <=
+                  local_lds->trampoline_offset);
 
   std::vector<uint32_t> far_words(40000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   far_words[0] = 0xBE804EC1u;
@@ -1225,38 +1237,18 @@ TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.modified());
-  const auto reservoir = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
-           patch.original_size != 0u;
-  });
-  ASSERT_NE(reservoir, result.patches.end());
-  EXPECT_GE(reservoir->original_size, 2u * sizeof(uint32_t));
-  EXPECT_EQ(reservoir->trampoline_size, reservoir->original_size + sizeof(uint32_t));
-  const auto island = std::ranges::find(
-      result.patches, ConSanPatchKind::TrampolineScIndirectBranchIsland, &ConSanPatchInfo::kind);
-  ASSERT_NE(island, result.patches.end());
-
-  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
-  ASSERT_TRUE(patched.is_valid());
-  ASSERT_EQ(patched.text_sections().size(), 1u);
-  const Section *text = patched.text_sections().front();
-  ASSERT_GE(text->size(), reservoir->trampoline_offset + reservoir->trampoline_size);
-  const auto text_bytes =
-      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-  const auto pristine_text = std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(text_words.data()), text_words.size() * sizeof(uint32_t));
-  ASSERT_LE(reservoir->anchor_offset + reservoir->original_size, pristine_text.size());
-  EXPECT_EQ(std::memcmp(text_bytes.data() + reservoir->trampoline_offset,
-                        pristine_text.data() + reservoir->anchor_offset, reservoir->original_size),
-            0);
-
-  ConSanTransformArtifacts corrupted = result;
-  const uint64_t text_file_offset = text->sectionOffset();
-  corrupted.replacement[text_file_offset + reservoir->trampoline_offset + sizeof(uint32_t)] ^= 1u;
-  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, corrupted);
-  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
-    return error.find("corrupted direct execution path") != std::string::npos;
-  })) << testing::PrintToString(validation_errors);
+  ASSERT_TRUE(result.text_relocation);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LdsLoadCheckTrap,
+                               &ConSanPatchInfo::kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.patches,
+                               ConSanPatchKind::TrampolineBranchRelayReservoir,
+                               &ConSanPatchInfo::kind),
+            0u);
+  EXPECT_EQ(std::ranges::count(result.patches,
+                               ConSanPatchKind::TrampolineScIndirectBranchIsland,
+                               &ConSanPatchInfo::kind),
+            0u);
 }
 
 } // namespace

@@ -63,6 +63,9 @@ struct KernelDescriptorResourceOptions {
   uint32_t private_segment_fixed_size_addend = 0;
   /// @brief Additional workgroup LDS bytes requested by DBT or DBI.
   uint32_t group_segment_fixed_size_addend = 0;
+  /// Caller owns descriptor validation and will retain the source resource
+  /// fields after an identity-ISA text-only translation.
+  bool allow_oversized_register_allocation = false;
 };
 
 /// @brief Descriptor policy owned by the virtual-LDS feature.

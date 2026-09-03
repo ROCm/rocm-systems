@@ -563,10 +563,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   redundant_options.max_patches =
       overall_patch_budget - static_cast<uint32_t>(perturbation.plans.size());
 
-  // Native LDS still uses source-coordinate cave placement, so complete it
-  // before perturbation as in the established composition transaction. FLAT
-  // then relocates the already composed LDS and perturbation text into the
-  // active bodies, leaving no post-relocation coordinate rediscovery problem.
+  // LDS and FLAT stage site-local programs without choosing physical caves.
+  // Perturbation composes against the still-source-coordinate image, and one
+  // final relocation then carries every selected operation into active text.
   if (options.probe_lds_check_trap)
     try_apply_lds_load_check_trap_patch(*code_object, *target_profile, redundant_options, result);
 
@@ -589,17 +588,16 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         const uint32_t access_patches = static_cast<uint32_t>(
             std::ranges::count_if(result.patches, [](const ConSanPatchLoweringProduct &patch) {
               switch (patch.kind) {
-              case ConSanPatchKind::InlineLdsLoadCheckTrap:
-              case ConSanPatchKind::InlineLdsStoreCheckTrap:
-              case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
-              case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
+              case ConSanPatchKind::LdsLoadCheckTrap:
+              case ConSanPatchKind::LdsStoreCheckTrap:
               case ConSanPatchKind::FlatLoadCheckTrap:
               case ConSanPatchKind::FlatStoreCheckTrap:
                 return true;
               default:
                 return false;
               }
-            }));
+            })) +
+                                        static_cast<uint32_t>(result.staged_text_rewrites.size());
         if (access_patches >= max_patches && redundant_options.max_patches_is_expert_limit) {
           ConSanOptions flat_options = redundant_options;
           flat_options.max_patches = 0u;
@@ -630,6 +628,15 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     try_apply_proof_endpgm_patch(*code_object, arch, result);
   else if (!has_perturbation && (options.probe_nop || options.probe_trampoline_nop))
     try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
+
+  if (!result.staged_text_rewrites.empty() && result.errors.empty()) {
+    const std::string_view subject = options.probe_lds_check_trap && options.probe_flat_check_trap
+                                         ? "SuperCollider access proof"
+                                     : options.probe_lds_check_trap ? "LDS check/trap proof"
+                                                                    : "flat check/trap proof";
+    if (!finalize_sc_text_rewrites(result.replacement, arch, options, subject, result))
+      result.discard_candidate_modification();
+  }
 
   publish_unplaced_sc_access_rejections(result.coverage_ledger, result.errors);
 

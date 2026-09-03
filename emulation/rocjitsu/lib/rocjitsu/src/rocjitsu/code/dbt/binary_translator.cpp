@@ -2492,6 +2492,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "rewrite-discharge verification cannot be combined with skip-failed-kernels");
     return leave_unchanged();
   }
+  if (options_.preserve_source_descriptor_resources && guest_arch_ != host_arch_) {
+    append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                 "preserving source descriptor resources requires identity-ISA translation");
+    return leave_unchanged();
+  }
 
   if (obj.image_size() < sizeof(Elf64_Ehdr)) {
     append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
@@ -2588,6 +2593,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const bool can_emit_sidecar_descriptors = supports_virtual_lds_sidecars(guest_arch_, host_arch_);
   KernelDescriptorTranslationOptions initial_descriptor_options;
   initial_descriptor_options.allow_oversized_lds = can_emit_sidecar_descriptors;
+  initial_descriptor_options.allow_oversized_register_allocation =
+      options_.preserve_source_descriptor_resources && guest_arch_ == host_arch_;
   auto descriptor_translations = descriptor_translator.translate_image(
       patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), initial_descriptor_options,
       obj.text_sections().front()->sectionHeaderIndex());
@@ -2692,10 +2699,15 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
   std::vector<std::unique_ptr<BasicBlock>> blocks;
+  std::vector<BasicBlock::CodeRange> source_code_ranges;
+  source_code_ranges.reserve(options_.source_text_code_ranges.size());
+  for (const SourceTextCodeRange &range : options_.source_text_code_ranges)
+    source_code_ranges.push_back({.start_offset = range.start_offset, .size = range.size});
   util::StringDiagnostic decode_error;
   auto block_result =
       BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
-                        ExternalEntryPolicy::ExplicitOnly, block_split_points);
+                        ExternalEntryPolicy::ExplicitOnly, block_split_points,
+                        source_code_ranges);
   if (block_result.failed()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();
@@ -3939,6 +3951,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::unordered_map<uint64_t, uint64_t> target_offset_by_source_offset;
     target_offset_by_source_offset.reserve(
         static_cast<size_t>(source_body_size / sizeof(uint32_t)) + scope.blocks.size());
+    std::unordered_set<uint64_t> client_rewritten_source_offsets;
     layout.body_begin = 0;
     layout.blocks.reserve(scope.blocks.size());
     uint64_t next_branch_island_pool_offset = first_direct_branch_island_pool_offset();
@@ -4120,7 +4133,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // Record every instruction start, not just recovered-PC builder
         // boundaries. The same final map keeps ELF labels attached to the
         // relocated instruction stream after semantic expansions change sizes.
-        target_offset_by_source_offset.emplace(offset, target_offset);
+        // A function entry can equal a preceding block's end boundary. That
+        // boundary is useful only until the actual instruction is emitted;
+        // the instruction placement must win so clients rewriting a shared
+        // helper receive its body address rather than the caller's end.
+        target_offset_by_source_offset.insert_or_assign(offset, target_offset);
 
         const auto recovered_it = recovered_indirect_by_call.find(offset);
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
@@ -4274,6 +4291,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               instruction_rewrite_callback_(inst, offset);
           if (rewrite) {
             std::vector<uint32_t> target_words = std::move(*rewrite);
+            client_rewritten_source_offsets.insert(offset);
             append_words(kernel_text, target_words);
             queue_trace(pending_traces, inst, offset, nullptr, false, true, true, target_offset,
                         std::move(target_words));
@@ -4814,7 +4832,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }
     for (const auto &[source_offset, target_offset] : target_offset_by_source_offset) {
       text_relocations.push_back(
-          {.source_offset = source_offset, .target_offset = target_offset + target_delta});
+          {.source_offset = source_offset,
+           .target_offset = target_offset + target_delta,
+           .client_rewrite = client_rewritten_source_offsets.contains(source_offset)});
     }
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
     // literal it owns must not also be written here -- the later write would land in a range the
@@ -4981,6 +5001,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       descriptor_options.virtualize_lds = scope.translation->needs_lds_overflow_buf;
       descriptor_options.allow_oversized_lds =
           can_emit_sidecar_descriptors && !scope.translation->needs_lds_overflow_buf;
+      descriptor_options.allow_oversized_register_allocation =
+          options_.preserve_source_descriptor_resources && guest_arch_ == host_arch_;
 
       // Descriptor growth is intentionally done after instruction lowering so
       // each kernel is translated once. Only descriptors that enter this code
@@ -5131,7 +5153,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   result.text_placements.reserve(text_relocations.size());
   for (const TextOffsetRelocation &relocation : text_relocations) {
     result.text_placements.push_back({.source_offset = relocation.source_offset,
-                                      .target_offset = relocation.target_offset});
+                                      .target_offset = relocation.target_offset,
+                                      .client_rewrite = relocation.client_rewrite});
   }
   return result;
 }

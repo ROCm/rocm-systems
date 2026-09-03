@@ -221,6 +221,17 @@ struct ConSanMutationOutcome {
   bool operator==(const ConSanMutationOutcome &) const = default;
 };
 
+/// One access lowering awaiting the object-wide text relocation transaction.
+/// Semantic intent and ABI planning remain site-local; only placement is
+/// deliberately deferred so heterogeneous SuperCollider probes share one
+/// relocated executable image.
+struct ConSanStagedTextRewrite {
+  PhysicalSiteId original_site;
+  std::vector<ConSanProbeIntentId> intent_ids;
+  std::vector<uint32_t> words;
+  ConSanPatchInfo patch;
+};
+
 /// Semantic and lowering artifacts owned by one static ConSan transformation.
 ///
 /// The internal native lowerer builds this value incrementally. The pipeline
@@ -255,6 +266,8 @@ struct ConSanTransformArtifacts {
   std::vector<ConSanPatchInfo> patches;
   /// Optional image-level executable relocation enclosing active bodies.
   std::optional<ConSanTextRelocationProof> text_relocation;
+  /// Site-local programs awaiting one shared executable relocation.
+  std::vector<ConSanStagedTextRewrite> staged_text_rewrites;
   /// Complete validated code-object replacement, or empty when none is installable.
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
@@ -289,6 +302,7 @@ struct ConSanTransformArtifacts {
     replacement.clear();
     patches.clear();
     text_relocation.reset();
+    staged_text_rewrites.clear();
     coverage_ledger.discard_instrumented_lowerings();
   }
   /// Publish the bytes, semantic commits, and patch proof of one completed

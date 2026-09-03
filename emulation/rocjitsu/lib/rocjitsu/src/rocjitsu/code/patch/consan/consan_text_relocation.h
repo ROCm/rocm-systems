@@ -34,7 +34,8 @@ struct ConSanRelocatedText {
     std::span<const uint8_t> descriptor_patched_image, rj_code_arch_t arch,
     std::span<const ConSanInlineTextRewrite> rewrites,
     const ConSanPatchedImageGrowthLimit &growth_limit, const ConSanCodeObjectId &input_id,
-    std::string_view operation, std::vector<std::string> &errors,
+    std::string_view operation, std::span<const SourceTextCodeRange> additional_code_ranges,
+    std::vector<std::string> &errors,
     std::optional<ConSanTransformFailureCause> *failure_cause = nullptr);
 
 } // namespace rocjitsu

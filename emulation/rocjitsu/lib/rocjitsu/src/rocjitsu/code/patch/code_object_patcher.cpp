@@ -1715,8 +1715,31 @@ bool CodeObjectPatcher::replace_text(
   if (growth != 0) {
     // Growing .text can shift later LOAD segments. Pad the inserted file range
     // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
-    // p_align. The padding is executable segment filler, not part of .text.
-    const auto file_delta_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
+    // p_align and every shifted allocated section retains its address-alignment
+    // residue. The padding is executable segment filler, not part of .text.
+    std::vector<bool> shift_section_vaddr(shdrs.size(), false);
+    uint64_t shifted_section_alignment = 1u;
+    for (size_t i = 0; i < shdrs.size(); ++i) {
+      if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
+        continue;
+      const bool shifts_in_file = shdrs[i].sh_offset >= old_text_end_file;
+      const bool shifts_in_memory =
+          (shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr;
+      shift_section_vaddr[i] = shifts_in_memory;
+      if (shifts_in_memory && !can_add_u64(shdrs[i].sh_addr, growth))
+        return false;
+      if (shifts_in_file || shifts_in_memory) {
+        const auto next = checked_lcm_u64(shifted_section_alignment,
+                                          std::max<uint64_t>(shdrs[i].sh_addralign, 1u));
+        if (!next)
+          return false;
+        shifted_section_alignment = *next;
+      }
+    }
+    const auto load_alignment = shifted_load_delta_alignment(phdrs, old_text_end_file);
+    if (!load_alignment)
+      return false;
+    const auto file_delta_alignment = checked_lcm_u64(*load_alignment, shifted_section_alignment);
     if (!file_delta_alignment)
       return false;
     const auto padded_file_delta = util::checked_align_up(growth, *file_delta_alignment);
@@ -1726,14 +1749,6 @@ bool CodeObjectPatcher::replace_text(
     assert(*padded_file_delta % sizeof(uint32_t) == 0 && "text growth must stay word-aligned");
 
     std::vector<uint8_t> inserted(*padded_file_delta, 0);
-    std::vector<bool> shift_section_vaddr(shdrs.size(), false);
-    for (size_t i = 0; i < shdrs.size(); ++i) {
-      if (i == *text_index || shdrs[i].sh_type == SHT_NULL)
-        continue;
-      if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= old_text_end_vaddr)
-        shift_section_vaddr[i] = true;
-    }
-
     std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
     for (size_t i = 0; i < phdrs.size(); ++i) {
       if (phdrs[i].p_vaddr >= old_text_end_vaddr && phdrs[i].p_offset >= old_text_end_file)

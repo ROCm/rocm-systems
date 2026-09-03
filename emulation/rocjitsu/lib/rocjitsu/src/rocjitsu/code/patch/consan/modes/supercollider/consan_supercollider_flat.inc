@@ -994,68 +994,17 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
           arch, "ConSan flat check/trap proof", result.errors))
     return;
 
-  std::vector<ConSanInlineTextRewrite> rewrites;
-  rewrites.reserve(planned_patches.size());
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    rewrites.push_back({planned.site->physical_id.original_text_offset, planned.words});
+    result.staged_text_rewrites.push_back({
+        .original_site = planned.site->physical_id,
+        .intent_ids = planned.intent_ids,
+        .words = planned.words,
+        .patch = planned.info,
+    });
   }
   std::vector<uint8_t> descriptor_image = std::move(patcher).emit();
-  auto relocated = relocate_consan_text(
-      descriptor_image, arch, rewrites, options.patched_image_growth_limit,
-      result.program_inventory.code_object_id(), "flat check/trap proof", result.errors,
-      &result.transform_failure_cause);
-  if (!relocated)
-    return;
-
-  if (relocated->source_text_size > std::numeric_limits<uint64_t>::max() -
-                                        relocated->relocated_text_size ||
-      relocated->relocated_text_size > std::numeric_limits<uint32_t>::max()) {
-    result.errors.emplace_back("ConSan flat check/trap proof relocated text is too large");
-    return;
-  }
-  std::vector<ConSanPatchInfo> new_patch_infos;
-  std::vector<ConSanPatchInfo> primary_patch_infos;
-  primary_patch_infos.reserve(planned_patches.size());
-  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    bool found_placement = false;
-    for (const TranslatedTextPlacement &placement : relocated->placements) {
-      if (placement.source_offset != planned.info.anchor_offset)
-        continue;
-      ConSanPatchInfo placed = planned.info;
-      placed.trampoline_offset = placement.target_offset;
-      if (!found_placement)
-        primary_patch_infos.push_back(placed);
-      new_patch_infos.push_back(std::move(placed));
-      found_placement = true;
-    }
-    if (!found_placement) {
-      result.errors.emplace_back(
-          "ConSan flat check/trap proof lost a relocated instruction placement");
-      return;
-    }
-  }
-  std::vector<ConSanCommittedLowering> lowering_commits;
-  lowering_commits.reserve(planned_patches.size());
-  for (size_t index = 0; index < planned_patches.size(); ++index) {
-    const PlannedFlatCheckTrapPatch &planned = planned_patches[index];
-    auto commit = make_sc_access_lowering_commit(result.observation_plan(), planned.intent_ids,
-                                                 *planned.site, primary_patch_infos[index]);
-    if (!commit) {
-      result.errors.emplace_back(
-          "ConSan flat check/trap proof produced an invalid intent-bound lowering");
-      result.discard_candidate_modification();
-      return;
-    }
-    lowering_commits.push_back(std::move(*commit));
-  }
-  result.text_relocation = ConSanTextRelocationProof{
-      relocated->source_text_size,
-      relocated->relocated_text_size,
-  };
-  if (!result.publish_access_lowering(std::move(relocated->image), "ConSan flat check/trap proof",
-                                      std::move(lowering_commits), std::move(new_patch_infos))) {
-    return;
-  }
+  result.replacement = std::move(descriptor_image);
+  result.mark_modified();
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,

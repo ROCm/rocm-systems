@@ -18,7 +18,8 @@ std::optional<ConSanRelocatedText> relocate_consan_text(
     std::span<const uint8_t> descriptor_patched_image, rj_code_arch_t arch,
     std::span<const ConSanInlineTextRewrite> rewrites,
     const ConSanPatchedImageGrowthLimit &growth_limit, const ConSanCodeObjectId &input_id,
-    std::string_view operation, std::vector<std::string> &errors,
+    std::string_view operation, std::span<const SourceTextCodeRange> additional_code_ranges,
+    std::vector<std::string> &errors,
     std::optional<ConSanTransformFailureCause> *failure_cause) {
   AmdGpuCodeObject source(descriptor_patched_image.data(), descriptor_patched_image.size());
   if (!source.is_valid() || source.text_sections().size() != 1u || !input_id.valid()) {
@@ -29,6 +30,17 @@ std::optional<ConSanRelocatedText> relocate_consan_text(
   const uint64_t source_text_size = source.text_sections().front()->size();
   BinaryTranslatorOptions options;
   options.preserve_source_text_prefix = true;
+  options.preserve_source_descriptor_resources = true;
+  options.source_text_code_ranges.reserve(source.functions().size());
+  for (const AmdGpuFunctionInfo &function : source.functions()) {
+    if (function.code_size != 0u) {
+      options.source_text_code_ranges.push_back(
+          {.start_offset = function.entry_text_offset, .size = function.code_size});
+    }
+  }
+  options.source_text_code_ranges.insert(options.source_text_code_ranges.end(),
+                                         additional_code_ranges.begin(),
+                                         additional_code_ranges.end());
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // A same-revision choice selects structural identity translation. ConSan's
     // target-specific emitters already produced words for the loaded revision;

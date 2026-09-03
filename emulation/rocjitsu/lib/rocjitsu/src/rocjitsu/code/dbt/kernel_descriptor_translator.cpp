@@ -657,12 +657,14 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   const uint32_t max_host_vgprs = arch_vgpr_limit == 0 || shared_vgpr_reserved >= arch_vgpr_limit
                                       ? arch_vgpr_limit
                                       : arch_vgpr_limit - shared_vgpr_reserved;
-  if (arch_vgpr_limit != 0 && shared_vgpr_reserved >= arch_vgpr_limit) {
+  if (!options.allow_oversized_register_allocation && arch_vgpr_limit != 0 &&
+      shared_vgpr_reserved >= arch_vgpr_limit) {
     append_descriptor_resource_error(
         result, "shared VGPR blocks alone exceed the target VGPR budget", required_vgprs,
         required_vgpr_allocation, arch_vgpr_limit, options);
   }
-  if (max_host_vgprs != 0 && required_vgprs > max_host_vgprs) {
+  if (!options.allow_oversized_register_allocation && max_host_vgprs != 0 &&
+      required_vgprs > max_host_vgprs) {
     append_descriptor_resource_error(
         result,
         "required ordinary VGPR count exceeds target limit; spill tiers are not implemented for "
@@ -670,14 +672,16 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
         required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
   }
   if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
-    if (max_host_vgprs != 0 && result.target_agpr_count > max_host_vgprs) {
+    if (!options.allow_oversized_register_allocation && max_host_vgprs != 0 &&
+        result.target_agpr_count > max_host_vgprs) {
       append_descriptor_resource_error(
           result,
           "required AccVGPR count exceeds target limit; spill tiers are not implemented for this "
           "descriptor",
           required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
     }
-  } else if (max_host_vgprs != 0 && required_vgpr_allocation > max_host_vgprs) {
+  } else if (!options.allow_oversized_register_allocation && max_host_vgprs != 0 &&
+             required_vgpr_allocation > max_host_vgprs) {
     append_descriptor_resource_error(
         result,
         "required VGPR allocation exceeds target limit; spill tiers are not implemented for this "

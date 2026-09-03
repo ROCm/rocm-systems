@@ -713,6 +713,28 @@ std::vector<uint32_t> emitted_patch_words(const ConSanTransformArtifacts &result
   return text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
 }
 
+template <size_t WordCount>
+std::array<uint32_t, WordCount> emitted_patch_prefix(const ConSanTransformArtifacts &result,
+                                                     const ConSanPatchInfo &patch) {
+  std::array<uint32_t, WordCount> words{};
+  const std::vector<uint32_t> body = emitted_patch_words(result, patch);
+  if (body.size() < WordCount) {
+    ADD_FAILURE() << "emitted patch is shorter than the requested prefix";
+    return words;
+  }
+  std::ranges::copy_n(body.begin(), WordCount, words.begin());
+  return words;
+}
+
+template <size_t WordCount>
+void expect_emitted_patch_without_legacy_return(
+    const ConSanTransformArtifacts &result, const ConSanPatchInfo &patch,
+    const std::array<uint32_t, WordCount> &legacy_words) {
+  const std::vector<uint32_t> body = emitted_patch_words(result, patch);
+  ASSERT_LT(body.size(), legacy_words.size());
+  EXPECT_TRUE(std::ranges::equal(body, std::span(legacy_words).first(body.size())));
+}
+
 MoiOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay) {
   MoiOptions options;
   options.flavor = ConSanFlavor::Moi;
