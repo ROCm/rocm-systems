@@ -739,7 +739,10 @@ testResult_t ReduceScatterRunTest(struct threadArgs* args, int root, ncclDataTyp
 NCCL_WEAK struct testEngine ncclTestEngine = {
   /* .getBuffSize = */ ReduceScatterGetBuffSize,
   /* .runTest = */ ReduceScatterRunTest,
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* .initCommConfig = */ nullptr,
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
   /* .getDevCommRequirements = */ ReduceScatterGetDevCommRequirements,
 #endif
 };
