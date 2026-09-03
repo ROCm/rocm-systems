@@ -1455,7 +1455,7 @@
     },
     {
       "name": "NET IB - Multithread Multi-QP Split (4)",
-      "description": "4 worker threads/rank with 4 QPs per connection and data split across QPs",
+      "description": "4 worker threads/rank with 8 QPs per connection and data split across QPs",
       "config": "net_ib_multithread_multiqp_4",
       "enabled": true
     },

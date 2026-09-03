@@ -1124,9 +1124,11 @@ protected:
     static constexpr int kSlotWaitDefaultMs = kMaxRetryAttempts * kPollIntervalMs;
 
     // nullRetries, when given, counts how many times isend came back without a
-    // request. That count is evidence for a test whose subject is backpressure --
-    // FifoPressureSenderFast asserts on it -- and without it such a test has to
-    // reimplement this loop to see it.
+    // request. FifoPressureSenderFast reports that count in its failure message
+    // rather than asserting on it: nothing orders the sender's attempt against the
+    // receiver publishing a slot, so a descheduled sender can legitimately see
+    // none. Without the count a test whose subject is backpressure would have to
+    // reimplement this loop just to observe it.
     ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
                                 void* mhandle, void** request, bool busyPoll = false,
                                 int timeoutMs = kSlotWaitDefaultMs,
