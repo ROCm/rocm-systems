@@ -9,6 +9,7 @@
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/session_backend.hpp"
 #include "core/perfetto/sinks/trace_sink.hpp"
+#include "recording_sink.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -212,8 +213,8 @@ TEST_F(perfetto_engine_backend_policy_test, init_sdk_delegates_config_to_backend
 TEST_F(perfetto_engine_backend_policy_test,
        cached_start_uses_backend_policy_and_stop_drains_collected_bytes)
 {
-    mock_engine                  engine{ make_test_config() };
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    mock_engine                      engine{ make_test_config() };
+    rocprofsys::core::recording_sink sink;
 
     {
         const ::testing::InSequence seq;
@@ -229,7 +230,7 @@ TEST_F(perfetto_engine_backend_policy_test,
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 1u);
     EXPECT_EQ(rec.records()[0].first, 42);
     EXPECT_TRUE(rec.finalized());
@@ -245,8 +246,8 @@ TEST_F(perfetto_engine_backend_policy_test,
     {
         auto cfg    = make_test_config();
         cfg.backend = backend;
-        mock_engine                  engine{ cfg };
-        rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+        mock_engine                      engine{ cfg };
+        rocprofsys::core::recording_sink sink;
 
         engine.start(sink);
         EXPECT_FALSE(engine.is_running());
@@ -290,7 +291,7 @@ TEST(perfetto_engine, cached_start_with_system_backend_warns_and_stays_stopped)
     cfg.backend = rocprofsys::core::engine_config::backend_t::system;
 
     rocprofsys::core::cached_perfetto_engine engine{ cfg };
-    rocprofsys::core::trace_sink             sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink         sink;
 
     ::testing::internal::CaptureStdout();
     ::testing::internal::CaptureStderr();
@@ -302,7 +303,7 @@ TEST(perfetto_engine, cached_start_with_system_backend_warns_and_stays_stopped)
     EXPECT_THAT(stderr_output + stdout_output,
                 ::testing::HasSubstr("cached output is unsupported"));
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     EXPECT_FALSE(rec.finalized()) << "early-return warning path must not bind the sink";
     EXPECT_TRUE(rec.records().empty());
 }
@@ -366,14 +367,14 @@ TEST(perfetto_engine_cached, start_then_stop_with_no_emission_drains_empty)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
 
     engine.start(sink);
     EXPECT_TRUE(engine.is_running());
     engine.stop();
 
     EXPECT_FALSE(engine.is_running());
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     EXPECT_TRUE(rec.finalized());
     EXPECT_TRUE(rec.records().empty());
 }
@@ -404,7 +405,7 @@ TEST(perfetto_engine_cached, drain_one_source_one_record)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
     engine.preregister_pids({ 42 });
 
@@ -413,7 +414,7 @@ TEST(perfetto_engine_cached, drain_one_source_one_record)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 1u);
     EXPECT_EQ(rec.records()[0].first, 42);
     EXPECT_EQ(rec.records()[0].second, frame_packet(payload));
@@ -430,7 +431,7 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
     engine.preregister_pids({ 101, 202 });
 
@@ -441,7 +442,7 @@ TEST(perfetto_engine_cached, drain_two_sources_no_cross_bleed)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 2u);
 
     // Build the expected (source_id, framed_bytes) pairs and assert
@@ -465,7 +466,7 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
     engine.preregister_pids({ 7 });
 
@@ -476,7 +477,7 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 1u);
     EXPECT_EQ(rec.records()[0].first, 7);
 
@@ -491,7 +492,7 @@ TEST(perfetto_engine_cached, collect_before_preregister_is_dropped)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
 
     const std::vector<char> payload{ 1, 2, 3, 4 };
@@ -499,7 +500,7 @@ TEST(perfetto_engine_cached, collect_before_preregister_is_dropped)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     EXPECT_TRUE(rec.records().empty());
     EXPECT_TRUE(rec.finalized());
 }
@@ -509,7 +510,7 @@ TEST(perfetto_engine_cached, collect_for_unregistered_pid_is_dropped)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
     engine.preregister_pids({ 10 });
 
@@ -520,7 +521,7 @@ TEST(perfetto_engine_cached, collect_for_unregistered_pid_is_dropped)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 1u);
     EXPECT_EQ(rec.records()[0].first, 10);
     EXPECT_EQ(rec.records()[0].second, frame_packet(kept));
@@ -532,7 +533,7 @@ TEST(perfetto_engine_cached, preregister_after_freeze_does_not_add_new_pid)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
     engine.preregister_pids({ 1 });
     engine.preregister_pids({ 2 });
@@ -544,7 +545,7 @@ TEST(perfetto_engine_cached, preregister_after_freeze_does_not_add_new_pid)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), 1u);
     EXPECT_EQ(rec.records()[0].first, 1);
     EXPECT_EQ(rec.records()[0].second, frame_packet(first));
@@ -562,16 +563,14 @@ namespace
 //   - finalize() is always called even if a per-source drain throws
 //   - the first thrown exception is rethrown after finalize()
 //   - other per-source drains still run after a throw
-// Engine reaches this fixture via polymorphic_sink_view (a variant
-// alternative of trace_sink) — no virtual base required.
-class throwing_sink
+class throwing_sink : public rocprofsys::core::trace_sink
 {
 public:
     explicit throwing_sink(std::vector<int> pids_to_throw_on)
     : m_throw_pids{ std::move(pids_to_throw_on) }
     {}
 
-    void on_source_drained(int source_id, std::vector<char> bytes)
+    void on_source_drained(int source_id, std::vector<char> bytes) override
     {
         m_drained_count++;
         if(std::find(m_throw_pids.begin(), m_throw_pids.end(), source_id) !=
@@ -584,7 +583,7 @@ public:
         m_kept.emplace_back(source_id, std::move(bytes));
     }
 
-    void finalize() { m_finalize_count++; }
+    void finalize() override { m_finalize_count++; }
 
     int drained_count() const noexcept { return m_drained_count; }
     int throw_count() const noexcept { return m_throw_count; }
@@ -607,13 +606,14 @@ TEST(perfetto_engine_cached, stop_calls_finalize_even_when_drain_throws)
 {
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
-    throwing_sink                target{ { 42 } };  // throws on pid 42
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::polymorphic_sink_view{
-        target } };
 
-    engine.start(sink);
-    engine.preregister_pids({ 42 });
-    simulate_interceptor_emit(engine, 42, std::vector<char>{ 'x' });
+    const std::vector<int> throwing_pids{ 42 };
+
+    throwing_sink target{ throwing_pids };  // throws on pid 42
+
+    engine.start(target);
+    engine.preregister_pids(throwing_pids);
+    simulate_interceptor_emit(engine, throwing_pids.at(0), std::vector<char>{ 'x' });
 
     EXPECT_THROW(engine.stop(), std::runtime_error);
     EXPECT_EQ(target.throw_count(), 1);
@@ -625,15 +625,17 @@ TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
 {
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
-    throwing_sink                target{ { 101, 202 } };  // both throw
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::polymorphic_sink_view{
-        target } };
+    constexpr int first_throwing_pid  = 101;
+    constexpr int second_throwing_pid = 202;
+    constexpr int non_throwing_pid    = 303;
+    throwing_sink target{ { first_throwing_pid, second_throwing_pid } };
 
-    engine.start(sink);
-    engine.preregister_pids({ 101, 202, 303 });  // 303 won't throw
-    simulate_interceptor_emit(engine, 101, std::vector<char>{ 'a' });
-    simulate_interceptor_emit(engine, 202, std::vector<char>{ 'b' });
-    simulate_interceptor_emit(engine, 303, std::vector<char>{ 'c' });
+    engine.start(target);
+    engine.preregister_pids(
+        { first_throwing_pid, second_throwing_pid, non_throwing_pid });
+    simulate_interceptor_emit(engine, first_throwing_pid, std::vector<char>{ 'a' });
+    simulate_interceptor_emit(engine, second_throwing_pid, std::vector<char>{ 'b' });
+    simulate_interceptor_emit(engine, non_throwing_pid, std::vector<char>{ 'c' });
 
     EXPECT_THROW(engine.stop(), std::runtime_error);
     EXPECT_EQ(target.drained_count(), 3)
@@ -641,7 +643,7 @@ TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
     EXPECT_EQ(target.throw_count(), 2);
     EXPECT_EQ(target.finalize_count(), 1);
     ASSERT_EQ(target.kept().size(), 1u) << "only the non-throwing source's bytes kept";
-    EXPECT_EQ(target.kept()[0].first, 303);
+    EXPECT_EQ(target.kept()[0].first, non_throwing_pid);
 }
 
 TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
@@ -657,7 +659,7 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
 
-    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    rocprofsys::core::recording_sink sink;
     engine.start(sink);
 
     constexpr int pid_count       = 4;
@@ -710,7 +712,7 @@ TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
 
     engine.stop();
 
-    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    const auto& rec = sink;
     ASSERT_EQ(rec.records().size(), static_cast<std::size_t>(pid_count));
 
     // Build the expected per-pid concatenated framed bytes and check

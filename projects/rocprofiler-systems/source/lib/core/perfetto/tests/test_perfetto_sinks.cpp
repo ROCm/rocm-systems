@@ -4,9 +4,11 @@
 #include "gtest/gtest.h"
 
 #include "core/output_file_registry.hpp"
-#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
-#include "core/perfetto/sinks/trace_sink.hpp"
+#include "core/perfetto/sinks/file_output.hpp"
+#include "core/perfetto/sinks/per_pid_file_sink.hpp"
+#include "core/perfetto/sinks/single_file_sink.hpp"
+#include "recording_sink.hpp"
 
 #include <cstdint>
 #include <filesystem>

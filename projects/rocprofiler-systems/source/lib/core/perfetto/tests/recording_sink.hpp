@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/perfetto/sinks/trace_sink.hpp"
+
 #include <utility>
 #include <vector>
 
@@ -10,20 +12,16 @@ namespace rocprofsys::core
 {
 // Test-only sink: captures (source_id, bytes) tuples in arrival order so
 // unit tests can assert the engine's drain contract without touching disk.
-class recording_sink
+class recording_sink : public trace_sink
 {
 public:
     using record_t = std::pair<int, std::vector<char>>;
 
-    recording_sink()                                     = default;
-    recording_sink(recording_sink&&) noexcept            = default;
-    recording_sink& operator=(recording_sink&&) noexcept = default;
-    recording_sink(const recording_sink&)                = delete;
-    recording_sink& operator=(const recording_sink&)     = delete;
-    ~recording_sink()                                    = default;
-
-    void on_source_drained(int source_id, std::vector<char> bytes);
-    void finalize();
+    void on_source_drained(int source_id, std::vector<char> bytes) override
+    {
+        m_records.emplace_back(source_id, std::move(bytes));
+    }
+    void finalize() override { m_finalized = true; }
 
     const std::vector<record_t>& records() const noexcept { return m_records; }
     bool                         finalized() const noexcept { return m_finalized; }

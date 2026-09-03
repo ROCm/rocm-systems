@@ -7,6 +7,9 @@
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/perfetto/sinks/append_mode.hpp"
+#include "core/perfetto/sinks/per_pid_file_sink.hpp"
+#include "core/perfetto/sinks/single_file_sink.hpp"
 #include "core/trace_cache/post_processor.hpp"
 #include "core/track_registry.hpp"
 #include "logger/debug.hpp"
@@ -36,13 +39,13 @@ rank_from_env() noexcept
     return 0;
 }
 
-single_file_sink
+std::unique_ptr<single_file_sink>
 make_merged_append_sink(output_file_registry& registry, std::size_t source_count)
 {
     const auto base_filename = config::get_perfetto_output_filename();
     const auto merged_path =
         (std::filesystem::path{ base_filename }.parent_path() / "merged.proto").string();
-    auto       sink        = single_file_sink{ registry, merged_path };
+    auto       sink        = std::make_unique<single_file_sink>(registry, merged_path);
     const auto env_rank    = rank_from_env();
     const auto seq_id_base = append_seq_id_base_for_rank(env_rank);
     if(!seq_id_base)
@@ -50,11 +53,11 @@ make_merged_append_sink(output_file_registry& registry, std::size_t source_count
         LOG_ERROR("cached Perfetto merged output skipped: launcher rank {} exceeds "
                   "the trusted_packet_sequence_id merge window",
                   env_rank);
-        sink.set_append_mode(append_mode_config{ .source_count = 0 });
+        sink->set_append_mode(append_mode_config{ .source_count = 0 });
         return sink;
     }
 
-    sink.set_append_mode(
+    sink->set_append_mode(
         append_mode_config{ .seq_id_base = *seq_id_base, .source_count = source_count });
     return sink;
 }
@@ -65,11 +68,10 @@ make_sink(output_file_registry& registry, pid_t root_pid, bool combine_traces,
 {
     if(combine_traces)
     {
-        return std::make_unique<trace_sink>(
-            make_merged_append_sink(registry, source_count));
+        return make_merged_append_sink(registry, source_count);
     }
 
-    return std::make_unique<trace_sink>(per_pid_file_sink{ root_pid, registry });
+    return std::make_unique<per_pid_file_sink>(root_pid, registry);
 }
 }  // namespace
 
