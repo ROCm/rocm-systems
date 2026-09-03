@@ -405,6 +405,8 @@ rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int component
 
   if (components & RDC_HEALTH_WATCH_XGMI) {
     field_ids.push_back(RDC_HEALTH_XGMI_ERROR);
+    // Fallback source where the legacy xgmi_error sysfs node is unreadable (gfx950+).
+    field_ids.push_back(RDC_FI_ECC_XGMI_WAFL_UE);
   }
 
   if (components & RDC_HEALTH_WATCH_MEM) {
@@ -573,32 +575,42 @@ rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gp
 
 rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
-  // get field start/end values
   rdc_field_value end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_HEALTH_XGMI_ERROR, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
-  amdsmi_xgmi_status_t status = static_cast<amdsmi_xgmi_status_t>(end.value.l_int);
-  if (AMDSMI_XGMI_STATUS_NO_ERRORS != status) {
-    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
+  uint32_t err_code = 0;
+  std::string err_msg;
+  if (result == RDC_ST_OK) {
+    // Legacy xgmi_error sysfs status.
+    amdsmi_xgmi_status_t status = static_cast<amdsmi_xgmi_status_t>(end.value.l_int);
+    if (AMDSMI_XGMI_STATUS_NO_ERRORS == status) return RDC_ST_OK;
 
-    uint32_t err_code;
-    std::string err_msg = "Detected ";
     if (AMDSMI_XGMI_STATUS_ERROR == status) {
-      err_msg += " a single XGMI error";
+      err_msg = "Detected a single XGMI error.";
       err_code = RDC_FR_XGMI_SINGLE_ERROR;
     } else {
-      err_msg += " multiple XGMI errors";
+      err_msg = "Detected multiple XGMI errors.";
       err_code = RDC_FR_XGMI_MULTIPLE_ERROR;
     }
-    err_msg += ".";
+  } else {
+    // xgmi_error is unreadable on gfx950 and later; XGMI faults surface as
+    // uncorrectable RAS errors on the XGMI_WAFL block instead.
+    result = get_start_end_values(group_id, gpu_index, RDC_FI_ECC_XGMI_WAFL_UE, 0, nullptr, &end);
+    if (result != RDC_ST_OK) return RDC_ST_OK;  // neither source available: skip component
 
-    // add incident
-    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_XGMI, RDC_HEALTH_RESULT_FAIL, err_code,
-                            err_msg, incident, response))
-      return RDC_ST_MAX_LIMIT;
+    uint64_t ue_count = end.value.l_int;
+    if (0 == ue_count) return RDC_ST_OK;
+
+    err_msg = "Detected " + std::to_string(ue_count) + " uncorrectable XGMI (WAFL) RAS error(s).";
+    err_code = (1 == ue_count) ? RDC_FR_XGMI_SINGLE_ERROR : RDC_FR_XGMI_MULTIPLE_ERROR;
   }
+
+  // add incident
+  rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
+  if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_XGMI, RDC_HEALTH_RESULT_FAIL, err_code,
+                          err_msg, incident, response))
+    return RDC_ST_MAX_LIMIT;
 
   return RDC_ST_OK;
 }
