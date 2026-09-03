@@ -11,7 +11,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +26,9 @@ inline constexpr std::size_t kMaxArgsLen = 512;
 
 // Maximum number of operator inputs rendered into an args blob.
 inline constexpr std::size_t kMaxArgItems = 32;
+
+// Maximum number of characters taken from a string IValue.
+inline constexpr std::size_t kMaxStringChars = 32;
 
 // Truncate an args blob to kMaxArgsLen and append "...".
 inline std::string cap_args_blob(std::string blob)
@@ -76,6 +81,19 @@ inline std::string encode_args(const std::string& args)
         default:
             out += c;
         }
+    }
+    return out;
+}
+
+inline std::string render_double(double value)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.15g", value);
+    std::string out(buf);
+    if (out.find('.') == std::string::npos && out.find('e') == std::string::npos &&
+        out.find('E') == std::string::npos)
+    {
+        out += ".0";
     }
     return out;
 }
@@ -176,7 +194,20 @@ inline std::string render_leaf_ivalue(const c10::IValue& iv, bool values)
             }
             if (iv.isDouble())
             {
-                return std::to_string(iv.toDouble());
+                const double value = iv.toDouble();
+                if (std::isfinite(value))
+                {
+                    return render_double(value);
+                }
+            }
+            if (iv.isString())
+            {
+                std::string string_value(iv.toStringRef());
+                if (string_value.size() > kMaxStringChars)
+                {
+                    string_value.resize(kMaxStringChars);
+                }
+                return "'" + string_value + "'";
             }
         }
         return iv.tagKind();

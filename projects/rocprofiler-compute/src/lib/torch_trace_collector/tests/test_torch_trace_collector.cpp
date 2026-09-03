@@ -381,11 +381,17 @@ TEST(ArgsRendering, ScalarValueModeRendersValueOtherwiseTypeTag)
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(static_cast<int64_t>(7)), /*values=*/true), "7");
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(true), /*values=*/true), "True");
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(false), /*values=*/true), "False");
-    EXPECT_EQ(render_leaf_ivalue(c10::IValue(2.5), /*values=*/true), std::to_string(2.5));
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(2.5), /*values=*/true), "2.5");
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(1.0), /*values=*/true), "1.0");
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(std::string("tanh")), /*values=*/true), "'tanh'");
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(std::string(40, 'x')), /*values=*/true),
+              "'" + std::string(kMaxStringChars, 'x') + "'");
 
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(static_cast<int64_t>(7)), /*values=*/false),
               c10::IValue(static_cast<int64_t>(7)).tagKind());
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(2.5), /*values=*/false), c10::IValue(2.5).tagKind());
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(std::string("tanh")), /*values=*/false),
+              c10::IValue(std::string("tanh")).tagKind());
 }
 
 TEST(ArgsRendering, CapArgsBlobTruncatesPastLimit)
