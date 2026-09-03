@@ -7228,6 +7228,200 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     }
 
 
+# Field name -> AMDSMI_FABRIC_*_FIELD_* mask bit, one map per config struct's `data`
+# member. Keys are exactly the ctypes field names on that struct.
+_FABRIC_PPOD_CONFIG_FIELD_MASKS = {
+    "accelerator_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID,
+    "ppod_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID,
+    "ppod_size": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE,
+    "local_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS,
+    "bandwidth": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH,
+    "latency": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LATENCY,
+}
+
+_FABRIC_VPOD_CONFIG_FIELD_MASKS = {
+    "vpod_id": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID,
+    "vpod_size": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE,
+    "vpod_active_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS,
+    "addr_mode": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE,
+}
+
+_FABRIC_STATION_CONFIG_FIELD_MASKS = {
+    "station_flags": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS,
+    "lane_en_bitmap": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP,
+    "num_stations": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS,
+}
+
+
+def _populate_fabric_config_data(config, data: Dict[str, Any], field_masks: Dict[str, int]) -> int:
+    """
+    Write `data` into a fabric ppod/vpod/station config struct's `.data` member and
+    return the OR of the mask bits for the fields written.
+
+    Only the keys present in `data` are written (and included in the mask), matching
+    the C API contract: an unmasked field is not read by the driver, so it is left at
+    whatever the zero-initialized struct already holds.
+
+    Args:
+        config: a freshly constructed amdsmi_fabric_{ppod,vpod,station}_config_t;
+            its `.data` member is written in place
+        data: mapping of `.data` field name to value to write
+        field_masks: the AMDSMI_FABRIC_*_FIELD_* mask bit for each valid field name
+            on this config struct
+
+    Returns:
+        int: OR of the mask bits for every field named in `data`
+
+    Raises:
+        AmdSmiParameterException: `data` names a field that is not in `field_masks`
+    """
+    mask = 0
+    for field_name, value in data.items():
+        if field_name not in field_masks:
+            raise AmdSmiParameterException(field_name, list(field_masks.keys()))
+        mask |= field_masks[field_name]
+        target = getattr(config.data, field_name)
+        if isinstance(target, ctypes.Array):
+            target[:] = value
+        else:
+            setattr(config.data, field_name, value)
+    return mask
+
+
+def amdsmi_set_gpu_fabric_ppod_config(
+    processor_handle: processor_handle_t, ppod_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply physical PoD (PPOD) fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `ppod_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        ppod_data: mapping of fields to write. Valid keys: "accelerator_id" (int),
+            "ppod_id" (16-byte iterable), "ppod_size" (int),
+            "local_accelerators" (16-entry iterable of accelerator IDs; fill unused
+            slots with UINT32_MAX), "bandwidth" (int), "latency" (int). Only the
+            supplied fields are written; `ppod_data` must select at least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            ppod_data is not a dict, commit is not a bool, or ppod_data names an
+            unrecognized field
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(ppod_data, dict):
+        raise AmdSmiParameterException(ppod_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_ppod_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_PPOD_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(config, ppod_data, _FABRIC_PPOD_CONFIG_FIELD_MASKS)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_ppod_config(processor_handle, ctypes.byref(config))
+    )
+
+
+def amdsmi_set_gpu_fabric_vpod_config(
+    processor_handle: processor_handle_t, vpod_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply virtual PoD (VPOD) fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `vpod_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        vpod_data: mapping of fields to write. Valid keys: "vpod_id" (int,
+            nonzero), "vpod_size" (int), "vpod_active_accelerators" (32-entry
+            iterable; fill unused slots with UINT32_MAX, 0 is a valid accelerator
+            ID), "addr_mode" (int, an amdsmi_fabric_npa_address_mode_t value).
+            Only the supplied fields are written; `vpod_data` must select at
+            least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            vpod_data is not a dict, commit is not a bool, or vpod_data names an
+            unrecognized field
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(vpod_data, dict):
+        raise AmdSmiParameterException(vpod_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_vpod_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_VPOD_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(config, vpod_data, _FABRIC_VPOD_CONFIG_FIELD_MASKS)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_vpod_config(processor_handle, ctypes.byref(config))
+    )
+
+
+def amdsmi_set_gpu_fabric_station_config(
+    processor_handle: processor_handle_t, station_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply DF/station fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `station_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        station_data: mapping of fields to write. Valid keys: "station_flags"
+            (int), "lane_en_bitmap" (64-byte iterable), "num_stations" (int, 0 to
+            255). Only the supplied fields are written; `station_data` must
+            select at least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            station_data is not a dict, commit is not a bool, or station_data
+            names an unrecognized field
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(station_data, dict):
+        raise AmdSmiParameterException(station_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_station_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_STATION_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(
+        config, station_data, _FABRIC_STATION_CONFIG_FIELD_MASKS
+    )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_station_config(processor_handle, ctypes.byref(config))
+    )
+
+
 def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
