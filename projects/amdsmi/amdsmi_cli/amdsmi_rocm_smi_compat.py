@@ -31,6 +31,7 @@ __version__ = "%s.%s.%s+%s" % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 # exit-code redesign (the 192-255 AmdSmiExitCode band + library status codes).
 # Adopting the new codes here could break scripts that rely on rocm-smi's existing
 # $? contract.
+@enum.unique
 class RocmSmiCompatExitCode(enum.IntEnum):
     SUCCESS = 0
     ERROR = 1
