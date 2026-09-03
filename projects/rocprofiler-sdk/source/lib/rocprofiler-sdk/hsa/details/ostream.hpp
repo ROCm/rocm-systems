@@ -1578,6 +1578,69 @@ operator<<(std::ostream& out, const hsa_amd_queue_create_desc_t& v)
     return out;
 }
 #endif
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_signal_create_desc_t& v)
+{
+    std::operator<<(out, '{');
+    HSA_depth_max_cnt++;
+    if(HSA_depth_max == -1 || HSA_depth_max_cnt <= HSA_depth_max)
+    {
+        if(std::string_view{"hsa_amd_signal_create_desc_t::version"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "version=");
+            rocprofiler::hsa::detail::operator<<(out, v.version);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::flags"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "flags=");
+            rocprofiler::hsa::detail::operator<<(out, v.flags);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::initial_value"}.find(
+               HSA_structs_regex) != std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "initial_value=");
+            rocprofiler::hsa::detail::operator<<(out, v.initial_value);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::attributes"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "attributes=");
+            rocprofiler::hsa::detail::operator<<(out, v.attributes);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::num_consumers"}.find(
+               HSA_structs_regex) != std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "num_consumers=");
+            rocprofiler::hsa::detail::operator<<(out, v.num_consumers);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::consumers"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "consumers=");
+            rocprofiler::hsa::detail::operator<<(out, v.consumers);
+            rocprofiler::hsa::detail::operator<<(out, ", ");
+        }
+        if(std::string_view{"hsa_amd_signal_create_desc_t::signal"}.find(HSA_structs_regex) !=
+           std::string_view::npos)
+        {
+            rocprofiler::hsa::detail::operator<<(out, "signal=");
+            rocprofiler::hsa::detail::operator<<(out, v.signal);
+        }
+    };
+    HSA_depth_max_cnt--;
+    std::operator<<(out, '}');
+    return out;
+}
+#endif
 // end ostream ops for HSA
 }  // namespace detail
 }  // namespace hsa
@@ -1887,6 +1950,15 @@ operator<<(std::ostream& out, const hsa_amd_svm_attribute_pair_t& v)
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
 inline static std::ostream&
 operator<<(std::ostream& out, const hsa_amd_queue_create_desc_t& v)
+{
+    rocprofiler::hsa::detail::operator<<(out, v);
+    return out;
+}
+#endif
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+inline static std::ostream&
+operator<<(std::ostream& out, const hsa_amd_signal_create_desc_t& v)
 {
     rocprofiler::hsa::detail::operator<<(out, v);
     return out;
