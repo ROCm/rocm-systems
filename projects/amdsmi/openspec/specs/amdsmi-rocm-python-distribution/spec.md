@@ -219,8 +219,10 @@ their release channel, not with AMD SMI's own library version:
 | nightly | `X.Y.ZaYYYYMMDD` |
 | ci, dev | `X.Y.Z.dev0+<commit>` |
 
-The BKC variants of the nightly and dev types add a `+bkc.<date>` segment. The
-native package versions cut from the same artifact use a different scheme — see
+Only the nightly BKC variant adds a `+bkc.<date>` segment
+(`X.Y.ZaYYYYMMDD+bkc.<date>`); the dev BKC variant is deliberately identical to
+the plain `ci`/`dev` form above and adds no segment. The native package
+versions cut from the same artifact use a different scheme — see
 [amdsmi-rocm-os-packages].
 
 #### Scenario: AMD SMI's library version is independent of the wheel version
