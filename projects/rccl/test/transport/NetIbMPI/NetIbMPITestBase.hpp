@@ -2006,29 +2006,35 @@ protected:
     // a per-worker payload seed, so a transfer delivered on the wrong connection
     // fails verification. Registers the whole buffer once and reuses that handle
     // for every size. Wraps the run in an RDMA resource leak check.
+    // How a threaded size sweep gets its memory. Some serial bodies allocate and
+    // register once and reuse that for every step; others allocate and register
+    // exactly the current size on each step. On a fused device the second shape is
+    // the point of the test, since every registration fans out across both members'
+    // protection domains and caches. The allocation churns with it, as the serial
+    // body does: registering sub-ranges of one block would keep handing back the
+    // same cache entry once a covering registration were live. The threaded branch
+    // has to match whichever its serial body does, or it quietly covers less.
+    enum class SweepRegistration { Once, PerSize };
+
     void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
                               const std::vector<size_t>& sizes, int repeats,
-                              const char* label) {
+                              const char* label,
+                              SweepRegistration registration = SweepRegistration::Once) {
         const int rank = MPIEnvironment::world_rank;
         size_t maxSize = 1;
         for (size_t size : sizes) maxSize = std::max(maxSize, size);
 
         RunThreadedBody(
             policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
-                void* buffer = malloc(maxSize);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+                const bool perSize = (registration == SweepRegistration::PerSize);
 
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mhandle = nullptr;
-                result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+                // Once: one allocation and one registration covering the largest
+                // step, reused by all of them.
+                WorkerHostBuffer whole;
+                if (!perSize) {
+                    whole = WorkerSetupHostBuffer(rank, pair, maxSize);
+                    if (!whole.result.ok) return whole.result;
+                }
 
                 // One pattern for this worker across the whole sweep. Varying it per
                 // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
@@ -2038,8 +2044,19 @@ protected:
                 // and the payload check. The tag and the expected size identify the
                 // step; the payload identifies the worker.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
+                ThreadResult result;
                 int tag = 0;
                 for (size_t size : sizes) {
+                    // PerSize: allocated and registered fresh for this step and
+                    // released at the end of it, so the next step starts over.
+                    WorkerHostBuffer step;
+                    if (perSize) {
+                        step = WorkerSetupHostBuffer(rank, pair, size);
+                        if (!step.result.ok) return step.result;
+                    }
+                    void* buffer  = perSize ? step.buffer  : whole.buffer;
+                    void* mhandle = perSize ? step.mhandle : whole.mhandle;
+
                     for (int repeat = 0; repeat < repeats; repeat++) {
                         const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
                                                                  : kDefaultTimeoutMs;
