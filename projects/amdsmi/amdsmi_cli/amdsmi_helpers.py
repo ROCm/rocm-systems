@@ -902,6 +902,51 @@ class AMDSMIHelpers:
             # owns the NO_PERM-is-command-wide rule the handlers apply themselves.
             self.record_or_raise(e)
 
+    # CPER-specific detail text for the statuses amdsmi_get_afids_from_cper can
+    # return. Anything else falls back to the generic library message.
+    CPER_DECODE_MESSAGES = {
+        amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL: "Invalid CPER file input",
+        amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE: "Unexpected CPER file data size",
+        amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA: "Unexpected data in the CPER file",
+        amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED: "AFID decoding is not supported",
+    }
+
+    def build_afid_record(self, cper_file, output_format, afids=None, code=None):
+        """Build one AFID result record, shared by ``ras --afid`` and ``ras --cper``.
+
+        ``code=None`` means a successful decode; otherwise it is the failing
+        AMDSMI_STATUS_*. ``afids`` stays a list so JSON consumers keep indexing
+        and len()-ing it; ``decode_failed`` stays alongside the newer
+        status/message/code fields so pre-existing consumers keep working.
+        """
+        if code is None:
+            return {
+                "cper_file": str(cper_file),
+                "afids": list(afids) if afids else [],
+                "decode_failed": False,
+                "status": "AMDSMI_STATUS_SUCCESS",
+                "message": "Success",
+                "code": 0,
+            }
+        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+            output_format, code, detail=self.CPER_DECODE_MESSAGES.get(code)
+        )
+        return {
+            "cper_file": str(cper_file),
+            "afids": [],
+            "decode_failed": True,
+            "status": exc.status_name,
+            "message": exc.status_message,
+            "code": exc.value,
+        }
+
+    @staticmethod
+    def afid_cell(record):
+        """Render one record's ``afids`` column for the human/CSV tables."""
+        if record["decode_failed"]:
+            return f"[{record['status']}] {record['message']}"
+        return " ".join(map(str, record["afids"])) if record["afids"] else "-"
+
     def record_or_raise(self, exception, context=None):
         """Record a per-device library failure, or raise when it is command-wide.
 
@@ -2545,6 +2590,8 @@ class AMDSMIHelpers:
             list: JSON row dicts when JSON format is active, otherwise ``[]``.
         """
         json_output = logger is not None and logger.is_json_format()
+        # Only the AFID message text varies by format. json_output picks the branch.
+        output_format = logger.format if logger is not None else "human"
         if cper_counter is None:
             cper_counter = [0]
 
@@ -2571,10 +2618,17 @@ class AMDSMIHelpers:
                         if isinstance(raw_bytes, list):
                             # Handle signed bytes (convert negative values to unsigned)
                             raw_bytes = bytes(x & 0xFF for x in raw_bytes)
-                        afids = self.cper_dump_afids(raw_bytes)
-                    except Exception as e:
-                        afids = []
+                        afid_record = self.build_afid_record(
+                            cper_path, output_format, afids=self.cper_dump_afids(raw_bytes)
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                        # Records the status so the decode failure reaches the exit
+                        # code. NO_PERM aborts instead, since it is not per-file.
+                        self.record_or_raise(e)
+                        afid_record = self.build_afid_record(
+                            cper_path, output_format, code=e.get_error_code()
+                        )
                     json_rows.append(
                         {
                             "timestamp": timestamp,
@@ -2582,7 +2636,11 @@ class AMDSMIHelpers:
                             "severity": severity,
                             "cper_file": cper_path_str,
                             "metadata_file": json_path_str,
-                            "afids": afids,
+                            "afids": afid_record["afids"],
+                            "decode_failed": afid_record["decode_failed"],
+                            "status": afid_record["status"],
+                            "message": afid_record["message"],
+                            "code": afid_record["code"],
                         }
                     )
                 if emit_inline:
@@ -2596,11 +2654,18 @@ class AMDSMIHelpers:
                         if isinstance(raw_bytes, list):
                             # Handle signed bytes (convert negative values to unsigned)
                             raw_bytes = bytes(x & 0xFF for x in raw_bytes)
-                        afids = self.cper_dump_afids(raw_bytes)
-                        afids_str = " ".join(map(str, afids))
-                    except Exception as e:
-                        afids_str = "Error fetching AFIDs"
+                        afid_record = self.build_afid_record(
+                            cper_path, output_format, afids=self.cper_dump_afids(raw_bytes)
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                        # Records the status so the decode failure reaches the exit
+                        # code. NO_PERM aborts instead, since it is not per-file.
+                        self.record_or_raise(e)
+                        afid_record = self.build_afid_record(
+                            cper_path, output_format, code=e.get_error_code()
+                        )
+                    afids_str = self.afid_cell(afid_record)
                     self.cper_print(
                         f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}",
                         logger,
