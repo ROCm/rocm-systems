@@ -139,6 +139,15 @@ rocp_register_add_attachment_selection_test(
     "Test FAILED")
 
 rocp_register_add_attachment_selection_test(
+    test-implicit-configure-without-attachment
+    ENVIRONMENT
+    "ROCP_TOOL_ATTACH=0;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+    PASS_REGEX
+    ".rocprofiler.cpp. hsa ::"
+    FAIL_REGEX
+    "Test FAILED|attachment library selected over implicit configure symbol")
+
+rocp_register_add_attachment_selection_test(
     test-runtime-attach-force-load-zero
     ARGS
     --runtime-attach

@@ -533,11 +533,11 @@ rocp_reg_scan_for_tools(bool _attachment_enabled, tool_load_context _load_contex
                 << "Attachment is enabled, so an implicitly discovered "
                    "rocprofiler_configure symbol will not activate "
                    "rocprofiler-sdk at startup. "
-                   "Attachment initialization will be attempted instead. Set "
-                   "ROCP_TOOL_LIBRARIES, directly LD_PRELOAD a tool library that "
-                   "exports rocprofiler_configure, or "
-                   "ROCPROFILER_REGISTER_FORCE_LOAD=1 to explicitly request "
-                   "startup profiling.";
+                   "Attachment initialization will be attempted instead. To explicitly "
+                   "request startup profiling, set ROCPROFILER_REGISTER_FORCE_LOAD=1; "
+                   "or leave it unset and set ROCP_TOOL_LIBRARIES or "
+                   "ROCPROFILER_REGISTER_LIBRARY; alternatively, directly LD_PRELOAD a "
+                   "tool library that exports rocprofiler_configure.";
         });
     }
 
