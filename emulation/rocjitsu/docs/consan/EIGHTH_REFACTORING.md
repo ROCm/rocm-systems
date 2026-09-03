@@ -580,3 +580,37 @@ macro-slice: the new protocol and the deleted inline/appended duplication are
 approximately break-even in governing lines. The next deletion frontier is
 the three mode-local compilers that still independently translate their
 planned access patches into the common executable program.
+
+### 12.3 Thesis B: bounded versioned-slot publication
+
+The post-cutover audit found a wider deletion frontier below the access
+program: Record/Replay automatic records, Sampled causal windows, InlineShadow
+exact slots, atomic release slots, acquired-token sets, and causal snapshots
+each privately emit a versioned publication state machine. Together their
+containing emitters account for more than 11,000 physical source lines. The
+payloads differ, but each lifecycle performs a bounded subset of the same
+operations: derive a slot set, take a stable even snapshot, distinguish empty
+from replaceable state, claim an odd reservation, retry contention, qualify
+prior identity, journal state across a guest boundary, write a typed payload,
+commit an even version, account for losers or saturation, and restore EXEC.
+
+The proposed protocol owns those transitions and names slot cardinality,
+replacement policy, retry budget, guest boundary, and payload schema as data.
+Typed leaf emitters retain address hashing, identity qualification, payload
+field production, and evidence meaning. They may not retain their own
+claim/retry/commit loop. The hard prototype pair is the one-slot exact-shadow
+replacement transaction and the multi-entry acquired-token-set transaction:
+they differ in cardinality, canonicalization, predecessor qualification,
+rollback, and evidence payload. Atomic release is the third consumer because
+it forces a guest RMW and causal import inside an outstanding reservation.
+
+The bounded scope includes the complete publication lifecycles in
+`consan_moi_inline_shadow_emission.cpp` and
+`consan_moi_inline_atomic_emission.cpp`, then the Record/Replay and Sampled
+publishers if the hard pair validates the algebra. The preliminary target is
+2,300--3,000 retired implementation lines for 700--1,000 common protocol and
+typed schema lines, or 1,500--2,000 net deletion. Abort if payload callbacks
+still contain claim/retry/commit control flow, if the protocol needs a mode
+switch, if exact dispatch and version semantics cannot be retained, or if the
+complete hard-pair migration forecasts less than 1,000 net lines after actual
+prototype measurements.

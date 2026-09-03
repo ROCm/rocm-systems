@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_versioned_publication.h"
 #include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -863,19 +864,12 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   const uint16_t cas_expected_vgpr = consan_detail::inline_shadow_cas_expected_vgpr(old_value_vgpr);
   const uint16_t tmp_vgpr = static_cast<uint16_t>(plan.scratch_vgpr + 4u);
 
-  const auto narrow_vcc = [&]() -> bool {
-    return sequence.emit(
-        instrumentation::build_s_and_saveexec_b64(temporary_exec_sgpr, kAmdGpuVccLo, arch));
+  MoiPublicationExec exec_masks(words, temporary_exec_sgpr, arch);
+  const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) {
+    return exec_masks.require_literal(value_vgpr, literal, true);
   };
-  const auto require_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) -> bool {
-    return sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(
-               scalar_positive_inline_u32(literal), value_vgpr, arch)) &&
-           narrow_vcc();
-  };
-  const auto require_not_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) -> bool {
-    return sequence.emit(instrumentation::build_v_cmp_ne_u32_vcc(
-               scalar_positive_inline_u32(literal), value_vgpr, arch)) &&
-           narrow_vcc();
+  const auto require_not_equal_literal = [&](uint16_t value_vgpr, uint32_t literal) {
+    return exec_masks.require_literal(value_vgpr, literal, false);
   };
   const auto restore_slot_address = [&]() {
     (void)sequence.emit_all(
@@ -931,7 +925,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   failure.stage = "payload validation";
   if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(ready_version_vgpr),
                                                              cas_expected_vgpr, arch)) ||
-      !narrow_vcc() ||
+      !exec_masks.narrow_vcc() ||
       !sequence.emit(
           instrumentation::build_v_and_b32_literal(cas_new_vgpr, 1u, ready_version_vgpr, arch)) ||
       !require_equal_literal(cas_new_vgpr, 0) ||
@@ -939,7 +933,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                              cas_new_vgpr, kConSanMoiInlineExactMaxReadyVersion, arch),
                          instrumentation::build_v_cmp_ne_u32_vcc(vector_source_vgpr(cas_new_vgpr),
                                                                  ready_version_vgpr, arch)) ||
-      !narrow_vcc() ||
+      !exec_masks.narrow_vcc() ||
       !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
 
@@ -991,7 +985,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                instrumentation::build_v_and_b32_literal(cas_new_vgpr, 0x3u, cas_new_vgpr, arch),
                instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
                                                        cas_new_vgpr, arch)) &&
-           narrow_vcc();
+           exec_masks.narrow_vcc();
   };
   if (!require_canonical_provenance_field(consan_moi_exact_byte_cell::byte_offset_shift,
                                           consan_moi_exact_byte_cell::byte_offset_by_mask_lookup) ||
@@ -1011,7 +1005,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
           scalar_positive_inline_u32(consan_moi_exact_byte_cell::maximum_lane + 1u), cas_new_vgpr,
           arch)) ||
-      !narrow_vcc() ||
+      !exec_masks.narrow_vcc() ||
       !sequence.emit(instrumentation::build_v_and_b32_literal(
           tmp_vgpr, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask),
           old_value_vgpr, arch)) ||
@@ -1019,7 +1013,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       !sequence.emit(instrumentation::build_v_cmp_gt_u32_vcc(
           scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic) + 1u),
           tmp_vgpr, arch)) ||
-      !narrow_vcc() ||
+      !exec_masks.narrow_vcc() ||
       !append_extract_exact_shadow_generation(words, tmp_vgpr, old_value_vgpr,
                                               static_cast<uint16_t>(old_value_vgpr + 1u),
                                               cas_new_vgpr, arch) ||
@@ -1067,7 +1061,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
   if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
                                                              cas_new_vgpr, arch)) ||
-      !narrow_vcc())
+      !exec_masks.narrow_vcc())
     return false;
   if (retry_contention) {
     failure.stage = "contention retry";
@@ -1120,14 +1114,14 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
                                                   /*high_word=*/false, arch)) {
     return false;
   }
-  if (!narrow_vcc())
+  if (!exec_masks.narrow_vcc())
     return false;
   if (!append_compare_moi_report_dispatch_id_word(words, plan.dispatch_id, prior_dispatch_high_vgpr,
                                                   tmp_vgpr,
                                                   /*high_word=*/true, arch)) {
     return false;
   }
-  if (!narrow_vcc() ||
+  if (!exec_masks.narrow_vcc() ||
       !sequence.emit_all(
           instrumentation::build_s_mov_b64(low_dispatch_exec_sgpr, kAmdGpuExecLo, arch),
           instrumentation::build_s_mov_b64(kAmdGpuExecLo, committed_exec_sgpr, arch)))
@@ -1191,7 +1185,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
   if (!sequence.emit(instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(cas_expected_vgpr),
                                                              cas_new_vgpr, arch)) ||
-      !narrow_vcc() ||
+      !exec_masks.narrow_vcc() ||
       !sequence.emit(instrumentation::build_s_mov_b64(committed_exec_sgpr, kAmdGpuExecLo, arch)))
     return false;
 

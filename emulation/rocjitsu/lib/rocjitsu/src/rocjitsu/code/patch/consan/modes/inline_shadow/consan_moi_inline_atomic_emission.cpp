@@ -17,6 +17,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_versioned_publication.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
@@ -55,46 +56,6 @@ using consan_moi_detail::append_store_u32_vgpr_at_offset;
 using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
-
-/// Shared instruction-sequence mechanics for InlineShadow's nested EXEC-mask
-/// transactions. Callers own mask lifetimes and semantic predicates; this
-/// emitter owns the target-normalized save, restore, and VCC narrowing recipe.
-class InlineExecMaskEmission {
-public:
-  InlineExecMaskEmission(std::vector<uint32_t> &words, uint16_t narrow_save, rj_code_arch_t arch)
-      : sequence_(words), narrow_save_(narrow_save), arch_(arch) {}
-
-  [[nodiscard]] bool restore(uint16_t source) {
-    return sequence_.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, source, arch_));
-  }
-
-  [[nodiscard]] bool save(uint16_t destination) {
-    return sequence_.emit(instrumentation::build_s_mov_b64(destination, kAmdGpuExecLo, arch_));
-  }
-
-  [[nodiscard]] bool narrow_vcc() {
-    return sequence_.emit(
-        instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
-  }
-
-  template <typename Predicate> [[nodiscard]] bool narrow(const Predicate &predicate) {
-    return sequence_.emit_all(
-        predicate, instrumentation::build_s_and_saveexec_b64(narrow_save_, kAmdGpuVccLo, arch_));
-  }
-
-  [[nodiscard]] bool require_literal(uint16_t value, uint32_t literal, bool equal) {
-    const auto compare = equal ? instrumentation::build_v_cmp_eq_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch_)
-                               : instrumentation::build_v_cmp_ne_u32_vcc(
-                                     scalar_positive_inline_u32(literal), value, arch_);
-    return narrow(compare);
-  }
-
-private:
-  InstructionSequence sequence_;
-  uint16_t narrow_save_ = 0;
-  rj_code_arch_t arch_{};
-};
 
 template <typename Entry>
 [[nodiscard]] static bool
@@ -378,7 +339,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t skipped = static_cast<uint16_t>(exec_base + 14u);
   const uint16_t eligible = static_cast<uint16_t>(exec_base + 6u);
 
-  InlineExecMaskEmission exec_masks(words, exec_base, arch);
+  MoiPublicationExec exec_masks(words, exec_base, arch);
   InstructionSequence sequence(words);
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
@@ -823,13 +784,12 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     rj_code_arch_t arch, std::vector<std::string> &errors) {
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
   const uint16_t exec_base = plan.exec_save_sgpr;
-  InlineExecMaskEmission valid_exec_masks(words, exec_base, arch);
-  InlineExecMaskEmission low_match_exec_masks(words, static_cast<uint16_t>(exec_base + 2u), arch);
-  InlineExecMaskEmission high_match_exec_masks(words, static_cast<uint16_t>(exec_base + 4u), arch);
-  InlineExecMaskEmission workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u),
-                                                    arch);
-  InlineExecMaskEmission other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u),
+  MoiPublicationExec valid_exec_masks(words, exec_base, arch);
+  MoiPublicationExec low_match_exec_masks(words, static_cast<uint16_t>(exec_base + 2u), arch);
+  MoiPublicationExec high_match_exec_masks(words, static_cast<uint16_t>(exec_base + 4u), arch);
+  MoiPublicationExec workgroup_match_exec_masks(words, static_cast<uint16_t>(exec_base + 6u),
                                                 arch);
+  MoiPublicationExec other_owner_exec_masks(words, static_cast<uint16_t>(exec_base + 14u), arch);
   InstructionSequence sequence(words);
   // The low/high address-match journals are dead once owner qualification
   // begins. Reuse them for the longer-lived same-owner and validated masks.
@@ -1189,7 +1149,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!sequence.emit(instrumentation::build_s_mov_b64(scan_exec, kAmdGpuExecLo, arch)))
     return false;
 
-  InlineExecMaskEmission exec_masks(words, narrow_save, arch);
+  MoiPublicationExec exec_masks(words, narrow_save, arch);
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
   const auto narrow_vcc = [&] { return exec_masks.narrow_vcc(); };
@@ -1540,7 +1500,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   const uint16_t guest_address = address_plan.result_address_vgpr;
   const uint16_t stable_guest_address = static_cast<uint16_t>(base + required_scratch_count - 2u);
 
-  InlineExecMaskEmission exec_masks(words, narrow_save, arch);
+  MoiPublicationExec exec_masks(words, narrow_save, arch);
   InstructionSequence sequence(words);
   const auto restore_exec = [&](uint16_t source) { return exec_masks.restore(source); };
   const auto save_exec = [&](uint16_t destination) { return exec_masks.save(destination); };
