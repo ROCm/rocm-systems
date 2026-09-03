@@ -94,38 +94,52 @@ def require_rocdecode_support(rocprof_config) -> None:
         return  # Binary missing; let the test fail naturally
 
     videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
-    first_mp4 = next(videos_dir.glob("*.mp4"), None) if videos_dir.is_dir() else None
-    if first_mp4 is None:
+    if not videos_dir.is_dir():
+        return  # No videos dir; require_video_data fixture will skip
+    mp4_files = list(videos_dir.glob("*.mp4"))
+    if not mp4_files:
         return  # No videos; require_video_data fixture will skip
 
     # Strip LD_PRELOAD so rocprofiler-systems does not interfere with the probe.
     env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
 
-    # Run with a single video so that the process exits cleanly after the first
-    # file rather than aborting on the second with an uncaught C++ exception.
+    # Copy ALL available videos into the probe directory so that we catch
+    # mixed-codec failure scenarios. Some codecs (H.264) may decode fine on a
+    # given GPU while others (H.265, AV1) fail. Running with a single file
+    # could miss the failing codec entirely if that file happened to succeed.
+    # With all files present, H.265 is processed (printing the __vaDriverInit
+    # error and skipping the file) before the AV1 file triggers an uncaught
+    # C++ exception; subprocess.run() captures the full output before the crash.
     with tempfile.TemporaryDirectory() as tmpdir:
-        shutil.copy2(str(first_mp4), tmpdir)
+        for mp4 in mp4_files:
+            shutil.copy2(str(mp4), tmpdir)
         try:
             result = subprocess.run(
                 [str(videodecode_bin), "-i", tmpdir, "-t", "1"],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
                 env=env,
             )
         except subprocess.TimeoutExpired:
             return  # Hanging; let the test surface the problem
 
     combined = result.stdout + result.stderr
-    # Known VA-API initialisation failure patterns:
-    #   "has no function __vaDriverInit" — libva cannot find the init symbol
+    # Known failure patterns that indicate the driver stack cannot support
+    # video decode on this GPU:
+    #   "has no function __vaDriverInit" — libva cannot find the VA-API init symbol
     #   "vaInitialize failed"            — VA-API init failed for any reason
-    va_errors = ("has no function __vaDriverInit", "vaInitialize failed")
+    #   "terminate called"               — uncaught C++ exception from rocDecode
+    va_errors = (
+        "has no function __vaDriverInit",
+        "vaInitialize failed",
+        "terminate called",
+    )
     if any(err in combined for err in va_errors):
         pytest.skip(
-            "rocDecode VA-API initialization failed on this system "
-            "(libva could not load the VA-API driver); "
-            "video decode is not supported by the current driver stack for this GPU."
+            "rocDecode VA-API initialization failed or the GPU does not support "
+            "one or more required video codecs; "
+            "video decode is not fully supported by the current driver stack for this GPU."
         )
 
 
