@@ -6,8 +6,15 @@ import json
 import logging
 import time
 
+import amdsmi_metrics_field_support
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
+
+# metric args whose values_dict section keys are not just the arg name. Only
+# --overdrive differs; --partition and the hypervisor-only args fill no section
+# of their own.
+_SECTION_KEYS_BY_METRIC_ARG = {"overdrive": ("overdrive", "mem_overdrive")}
 
 
 class MetricCommands:
@@ -204,6 +211,19 @@ class MetricCommands:
                 args.xgmi,
             ]
 
+        # Sections the user named, which unsupported-field filtering may narrow
+        # but must never empty. Captured here because the block further down
+        # turns every section on when none was named, and memoized because that
+        # block mutates the args object shared by the per-GPU recursion and by
+        # every watch iteration.
+        if not hasattr(args, "requested_metric_sections"):
+            args.requested_metric_sections = frozenset(
+                section
+                for arg in current_platform_args
+                if getattr(args, arg, False)
+                for section in _SECTION_KEYS_BY_METRIC_ARG.get(arg, (arg,))
+            )
+
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
@@ -256,23 +276,24 @@ class MetricCommands:
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
-        if args.loglevel == "DEBUG":
-            try:
-                # Get GPU Metrics table version
-                gpu_metric_version_info = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(
-                    args.gpu
-                )
-                gpu_metric_version_str = json.dumps(gpu_metric_version_info, indent=4)
+        # Fields this metrics version cannot populate are filtered out of
+        # human-readable output unless --show-unsupported asks for them. JSON and
+        # CSV are consumed by scripts, so they keep every field and every key.
+        filter_human_fields = self.logger.is_human_readable_format() and not getattr(
+            args, "show_unsupported", False
+        )
+
+        gpu_metric_version_info = None
+        if args.loglevel == "DEBUG" or filter_human_fields:
+            gpu_metric_version_info = self._gpu_metrics_header(args.gpu, gpu_id)
+            if args.loglevel == "DEBUG" and gpu_metric_version_info is not None:
                 logging.debug(
-                    "GPU Metrics table Version for GPU %s | %s", gpu_id, gpu_metric_version_str
-                )
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug(
-                    "#1 - Unable to load GPU Metrics table version for %s | %s",
+                    "GPU Metrics table Version for GPU %s | %s",
                     gpu_id,
-                    e.get_error_info(),
+                    json.dumps(gpu_metric_version_info, indent=4),
                 )
 
+        if args.loglevel == "DEBUG":
             try:
                 # Get GPU Metrics table
                 gpu_metric_debug_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
@@ -2337,6 +2358,21 @@ class MetricCommands:
                 elif section_val == "N/A":
                     del values_dict[section_key]
 
+        if filter_human_fields:
+            suppressed = amdsmi_metrics_field_support.build_suppression_set(gpu_metric_version_info)
+            if not suppressed:
+                header = gpu_metric_version_info or {}
+                logging.debug(
+                    "unsupported-field filtering suppresses nothing on gpu %s: "
+                    "gpu_metrics version (%s, %s) is unmapped or its header was unreadable",
+                    gpu_id,
+                    header.get("format_revision", "N/A"),
+                    header.get("content_revision", "N/A"),
+                )
+            values_dict = amdsmi_metrics_field_support.filter_unsupported(
+                values_dict, suppressed, args.requested_metric_sections
+            )
+
         # Store timestamp first if watching_output is enabled
         if watching_output:
             self.logger.store_output(args.gpu, "timestamp", int(time.time()))
@@ -2352,6 +2388,40 @@ class MetricCommands:
 
         if watching_output:  # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
+
+    def _gpu_metrics_header(self, device_handle, gpu_id):
+        """The gpu_metrics header for ``device_handle``, read at most once.
+
+        The header is fixed for the life of the handle while the read pulls a
+        whole metrics blob, so `metric --watch` must not pay for it once per GPU
+        per iteration. An unreadable header caches as None, which suppresses
+        nothing.
+        """
+        if not hasattr(self, "_gpu_metrics_header_cache"):
+            self._gpu_metrics_header_cache = {}
+        # Handles are unhashable ctypes pointers, so key on identity and keep the
+        # handle alive in the entry so its id cannot be recycled.
+        entry = self._gpu_metrics_header_cache.get(id(device_handle))
+        if entry is not None:
+            return entry[1]
+
+        header = None
+        try:
+            header = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(device_handle)
+        except amdsmi_exception.AmdSmiException as e:
+            # AmdSmiParameterException is a sibling of AmdSmiLibraryException, so it
+            # reaches here on a bad handle but carries no get_error_info().
+            logging.debug(
+                "#1 - Unable to load GPU Metrics table version for %s | %s",
+                gpu_id,
+                (
+                    e.get_error_info()
+                    if isinstance(e, amdsmi_exception.AmdSmiLibraryException)
+                    else e
+                ),
+            )
+        self._gpu_metrics_header_cache[id(device_handle)] = (device_handle, header)
+        return header
 
     def metric_cpu(
         self,
