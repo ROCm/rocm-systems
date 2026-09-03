@@ -823,6 +823,7 @@ extern int64_t rcclParamIbQpSchedUpdateInterval();
 extern int64_t rcclParamIbQpSchedSplitDataMin();
 extern int64_t rcclParamIbQpSchedLogInterval();
 
+void IbCastReportMatchingScheme();
 #define QP_SCHED_WEIGHT_ENV_VAR "RCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_WEIGHT_ENV_VAR_ALIAS "NCCL_IB_QP_SCHED_WEIGHT"
 #define QP_SCHED_LOG_PATH_ENV_VAR "RCCL_IB_QP_SCHED_LOG_PATH"
