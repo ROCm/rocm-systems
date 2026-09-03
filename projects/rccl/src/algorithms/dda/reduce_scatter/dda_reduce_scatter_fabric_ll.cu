@@ -70,17 +70,17 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, comm->abortFlagDev);
     break;
   }
 

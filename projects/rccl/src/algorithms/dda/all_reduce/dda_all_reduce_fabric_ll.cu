@@ -105,17 +105,17 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   }
 
@@ -166,17 +166,17 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          bytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, comm->abortFlagDev);
     break;
   }
 
@@ -226,19 +226,19 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 4>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 8>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 0>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, comm->abortFlagDev);
     break;
   }
 
@@ -287,17 +287,17 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          count, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   }
 
