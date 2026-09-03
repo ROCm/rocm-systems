@@ -26,6 +26,11 @@
 
 namespace rocjitsu::test {
 
+/// @brief What a shared memory window lets the device do.
+/// @details Translated to the protocol's DMA region flags, so a test can
+/// advertise exactly one direction and check that the transport enforces it.
+enum class DmaProtection { ReadOnly, WriteOnly, ReadWrite };
+
 /// @brief A client connection to a vfio-user server.
 class VfioUserClient {
 public:
@@ -86,7 +91,10 @@ public:
   ///               away from the device, so a true return does not mean the
   ///               device can reach it.
   /// @param[in] fd_offset Offset into @p fd of the window base.
-  [[nodiscard]] bool dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset);
+  /// @param[in] protection Which directions the window permits; read/write by
+  ///                       default, matching what every earlier caller asked for.
+  [[nodiscard]] bool dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset,
+                             DmaProtection protection = DmaProtection::ReadWrite);
 
   /// @brief Withdraw a previously shared window.
   /// @param[in] iova Guest-physical base address of the window.
