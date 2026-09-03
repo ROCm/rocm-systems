@@ -72,6 +72,15 @@ if(CLR_BUILD_HIP)
     if(NOT DEFINED HIP_COMMON_DIR)
         message(FATAL_ERROR "Please pass HIP using -DHIP_COMMON_DIR. HIP_COMMON_DIR is incorrect")
     endif()
+    # HIP_PLATFORM selects the HIP backend: "amd" (default) or "nvidia".
+    # Pass -DHIP_PLATFORM=nvidia explicitly for NVIDIA builds.
+    # Note: ENV{HIP_PLATFORM} (hipcc's env var) is intentionally not read here.
+    if(NOT DEFINED HIP_PLATFORM)
+        set(HIP_PLATFORM "amd")
+        message(STATUS "HIP_PLATFORM defaulting to: ${HIP_PLATFORM}")
+    else()
+        message(STATUS "HIP_PLATFORM set to: ${HIP_PLATFORM}")
+    endif()
 endif()
 
 if(CLR_BUILD_HIP)
@@ -80,9 +89,10 @@ if(CLR_BUILD_HIP)
         add_compile_definitions(BUILD_STATIC_LIBS)
     endif()
 endif()
-if(CLR_BUILD_HIP OR CLR_BUILD_OCL)
+# rocclr is only used for the AMD HIP path and OpenCL; the NVIDIA path does not use it.
+if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
-else()
+elseif(NOT CLR_BUILD_HIP AND NOT CLR_BUILD_OCL)
     message(FATAL_ERROR "Please enable building of one or more of the below runtimes:\n- HIP (-DCLR_BUILD_HIP=ON)\n- OpenCL (-DCLR_BUILD_OCL=ON)")
 endif()
 if(CLR_BUILD_HIP)
