@@ -767,8 +767,6 @@ hipFileError_t hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp, unsigned nr,
  * @brief Poll for the status of completed batch IO operations
  * @ingroup batch
  *
- * \warn_not_implemented
- *
  * @param [in] batch_idp \batch_handle_param
  * @param [in] min_nr Minimum number of batch operation statuses that should be returned.
  *                    If `timeout` is exceeded, fewer statuses may be returned.
@@ -788,8 +786,6 @@ hipFileError_t hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp, unsigned 
  * @brief Cancels all pending batch IO operations
  * @ingroup batch
  *
- * \warn_not_implemented
- *
  * @param [in] batch_idp \batch_handle_param
  *
  * @return \hipfile_error_return
@@ -800,8 +796,6 @@ hipFileError_t hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp);
 /*!
  * @brief Destroys the batch IO handle and frees the associated resources
  * @ingroup batch
- *
- * \warn_not_implemented_void
  *
  * @param [in] batch_idp \batch_handle_param
  */
