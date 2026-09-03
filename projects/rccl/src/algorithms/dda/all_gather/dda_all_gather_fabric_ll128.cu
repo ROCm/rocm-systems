@@ -27,7 +27,7 @@ RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads)
 
 namespace {
 
-using dda::common::ddaLL128AGSlices;
+using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128DataBytesPerSlice;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireBytesPerSlice;
@@ -74,7 +74,7 @@ static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, 
     nBlocksMax = 1;
   }
   const unsigned blocksPerPeer =
-    ddaLL128AGBlocksPerPeer(ddaLL128AGSlices(perRankBytes), warps, nPeers, (size_t)nBlocksMax);
+    ddaLL128AGBlocksPerPeer(ddaLL128Slices(perRankBytes), warps, nPeers, (size_t)nBlocksMax);
   return std::make_pair(dim3((unsigned)nPeers, blocksPerPeer), dim3(threads));
 }
 
@@ -85,7 +85,7 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
-  const size_t slices = ddaLL128AGSlices(perRankBytes);
+  const size_t slices = ddaLL128Slices(perRankBytes);
   // Slot stride in 8B words.
   const size_t slotWords =
     ddaLL128AGSlotSlices(nRanks, comm->ddaScratchBytes) * (size_t)kDdaLL128WireWordsPerSlice;

@@ -10,7 +10,7 @@
  * instead of the whole message, plus the LL128 one-shot tier from
  * all_reduce_dda_ll128.h. They share a scratch layout and epoch counter, so
  * keeping the launchers in one translation unit also keeps the invariants that
- * tie them (the static_asserts below) next to the code they constrain. LL128
+ * tie them (the static_assert below) next to the code it constrains. LL128
  * one-shot uses the same DDA_LL enable and its own threshold.
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -40,25 +40,20 @@ RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
 
 namespace {
 
-using dda::common::kDdaLL128ArSlotWords;
 using dda::common::kDdaLLArSlotStridePkts;
 using dda::common::kDdaLLArTwoShotSlotStridePkts;
 using dda::common::kDdaLLMaxBytes;
 using dda::common::LLPacket16;
 
-using dda::common::ddaLL128ArMaxSlices;
-using dda::common::ddaLL128ArSlices;
+using dda::common::ddaBankSize;
+using dda::common::ddaLL128ArSlotWords;
+using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128Warp;
+using dda::common::kDdaLL128WireWordsPerSlice;
 
 // LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
 static inline size_t ddaLLArScratchSize(int nRanks) {
   return (size_t)2 * (size_t)nRanks * kDdaLLArSlotStridePkts * sizeof(LLPacket16);
-}
-
-// LL128 one-shot footprint: 2 banks * nRanks slots * slotWords * 8B. Sized off
-// kDdaLLMaxBytes so it matches the LL tiers exactly; see kDdaLL128ArSlotWords.
-static inline size_t ddaLL128ArOneShotScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLL128ArSlotWords * sizeof(uint64_t);
 }
 
 // Two-shot footprint, 2 banks * nRanks slots * slotStride packets * 16B  * 2 phases.
@@ -72,13 +67,6 @@ static inline size_t ddaLLArTwoShotScratchSize(int nRanks) {
 static_assert(kDdaLLArTwoShotSlotStridePkts == kDdaLLArSlotStridePkts / 2,
               "LL all-reduce tiers share one scratch and epoch; \
               keep LL-ts slot half of LL because the scratch is used in two phases");
-
-// Same invariant across protocols: the LL128 one-shot tier stages through that
-// same scratch under that same epoch, so its slot has to be the same number of
-// bytes or bank 1 would start somewhere else.
-static_assert(kDdaLL128ArSlotWords * sizeof(uint64_t) == kDdaLLArSlotStridePkts * sizeof(LLPacket16),
-              "LL and LL128 all-reduce one-shot tiers share one scratch and epoch; \
-              keep their slot strides equal in bytes");
 
 // Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
 // low (LL serves tiny messages where latency, not occupancy, dominates).
@@ -155,8 +143,8 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
                                                             ncclComm* comm, cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
-  const size_t slices = ddaLL128ArSlices(bytes);
-  const size_t slotWords = kDdaLL128ArSlotWords;
+  const size_t slices = ddaLL128Slices(bytes);
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   const unsigned threads = 512;
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
@@ -179,25 +167,25 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 one-shot: nRanks=%d bytes=%zu slices=%zu grid=%u block=%u "
-       "(warp-per-slice, slotWords=%zu)",
-       nRanks, bytes, slices, grid.x, block.x, slotWords);
+       "(warp-per-slice, bankSize=%zu)",
+       nRanks, bytes, slices, grid.x, block.x, bankSize);
 
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     dda::common::ddaAllReduceFlatLL128<T, 4><<<grid, block, 0, stream>>>(
       peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), bytes, comm->rank, nRanks, epochDev, epochLen,
-      slices, slotWords);
+      slices, bankSize);
     break;
   case 8:
     dda::common::ddaAllReduceFlatLL128<T, 8><<<grid, block, 0, stream>>>(
       peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), bytes, comm->rank, nRanks, epochDev, epochLen,
-      slices, slotWords);
+      slices, bankSize);
     break;
   default:
     dda::common::ddaAllReduceFlatLL128<T, 0><<<grid, block, 0, stream>>>(
       peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), bytes, comm->rank, nRanks, epochDev, epochLen,
-      slices, slotWords);
+      slices, bankSize);
     break;
   }
 
@@ -413,13 +401,9 @@ bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
-  if (ddaLL128ArOneShotScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
-    return false;
-  }
-
-  // A slot is a fixed kDdaLL128ArSlotWords, so the message has to fit the slices
-  // that stride holds.
-  if (ddaLL128ArSlices(bytes) > ddaLL128ArMaxSlices()) {
+  // can the bank hold the data in the slot
+  const size_t slotWords = ddaLL128ArSlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks);
+  if (ddaLL128Slices(bytes) * (size_t)kDdaLL128WireWordsPerSlice > slotWords) {
     return false;
   }
 
