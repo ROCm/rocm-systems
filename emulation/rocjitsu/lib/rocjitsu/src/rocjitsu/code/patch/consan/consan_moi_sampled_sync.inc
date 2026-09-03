@@ -67,12 +67,6 @@ struct SampledBarrierCandidate {
   };
 }
 
-struct SampledDenseSyncRoute {
-  uint32_t identity = 0;
-  uint64_t caller_return = 0;
-  uint64_t target = 0;
-};
-
 /// Prove that every scalar range is dead at every selected call anchor and
 /// avoids all persistent, architectural, and request-owned scalar state.
 [[nodiscard]] bool
@@ -97,59 +91,6 @@ sampled_route_ranges_are_safe(MoiResourcePlanningState &state, std::span<const u
   };
   return !ranges.empty() && std::ranges::none_of(ranges, conflicts_with_reserved_state) &&
          moi_resource_owner_anchors_admit_scalar_router_ranges(state, owners, anchors, ranges);
-}
-
-/// Build the one call-key dispatcher shared by Sampled barrier and atomic
-/// synchronization relays. The semantic owners supply only their route list;
-/// key reconstruction, SCC restoration, and indirect return are one mode-local
-/// mechanism.
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_dense_sync_dispatcher(
-    std::span<const SampledDenseSyncRoute> routes, uint16_t jump_pc_sgpr, uint16_t saved_scc_sgpr,
-    uint16_t key_sgpr, uint16_t call_return_sgpr, bool derive_key_at_entry, bool key_encodes_scc,
-    bool clone_local_routes, uint64_t dispatcher_offset, uint64_t island_offset,
-    const ConSanTargetProfile &target, rj_code_arch_t arch) {
-  std::vector<uint32_t> words;
-  InstructionSequence sequence(words);
-  if (key_encodes_scc) {
-    words.push_back(build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
-  }
-  if (!derive_key_at_entry && !clone_local_routes) {
-    if (!sequence.emit(
-            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch)))
-      return std::nullopt;
-    words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-    words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
-  }
-  for (const SampledDenseSyncRoute &route : routes) {
-    if (clone_local_routes) {
-      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch)))
-        return std::nullopt;
-    } else {
-      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
-              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch)))
-        return std::nullopt;
-      words.push_back(static_cast<uint32_t>(route.caller_return - island_offset) /
-                      (key_encodes_scc ? 2u : 1u));
-    }
-    std::vector<uint32_t> matched_words;
-    if (key_encodes_scc && !consan_detail::append_restore_moi_scc_from_route_key(
-                               matched_words, {.encoded_sgpr = key_sgpr}, target)) {
-      return std::nullopt;
-    }
-    const uint64_t matched_offset = dispatcher_offset + (words.size() + 1u) * sizeof(uint32_t);
-    if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, route.target,
-                                                 jump_pc_sgpr, saved_scc_sgpr,
-                                                 /*capture_scc=*/false, arch)) {
-      return std::nullopt;
-    }
-    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(
-            static_cast<int16_t>(matched_words.size()), arch)) ||
-        !sequence.emit(matched_words))
-      return std::nullopt;
-  }
-  words.push_back(build_s_endpgm(arch));
-  return words;
 }
 
 void append_sampled_dense_sync_relay_patches(std::vector<ConSanPatchInfo> &patches,
@@ -1332,7 +1273,7 @@ void try_apply_sampled_barrier_sync_patch(
       }
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
-      std::vector<SampledDenseSyncRoute> routes{
+      std::vector<MoiDenseRelayRoute> routes{
           {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
       routes.reserve(bodies.size() + 1u);
       for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
@@ -1342,9 +1283,10 @@ void try_apply_sampled_barrier_sync_patch(
                           .caller_return = site.text_offset + sizeof(uint32_t),
                           .target = body.offset});
       }
-      const auto dispatcher_words = build_sampled_dense_sync_dispatcher(
+      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
           routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
-          key_encodes_scc, use_clone_local_routes, dispatcher_offset, island_offset,
+          key_encodes_scc, /*match_call_return=*/false, use_clone_local_routes, dispatcher_offset,
+          island_offset,
           *target_profile, arch);
       if (!dispatcher_words ||
           dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
@@ -2292,7 +2234,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       const auto host_call = build_s_call_b64(call_return_sgpr, /*next instruction=*/0, arch);
       std::memcpy(new_text.data() + host_offset, &host_call, sizeof(uint32_t));
 
-      std::vector<SampledDenseSyncRoute> routes{
+      std::vector<MoiDenseRelayRoute> routes{
           {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
       routes.reserve(bodies.size() + 1u);
       for (const DenseBody &body : bodies) {
@@ -2301,9 +2243,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                           .caller_return = planned.physical_anchor_offset + sizeof(uint32_t),
                           .target = body.offset});
       }
-      const auto dispatcher_words = build_sampled_dense_sync_dispatcher(
+      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
           routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
-          key_encodes_scc, /*clone_local_routes=*/false, dispatcher_offset, island_offset,
+          key_encodes_scc, /*match_call_return=*/false, /*clone_local_routes=*/false,
+          dispatcher_offset, island_offset,
           *target_profile, arch);
       if (!dispatcher_words ||
           dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
