@@ -286,9 +286,12 @@ def _assert_bcast_ok(rc, out, debug, ctx):
     )
 
 
-def _launch_bcast_gin_sdma(request, msg_bytes, dtype, *, force_flat_gin):
+def _launch_bcast_gin_sdma(
+    request, msg_bytes, dtype, *, force_flat_gin=False, force_sag_gin=False
+):
     """Launch broadcast_perf -D 3 at a fixed message size. When force_flat_gin,
     disable the SAG/ring large tiers so the root flat gin.put() path is used.
+    When force_sag_gin, disable only the ring tier so scatter+allgather runs.
 
     Returns (returncode, stdout, debug_text); debug_text is the merged per-rank
     NCCL debug log, kept off stdout so the results table stays parseable."""
@@ -312,6 +315,9 @@ def _launch_bcast_gin_sdma(request, msg_bytes, dtype, *, force_flat_gin):
             "NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES=0",
             "NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0",
         ]
+    elif force_sag_gin:
+        # Ring is checked before SAG; disable ring only so SAG is exercised.
+        gin_env += ["NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0"]
     gin_env += BCAST_XENV
     gin_env = sum([["-x", kv] for kv in gin_env], [])
 
@@ -383,14 +389,20 @@ def _launch_bcast_gin_sdma(request, msg_bytes, dtype, *, force_flat_gin):
     return proc.returncode, out, debug
 
 
-def _run_bcast_gin_sdma(request, msg_bytes, dtype, *, force_flat_gin):
+def _run_bcast_gin_sdma(
+    request, msg_bytes, dtype, *, force_flat_gin=False, force_sag_gin=False
+):
     if BCAST_NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA Broadcast")
 
     rc, out, debug = 1, "", ""
     for attempt in range(1, max(1, BCAST_CONN_RETRIES) + 1):
         rc, out, debug = _launch_bcast_gin_sdma(
-            request, msg_bytes, dtype, force_flat_gin=force_flat_gin
+            request,
+            msg_bytes,
+            dtype,
+            force_flat_gin=force_flat_gin,
+            force_sag_gin=force_sag_gin,
         )
         if rc == 0:
             return rc, out, debug
@@ -419,6 +431,15 @@ def test_BroadcastGinSdmaLargeSegmented(request, msg_mib, dtype):
     _assert_bcast_ok(
         rc, out, debug, "flat-segmented {} MiB dtype={}".format(msg_mib, dtype)
     )
+
+
+@_bcast_skip
+def test_BroadcastGinSdmaScatterAllgather(request):
+    """256 MiB scatter+allgather tier (ring disabled via RING_MIN_BYTES=0)."""
+    rc, out, debug = _run_bcast_gin_sdma(
+        request, 256 * MiB, "int32", force_sag_gin=True
+    )
+    _assert_bcast_ok(rc, out, debug, "SAG 256 MiB")
 
 
 @_bcast_skip
