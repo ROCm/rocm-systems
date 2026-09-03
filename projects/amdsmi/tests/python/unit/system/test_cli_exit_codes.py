@@ -13,6 +13,7 @@ GPU/CPU/Core or elevated permissions.
 
 import importlib.util
 import os
+import pathlib
 import sys
 import unittest
 from typing import Any
@@ -30,6 +31,24 @@ from common.common import (
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 if _CLI_DIR and _CLI_DIR not in sys.path:
     sys.path.append(_CLI_DIR)
+
+
+def _find_amdsmi_header(*start_dirs):
+    """Return the path to amdsmi.h, or None.
+
+    Walks up rather than indexing a fixed depth, because the header sits one
+    level above the CLI in a checkout and two in an install. Feed it
+    cli_search_order() so install-vs-source stays decided in that one place.
+    """
+    for start in start_dirs:
+        if not start:
+            continue
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
+            candidate = directory / "include" / "amd_smi" / "amdsmi.h"
+            if candidate.is_file():
+                return str(candidate)
+    return None
 
 
 # Required for when the amdgpu driver is not loaded. We are required to
@@ -346,6 +365,60 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             f"and would all report {int(self.ExitCode.UNREPRESENTABLE_LIBRARY_STATUS)}: "
             f"{', '.join(too_large)}. The exit-code map in amdsmi_cli_exceptions needs "
             "revisiting -- a byte can no longer carry a status one-to-one.",
+        )
+
+    def test_python_wrapper_matches_amdsmi_status_t_in_the_header(self):
+        """amdsmi.h is the source of truth for AMDSMI_STATUS_*; the Python
+        wrapper is generated from it.
+
+        Nothing else can catch a stale wrapper: every other test reads the
+        wrapper, so a wrapper that is missing a status the library already
+        returns is perfectly self-consistent and therefore invisible. This is
+        the one place that compares the two, so adding a status in C without
+        regenerating fails here instead of surfacing later as an unrecognized
+        code at runtime.
+        """
+        import re
+
+        header = _find_amdsmi_header(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+        if header is None:
+            self.skipTest("amdsmi.h not found in the source tree or the ROCm install")
+
+        with open(header, encoding="utf-8") as handle:
+            source = handle.read()
+        block = re.search(r"typedef enum\s*\{(.*?)\}\s*amdsmi_status_t", source, re.S)
+        self.assertIsNotNone(block, f"could not locate amdsmi_status_t in {header}")
+
+        in_header = {
+            name: int(value, 0)
+            for name, value in re.findall(
+                r"(AMDSMI_STATUS_\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", block.group(1)
+            )
+        }
+        self.assertTrue(in_header, f"parsed no statuses out of {header}")
+        in_wrapper = {
+            name: abs(int(code))
+            for code, name in amdsmi_wrapper.amdsmi_status_t__enumvalues.items()
+        }
+
+        self.assertEqual(
+            sorted(set(in_header) - set(in_wrapper)),
+            [],
+            "in amdsmi.h but missing from the Python wrapper -- regenerate it",
+        )
+        self.assertEqual(
+            sorted(set(in_wrapper) - set(in_header)),
+            [],
+            "in the Python wrapper but not in amdsmi.h -- the wrapper is ahead of the header",
+        )
+        self.assertEqual(
+            {
+                name: (in_header[name], in_wrapper[name])
+                for name in set(in_header) & set(in_wrapper)
+                if in_header[name] != in_wrapper[name]
+            },
+            {},
+            "status value differs between amdsmi.h and the Python wrapper (header, wrapper)",
         )
 
     def test_exit_codes_are_unique(self):
