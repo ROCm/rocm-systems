@@ -7143,6 +7143,15 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     lines; the struct is still populated with BDF and sentinel/default fabric fields.
     An unconfigured accelerator returns AMDSMI_STATUS_SUCCESS and reports itself
     through the accelerator_state key.
+
+    A library predating the nested (version 2) layout never echoes back
+    AMDSMI_FABRIC_INFO_VERSION_2 and instead fills the flat version 1 member; this
+    degrades gracefully to that flat layout (mirroring amd_smi_fabric_example.cc)
+    rather than raising. The returned dict always carries the same keys; the
+    station-only fields (station_flags, num_stations, lane_en_bitmap, the
+    ppod/vpod/station masks, and local_accelerator_count) have no version 1
+    equivalent and are None on that path, "version" reports which layout was
+    actually filled.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -7159,9 +7168,35 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
         raise AmdSmiLibraryException(ret)
 
     if fabric_info.fabric_version != amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2:
-        # A library predating the nested layout filled the flat v1 member instead, so every
-        # field below would be read at the wrong offset
-        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+        # A library predating the nested layout filled the flat v1 member instead; read
+        # it directly rather than erroring, so callers linked against an older
+        # libamd_smi.so keep working the way they did before the v2 layout existed
+        v1 = fabric_info.fabric_info.v1
+        return {
+            "bdf": _format_bdf(fabric_info.bdf),
+            "version": 1,
+            "accelerator_id": v1.accelerator_id,
+            "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
+            "bandwidth": v1.bandwidth,
+            "latency": v1.latency,
+            "ppod_id": list(v1.ppod_id),
+            "ppod_size": v1.ppod_size,
+            "vpod_id": v1.vpod_id,
+            "vpod_size": v1.vpod_size,
+            "local_accelerators": list(v1.local_accelerators),
+            "local_accelerator_count": None,
+            "vpod_active_accelerators": list(v1.vpod_active_accelerators),
+            "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
+            "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+            # Station data has no version 1 equivalent
+            "station_flags": None,
+            "num_stations": None,
+            "lane_en_bitmap": None,
+            # No per-field read mask exists in version 1
+            "ppod_mask": None,
+            "vpod_mask": None,
+            "station_mask": None,
+        }
 
     v2 = fabric_info.fabric_info.v2
     ppod = v2.ppod
