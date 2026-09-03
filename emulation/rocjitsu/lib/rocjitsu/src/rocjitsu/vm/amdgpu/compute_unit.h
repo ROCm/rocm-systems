@@ -1112,6 +1112,10 @@ inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
   return raw_cu().engine();
 }
+inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                                   uint32_t process_id) const {
+  return raw_cu().memory()->fetch32(address, process_id);
+}
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
 }
