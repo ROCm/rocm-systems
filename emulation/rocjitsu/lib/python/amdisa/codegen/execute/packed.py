@@ -875,6 +875,8 @@ def gen_mad_mix_bf16(
     """Generate gfx1250 BF16 FMA_MIX variants."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
+    if result != 'f32':
+        L.append('  amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);')
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -928,14 +930,20 @@ def gen_mad_mix_bf16(
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append('    float result = std::fma(a, b, c);')
-    L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
     if result == 'f32':
+        L.append('    float result = std::fma(a, b, c);')
+        L.append(
+            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+        )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
         )
     else:
-        L.append(f'    uint16_t h = util::f32_to_bf16(result);')
+        L.append(
+            '    uint16_t h = amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
+            'a, b, c, wf.fp_round_mode_f16_f64(), inst_.clamp, '
+            'amdgpu::floating_clamp_nan_to_zero(wf));'
+        )
         if result == 'lo':
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'

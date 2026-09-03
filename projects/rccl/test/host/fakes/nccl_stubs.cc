@@ -64,6 +64,7 @@ bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) { ::abort(); }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
