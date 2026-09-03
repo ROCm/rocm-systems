@@ -496,10 +496,7 @@ bool TransformResult::well_formed() const {
   if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
     return false;
   if (mutation.fault.planned != private_lowering_.fault_plans.size() ||
-      mutation.fault.applied > mutation.fault.planned ||
-      std::ranges::any_of(private_lowering_.fault_plans, [&](const ConSanFaultMutationPlan &plan) {
-        return !plan.well_formed() || plan.source_code_object != code_object;
-      })) {
+      mutation.fault.applied > mutation.fault.planned) {
     return false;
   }
   if (evidence_intent_plan.has_value() != evidence_requirements.has_value())

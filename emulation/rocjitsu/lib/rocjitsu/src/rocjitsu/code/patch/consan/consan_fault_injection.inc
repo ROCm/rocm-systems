@@ -69,10 +69,11 @@ struct ResolvedFaultTargets {
   std::optional<OrdinaryAcquireMutationTarget> ordinary;
 };
 
-static void apply_resolved_consan_fault_mutations(
-    const AmdGpuCodeObject &code_object, rj_code_arch_t arch, const ConSanOptions &options,
-    const ResolvedFaultTargets &targets, std::span<const ConSanFaultMutationPlan> plans,
-    ConSanTransformArtifacts &result);
+static void apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+                                                  rj_code_arch_t arch, const ConSanOptions &options,
+                                                  const ResolvedFaultTargets &targets,
+                                                  std::span<const ConSanFaultMutationPlan> plans,
+                                                  ConSanTransformArtifacts &result);
 
 [[nodiscard]] AtomicOrderBoundary resolve_atomic_order_boundary(const ProgramInventory &inventory,
                                                                 const ConSanFaultSite &site,
@@ -276,8 +277,7 @@ void mark_participant_mutation_unsupported(FaultApplicationState &result, std::s
 
 void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                     const ConSanOptions &options, bool apply,
-                                    bool require_applicable_plan,
-                                    bool require_exactly_one_applied,
+                                    bool require_applicable_plan, bool require_exactly_one_applied,
                                     ConSanTransformArtifacts &artifacts) {
   const ConSanFaultPlanningInput input{
       .selection = {.program_inventory = artifacts.program_inventory,
@@ -296,7 +296,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
   };
   const auto make_named_plan = [&](ConSanFaultMutationKind kind, std::string primary_identity) {
     ConSanFaultMutationPlan plan;
-    plan.source_code_object = program_inventory.code_object_id();
     plan.kind = kind;
     plan.primary_identity = std::move(primary_identity);
     return plan;
@@ -364,8 +363,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
           // completing member.
           plan.companion_identity = group->second.primary->identity;
           plan.logical_sequence_identity = exact_barrier_drop_group_identity(*group);
-          plan.selection_sequence_identity = group->first.sequence->identity;
-          plan.companion_selection_sequence_identity = group->second.sequence->identity;
           plan.ordered_member_identities = group->first.sequence->member_event_identities;
           plan.ordered_member_identities.insert(
               plan.ordered_member_identities.end(),
@@ -374,7 +371,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         } else {
           plan.companion_identity = pair->companion->identity;
           plan.logical_sequence_identity = pair->sequence->identity;
-          plan.selection_sequence_identity = pair->sequence->identity;
           plan.ordered_member_identities = pair->sequence->member_event_identities;
         }
         result.fault_plans.push_back(std::move(plan));
@@ -388,8 +384,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     } else {
       if (primary != nullptr) {
         ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::DropBarrier, *primary);
-        plan.destructive_incomplete_barrier_drop =
-            is_member_of_qualified_logical_barrier_pair(input.selection, *primary);
         result.fault_plans.push_back(std::move(plan));
       } else {
         append_primary(ConSanFaultMutationKind::DropBarrier, primary);
@@ -434,7 +428,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             make_plan(ConSanFaultMutationKind::MoveBarrierPair, *primary);
         plan.companion_identity = companion->identity;
         plan.logical_sequence_identity = sequence->identity;
-        plan.selection_sequence_identity = sequence->identity;
         plan.ordered_member_identities = sequence->member_event_identities;
         plan.barrier_move_direction = options.fault_barrier_move_direction;
         if (options.fault_barrier_move_direction == ConSanBarrierMoveDirection::LegacyMarker) {
@@ -491,15 +484,8 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
           } else {
             move_destination = &*destination;
             plan.destination_identity = destination->identity;
-            if (destination->basic_block_index != *sequence->basic_block_index) {
+            if (destination->basic_block_index != *sequence->basic_block_index)
               plan.barrier_move_cfg_contract = destination->cfg_contract;
-              plan.structured_guard_block_index = destination->structured_guard_block_index;
-              plan.structured_destination_block_index = destination->basic_block_index;
-              plan.structured_source_block_index = destination->structured_source_block_index;
-              plan.structured_guard_offset = destination->structured_guard_offset;
-              plan.structured_destination_offset = destination->text_offset;
-              plan.structured_source_offset = destination->structured_source_offset;
-            }
             result.fault_plans.push_back(std::move(plan));
           }
         }
@@ -583,7 +569,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
             make_plan(ConSanFaultMutationKind::BarrierIdScope, *members[0]);
         plan.companion_identity = members[1]->identity;
         plan.logical_sequence_identity = group != nullptr ? group->identity : sequence->identity;
-        plan.selection_sequence_identity = sequence->identity;
         plan.ordered_member_identities =
             group != nullptr ? group->member_event_identities : sequence->member_event_identities;
         plan.original_barrier_id = sequence->barrier_id;
@@ -626,14 +611,11 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
       ConSanFaultMutationPlan plan = make_named_plan(
           ConSanFaultMutationKind::BarrierParticipantCount, group->member_event_identities.front());
       plan.logical_sequence_identity = group->identity;
-      plan.selection_sequence_identity = selected->identity;
       plan.ordered_member_identities = group->member_event_identities;
       plan.original_barrier_id = group->barrier_id;
       plan.target_barrier_id = group->barrier_id;
       plan.original_barrier_scope = group->barrier_scope;
       plan.target_barrier_scope = group->barrier_scope;
-      plan.original_participant_count = init->participant_count;
-      plan.target_participant_count = options.fault_barrier_target_participant_count;
       result.fault_plans.push_back(std::move(plan));
     }
   }
@@ -670,10 +652,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
       result.errors.emplace_back(
           "ConSan atomic address delta must be a positive aligned signed-24-bit offset");
     } else {
-      ConSanFaultMutationPlan plan =
-          make_plan(ConSanFaultMutationKind::AtomicWrongAddress, *atomic);
-      plan.address_delta_bytes = options.fault_atomic_address_delta;
-      result.fault_plans.push_back(std::move(plan));
+      result.fault_plans.push_back(make_plan(ConSanFaultMutationKind::AtomicWrongAddress, *atomic));
     }
   }
   if (options.fault_atomic_weaken_order) {
@@ -694,16 +673,13 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
           "ConSan fault dry run found no qualified atomic ordering boundary to weaken");
     } else {
       ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::AtomicWeakenOrder, *atomic);
-      plan.companion_identity = atomic_order_boundary.fence != nullptr
-                                    ? std::optional<std::string>(
-                                          atomic_order_boundary.fence->identity)
-                                    : std::optional<std::string>(
-                                          atomic_order_boundary.sequence->identity +
-                                          "|release-wait-boundary");
+      plan.companion_identity =
+          atomic_order_boundary.fence != nullptr
+              ? std::optional<std::string>(atomic_order_boundary.fence->identity)
+              : std::optional<std::string>(atomic_order_boundary.sequence->identity +
+                                           "|release-wait-boundary");
       plan.logical_sequence_identity = atomic_order_boundary.sequence->identity;
-      plan.selection_sequence_identity = atomic_order_boundary.sequence->identity;
       plan.ordered_member_identities = atomic_order_boundary.sequence->member_event_identities;
-      plan.atomic_order_edge = options.fault_atomic_order_edge;
       result.fault_plans.push_back(std::move(plan));
     }
   }
@@ -731,7 +707,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     } else {
       lds_target = lds;
       ConSanFaultMutationPlan plan = make_plan(ConSanFaultMutationKind::LdsWrongAddress, *lds);
-      plan.original_address_vgpr = lds->address_vgpr;
       plan.target_address_vgpr = options.fault_lds_address_vgpr;
       result.fault_plans.push_back(std::move(plan));
     }
@@ -757,10 +732,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
         ConSanFaultMutationPlan plan = make_plan(kind, *target->site);
         plan.companion_identity = std::move(companion);
         plan.logical_sequence_identity = target->sequence->identity;
-        plan.selection_sequence_identity = target->sequence->identity;
         plan.ordered_member_identities = target->sequence->member_event_identities;
-        if (kind == ConSanFaultMutationKind::OrdinaryWrongAddress)
-          plan.address_delta_bytes = options.fault_ordinary_address_delta;
         result.fault_plans.push_back(std::move(plan));
       };
       if (options.fault_ordinary_wrong_address)
@@ -770,12 +742,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
       if (options.fault_ordinary_weaken_scope)
         append_ordinary(ConSanFaultMutationKind::OrdinaryWeakenScope, std::nullopt);
     }
-  }
-  if (std::ranges::any_of(result.fault_plans, [](const ConSanFaultMutationPlan &plan) {
-        return !plan.well_formed();
-      })) {
-    result.errors.emplace_back(
-        "ConSan fault planner produced an internally inconsistent typed mutation plan");
   }
   if (options.fault_require_exactly_one && !input.prior_attempt_unsupported &&
       !result.unsupported && result.fault_plans.size() != 1u) {
@@ -894,7 +860,6 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object,
                                                rj_code_arch_t arch,
                                                const ResolvedFaultTargets &targets,
-                                               const ConSanFaultMutationPlan &plan,
                                                FaultApplicationState &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
@@ -904,7 +869,7 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
 
-  if (plan.selection_sequence_identity) {
+  if (targets.drop_group || targets.drop_pair) {
     const auto &group = targets.drop_group;
     const auto &pair = targets.drop_pair;
     std::vector<const ConSanFaultSite *> members;
@@ -995,46 +960,14 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
   return std::nullopt;
 }
 
-static void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                                   const ConSanFaultMutationPlan &plan,
-                                                   FaultApplicationState &result) {
+static void
+try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
+                                       const ConSanSyncSequence *selected,
+                                       const ConSanBarrierLifecycleGroup *lifecycle_group,
+                                       int32_t target_id, FaultApplicationState &result) {
+  if (selected == nullptr)
+    return;
   const SynchronizationInventoryView sync = result.program_inventory.sync();
-  if (!plan.selection_sequence_identity || !plan.target_barrier_id) {
-    result.errors.emplace_back(
-        "ConSan barrier ID/scope mutation requires an exact sequence identity and target ID");
-    return;
-  }
-  const auto selected = std::ranges::find(sync.sync_sequences, *plan.selection_sequence_identity,
-                                          &ConSanSyncSequence::identity);
-  if (selected == sync.sync_sequences.end() || selected->kind != ConSanSyncSequenceKind::Barrier ||
-      selected->operation != ConSanSyncOperation::BarrierFull ||
-      !consan_sync_confidence_meets(selected->confidence, ConSanSemanticConfidence::Conservative) ||
-      selected->member_event_identities.size() != 2u || !selected->barrier_id ||
-      selected->barrier_scope == ConSanBarrierSite::Scope::Unknown) {
-    result.errors.emplace_back(
-        "ConSan barrier ID/scope mutation requires an exact qualified two-member sequence");
-    return;
-  }
-  const ConSanBarrierLifecycleGroup *lifecycle_group =
-      find_lifecycle_group_for_sequence(result.program_inventory, *selected);
-  if (lifecycle_group != nullptr && !lifecycle_group->admissible()) {
-    result.errors.emplace_back(
-        "ConSan barrier ID/scope mutation refused a partial unresolved lifecycle mutation: " +
-        std::string(consan_barrier_lifecycle_issue_message(lifecycle_group->issue)));
-    return;
-  }
-  const int32_t target_id = *plan.target_barrier_id;
-  if (target_id == *selected->barrier_id ||
-      barrier_scope_for_id(target_id) == ConSanBarrierSite::Scope::Unknown) {
-    result.errors.emplace_back(
-        "ConSan barrier ID/scope mutation requires a distinct target with known scope");
-    return;
-  }
-  if (lifecycle_group != nullptr && (target_id < 1 || target_id > 16)) {
-    result.errors.emplace_back(
-        "ConSan barrier lifecycle retarget requires a named-barrier target ID in [1, 16]");
-    return;
-  }
 
   const std::vector<std::string> &member_identities = lifecycle_group != nullptr
                                                           ? lifecycle_group->member_event_identities
@@ -1152,37 +1085,12 @@ static void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_
 }
 
 static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                                      const ConSanFaultMutationPlan &plan,
+                                                      const ConSanBarrierLifecycleGroup *group,
+                                                      const ConSanBarrierSite *init,
+                                                      uint32_t target_participant_count,
                                                       FaultApplicationState &result) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
-  const auto selected =
-      plan.selection_sequence_identity
-          ? std::ranges::find(sync.sync_sequences, *plan.selection_sequence_identity,
-                              &ConSanSyncSequence::identity)
-          : sync.sync_sequences.end();
-  const ConSanBarrierLifecycleGroup *group =
-      selected == sync.sync_sequences.end()
-          ? nullptr
-          : find_lifecycle_group_for_sequence(result.program_inventory, *selected);
-  const ConSanBarrierSite *init =
-      group != nullptr && group->admissible()
-          ? find_static_participant_init(result.program_inventory, *group)
-          : nullptr;
-  if (group == nullptr || !group->admissible() || init == nullptr ||
-      init->participant_encoding != ConSanBarrierSite::ParticipantEncoding::M0Literal32 ||
-      !init->participant_count || !init->participant_setup_text_offset ||
-      !init->participant_setup_file_offset || !init->participant_setup_literal) {
-    mark_participant_mutation_unsupported(
-        result, "no complete lifecycle has an immediately preceding literal M0 count setup");
+  if (group == nullptr || init == nullptr)
     return;
-  }
-  if (!plan.target_participant_count || *plan.target_participant_count == 0u ||
-      *plan.target_participant_count > 63u ||
-      *plan.target_participant_count == *init->participant_count) {
-    mark_participant_mutation_unsupported(
-        result, "the target count must be a distinct value in the encodable range [1, 63]");
-    return;
-  }
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
@@ -1195,7 +1103,7 @@ static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &co
   constexpr uint32_t kParticipantCountMask = 0x3fu << 16u;
   uint32_t replacement_literal = *init->participant_setup_literal;
   replacement_literal =
-      (replacement_literal & ~kParticipantCountMask) | (*plan.target_participant_count << 16u);
+      (replacement_literal & ~kParticipantCountMask) | (target_participant_count << 16u);
   result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::memcpy(result.replacement.data() + literal_file_offset, &replacement_literal,
               sizeof(replacement_literal));
@@ -1207,20 +1115,20 @@ static void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &co
   patch.trampoline_offset = patch.anchor_offset;
   patch.original_size = 2u * sizeof(uint32_t);
   patch.original_participant_count = init->participant_count;
-  patch.target_participant_count = plan.target_participant_count;
+  patch.target_participant_count = target_participant_count;
   result.patches.push_back(std::move(patch));
   result.mark_modified();
   result.mutation.applied_fault_logical_identity = group->identity;
   result.warnings.emplace_back("ConSan barrier participant mutation rewrote one proven static "
                                "lifecycle count from " +
                                std::to_string(*init->participant_count) + " to " +
-                               std::to_string(*plan.target_participant_count));
+                               std::to_string(target_participant_count));
 }
 
 static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object,
                                                rj_code_arch_t arch,
                                                const ResolvedFaultTargets &targets,
-                                               const ConSanFaultMutationPlan &plan,
+                                               ConSanBarrierMoveDirection direction,
                                                const ConSanPatchedImageGrowthLimit &growth_limit,
                                                FaultApplicationState &result) {
   if (has_only_rocclr_runtime_kernels(result.program_inventory)) {
@@ -1238,7 +1146,7 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
   const BarrierSite second_site = barrier_site_from_inventory(*targets.move_companion);
   const ConSanSyncSequence *selected_sequence = targets.move_sequence;
 
-  if (plan.barrier_move_direction != ConSanBarrierMoveDirection::LegacyMarker) {
+  if (direction != ConSanBarrierMoveDirection::LegacyMarker) {
     const ConSanBarrierMoveDestination *destination = targets.move_destination;
     if (destination == nullptr)
       return;
@@ -1313,7 +1221,7 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
 
     std::vector<uint32_t> cave_words;
     cave_words.reserve(2u + destination_words.size() + 1u);
-    if (plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier) {
+    if (direction == ConSanBarrierMoveDirection::Earlier) {
       cave_words.insert(cave_words.end(), barrier_words.begin(), barrier_words.end());
       cave_words.insert(cave_words.end(), destination_words.begin(), destination_words.end());
     } else {
@@ -1355,7 +1263,7 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
       source_info.anchor_offset = source.text_offset;
       source_info.trampoline_offset = source.text_offset;
       source_info.original_size = source.size;
-      source_info.barrier_move_direction = plan.barrier_move_direction;
+      source_info.barrier_move_direction = direction;
       result.patches.push_back(source_info);
     }
     ConSanPatchInfo target_info;
@@ -1365,7 +1273,7 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
     target_info.trampoline_offset = placement->body_offset;
     target_info.original_size = destination->size;
     target_info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
-    target_info.barrier_move_direction = plan.barrier_move_direction;
+    target_info.barrier_move_direction = direction;
     if (cross_block) {
       target_info.barrier_move_cfg_contract = destination->cfg_contract;
       target_info.structured_guard_block_index = destination->structured_guard_block_index;
@@ -1379,8 +1287,7 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
     result.mark_modified();
     result.warnings.emplace_back(
         "ConSan barrier move fault relocated an adjacent logical pair " +
-        std::string(plan.barrier_move_direction == ConSanBarrierMoveDirection::Earlier ? "earlier"
-                                                                                       : "later") +
+        std::string(direction == ConSanBarrierMoveDirection::Earlier ? "earlier" : "later") +
         " at " + destination->mnemonic + " in " + destination->container_name);
     return;
   }
@@ -1472,10 +1379,9 @@ static void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_obje
 static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                          const ConSanFaultSite *selected,
                                          AtomicFaultEncoding encoding,
-                                         AtomicOrderBoundary order_boundary,
-                                         const ConSanFaultMutationPlan *address_plan,
-                                         const ConSanFaultMutationPlan *order_plan,
-                                         const ConSanFaultMutationPlan *scope_plan,
+                                         AtomicOrderBoundary order_boundary, bool mutate_address,
+                                         bool mutate_order, bool mutate_scope,
+                                         uint32_t address_delta, ConSanAtomicOrderEdge order_edge,
                                          FaultApplicationState &result) {
   if (!selected) {
     result.errors.emplace_back("ConSan atomic fault plan no longer matches its pristine site");
@@ -1489,8 +1395,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
   std::array<uint32_t, 3> words{};
   std::memcpy(words.data(), result.replacement.data() + selected->file_offset, selected->size);
   std::span<uint8_t> atomic_instruction(reinterpret_cast<uint8_t *>(words.data()), selected->size);
-  if (address_plan != nullptr) {
-    const uint32_t address_delta = address_plan->address_delta_bytes.value_or(0u);
+  if (mutate_address) {
     if (address_delta == 0 || address_delta % sizeof(uint32_t) != 0 || address_delta > 0x7fffffu) {
       result.errors.emplace_back(
           "ConSan atomic address delta must be a positive aligned signed-24-bit offset");
@@ -1525,9 +1430,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     info.original_size = selected->size;
     result.patches.push_back(info);
   }
-  if (order_plan != nullptr) {
-    const ConSanAtomicOrderEdge order_edge =
-        order_plan->atomic_order_edge.value_or(ConSanAtomicOrderEdge::Any);
+  if (mutate_order) {
     const ConSanSyncSequence *sequence = order_boundary.sequence;
     const ConSanSyncEvent *fence = order_boundary.fence;
     std::optional<uint64_t> &release_wait_text_offset = order_boundary.release_wait_text_offset;
@@ -1613,7 +1516,7 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
     result.warnings.emplace_back("ConSan atomic fault removed associated " + removed_boundary +
                                  " while preserving " + selected->mnemonic);
   }
-  if (scope_plan != nullptr) {
+  if (mutate_scope) {
     const ConSanAtomicFaultRewriteResult rewrite =
         rewrite_consan_atomic_fault_scope_to_wave(atomic_instruction, encoding);
     if (!rewrite.rewritten()) {
@@ -1637,16 +1540,15 @@ static void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj
   }
   std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
   result.mark_modified();
-  if (address_plan != nullptr) {
+  if (mutate_address) {
     result.warnings.emplace_back("ConSan atomic fault rewrote " + selected->mnemonic +
-                                 " with validated address delta " +
-                                 std::to_string(*address_plan->address_delta_bytes));
+                                 " with validated address delta " + std::to_string(address_delta));
   }
 }
 
 static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                       const ConSanFaultSite *selected,
-                                      const ConSanFaultMutationPlan &plan,
+                                      std::optional<uint16_t> requested_target_address_vgpr,
                                       FaultApplicationState &result) {
   if (!consan_lds_address_fault_arch_supported(arch)) {
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
@@ -1659,11 +1561,11 @@ static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_co
         "ConSan LDS address fault selected an unsupported decoded instruction shape");
     return;
   }
-  if (!plan.target_address_vgpr) {
+  if (!requested_target_address_vgpr) {
     result.errors.emplace_back("ConSan LDS address fault requires an explicit replacement VGPR");
     return;
   }
-  const uint16_t target_address_vgpr = *plan.target_address_vgpr;
+  const uint16_t target_address_vgpr = *requested_target_address_vgpr;
   if (target_address_vgpr == *selected->address_vgpr) {
     result.errors.emplace_back(
         "ConSan LDS address fault requires a distinct 8-bit replacement VGPR");
@@ -1736,9 +1638,8 @@ static void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_co
 
 static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                            const OrdinaryAcquireMutationTarget *target,
-                                           const ConSanFaultMutationPlan *address_plan,
-                                           const ConSanFaultMutationPlan *order_plan,
-                                           const ConSanFaultMutationPlan *scope_plan,
+                                           bool mutate_address, bool mutate_order,
+                                           bool mutate_scope, uint32_t address_delta,
                                            FaultApplicationState &result) {
   if (!target) {
     result.errors.emplace_back("ConSan ordinary fault plan no longer matches its pristine site");
@@ -1783,8 +1684,7 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
     return info;
   };
 
-  if (address_plan != nullptr) {
-    const uint32_t address_delta = address_plan->address_delta_bytes.value_or(0u);
+  if (mutate_address) {
     if (address_delta == 0u || address_delta % sizeof(uint32_t) != 0u ||
         address_delta > 0x7fffffu) {
       result.errors.emplace_back(
@@ -1815,7 +1715,7 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->site->text_offset, target->site->size, {}));
   }
 
-  if (order_plan != nullptr) {
+  if (mutate_order) {
     const uint32_t nop = build_s_nop(0, consan_arch_for_target(code_object.target_id()));
     for (uint32_t offset = 0; offset < target->cache->size; offset += sizeof(uint32_t))
       std::memcpy(candidate.data() + target->cache->file_offset + offset, &nop, sizeof(nop));
@@ -1823,7 +1723,7 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->cache->text_offset, target->cache->size,
                                 target->cache->identity));
   }
-  if (scope_plan != nullptr) {
+  if (mutate_scope) {
     const auto current_encoding = decode_consan_ordinary_global_fault_encoding(target_instruction);
     if (!current_encoding || !target->load->raw_scope || !target->load->scope ||
         current_encoding->scope != *target->load->raw_scope ||
@@ -1845,111 +1745,84 @@ static void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                         std::make_move_iterator(patches.end()));
   result.mutation.applied_fault_logical_identity = target->sequence->identity;
   result.mark_modified();
-  if (address_plan != nullptr) {
+  if (mutate_address) {
     result.warnings.emplace_back("ConSan ordinary fault shifted global_load_b32 by validated " +
-                                 std::to_string(*address_plan->address_delta_bytes) + " byte(s)");
+                                 std::to_string(address_delta) + " byte(s)");
   }
-  if (order_plan != nullptr) {
+  if (mutate_order) {
     result.warnings.emplace_back(
         "ConSan ordinary fault removed associated global_inv while preserving the acquire load "
         "and waits");
   }
-  if (scope_plan != nullptr) {
+  if (mutate_scope) {
     result.warnings.emplace_back("ConSan ordinary fault lowered global_load_b32 scope to wave");
   }
 }
 
 namespace {
 
-[[nodiscard]] const ConSanFaultMutationPlan *
-find_fault_plan(std::span<const ConSanFaultMutationPlan> plans, ConSanFaultMutationKind kind) {
-  const auto plan = std::ranges::find(plans, kind, &ConSanFaultMutationPlan::kind);
-  return plan == plans.end() ? nullptr : &*plan;
-}
-
-[[nodiscard]] bool validate_fault_application_plans(std::span<const ConSanFaultMutationPlan> plans,
-                                                    const ProgramInventory &inventory,
-                                                    std::vector<std::string> &errors) {
-  for (size_t index = 0; index < plans.size(); ++index) {
-    const ConSanFaultMutationPlan &plan = plans[index];
-    if (!plan.well_formed()) {
-      errors.emplace_back("ConSan fault application received malformed typed plan " +
-                          std::to_string(index));
-      return false;
-    }
-    if (plan.source_code_object != inventory.code_object_id()) {
-      errors.emplace_back(
-          "ConSan fault application rejected a plan from a different pristine code object");
-      return false;
-    }
-    if (std::ranges::count(plans, plan.kind, &ConSanFaultMutationPlan::kind) != 1) {
-      errors.emplace_back(
-          "ConSan fault application received duplicate plans for one mutation kind");
-      return false;
-    }
-  }
-  return true;
+[[nodiscard]] bool has_fault_mutation(std::span<const ConSanFaultMutationPlan> mutations,
+                                      ConSanFaultMutationKind kind) {
+  return std::ranges::find(mutations, kind, &ConSanFaultMutationPlan::kind) != mutations.end();
 }
 
 } // namespace
 
-static void apply_resolved_consan_fault_mutations(
-    const AmdGpuCodeObject &code_object, rj_code_arch_t arch, const ConSanOptions &options,
-    const ResolvedFaultTargets &targets, std::span<const ConSanFaultMutationPlan> plans,
-    ConSanTransformArtifacts &result) {
-  if (!validate_fault_application_plans(plans, result.program_inventory, result.errors))
-    return;
+static void apply_resolved_consan_fault_mutations(const AmdGpuCodeObject &code_object,
+                                                  rj_code_arch_t arch, const ConSanOptions &options,
+                                                  const ResolvedFaultTargets &targets,
+                                                  std::span<const ConSanFaultMutationPlan> plans,
+                                                  ConSanTransformArtifacts &result) {
   FaultApplicationState transaction(result);
 
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::DropBarrier)) {
-    try_apply_barrier_drop_fault_patch(code_object, arch, targets, *plan, transaction);
+  if (has_fault_mutation(plans, ConSanFaultMutationKind::DropBarrier)) {
+    try_apply_barrier_drop_fault_patch(code_object, arch, targets, transaction);
   }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::MoveBarrierPair);
-      plan != nullptr && transaction.errors.empty()) {
-    try_apply_barrier_move_fault_patch(code_object, arch, targets, *plan,
+  if (has_fault_mutation(plans, ConSanFaultMutationKind::MoveBarrierPair) &&
+      transaction.errors.empty()) {
+    try_apply_barrier_move_fault_patch(code_object, arch, targets,
+                                       options.fault_barrier_move_direction,
                                        options.patched_image_growth_limit, transaction);
   }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::BarrierIdScope);
-      plan != nullptr && transaction.errors.empty()) {
-    try_apply_barrier_id_scope_fault_patch(code_object, *plan, transaction);
+  if (has_fault_mutation(plans, ConSanFaultMutationKind::BarrierIdScope) &&
+      transaction.errors.empty()) {
+    try_apply_barrier_id_scope_fault_patch(
+        code_object, targets.retarget_sequence, targets.retarget_group,
+        options.fault_barrier_target_id.value_or(0), transaction);
   }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::BarrierParticipantCount);
-      plan != nullptr && transaction.errors.empty() &&
-      transaction.outcome != ConSanTransformOutcome::Unsupported) {
-    try_apply_barrier_participant_fault_patch(code_object, *plan, transaction);
+  if (has_fault_mutation(plans, ConSanFaultMutationKind::BarrierParticipantCount) &&
+      transaction.errors.empty() && transaction.outcome != ConSanTransformOutcome::Unsupported) {
+    try_apply_barrier_participant_fault_patch(
+        code_object, targets.participant_group, targets.participant_init,
+        options.fault_barrier_target_participant_count.value_or(0), transaction);
   }
 
-  const ConSanFaultMutationPlan *atomic_address =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWrongAddress);
-  const ConSanFaultMutationPlan *atomic_order =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenOrder);
-  const ConSanFaultMutationPlan *atomic_scope =
-      find_fault_plan(plans, ConSanFaultMutationKind::AtomicWeakenScope);
+  const bool atomic_address =
+      has_fault_mutation(plans, ConSanFaultMutationKind::AtomicWrongAddress);
+  const bool atomic_order = has_fault_mutation(plans, ConSanFaultMutationKind::AtomicWeakenOrder);
+  const bool atomic_scope = has_fault_mutation(plans, ConSanFaultMutationKind::AtomicWeakenScope);
   if ((atomic_address || atomic_order || atomic_scope) && transaction.errors.empty()) {
     try_apply_atomic_fault_patch(code_object, arch, targets.atomic, targets.atomic_encoding,
                                  targets.atomic_order_boundary, atomic_address, atomic_order,
-                                 atomic_scope, transaction);
+                                 atomic_scope, options.fault_atomic_address_delta,
+                                 options.fault_atomic_order_edge, transaction);
   }
-  if (const ConSanFaultMutationPlan *plan =
-          find_fault_plan(plans, ConSanFaultMutationKind::LdsWrongAddress);
-      plan != nullptr && transaction.errors.empty()) {
-    try_apply_lds_fault_patch(code_object, arch, targets.lds, *plan, transaction);
+  if (has_fault_mutation(plans, ConSanFaultMutationKind::LdsWrongAddress) &&
+      transaction.errors.empty()) {
+    try_apply_lds_fault_patch(code_object, arch, targets.lds, options.fault_lds_address_vgpr,
+                              transaction);
   }
 
-  const ConSanFaultMutationPlan *ordinary_address =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWrongAddress);
-  const ConSanFaultMutationPlan *ordinary_order =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenOrder);
-  const ConSanFaultMutationPlan *ordinary_scope =
-      find_fault_plan(plans, ConSanFaultMutationKind::OrdinaryWeakenScope);
+  const bool ordinary_address =
+      has_fault_mutation(plans, ConSanFaultMutationKind::OrdinaryWrongAddress);
+  const bool ordinary_order =
+      has_fault_mutation(plans, ConSanFaultMutationKind::OrdinaryWeakenOrder);
+  const bool ordinary_scope =
+      has_fault_mutation(plans, ConSanFaultMutationKind::OrdinaryWeakenScope);
   if ((ordinary_address || ordinary_order || ordinary_scope) && transaction.errors.empty()) {
-    try_apply_ordinary_fault_patch(code_object,
-                                   targets.ordinary ? &*targets.ordinary : nullptr,
-                                   ordinary_address, ordinary_order, ordinary_scope, transaction);
+    try_apply_ordinary_fault_patch(code_object, targets.ordinary ? &*targets.ordinary : nullptr,
+                                   ordinary_address, ordinary_order, ordinary_scope,
+                                   options.fault_ordinary_address_delta, transaction);
   }
   transaction.mutation.fault.applied = applied_fault_mutation_count(transaction.patches);
   const bool mechanisms_succeeded = transaction.successful();

@@ -365,8 +365,6 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   ASSERT_EQ(dry_run.outcome, ConSanTransformOutcome::Unchanged);
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
   EXPECT_EQ(dry_run.fault_plans.front().kind, ConSanFaultMutationKind::BarrierParticipantCount);
-  EXPECT_EQ(dry_run.fault_plans.front().original_participant_count, 12u);
-  EXPECT_EQ(dry_run.fault_plans.front().target_participant_count, 8u);
   EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity,
             inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
 
@@ -1669,9 +1667,6 @@ TEST(ConSan, FaultBarrierConditionalMoveAdmitsProvenCompletingStructuredDiamond)
   const ConSanFaultMutationPlan &plan = dry_run.fault_plans.front();
   EXPECT_EQ(plan.barrier_move_cfg_contract,
             ConSanBarrierMoveCfgContract::CompletingStructuredDiamond);
-  EXPECT_EQ(plan.structured_guard_block_index, destination->structured_guard_block_index);
-  EXPECT_EQ(plan.structured_destination_block_index, destination->basic_block_index);
-  EXPECT_EQ(plan.structured_source_block_index, destination->structured_source_block_index);
 
   options.fault_dry_run = false;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -1759,12 +1754,6 @@ TEST(ConSan, FaultBarrierDivergentMoveAdmitsOnlyProvenStructuredExecDiamond) {
   const ConSanFaultMutationPlan &plan = dry_run.fault_plans.front();
   EXPECT_EQ(plan.barrier_move_cfg_contract,
             ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond);
-  EXPECT_EQ(plan.structured_guard_block_index, destination->structured_guard_block_index);
-  EXPECT_EQ(plan.structured_destination_block_index, destination->basic_block_index);
-  EXPECT_EQ(plan.structured_source_block_index, destination->structured_source_block_index);
-  EXPECT_EQ(plan.structured_guard_offset, 4u);
-  EXPECT_EQ(plan.structured_destination_offset, 8u);
-  EXPECT_EQ(plan.structured_source_offset, 16u);
 
   options.fault_dry_run = false;
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);

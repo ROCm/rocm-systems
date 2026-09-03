@@ -536,7 +536,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.barrier_move_destinations.push_back(std::move(published_destination));
 
   ConSanFaultMutationPlan published_fault_plan;
-  published_fault_plan.source_code_object = inventory.code_object_id();
   published_fault_plan.kind = ConSanFaultMutationKind::DropBarrier;
   published_fault_plan.primary_identity = "published-fault-plan";
   const ConSanFaultMutationPresentation expected_fault_plan = published_fault_plan;
@@ -581,9 +580,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ASSERT_EQ(published_diagnostics.fault_mutations.size(), 1u);
   EXPECT_EQ(published_diagnostics.fault_mutations.front(), expected_fault_plan);
   TransformResult malformed_fault_plan = published;
-  TransformResultTestAccess::corrupt_first_fault_plan_code_object(malformed_fault_plan);
-  EXPECT_FALSE(malformed_fault_plan.well_formed());
-  malformed_fault_plan = published;
   malformed_fault_plan.mutation.fault.planned = 0u;
   EXPECT_FALSE(malformed_fault_plan.well_formed());
   EXPECT_EQ(published_diagnostics.resource_summary.unsupported_plans, 1u);

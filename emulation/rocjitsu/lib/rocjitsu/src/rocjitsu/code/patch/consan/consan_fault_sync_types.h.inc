@@ -10,8 +10,7 @@ enum class ConSanFaultSiteKind : uint8_t {
 /// These values describe changes to the guest program, not patch encodings.
 /// Architecture-specific lowering can therefore consume the same intent while
 /// choosing different instruction rewrites. A new value must identify a
-/// distinct behavioral fault and define its required payload in
-/// `ConSanFaultMutationPlan::well_formed`.
+/// distinct behavioral fault.
 enum class ConSanFaultMutationKind : uint8_t {
   /// Remove one barrier instruction or one explicitly selected logical group.
   DropBarrier,
@@ -127,57 +126,9 @@ struct ConSanFaultMutationPresentation {
   bool operator==(const ConSanFaultMutationPresentation &) const = default;
 };
 
-/// Immutable planner-to-emitter contract for one validation-only corruption.
-///
-/// The planner binds a semantic fault to a pristine code object, stable site
-/// identities, and every value needed to perform the rewrite. The emitter may
-/// validate those facts against `ProgramInventory`, but must not select a
-/// different site from a caller index or reconstruct a target value from the
-/// original `MutationRequest`. Generic identity fields are shared because a
-/// barrier, atomic, and ordinary-memory fault all refer to the same semantic
-/// inventory vocabulary; kind-specific payloads remain optional and are
-/// admitted only in the combinations checked by `well_formed()`.
+/// Diagnostic description of one validation-only corruption admitted by the
+/// private resolution-and-mutation transaction.
 struct ConSanFaultMutationPlan : ConSanFaultMutationPresentation {
-  /// Content identity of the pristine image whose inventory produced this
-  /// plan. Applying the plan to any other image is a stale-plan error even if
-  /// a diagnostic identity string happens to collide.
-  ConSanCodeObjectId source_code_object;
-  /// Exact inventory sequence through which the primary site was selected.
-  /// This differs from `logical_sequence_identity` for a lifecycle or grouped
-  /// mutation whose externally meaningful identity spans multiple sequences.
-  std::optional<std::string> selection_sequence_identity;
-  /// Second exact inventory sequence selected by a grouped barrier drop.
-  std::optional<std::string> companion_selection_sequence_identity;
-  /// Structured-CFG coordinates retained only for a cross-block barrier move;
-  /// together they bind lowering to the exact proof established by analysis.
-  std::optional<uint32_t> structured_guard_block_index;
-  std::optional<uint32_t> structured_destination_block_index;
-  std::optional<uint32_t> structured_source_block_index;
-  std::optional<uint64_t> structured_guard_offset;
-  std::optional<uint64_t> structured_destination_offset;
-  std::optional<uint64_t> structured_source_offset;
-  /// Participant cardinality before and after a lifecycle-count mutation.
-  std::optional<uint32_t> original_participant_count;
-  std::optional<uint32_t> target_participant_count;
-  /// Positive aligned byte displacement used by atomic and ordinary
-  /// wrong-address mutations. No other mutation kind may carry it.
-  std::optional<uint32_t> address_delta_bytes;
-  /// Original and replacement encoded LDS address registers. Retaining both
-  /// makes the selected corruption independently inspectable and lets lowering
-  /// reject a stale decoded source operand.
-  std::optional<uint16_t> original_address_vgpr;
-  /// Exact ordering edge selected for an atomic weaken-order mutation.
-  std::optional<ConSanAtomicOrderEdge> atomic_order_edge;
-  /// Whether a single-instruction barrier drop was deliberately admitted even
-  /// though it removes only half of a qualified logical barrier.
-  bool destructive_incomplete_barrier_drop = false;
-
-  /// Return whether all common identities and kind-specific payloads form one
-  /// self-consistent semantic mutation. This is intentionally independent of
-  /// any particular `ProgramInventory`; application separately proves that the
-  /// source identity and referenced sites belong to its immutable inventory.
-  [[nodiscard]] bool well_formed() const;
-
   bool operator==(const ConSanFaultMutationPlan &) const = default;
 };
 
