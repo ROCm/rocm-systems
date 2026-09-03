@@ -7,8 +7,9 @@
 #include <gtest/gtest.h>
 
 #include "amd_smi/amdsmi.h"
+#include "unit_fixtures.h"
 
-TEST(GpuUnit, FabricPublicApiGetRejectsNullArguments) {
+TEST_F(GpuUnit, FabricPublicApiGetRejectsNullArguments) {
   auto info = amdsmi_fabric_info_t{};
   info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
 

@@ -18,6 +18,7 @@
 #include <string>
 
 #include "amd_smi/impl/amd_smi_fabric_ualink.h"
+#include "unit_fixtures.h"
 
 namespace amd::smi {
 
@@ -68,7 +69,7 @@ struct TempRoot {
   }
 };
 
-TEST(GpuUnit, FabricConfigPpodAllFieldsRoundTrip) {
+TEST_F(GpuUnit, FabricConfigPpodAllFieldsRoundTrip) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -111,7 +112,7 @@ TEST(GpuUnit, FabricConfigPpodAllFieldsRoundTrip) {
 
 // local_accelerator_count < list length: the serializer must stop at the count and
 // the reader must not resurrect a phantom tail from the write-side array.
-TEST(GpuUnit, FabricConfigPpodLocalAccelsStopAtCount) {
+TEST_F(GpuUnit, FabricConfigPpodLocalAccelsStopAtCount) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -140,7 +141,7 @@ TEST(GpuUnit, FabricConfigPpodLocalAccelsStopAtCount) {
 
 // A field left out of the write mask must read back at its guard sentinel, and the
 // read mask must report only the field that was actually persisted.
-TEST(GpuUnit, FabricConfigPpodPartialWriteLeavesUnwrittenAtSentinel) {
+TEST_F(GpuUnit, FabricConfigPpodPartialWriteLeavesUnwrittenAtSentinel) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -165,7 +166,7 @@ TEST(GpuUnit, FabricConfigPpodPartialWriteLeavesUnwrittenAtSentinel) {
 
 // A 0 in the active-accelerator list is not a real ID and must terminate the
 // serialized run; slots past it stay at the read sentinel.
-TEST(GpuUnit, FabricConfigVpodRoundTripAccelIdZeroPreserved) {
+TEST_F(GpuUnit, FabricConfigVpodRoundTripAccelIdZeroPreserved) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -201,7 +202,7 @@ TEST(GpuUnit, FabricConfigVpodRoundTripAccelIdZeroPreserved) {
   EXPECT_EQ(out.data.addr_mode, AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING);
 }
 
-TEST(GpuUnit, FabricConfigStationRoundTripFullBitmap) {
+TEST_F(GpuUnit, FabricConfigStationRoundTripFullBitmap) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -232,7 +233,7 @@ TEST(GpuUnit, FabricConfigStationRoundTripFullBitmap) {
 }
 
 // commit=true writes the subtree commit file after the masked fields.
-TEST(GpuUnit, FabricConfigPpodCommitWritesCommitFile) {
+TEST_F(GpuUnit, FabricConfigPpodCommitWritesCommitFile) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -254,7 +255,7 @@ TEST(GpuUnit, FabricConfigPpodCommitWritesCommitFile) {
 
 // commit=false validates and writes nothing: the driver ignores the staging files
 // unless a commit follows, so leaving values there would only feed the next commit.
-TEST(GpuUnit, FabricConfigNoCommitWritesNothing) {
+TEST_F(GpuUnit, FabricConfigNoCommitWritesNothing) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -271,7 +272,7 @@ TEST(GpuUnit, FabricConfigNoCommitWritesNothing) {
 }
 
 // device_supports_ualink=false is rejected even when the sysfs tree exists.
-TEST(GpuUnit, FabricConfigApplyUnsupportedDeviceNotSupported) {
+TEST_F(GpuUnit, FabricConfigApplyUnsupportedDeviceNotSupported) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -284,7 +285,7 @@ TEST(GpuUnit, FabricConfigApplyUnsupportedDeviceNotSupported) {
 
 // Input validation precedes the support gate: a bad version is INVAL regardless of
 // device support, preserving the validation-before-hardware-gate contract.
-TEST(GpuUnit, FabricConfigApplyValidationRunsBeforeSupportGate) {
+TEST_F(GpuUnit, FabricConfigApplyValidationRunsBeforeSupportGate) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -294,7 +295,7 @@ TEST(GpuUnit, FabricConfigApplyValidationRunsBeforeSupportGate) {
   EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, false, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyLocalAccelCountOutOfRangeInval) {
+TEST_F(GpuUnit, FabricConfigApplyLocalAccelCountOutOfRangeInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -305,7 +306,7 @@ TEST(GpuUnit, FabricConfigApplyLocalAccelCountOutOfRangeInval) {
   EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyAccelIdOutOfRangeInval) {
+TEST_F(GpuUnit, FabricConfigApplyAccelIdOutOfRangeInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -316,7 +317,7 @@ TEST(GpuUnit, FabricConfigApplyAccelIdOutOfRangeInval) {
   EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyLocalAccelIdOutOfRangeInval) {
+TEST_F(GpuUnit, FabricConfigApplyLocalAccelIdOutOfRangeInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -328,7 +329,7 @@ TEST(GpuUnit, FabricConfigApplyLocalAccelIdOutOfRangeInval) {
   EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyVpodActiveAccelOutOfRangeInval) {
+TEST_F(GpuUnit, FabricConfigApplyVpodActiveAccelOutOfRangeInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -353,7 +354,7 @@ TEST(GpuUnit, FabricConfigApplyVpodActiveAccelOutOfRangeInval) {
   EXPECT_EQ(fabric_ualink::apply_vpod_config_at(root.path, true, gap), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyVpodIdZeroInval) {
+TEST_F(GpuUnit, FabricConfigApplyVpodIdZeroInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -364,7 +365,7 @@ TEST(GpuUnit, FabricConfigApplyVpodIdZeroInval) {
   EXPECT_EQ(fabric_ualink::apply_vpod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyPpodIdZeroInval) {
+TEST_F(GpuUnit, FabricConfigApplyPpodIdZeroInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -375,7 +376,7 @@ TEST(GpuUnit, FabricConfigApplyPpodIdZeroInval) {
   EXPECT_EQ(fabric_ualink::apply_ppod_config_at(root.path, true, in), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, FabricConfigApplyPpodIdUnsetSentinelInval) {
+TEST_F(GpuUnit, FabricConfigApplyPpodIdUnsetSentinelInval) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -390,7 +391,7 @@ TEST(GpuUnit, FabricConfigApplyPpodIdUnsetSentinelInval) {
 }
 
 // Missing write subtree under the root reports NOT_SUPPORTED rather than crashing.
-TEST(GpuUnit, FabricConfigQueryMissingSubdirNotSupported) {
+TEST_F(GpuUnit, FabricConfigQueryMissingSubdirNotSupported) {
   auto tmpl = std::string("/tmp/amdsmi_fabric_empty_XXXXXX");
   ASSERT_NE(::mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed";
   const auto empty_root = std::string(tmpl);
@@ -406,7 +407,7 @@ TEST(GpuUnit, FabricConfigQueryMissingSubdirNotSupported) {
 }
 
 // A commit with nothing freshly staged would flush a prior partial write's residue.
-TEST(GpuUnit, FabricConfigBareCommitIsRejected) {
+TEST_F(GpuUnit, FabricConfigBareCommitIsRejected) {
   auto root = TempRoot{};
   ASSERT_FALSE(root.path.empty()) << "mkdtemp failed";
 
@@ -419,7 +420,7 @@ TEST(GpuUnit, FabricConfigBareCommitIsRejected) {
 
 // The unified getter reads the flat surface, which the driver syncs on commit. Fields must
 // come back even when the setup/config/stations write subtrees are absent.
-TEST(GpuUnit, FabricConfigQueryFlatSurfaceWithoutWriteSubtrees) {
+TEST_F(GpuUnit, FabricConfigQueryFlatSurfaceWithoutWriteSubtrees) {
   auto tmpl = std::string("/tmp/amdsmi_fabric_flat_XXXXXX");
   ASSERT_NE(::mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed";
   const auto flat_root = std::string(tmpl);
