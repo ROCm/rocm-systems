@@ -3,12 +3,9 @@
 
 #pragma once
 
-#include "backends/amd_smi/gpu_types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
-#include <algorithm>
-#include <array>
 #include <concepts>
 #include <cstdint>
 #include <fmt/format.h>
@@ -131,24 +128,9 @@ public:
             }
             if(m_supported_metrics.bits.jpeg_busy)
             {
-                // jpeg_busy is an instantaneous snapshot; on fast VCN hardware the
-                // engine completes decodes within a single polling interval, causing
-                // all samples to read 0.  Track the running maximum across polls so
-                // that at least one non-zero sample is visible when the engine was
-                // active.
                 for(size_t i = 0; i < raw.xcp_stats.size(); ++i)
                 {
-                    const auto& src_busy = raw.xcp_stats[i].jpeg_busy;
-                    auto&       max_busy = m_jpeg_busy_max[i];
-                    auto&       dst_busy = gpu_metrics.xcp_stats[i].jpeg_busy;
-                    for(size_t j = 0; j < src_busy.size(); ++j)
-                    {
-                        if(src_busy[j] != METRIC_VALUE_NOT_SUPPORTED_16)
-                        {
-                            max_busy[j] = std::max(max_busy[j], src_busy[j]);
-                        }
-                        dst_busy[j] = max_busy[j];
-                    }
+                    gpu_metrics.xcp_stats[i].jpeg_busy = raw.xcp_stats[i].jpeg_busy;
                 }
             }
             if(m_supported_metrics.bits.jpeg_activity)
@@ -424,9 +406,6 @@ private:
     mutable std::optional<std::string> m_bdf;
     bool                               m_is_supported = false;
     sdma_state                         m_sdma_state;
-    // Running maximum of per-XCP jpeg_busy values; see get_metrics() for rationale.
-    std::array<std::array<std::uint16_t, backend::MAX_NUM_JPEG_V1>, backend::MAX_NUM_XCP>
-        m_jpeg_busy_max = {};
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu

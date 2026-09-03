@@ -112,23 +112,8 @@ else()
     videodecode_message(
         AUTHOR_WARNING
         "${rocdecode_ROOT_DIR}/share/rocdecode/video contains no H264/H265/AV1 MP4 files; "
-        "falling back to bundled sample videos"
+        "videodecode tests will be skipped due to missing video data"
     )
-    # Fall back to the sample videos bundled with rocprofiler-systems so that
-    # the videodecode tests can run even on non-test ROCm builds that do not
-    # ship the rocdecode H264/H265/AV1 video dataset.
-    set(_fallback_dir "${CMAKE_CURRENT_LIST_DIR}/sample_videos")
-    if(EXISTS "${_fallback_dir}")
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
-        file(GLOB_RECURSE _fallback_files "${_fallback_dir}/*")
-        file(COPY ${_fallback_files} DESTINATION "${CMAKE_BINARY_DIR}/videos")
-    else()
-        videodecode_message(
-            AUTHOR_WARNING
-            "Bundled sample videos directory ${_fallback_dir} also does not exist; "
-            "videodecode tests will be skipped due to missing video data"
-        )
-    endif()
 endif()
 
 # Find FFMPEG

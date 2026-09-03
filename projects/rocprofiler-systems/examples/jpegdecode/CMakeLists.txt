@@ -114,34 +114,8 @@ function(copy_image_files_and_make_copies)
         message(
             AUTHOR_WARNING
             "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist; "
-            "falling back to bundled sample images"
+            "jpeg-decode tests will be skipped due to missing image data"
         )
-        # Fall back to the sample images bundled with rocprofiler-systems so that
-        # the jpeg-decode tests can run even on non-test ROCm builds that do not
-        # ship the rocjpeg image dataset.
-        set(_fallback_dir "${CMAKE_CURRENT_LIST_DIR}/sample_images")
-        if(EXISTS "${_fallback_dir}")
-            file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/images")
-            file(GLOB_RECURSE _fallback_files "${_fallback_dir}/*")
-            file(COPY ${_fallback_files} DESTINATION "${CMAKE_BINARY_DIR}/images")
-            set(NUM_COPIES 20)
-            foreach(_file ${_fallback_files})
-                get_filename_component(_fname ${_file} NAME_WE)
-                foreach(i RANGE 1 ${NUM_COPIES})
-                    configure_file(
-                        "${_file}"
-                        "${CMAKE_BINARY_DIR}/images/${_fname}_copy${i}.jpg"
-                        COPYONLY
-                    )
-                endforeach()
-            endforeach()
-        else()
-            message(
-                AUTHOR_WARNING
-                "Bundled sample images directory ${_fallback_dir} also does not exist; "
-                "jpeg-decode tests will be skipped due to missing image data"
-            )
-        endif()
     endif()
 endfunction()
 

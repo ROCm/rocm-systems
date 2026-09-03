@@ -68,80 +68,13 @@ def require_video_data(rocprof_config) -> None:
 
 
 @pytest.fixture
-def require_rocdecode_support(rocprof_config) -> None:
-    """Skip if the rocDecode VA-API driver cannot be initialized on this system.
-
-    rocDecode uses VA-API for hardware video decoding. On some GPUs the VA
-    driver is present but libva cannot load it — either because the driver
-    exports no __vaDriverInit_* symbol, or because it exports a version
-    (__vaDriverInit_1_22) that does not match what the installed libva expects
-    (__vaDriverInit_1_0). Either way, every decode attempt aborts at runtime.
-
-    A static symbol check (nm -D) is insufficient because the expected symbol
-    name is determined by the installed libva version at runtime, not by the
-    driver's exported symbols. Instead, probe by running the videodecode binary
-    without LD_PRELOAD against a single video file and checking the output for
-    known VA-API initialisation failure patterns. The probe completes quickly on
-    both supported and unsupported systems.
-    """
-    import subprocess
-    import os
-    import shutil
-    import tempfile
-
-    videodecode_bin = rocprof_config.rocprofsys_examples_dir / "videodecode"
-    if not videodecode_bin.exists():
-        return  # Binary missing; let the test fail naturally
-
-    videos_dir = rocprof_config.rocprofsys_examples_dir / "videos"
-    if not videos_dir.is_dir():
-        return  # No videos dir; require_video_data fixture will skip
-    mp4_files = list(videos_dir.glob("*.mp4"))
-    if not mp4_files:
-        return  # No videos; require_video_data fixture will skip
-
-    # Strip LD_PRELOAD so rocprofiler-systems does not interfere with the probe.
-    env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
-
-    # Copy ALL available videos into the probe directory so that we catch
-    # mixed-codec failure scenarios. Some codecs (H.264) may decode fine on a
-    # given GPU while others (H.265, AV1) fail. Running with a single file
-    # could miss the failing codec entirely if that file happened to succeed.
-    # With all files present, H.265 is processed (printing the __vaDriverInit
-    # error and skipping the file) before the AV1 file triggers an uncaught
-    # C++ exception; subprocess.run() captures the full output before the crash.
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for mp4 in mp4_files:
-            shutil.copy2(str(mp4), tmpdir)
-        try:
-            result = subprocess.run(
-                [str(videodecode_bin), "-i", tmpdir, "-t", "1"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env=env,
-            )
-        except subprocess.TimeoutExpired:
-            return  # Hanging; let the test surface the problem
-
-    combined = result.stdout + result.stderr
-    # Known failure patterns that indicate the driver stack cannot support
-    # video decode on this GPU:
-    #   "has no function __vaDriverInit" — libva cannot find the VA-API init symbol
-    #   "vaInitialize failed"            — VA-API init failed for any reason
-    #   "terminate called"               — uncaught C++ exception from rocDecode
-    va_errors = (
-        "has no function __vaDriverInit",
-        "vaInitialize failed",
-        "terminate called",
-    )
-    if any(err in combined for err in va_errors):
+def require_video_decode_support(gpu_info) -> None:
+    """Skip on architectures where rocDecode VA-API is not yet supported."""
+    if gpu_info._is_gfx1250:
         pytest.skip(
-            "rocDecode VA-API initialization failed or the GPU does not support "
-            "one or more required video codecs; "
-            "video decode is not fully supported by the current driver stack for this GPU."
+            "Video decode not yet supported on gfx1250: "
+            "the current VA-API stack lacks rocDecode support for this GPU"
         )
-
 
 # =============================================================================
 # Video decode tests
@@ -166,7 +99,7 @@ class TestVideoDecode(RocprofsysTest):
         video_decode_rules,
         get_run_args,
         require_video_data,
-        require_rocdecode_support,
+        require_video_decode_support,
     ):
         result = self.run_test(
             mode,
