@@ -302,10 +302,11 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   return body;
 }
 
-[[nodiscard]] std::optional<MoiFinalizedAccessBody> finalize_moi_access_body(
-    std::vector<uint32_t> body, uint64_t body_text_offset, uint64_t planned_body_size,
-    const MoiAccessContinuationPlan &continuation, rj_code_arch_t arch,
-    std::string_view probe_name, std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<MoiFinalizedAccessBody>
+finalize_moi_access_body(std::vector<uint32_t> body, uint64_t body_text_offset,
+                         uint64_t planned_body_size, const MoiAccessContinuationPlan &continuation,
+                         rj_code_arch_t arch, std::string_view probe_name,
+                         std::vector<std::string> &errors) {
   if (continuation.displaced_tail_word_count > body.size()) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " lost its displaced continuation");
@@ -374,9 +375,9 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
   case MoiAccessTransferKind::IndirectJump: {
     const size_t return_begin = body.size();
-    if (!append_moi_scc_preserving_indirect_jump(
-            body, body_text_offset, continuation.return_target, *continuation.pc_sgpr,
-            *continuation.scc_save_sgpr, continuation.capture_scc, arch)) {
+    if (!append_moi_scc_preserving_indirect_jump(body, body_text_offset, continuation.return_target,
+                                                 *continuation.pc_sgpr, *continuation.scc_save_sgpr,
+                                                 continuation.capture_scc, arch)) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                           " could not encode its indirect return");
       return std::nullopt;
@@ -403,10 +404,10 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
     break;
   }
 
-  const size_t continuation_payload_words = continuation.deferred_guest_words.size() +
-                                            displaced_tail.size();
-  const size_t transfer_and_suffix_words = body.size() -
-                                           (continuation_begin + continuation_payload_words);
+  const size_t continuation_payload_words =
+      continuation.deferred_guest_words.size() + displaced_tail.size();
+  const size_t transfer_and_suffix_words =
+      body.size() - (continuation_begin + continuation_payload_words);
   if ((body.size() - transfer_and_suffix_words) * sizeof(uint32_t) != planned_body_size) {
     errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                         " body size changed after placing its guest continuation");
@@ -414,8 +415,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
 
   if (continuation.empty_exec_guard_word) {
-    size_t target = continuation.empty_exec_resumes_at_transfer ? transfer_word
-                                                                : continuation_begin;
+    size_t target =
+        continuation.empty_exec_resumes_at_transfer ? transfer_word : continuation_begin;
     if (continuation.empty_exec_resumes_at_displaced_tail) {
       if (continuation.displaced_tail_word_count > continuation_begin) {
         errors.emplace_back("ConSan MOI " + std::string(probe_name) +
@@ -425,15 +426,14 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
       target = continuation_begin - continuation.displaced_tail_word_count;
     }
     const size_t guard = *continuation.empty_exec_guard_word;
-    if (guard >= body.size() || target <= guard || target - guard - 1u >
-                                                   static_cast<size_t>(
-                                                       std::numeric_limits<int16_t>::max())) {
+    if (guard >= body.size() || target <= guard ||
+        target - guard - 1u > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                           " empty-wave guard cannot reach its continuation");
       return std::nullopt;
     }
-    const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-        static_cast<int16_t>(target - guard - 1u), arch);
+    const auto skip_empty_wave =
+        instrumentation::build_s_cbranch_execz(static_cast<int16_t>(target - guard - 1u), arch);
     if (!skip_empty_wave) {
       errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                           " could not encode its empty-wave guard");
@@ -443,17 +443,114 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   }
   return MoiFinalizedAccessBody{
       .words = std::move(body),
-      .deferred_guest_offset = deferred_guest_word
-                                   ? std::optional<uint32_t>(static_cast<uint32_t>(
-                                         *deferred_guest_word * sizeof(uint32_t)))
-                                   : std::nullopt,
+      .deferred_guest_offset = deferred_guest_word ? std::optional<uint32_t>(static_cast<uint32_t>(
+                                                         *deferred_guest_word * sizeof(uint32_t)))
+                                                   : std::nullopt,
   };
 }
 
-[[nodiscard]] bool emit_moi_access_programs(
-    std::vector<uint8_t> &text, std::vector<MoiAccessPatchProgram> programs,
-    rj_code_arch_t arch, std::string_view probe_name, std::vector<ConSanPatchInfo> &patches,
-    std::vector<ConSanCommittedLowering> &commits, std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<MoiAccessPatchProgram>
+compile_moi_access_program(const MoiPlannedAccessPatch &planned, MoiAccessProgramRecipe recipe,
+                           rj_code_arch_t arch, std::string_view probe_name,
+                           std::vector<std::string> &errors) {
+  if (planned.candidate == nullptr)
+    return std::nullopt;
+  const ConSanMoiCandidate &candidate = *planned.candidate;
+  MoiAccessPatchProgram program;
+  program.publication = planned.placement.kind == DbiPatchPlacementKind::AppendedCave
+                            ? MoiAccessBodyPublication::Append
+                            : MoiAccessBodyPublication::Overwrite;
+  program.body_offset = planned.placement.kind == DbiPatchPlacementKind::AppendedCave
+                            ? planned.placement.body_offset
+                            : candidate.anchor();
+  program.pad_to_body_offset = recipe.pad_to_body_offset;
+  program.reserved_regions = std::move(recipe.reserved_regions);
+  program.trailing_reserved_word_count = recipe.trailing_reserved_word_count;
+
+  if (planned.placement.kind == DbiPatchPlacementKind::AppendedCave) {
+    const uint64_t cave_text_offset = planned.placement.body_offset;
+    program.entry_target =
+        planned.branch_only_route && !planned.branch_only_route->entry_relay_offsets.empty()
+            ? planned.branch_only_route->entry_relay_offsets.front()
+            : planned.entry_island_offset.value_or(cave_text_offset);
+    if (!planned.dense_call_anchor) {
+      program.anchor = MoiAppendedAnchorPlan{
+          .candidate_anchor = candidate.anchor(),
+          .placement_anchor = planned.placement.anchor_offset,
+          .original_size = planned.placement.original_size,
+          .entry_island_at_anchor = planned.entry_island_at_anchor,
+      };
+    }
+    if (planned.entry_island_offset && !planned.dense_call_anchor) {
+      if (recipe.entry_island_words.empty()) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " lost its compiled entry island");
+        return std::nullopt;
+      }
+      program.entry_island = MoiEntryIslandPlan{
+          .candidate_anchor = candidate.anchor(),
+          .island_offset = planned.entry_island_offset,
+          .entry_island_at_anchor = planned.entry_island_at_anchor,
+          .owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets,
+      };
+      program.entry_island_words = std::move(recipe.entry_island_words);
+    }
+    auto body = assemble_moi_appended_body(planned, recipe.probe_words, probe_name, errors,
+                                           recipe.body_options);
+    if (!body)
+      return std::nullopt;
+    if (recipe.continuation.empty_exec_guard_word &&
+        recipe.continuation.empty_exec_resumes_at_displaced_tail &&
+        recipe.patch.branch_only_route && recipe.patch.branch_only_route->borrowed_entry()) {
+      if (planned.displaced_tail_words.size() > body->size())
+        return std::nullopt;
+      const size_t displaced_tail_begin = body->size() - planned.displaced_tail_words.size();
+      recipe.patch.branch_only_route->borrowed_entry()->empty_exec_continuation_offset =
+          cave_text_offset + displaced_tail_begin * sizeof(uint32_t);
+    }
+    auto finalized =
+        finalize_moi_access_body(std::move(*body), cave_text_offset, planned.placement.body_size,
+                                 recipe.continuation, arch, probe_name, errors);
+    if (!finalized)
+      return std::nullopt;
+    if (finalized->deferred_guest_offset) {
+      recipe.patch.relocated_guest_instruction_offset =
+          cave_text_offset + *finalized->deferred_guest_offset;
+    } else if (recipe.body_options.body_guest_instruction_offset != nullptr) {
+      recipe.patch.relocated_guest_instruction_offset =
+          cave_text_offset + *recipe.body_options.body_guest_instruction_offset;
+    }
+    program.body_words = std::move(finalized->words);
+    recipe.patch.trampoline_offset = cave_text_offset;
+    recipe.patch.original_size = planned.placement.original_size;
+    recipe.patch.trampoline_size =
+        static_cast<uint32_t>(program.body_words.size() * sizeof(uint32_t));
+  } else {
+    const uint64_t patch_bytes = recipe.probe_words.size() * sizeof(uint32_t);
+    if (patch_bytes != planned.placement.body_size) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) + " final patch size changed");
+      return std::nullopt;
+    }
+    program.body_words = std::move(recipe.probe_words);
+    recipe.patch.trampoline_offset = candidate.anchor() + candidate.size();
+    recipe.patch.original_size = static_cast<uint32_t>(patch_bytes);
+    recipe.patch.trampoline_size = 0;
+    if (recipe.inline_guest_offset)
+      recipe.patch.relocated_guest_instruction_offset =
+          candidate.anchor() + *recipe.inline_guest_offset;
+  }
+  program.patch = std::move(recipe.patch);
+  program.branch_only_route = planned.branch_only_route;
+  program.return_target = planned.placement.return_target;
+  return program;
+}
+
+[[nodiscard]] bool emit_moi_access_programs(std::vector<uint8_t> &text,
+                                            std::vector<MoiAccessPatchProgram> programs,
+                                            rj_code_arch_t arch, std::string_view probe_name,
+                                            std::vector<ConSanPatchInfo> &patches,
+                                            std::vector<ConSanCommittedLowering> &commits,
+                                            std::vector<std::string> &errors) {
   commits.reserve(commits.size() + programs.size());
   patches.reserve(patches.size() + programs.size());
   for (MoiAccessPatchProgram &program : programs) {
@@ -477,9 +574,8 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                             " emitted a stale appended-body mapping");
         return false;
       }
-      if (program.anchor &&
-          !write_moi_appended_anchor(text, *program.anchor, program.entry_target, arch, probe_name,
-                                     errors)) {
+      if (program.anchor && !write_moi_appended_anchor(text, *program.anchor, program.entry_target,
+                                                       arch, probe_name, errors)) {
         return false;
       }
       if (program.entry_island &&
@@ -498,8 +594,7 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
         return false;
       }
       if (program.body_offset > text.size() || body_bytes > text.size() - program.body_offset) {
-        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                            " inline body exceeds .text");
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) + " inline body exceeds .text");
         return false;
       }
       std::memcpy(text.data() + program.body_offset, program.body_words.data(),
@@ -511,9 +606,9 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
     if (program.branch_only_route) {
       std::string relay_error;
       const ConSanPatchInfo &patch = patches.back();
-      if (!BranchOnlyRelayRouter::emit_and_record(
-              text, *program.branch_only_route, patch.trampoline_offset, program.return_target,
-              arch, patches, &relay_error)) {
+      if (!BranchOnlyRelayRouter::emit_and_record(text, *program.branch_only_route,
+                                                  patch.trampoline_offset, program.return_target,
+                                                  arch, patches, &relay_error)) {
         errors.emplace_back("ConSan MOI " + std::string(probe_name) + " " + relay_error);
         return false;
       }

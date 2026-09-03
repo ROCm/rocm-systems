@@ -636,3 +636,22 @@ the common protocol plus its two first adapters is still approximately
 line-neutral. Commit/rollback, multi-slot cardinality, typed payload stores,
 and loser accounting remain mode-local and are the deletion frontier for the
 rest of Thesis B.
+
+### 12.5 Access-program recipe checkpoint
+
+The three materially different access compilers now hand one
+`MoiAccessProgramRecipe` to `compile_moi_access_program`. Record/Replay keeps
+its borrowed-entry and relay facts, Sampled keeps its runtime-gate evidence,
+and InlineShadow keeps its exact-evidence leaf, but none independently
+reconstructs appended anchors, entry islands, body placement, displaced or
+deferred guest continuation geometry, relocated-guest attribution, or inline
+patch geometry. The architecture-boundary test requires all three consumers
+and rejects any return of the old assembly/finalization sequence to mode code.
+
+The focused InlineShadow, Sampled, Record/Replay, FirstLight, dynamic-access,
+automatic-record, branch-only, and many-access tests pass. This cutover removes
+48 physical production lines net, and the complete 4,765-test nonphysical
+ConSan matrix passes. It is useful protocol groundwork but is far below the
+macro-slice threshold. It must therefore feed a larger replacement of the
+parallel mode-local access planners rather than be counted as an
+Eighth-refactoring result in its own right.

@@ -569,8 +569,7 @@ void try_apply_first_light_access_record_patch(
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
         result.moi_operating_point, resources->owner_descriptor_file_offsets);
     if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_point, result.moi_operating_point,
-            resources->owner_descriptor_file_offsets,
+            candidate_point, result.moi_operating_point, resources->owner_descriptor_file_offsets,
             private_layout ? &*private_layout : nullptr)) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe found no common entry workgroup assignment");
@@ -1107,350 +1106,295 @@ void try_apply_first_light_access_record_patch(
   }
 
   CodeObjectPatcher patcher(code_object);
-    if (!apply_moi_appended_access_descriptor_requirements(
-            patcher, code_object, options, descriptor_requirements, scalar_requirements,
-            private_requirements, nullptr, arch, result.program_inventory, result.errors))
+  if (!apply_moi_appended_access_descriptor_requirements(
+          patcher, code_object, options, descriptor_requirements, scalar_requirements,
+          private_requirements, nullptr, arch, result.program_inventory, result.errors))
+    return;
+  std::vector<uint8_t> new_text;
+  std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> lowering_commits;
+  patches.reserve(planned_patches.size());
+  lowering_commits.reserve(planned_patches.size());
+  if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
+                                           direct_branch_reservoirs, "first-light probe", arch,
+                                           new_text, patches, result.errors))
+    return;
+  const auto dense_groups = group_moi_dense_access_patches(planned_patches);
+  if (!emit_moi_dense_access_groups(
+          dense_groups, dense_entry_hosts, options, result.moi_operating_point, access_slot_words,
+          "first-light probe", arch, new_text, patches, result.errors,
+          [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
+            return point.moi_exec_save_sgpr.has_value();
+          }))
+    return;
+  std::vector<MoiAccessPatchProgram> programs;
+  programs.reserve(planned_patches.size());
+  for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
+    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
+    ConSanMoiOperatingPoint candidate_point = operating_point;
+    if (!apply_moi_transient_sgpr_assignment(
+            options, candidate_point, result.moi_operating_point,
+            planned_patch.resources.owner_descriptor_file_offsets) ||
+        !apply_record_replay_entry_workgroup_assignment(
+            candidate_point, result.moi_operating_point,
+            planned_patch.resources.owner_descriptor_file_offsets,
+            planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr) ||
+        !candidate_point.moi_exec_save_sgpr) {
+      result.errors.emplace_back(
+          "ConSan MOI first-light probe lost its owner-local register assignment");
       return;
-    std::vector<uint8_t> new_text;
-    std::vector<ConSanPatchInfo> patches;
-    std::vector<ConSanCommittedLowering> lowering_commits;
-    patches.reserve(planned_patches.size());
-    lowering_commits.reserve(planned_patches.size());
-    if (!initialize_moi_appended_access_text(patcher, use_indirect_appended, indirect_body_begin,
-                                             direct_branch_reservoirs, "first-light probe", arch,
-                                             new_text, patches, result.errors))
-      return;
-    const auto dense_groups = group_moi_dense_access_patches(planned_patches);
-    if (!emit_moi_dense_access_groups(
-            dense_groups, dense_entry_hosts, options, result.moi_operating_point, access_slot_words,
-            "first-light probe", arch, new_text, patches, result.errors,
-            [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
-              return point.moi_exec_save_sgpr.has_value();
-            }))
-      return;
-    std::vector<MoiAccessPatchProgram> programs;
-    programs.reserve(planned_patches.size());
-    for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
-      const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      ConSanMoiOperatingPoint candidate_point = operating_point;
-      if (!apply_moi_transient_sgpr_assignment(
-              options, candidate_point, result.moi_operating_point,
-              planned_patch.resources.owner_descriptor_file_offsets) ||
-          !apply_record_replay_entry_workgroup_assignment(
-              candidate_point, result.moi_operating_point,
-              planned_patch.resources.owner_descriptor_file_offsets,
-              planned_patch.private_state_layout ? &*planned_patch.private_state_layout
-                                                 : nullptr) ||
-          !candidate_point.moi_exec_save_sgpr) {
-        result.errors.emplace_back(
-            "ConSan MOI first-light probe lost its owner-local register assignment");
-        return;
-      }
-      const MoiScalarAbiPlan scalar_abi =
-          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
-      auto words = build_first_light_access_record_words(
-          bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
-          planned_patch.record_index, planned_record_count, planned_patch.logical_range_index,
-          layout, planned_patch.spill_overlaps_guest_operands,
-          planned_patch.spill ? &*planned_patch.spill : nullptr,
-          planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr,
-          planned_patch.owner_derivation, result.errors);
-      if (!words)
-        return;
-
-      ConSanPatchInfo info;
-      info.kind = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
-                      ? ConSanPatchKind::TrampolineMoiAccessRecordStore
-                      : ConSanPatchKind::InlineMoiAccessRecordStore;
-      info.anchor_offset = candidate.anchor();
-      note_moi_access_patch_info(info, planned_patch);
-      if (planned_patch.borrowed_entry) {
-        if (!info.branch_only_route) {
-          result.errors.emplace_back(
-              "ConSan MOI first-light borrowed entry lost its branch-only return route");
-          return;
-        }
-        const ConSanIndirectJumpSgprs jump_sgprs = *scalar_abi.indirect_jump;
-        info.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
-            .jump = jump_sgprs,
-            .backup_vgpr = planned_patch.borrowed_entry->backup_vgpr,
-            .empty_exec_continuation_offset = std::nullopt,
-        };
-      }
-      MoiAccessPatchProgram program;
-      program.publication = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
-                                ? MoiAccessBodyPublication::Append
-                                : MoiAccessBodyPublication::Overwrite;
-      program.body_offset = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
-                                ? planned_patch.placement.body_offset
-                                : candidate.anchor();
-
-      if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
-        const uint64_t cave_text_offset = planned_patch.placement.body_offset;
-        program.pad_to_body_offset = true;
-        const uint64_t entry_target =
-            planned_patch.branch_only_route &&
-                    !planned_patch.branch_only_route->entry_relay_offsets.empty()
-                ? planned_patch.branch_only_route->entry_relay_offsets.front()
-                : planned_patch.entry_island_offset.value_or(planned_patch.placement.body_offset);
-        program.entry_target = entry_target;
-        if (!planned_patch.dense_call_anchor)
-          program.anchor = MoiAppendedAnchorPlan{
-              .candidate_anchor = candidate.anchor(),
-              .placement_anchor = planned_patch.placement.anchor_offset,
-              .original_size = planned_patch.placement.original_size,
-              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
-          };
-
-        if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
-          if (!scalar_abi.special_state || !scalar_abi.indirect_jump) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe lost its indirect-jump SGPR assignment");
-            return;
-          }
-          std::vector<uint32_t> island_words;
-          if (planned_patch.borrowed_entry) {
-            island_words = planned_patch.borrowed_entry->island_words;
-          } else if (planned_patch.runtime_workgroup_gate) {
-            if (!planned_patch.runtime_workgroup_sources) {
-              result.errors.emplace_back(
-                  "ConSan MOI first-light probe lost its runtime workgroup sources");
-              return;
-            }
-            auto gate = build_moi_runtime_workgroup_gate_island_words(
-                bytes, candidate, *planned_patch.runtime_workgroup_gate,
-                *planned_patch.runtime_workgroup_sources, *planned_patch.entry_island_offset,
-                cave_text_offset, planned_patch.placement.return_target,
-                planned_patch.entry_island_word_count, arch);
-            if (gate)
-              island_words = std::move(*gate);
-          } else if (append_moi_scc_preserving_indirect_jump(
-                         island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                         scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
-                         /*capture_scc=*/true, arch)) {
-            island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
-          }
-          if (island_words.size() != planned_patch.entry_island_word_count) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe could not encode its entry island");
-            return;
-          }
-          program.entry_island = MoiEntryIslandPlan{
-              .candidate_anchor = candidate.anchor(),
-              .island_offset = planned_patch.entry_island_offset,
-              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
-              .owner_descriptor_file_offsets =
-                  planned_patch.resources.owner_descriptor_file_offsets,
-          };
-          program.entry_island_words = std::move(island_words);
-        }
-
-        std::vector<uint32_t> dense_gate_words;
-        if (planned_patch.dense_call_anchor && planned_patch.runtime_workgroup_gate) {
-          if (!planned_patch.runtime_workgroup_sources) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe lost its dense runtime workgroup sources");
-            return;
-          }
-          auto gate = build_moi_runtime_workgroup_gate_call_words(
-              bytes.subspan(candidate.file_offset, candidate.size()),
-              *planned_patch.runtime_workgroup_gate, *planned_patch.runtime_workgroup_sources,
-              cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
-              arch);
-          if (!gate) {
-            const auto describe_source = [](const ConSanMoiWorkgroupSource &source) {
-              if (source.scalar_src)
-                return std::string("s") + std::to_string(*source.scalar_src);
-              if (source.vector_src)
-                return std::string("v") + std::to_string(*source.vector_src);
-              if (source.private_offset)
-                return std::string("private+") + std::to_string(*source.private_offset);
-              return std::string("absent");
-            };
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe could not encode its dense runtime gate at " +
-                std::to_string(candidate.anchor()) + " with exec-save s" +
-                std::to_string(planned_patch.runtime_workgroup_gate->exec_save_sgpr) +
-                " and workgroup sources " +
-                describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
-                describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
-                describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
-                describe_source(planned_patch.runtime_workgroup_sources->cluster_workgroup_id));
-            return;
-          }
-          dense_gate_words = std::move(*gate);
-        }
-        uint32_t body_guest_instruction_offset = 0;
-        MoiAppendedBodyOptions body_options(arch);
-        body_options.scalar_save_words = planned_patch.scalar_spill
-                                             ? planned_patch.scalar_spill->save_words
-                                             : std::span<const uint32_t>{};
-        body_options.scalar_restore_words = planned_patch.scalar_spill
-                                                ? planned_patch.scalar_spill->restore_words
-                                                : std::span<const uint32_t>{};
-        body_options.incoming_vgpr_bank_mode = planned_patch.incoming_vgpr_bank_mode;
-        if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
-          const uint16_t base_scratch_count =
-              record_replay_uses_automatic_banked_capture(
-                  options, layout.record_replay_dispatch_token_capacity)
-                  ? 10u
-                  : 6u;
-          body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
-          body_options.high_bank_address_destination =
-              static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
-        }
-        body_options.entry_prefix_words = dense_gate_words;
-        body_options.trailing_guest_word_count =
-            options.moi_dynamic_access_records ? 0u : planned_patch.guest_instruction_word_count;
-        body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
-        body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
-        body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
-        body_options.restore_vgpr_spill_before_trailing_guest =
-            planned_patch.spill_overlaps_guest_operands;
-        body_options.wrap_embedded_guest_vgpr_bank = planned_patch.wrap_embedded_guest_vgpr_bank;
-        std::vector<uint32_t> borrowed_entry_prefix;
-        std::optional<size_t> borrowed_empty_exec_guard_word;
-        if (planned_patch.borrowed_entry) {
-          borrowed_entry_prefix = planned_patch.borrowed_entry->scalar_restore_words;
-          borrowed_empty_exec_guard_word = borrowed_entry_prefix.size();
-          borrowed_entry_prefix.push_back(build_s_nop(0u, arch));
-          body_options.entry_prefix_words = borrowed_entry_prefix;
-        }
-        auto cave_words = assemble_moi_appended_body(planned_patch, *words, "first-light probe",
-                                                     result.errors, body_options);
-        if (!cave_words)
-          return;
-        MoiAccessContinuationPlan continuation;
-        continuation.return_target = planned_patch.placement.return_target;
-        continuation.displaced_tail_word_count =
-            static_cast<uint32_t>(planned_patch.displaced_tail_words.size());
-        if (borrowed_empty_exec_guard_word) {
-          continuation.empty_exec_guard_word =
-              static_cast<uint32_t>(*borrowed_empty_exec_guard_word);
-          continuation.empty_exec_resumes_at_displaced_tail = true;
-          const size_t displaced_tail_begin = cave_words->size() -
-                                              planned_patch.displaced_tail_words.size();
-          info.branch_only_route->borrowed_entry()->empty_exec_continuation_offset =
-              cave_text_offset + displaced_tail_begin * sizeof(uint32_t);
-        }
-        if (planned_patch.dense_call_anchor) {
-          if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
-              candidate_point.has_compact_moi_scalar_spill()) {
-            continuation.transfer = MoiAccessTransferKind::IndirectJump;
-            continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
-            continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
-            continuation.capture_scc = true;
-            continuation.reserved_transfer_words = kIndirectIslandWords;
-          } else {
-            continuation.transfer = MoiAccessTransferKind::SetPc;
-            continuation.setpc_sgpr =
-                static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 6u);
-          }
-        } else if (planned_patch.borrowed_entry) {
-          continuation.transfer = MoiAccessTransferKind::DirectBranch;
-          continuation.return_target =
-              planned_patch.branch_only_route &&
-                      !planned_patch.branch_only_route->return_relay_offsets.empty()
-                  ? planned_patch.branch_only_route->return_relay_offsets.front()
-                  : planned_patch.placement.return_target;
-        } else if (planned_patch.entry_island_offset) {
-          continuation.transfer = MoiAccessTransferKind::IndirectJump;
-          continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
-          continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
-        } else {
-          continuation.transfer = MoiAccessTransferKind::DirectBranch;
-          continuation.return_target =
-              planned_patch.branch_only_route &&
-                      !planned_patch.branch_only_route->return_relay_offsets.empty()
-                  ? planned_patch.branch_only_route->return_relay_offsets.front()
-                  : planned_patch.placement.return_target;
-        }
-        auto finalized = finalize_moi_access_body(
-            std::move(*cave_words), cave_text_offset, planned_patch.placement.body_size,
-            continuation, arch, "first-light probe", result.errors);
-        if (!finalized)
-          return;
-        cave_words = std::move(finalized->words);
-        program.body_words = std::move(*cave_words);
-        program.trailing_reserved_word_count =
-            static_cast<uint32_t>(planned_patch.appended_branch_relay_offsets.size());
-        info.trampoline_offset = cave_text_offset;
-        info.original_size = planned_patch.placement.original_size;
-        info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
-        info.relocated_guest_instruction_offset = cave_text_offset + body_guest_instruction_offset;
-      } else {
-        const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-        if (patch_bytes != planned_patch.placement.body_size) {
-          result.errors.emplace_back("ConSan MOI first-light probe final patch size changed");
-          return;
-        }
-        program.body_words = std::move(*words);
-        info.trampoline_offset = candidate.anchor() + candidate.size();
-        info.original_size = static_cast<uint32_t>(patch_bytes);
-        info.trampoline_size = 0;
-        info.relocated_guest_instruction_offset =
-            candidate.anchor() + planned_patch.probe_guest_instruction_offset;
-      }
-      for (uint64_t offset = info.anchor_offset + sizeof(uint32_t);
-           offset < info.anchor_offset + info.original_size; offset += sizeof(uint32_t)) {
-        if (selected_record_replay_anchor_relay_offsets.contains(offset))
-          info.branch_relay_offsets.push_back(offset);
-      }
-      auto commit = make_moi_access_lowering_commit(result.observation_plan(), candidate, info,
-                                                    ConSanProbeIntentKind::AccessRecord,
-                                                    make_record_replay_access_runtime_mapping);
-      if (!commit) {
-        result.errors.emplace_back(
-            "ConSan MOI first-light probe produced an invalid intent-bound lowering");
-        return;
-      }
-      program.patch = std::move(info);
-      program.commit = std::move(*commit);
-      program.branch_only_route = planned_patch.branch_only_route;
-      program.return_target = planned_patch.placement.return_target;
-      programs.push_back(std::move(program));
     }
-
-    if (!emit_moi_access_programs(new_text, std::move(programs), arch, "first-light probe",
-                                  patches, lowering_commits, result.errors))
+    const MoiScalarAbiPlan scalar_abi =
+        plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
+    auto words = build_first_light_access_record_words(
+        bytes, candidate, options, options, candidate_point, planned_patch.resources.base, arch,
+        planned_patch.record_index, planned_record_count, planned_patch.logical_range_index, layout,
+        planned_patch.spill_overlaps_guest_operands,
+        planned_patch.spill ? &*planned_patch.spill : nullptr,
+        planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr,
+        planned_patch.owner_derivation, result.errors);
+    if (!words)
       return;
 
-    if (!emit_moi_dense_entry_hosts(
-            dense_entry_hosts, dense_groups, options, result.moi_operating_point,
-            kIndirectIslandWords,
-            /*pad_to_planned_offset=*/true,
-            /*use_indirect_jump_scc_save=*/false, "first-light probe",
-            "ConSan MOI first-light probe lost its dense-host transient SGPR assignment",
-            "ConSan MOI first-light probe could not encode its dense entry-host return", arch,
-            new_text, result.errors,
-            [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
-              return point.moi_exec_save_sgpr.has_value();
-            },
-            [&](const MoiDenseEntryHost &host, std::vector<uint32_t> &host_words) {
-              while (host_words.size() < host.displaced_words.size() + kIndirectIslandWords)
-                host_words.push_back(build_s_nop(0, arch));
-              return true;
-            }))
-      return;
-
-    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI first-light probe", result.program_inventory.code_object_id(),
-                             result.errors, &result.transform_failure_cause) ||
-        !result.publish_access_lowering(std::move(patcher).emit(),
-                                        "ConSan MOI first-light probe",
-                                        std::move(lowering_commits), std::move(patches)))
-      return;
-    if (reserved_sync_island_count != 0u) {
-      access_output.reserved_sync_islands = MoiBarrierIslandReservation{
-          .begin = original_text_size,
-          .slot_words = static_cast<uint32_t>(reserved_sync_slot_words),
-          .protected_prefix_words = static_cast<uint32_t>(
-              reserved_sync_slot_words == kMoiRecordReplayBarrierRelaySlotWords
-                  ? kIndirectIslandWords
-                  : reserved_sync_slot_words),
-          .reserved_slot_count = reserved_sync_island_count,
+    MoiAccessProgramRecipe recipe(arch);
+    recipe.patch.kind = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                            ? ConSanPatchKind::TrampolineMoiAccessRecordStore
+                            : ConSanPatchKind::InlineMoiAccessRecordStore;
+    recipe.patch.anchor_offset = candidate.anchor();
+    note_moi_access_patch_info(recipe.patch, planned_patch);
+    if (planned_patch.borrowed_entry) {
+      if (!recipe.patch.branch_only_route) {
+        result.errors.emplace_back(
+            "ConSan MOI first-light borrowed entry lost its branch-only return route");
+        return;
+      }
+      const ConSanIndirectJumpSgprs jump_sgprs = *scalar_abi.indirect_jump;
+      recipe.patch.branch_only_route->entry = ConSanBranchOnlyBorrowedEntry{
+          .jump = jump_sgprs,
+          .backup_vgpr = planned_patch.borrowed_entry->backup_vgpr,
+          .empty_exec_continuation_offset = std::nullopt,
       };
     }
-    access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
+    std::vector<uint32_t> dense_gate_words;
+    std::vector<uint32_t> borrowed_entry_prefix;
+    uint32_t body_guest_instruction_offset = 0;
+
+    if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
+      const uint64_t cave_text_offset = planned_patch.placement.body_offset;
+      recipe.pad_to_body_offset = true;
+
+      if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
+        if (!scalar_abi.special_state || !scalar_abi.indirect_jump) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe lost its indirect-jump SGPR assignment");
+          return;
+        }
+        std::vector<uint32_t> island_words;
+        if (planned_patch.borrowed_entry) {
+          island_words = planned_patch.borrowed_entry->island_words;
+        } else if (planned_patch.runtime_workgroup_gate) {
+          if (!planned_patch.runtime_workgroup_sources) {
+            result.errors.emplace_back(
+                "ConSan MOI first-light probe lost its runtime workgroup sources");
+            return;
+          }
+          auto gate = build_moi_runtime_workgroup_gate_island_words(
+              bytes, candidate, *planned_patch.runtime_workgroup_gate,
+              *planned_patch.runtime_workgroup_sources, *planned_patch.entry_island_offset,
+              cave_text_offset, planned_patch.placement.return_target,
+              planned_patch.entry_island_word_count, arch);
+          if (gate)
+            island_words = std::move(*gate);
+        } else if (append_moi_scc_preserving_indirect_jump(
+                       island_words, *planned_patch.entry_island_offset, cave_text_offset,
+                       scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
+                       /*capture_scc=*/true, arch)) {
+          island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
+        }
+        if (island_words.size() != planned_patch.entry_island_word_count) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe could not encode its entry island");
+          return;
+        }
+        recipe.entry_island_words = std::move(island_words);
+      }
+
+      if (planned_patch.dense_call_anchor && planned_patch.runtime_workgroup_gate) {
+        if (!planned_patch.runtime_workgroup_sources) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe lost its dense runtime workgroup sources");
+          return;
+        }
+        auto gate = build_moi_runtime_workgroup_gate_call_words(
+            bytes.subspan(candidate.file_offset, candidate.size()),
+            *planned_patch.runtime_workgroup_gate, *planned_patch.runtime_workgroup_sources,
+            cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
+            arch);
+        if (!gate) {
+          const auto describe_source = [](const ConSanMoiWorkgroupSource &source) {
+            if (source.scalar_src)
+              return std::string("s") + std::to_string(*source.scalar_src);
+            if (source.vector_src)
+              return std::string("v") + std::to_string(*source.vector_src);
+            if (source.private_offset)
+              return std::string("private+") + std::to_string(*source.private_offset);
+            return std::string("absent");
+          };
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe could not encode its dense runtime gate at " +
+              std::to_string(candidate.anchor()) + " with exec-save s" +
+              std::to_string(planned_patch.runtime_workgroup_gate->exec_save_sgpr) +
+              " and workgroup sources " +
+              describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
+              describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
+              describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
+              describe_source(planned_patch.runtime_workgroup_sources->cluster_workgroup_id));
+          return;
+        }
+        dense_gate_words = std::move(*gate);
+      }
+      recipe.body_options.scalar_save_words = planned_patch.scalar_spill
+                                                  ? planned_patch.scalar_spill->save_words
+                                                  : std::span<const uint32_t>{};
+      recipe.body_options.scalar_restore_words = planned_patch.scalar_spill
+                                                     ? planned_patch.scalar_spill->restore_words
+                                                     : std::span<const uint32_t>{};
+      recipe.body_options.incoming_vgpr_bank_mode = planned_patch.incoming_vgpr_bank_mode;
+      if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
+        const uint16_t base_scratch_count =
+            record_replay_uses_automatic_banked_capture(
+                options, layout.record_replay_dispatch_token_capacity)
+                ? 10u
+                : 6u;
+        recipe.body_options.high_bank_address_source = candidate.lowering.form->address_vgpr;
+        recipe.body_options.high_bank_address_destination =
+            static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
+      }
+      recipe.body_options.entry_prefix_words = dense_gate_words;
+      recipe.body_options.trailing_guest_word_count =
+          options.moi_dynamic_access_records ? 0u : planned_patch.guest_instruction_word_count;
+      recipe.body_options.probe_guest_instruction_offset =
+          planned_patch.probe_guest_instruction_offset;
+      recipe.body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
+      recipe.body_options.body_guest_instruction_offset = &body_guest_instruction_offset;
+      recipe.body_options.restore_vgpr_spill_before_trailing_guest =
+          planned_patch.spill_overlaps_guest_operands;
+      recipe.body_options.wrap_embedded_guest_vgpr_bank =
+          planned_patch.wrap_embedded_guest_vgpr_bank;
+      std::optional<size_t> borrowed_empty_exec_guard_word;
+      if (planned_patch.borrowed_entry) {
+        borrowed_entry_prefix = planned_patch.borrowed_entry->scalar_restore_words;
+        borrowed_empty_exec_guard_word = borrowed_entry_prefix.size();
+        borrowed_entry_prefix.push_back(build_s_nop(0u, arch));
+        recipe.body_options.entry_prefix_words = borrowed_entry_prefix;
+      }
+      recipe.continuation.return_target = planned_patch.placement.return_target;
+      recipe.continuation.displaced_tail_word_count =
+          static_cast<uint32_t>(planned_patch.displaced_tail_words.size());
+      if (borrowed_empty_exec_guard_word) {
+        recipe.continuation.empty_exec_guard_word =
+            static_cast<uint32_t>(*borrowed_empty_exec_guard_word);
+        recipe.continuation.empty_exec_resumes_at_displaced_tail = true;
+      }
+      if (planned_patch.dense_call_anchor) {
+        if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
+            candidate_point.has_compact_moi_scalar_spill()) {
+          recipe.continuation.transfer = MoiAccessTransferKind::IndirectJump;
+          recipe.continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
+          recipe.continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
+          recipe.continuation.capture_scc = true;
+          recipe.continuation.reserved_transfer_words = kIndirectIslandWords;
+        } else {
+          recipe.continuation.transfer = MoiAccessTransferKind::SetPc;
+          recipe.continuation.setpc_sgpr =
+              static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 6u);
+        }
+      } else if (planned_patch.borrowed_entry) {
+        recipe.continuation.transfer = MoiAccessTransferKind::DirectBranch;
+        recipe.continuation.return_target =
+            planned_patch.branch_only_route &&
+                    !planned_patch.branch_only_route->return_relay_offsets.empty()
+                ? planned_patch.branch_only_route->return_relay_offsets.front()
+                : planned_patch.placement.return_target;
+      } else if (planned_patch.entry_island_offset) {
+        recipe.continuation.transfer = MoiAccessTransferKind::IndirectJump;
+        recipe.continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
+        recipe.continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
+      } else {
+        recipe.continuation.transfer = MoiAccessTransferKind::DirectBranch;
+        recipe.continuation.return_target =
+            planned_patch.branch_only_route &&
+                    !planned_patch.branch_only_route->return_relay_offsets.empty()
+                ? planned_patch.branch_only_route->return_relay_offsets.front()
+                : planned_patch.placement.return_target;
+      }
+      recipe.trailing_reserved_word_count =
+          static_cast<uint32_t>(planned_patch.appended_branch_relay_offsets.size());
+    } else {
+      recipe.inline_guest_offset = planned_patch.probe_guest_instruction_offset;
+    }
+    recipe.probe_words = std::move(*words);
+    auto program = compile_moi_access_program(planned_patch, std::move(recipe), arch,
+                                              "first-light probe", result.errors);
+    if (!program)
+      return;
+    for (uint64_t offset = program->patch.anchor_offset + sizeof(uint32_t);
+         offset < program->patch.anchor_offset + program->patch.original_size;
+         offset += sizeof(uint32_t)) {
+      if (selected_record_replay_anchor_relay_offsets.contains(offset))
+        program->patch.branch_relay_offsets.push_back(offset);
+    }
+    auto commit = make_moi_access_lowering_commit(
+        result.observation_plan(), candidate, program->patch, ConSanProbeIntentKind::AccessRecord,
+        make_record_replay_access_runtime_mapping);
+    if (!commit) {
+      result.errors.emplace_back(
+          "ConSan MOI first-light probe produced an invalid intent-bound lowering");
+      return;
+    }
+    program->commit = std::move(*commit);
+    programs.push_back(std::move(*program));
+  }
+
+  if (!emit_moi_access_programs(new_text, std::move(programs), arch, "first-light probe", patches,
+                                lowering_commits, result.errors))
+    return;
+
+  if (!emit_moi_dense_entry_hosts(
+          dense_entry_hosts, dense_groups, options, result.moi_operating_point,
+          kIndirectIslandWords,
+          /*pad_to_planned_offset=*/true,
+          /*use_indirect_jump_scc_save=*/false, "first-light probe",
+          "ConSan MOI first-light probe lost its dense-host transient SGPR assignment",
+          "ConSan MOI first-light probe could not encode its dense entry-host return", arch,
+          new_text, result.errors,
+          [](const PlannedAccessRecordPatch &, const ConSanMoiOperatingPoint &point) {
+            return point.moi_exec_save_sgpr.has_value();
+          },
+          [&](const MoiDenseEntryHost &host, std::vector<uint32_t> &host_words) {
+            while (host_words.size() < host.displaced_words.size() + kIndirectIslandWords)
+              host_words.push_back(build_s_nop(0, arch));
+            return true;
+          }))
+    return;
+
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "MOI first-light probe", result.program_inventory.code_object_id(),
+                           result.errors, &result.transform_failure_cause) ||
+      !result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI first-light probe",
+                                      std::move(lowering_commits), std::move(patches)))
+    return;
+  if (reserved_sync_island_count != 0u) {
+    access_output.reserved_sync_islands = MoiBarrierIslandReservation{
+        .begin = original_text_size,
+        .slot_words = static_cast<uint32_t>(reserved_sync_slot_words),
+        .protected_prefix_words =
+            static_cast<uint32_t>(reserved_sync_slot_words == kMoiRecordReplayBarrierRelaySlotWords
+                                      ? kIndirectIslandWords
+                                      : reserved_sync_slot_words),
+        .reserved_slot_count = reserved_sync_island_count,
+    };
+  }
+  access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
   return;
 }

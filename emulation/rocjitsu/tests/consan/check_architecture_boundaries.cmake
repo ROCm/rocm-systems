@@ -3721,10 +3721,21 @@ foreach(
         modes/sampled/consan_moi_sampled_access.inc
         modes/inline_shadow/consan_moi_inline_shadow.inc
 )
+    file(READ "${_consan_dir}/${_access_mode_source}" _access_mode_contents)
+    if(NOT _access_mode_contents MATCHES "compile_moi_access_program")
+        message(FATAL_ERROR
+            "${_access_mode_source} must compile access placement and control flow through the shared program compiler"
+        )
+    endif()
     _consan_assert_no_match(
         "${_consan_dir}/${_access_mode_source}"
         "publish_lowering_commits|result[.]replacement|result[.]mark_modified|discard_candidate_modification"
         "mode-local access emission must publish bytes, proof, and lowering through the shared access transaction"
+    )
+    _consan_assert_no_match(
+        "${_consan_dir}/${_access_mode_source}"
+        "assemble_moi_appended_body|finalize_moi_access_body|MoiAccessPatchProgram[ \t]+program"
+        "mode-local access emission must not reconstruct shared program geometry"
     )
 endforeach()
 foreach(_result_bus IN ITEMS consan_result.h.inc consan_pipeline.h)

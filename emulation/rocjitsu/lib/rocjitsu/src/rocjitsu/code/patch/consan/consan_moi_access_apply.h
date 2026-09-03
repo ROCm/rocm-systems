@@ -406,10 +406,11 @@ struct MoiFinalizedAccessBody {
 /// that placed prefix, reorders a displaced continuation only when requested
 /// by a deferred guest, emits the selected transfer, and patches the optional
 /// empty-wave guard.  No mode or evidence distinction is observed here.
-[[nodiscard]] std::optional<MoiFinalizedAccessBody> finalize_moi_access_body(
-    std::vector<uint32_t> body, uint64_t body_text_offset, uint64_t planned_body_size,
-    const MoiAccessContinuationPlan &continuation, rj_code_arch_t arch,
-    std::string_view probe_name, std::vector<std::string> &errors);
+[[nodiscard]] std::optional<MoiFinalizedAccessBody>
+finalize_moi_access_body(std::vector<uint32_t> body, uint64_t body_text_offset,
+                         uint64_t planned_body_size, const MoiAccessContinuationPlan &continuation,
+                         rj_code_arch_t arch, std::string_view probe_name,
+                         std::vector<std::string> &errors);
 
 enum class MoiAccessBodyPublication : uint8_t {
   Append,
@@ -419,6 +420,23 @@ enum class MoiAccessBodyPublication : uint8_t {
 struct MoiAccessReservedRegion {
   uint64_t offset = 0;
   uint32_t word_count = 0;
+};
+
+/// Mode-produced leaves for one access program. Common compilation owns the
+/// placement-shaped body, entry, continuation, and patch geometry; mode code
+/// supplies only evidence words, resolved ABI options, and typed patch facts.
+struct MoiAccessProgramRecipe {
+  explicit MoiAccessProgramRecipe(rj_code_arch_t arch) : body_options(arch) {}
+
+  std::vector<uint32_t> probe_words;
+  std::vector<uint32_t> entry_island_words;
+  std::vector<MoiAccessReservedRegion> reserved_regions;
+  MoiAppendedBodyOptions body_options;
+  MoiAccessContinuationPlan continuation;
+  ConSanPatchInfo patch;
+  bool pad_to_body_offset = false;
+  uint32_t trailing_reserved_word_count = 0;
+  std::optional<uint32_t> inline_guest_offset;
 };
 
 /// Fully compiled, mode-independent text program for one access site.
@@ -443,14 +461,23 @@ struct MoiAccessPatchProgram {
   ConSanCommittedLowering commit;
 };
 
+/// Compile the placement and control-flow shell around one typed evidence
+/// leaf. This is the single owner of inline/appended geometry for all access
+/// modes; callers attach the mode-specific committed runtime mapping.
+[[nodiscard]] std::optional<MoiAccessPatchProgram>
+compile_moi_access_program(const MoiPlannedAccessPatch &planned, MoiAccessProgramRecipe recipe,
+                           rj_code_arch_t arch, std::string_view probe_name,
+                           std::vector<std::string> &errors);
+
 /// Execute already-compiled access programs against one tentative text image.
 /// All mutations remain private to the caller's transaction until the common
 /// publication step succeeds.
-[[nodiscard]] bool emit_moi_access_programs(
-    std::vector<uint8_t> &text, std::vector<MoiAccessPatchProgram> programs,
-    rj_code_arch_t arch, std::string_view probe_name, std::vector<ConSanPatchInfo> &patches,
-    std::vector<ConSanCommittedLowering> &commits, std::vector<std::string> &errors);
-
+[[nodiscard]] bool emit_moi_access_programs(std::vector<uint8_t> &text,
+                                            std::vector<MoiAccessPatchProgram> programs,
+                                            rj_code_arch_t arch, std::string_view probe_name,
+                                            std::vector<ConSanPatchInfo> &patches,
+                                            std::vector<ConSanCommittedLowering> &commits,
+                                            std::vector<std::string> &errors);
 
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
