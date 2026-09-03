@@ -3972,7 +3972,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
   };
 
   /* Each pending dep signal calls this handler when it reaches 0.
-  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  The last one to decrement remaining_deps to 0 will trigger the discard. */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
 
@@ -3992,6 +3992,127 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     }
   } else {
     // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
+      return errors in the future, we need to handle the possibility of use-after-free and double
+      deletion of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
+    }
+  }
+
+  OpGuard.Dismiss();
+  return HSA_STATUS_SUCCESS;
+#endif
+}
+
+hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                                 const hsa_agent_t* dst_agents,
+                                                 uint32_t num_dst_agents,
+                                                 uint32_t num_dep_signals,
+                                                 const hsa_signal_t* dep_signals,
+                                                 hsa_signal_t completion_signal) {
+#if !defined(__linux__)
+  return HSA_STATUS_ERROR;
+#else
+  const size_t kPageSize = os::PageSize();
+
+  // Resolve and validate all unique destination agents up front
+  std::vector<uint32_t> gpu_nodes(num_dst_agents);
+  for (uint32_t i = 0; i < num_dst_agents; i++) {
+    core::Agent* agent = Agent::Convert(dst_agents[i]);
+    if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice)
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    gpu_nodes[i] = agent->node_id();
+  }
+
+  // Validate the pointers; only vmem-reserved addresses supported
+  for (uint32_t i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Operation context
+  struct DiscardAndPrefetchOp {
+    std::vector<uint32_t> target_gpus;    // per-region dest gpu node for prefetch
+    std::vector<std::pair<void*, size_t>> regions;
+    std::atomic<uint32_t> remaining_deps;
+    hsa_signal_t completion;
+  };
+
+  DiscardAndPrefetchOp* op = new DiscardAndPrefetchOp();
+  MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
+
+  op->completion = completion_signal;
+  op->regions.reserve(count);
+  op->target_gpus.reserve(count);
+
+  // Build page-aligned region list, resolve gpus for every region
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
+    size_t len = end - base;
+
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
+    op->target_gpus.push_back(gpu_nodes[i]);
+  }
+
+  // Filter out dependency signals already at 0
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (uint32_t i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0)
+      pending_deps.push_back(dep_signals[i]);
+  }
+
+  static auto discard_and_prefetch_all = [](DiscardAndPrefetchOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_gpu = op->target_gpus[i];
+
+      int res = madvise(base, size, MADV_DONTNEED);
+      if (res != 0)
+        debug_warning(false && "madvise MADV_DONTNEED failed in SvmDiscardAndPrefetchBatch");
+
+      // prefetch to dest gpu
+      HSA_SVM_ATTRIBUTE gpu_attr;
+      gpu_attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+      gpu_attr.value = target_gpu;
+      HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &gpu_attr));
+      if (err != HSAKMT_STATUS_SUCCESS)
+        debug_warning(false && "hsaKmtSVMSetAttr gpu prefetch failed in SvmDiscardAndPrefetchBatch");
+    }
+
+    if (op->completion.handle != 0)
+      Signal::Convert(op->completion)->SubRelaxed(1);
+    delete op;
+  };
+
+  /* Every dep signal calls this handler when it reaches 0. The last one to decrement 
+  remaining_deps to 0 triggers the discard-and-prefetch op on all memory ranges */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardAndPrefetchOp* op = reinterpret_cast<DiscardAndPrefetchOp*>(arg);
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      discard_and_prefetch_all(op);
+    return false;
+  };
+
+  // Dispatch directly if there are no pending deps, otherwise register signal handlers
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(err, "Failed to schedule async discard-and-prefetch operation");
+  } else {
     op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
     for (size_t i = 0; i < pending_deps.size(); i++) {
       /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to

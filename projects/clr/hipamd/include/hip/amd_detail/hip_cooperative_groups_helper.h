@@ -108,6 +108,22 @@ __CG_STATIC_QUALIFIER__ unsigned long long adjust_mask(unsigned long long base_m
   return out;
 }
 }  // namespace helper
+
+/**
+ * @brief Drain the asynchronous global<->LDS copies issued by this wave.
+ *
+ * The copies behind `cooperative_groups::memcpy_async` complete out of band and are tracked by
+ * ASYNCcnt, which is per-wave and is not drained by a barrier. Each wave therefore has to drain
+ * its own counter, and it has to do so before the group barrier, so that the barrier is what
+ * publishes the data to the rest of the group.
+ */
+__CG_STATIC_QUALIFIER__ void wait_async_copies() {
+#if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
+#endif
+}
+
 /**
  *
  * @brief  Functionalities related to multi-grid cooperative group type
@@ -134,7 +150,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_multi_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_multi_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_multi_grid_sync();
+}
 
 }  // namespace multi_grid
 
@@ -173,16 +192,25 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
-__CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __ockl_grid_sync();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
   return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
-__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() {
+  wait_async_copies();
+  return __ockl_grid_bar_arrive();
+}
 
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
@@ -220,7 +248,10 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
 
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
-__CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
+__CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
+  __syncthreads();
+}
 
 __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
@@ -228,6 +259,7 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
@@ -248,6 +280,7 @@ namespace tiled_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -258,6 +291,7 @@ namespace coalesced_group {
 
 // enforce ordering for memory instructions
 __CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
 }
@@ -287,6 +321,7 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
 
 namespace cluster {
 __CG_STATIC_QUALIFIER__ void sync() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
@@ -299,6 +334,7 @@ __CG_STATIC_QUALIFIER__ void sync() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  wait_async_copies();
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) &&

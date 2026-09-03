@@ -187,9 +187,8 @@ module:
     tags: [load, P0]
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
-    # (amd_linux) Rock_Linux_Failures_on_gfx94X
     # (amd_windows) Rock_Window_Failures_on_gfx1151
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl]
     tags: [function]
   Unit_hipModuleGetFunctionCount_NegativeTsts:
     <<: *level_2

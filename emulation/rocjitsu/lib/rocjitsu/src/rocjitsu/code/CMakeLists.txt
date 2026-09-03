@@ -11,11 +11,11 @@ rj_add_object_library(rocjitsu_code
     kernel_symbol.cpp
     relocation_function_table.cpp
     rj_code.cpp
+    scoped_cfg_edges.cpp
     builders/instruction_builder.cpp
     dbt/binary_translator.cpp
     dbt/legalization/gfx1250_b0_to_a0.cpp
     dbt/rj_code_translate.cpp
-    dbt/scoped_cfg_edges.cpp
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
     dbt/lane_permutation.cpp
