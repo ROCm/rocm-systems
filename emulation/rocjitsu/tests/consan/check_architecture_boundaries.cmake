@@ -2083,52 +2083,23 @@ _consan_assert_no_match(
     "SuperCollider scalar-VCC spill effects must remain target independent"
 )
 
-# SuperCollider dense dispatch retains one mode-local route product. The
-# dispatcher, relocated host, and bodies must not reconstruct that route from
-# generic indirect fields or the former three independently optional fields.
-file(READ
-    "${_consan_dir}/modes/supercollider/consan_supercollider_dense_route.h.inc"
-    _sc_dense_route_contract
-)
-if(NOT _shared_aggregate_contract MATCHES
-       "consan_supercollider_dense_route[.]h[.]inc" OR
-   NOT _sc_dense_route_contract MATCHES
-       "struct ConSanSuperColliderDenseRouteEffect" OR
-   NOT _sc_dense_route_contract MATCHES
-       "enum class ConSanSuperColliderDenseKeyKind" OR
-   NOT _patch_proof_contract MATCHES
-       "std::optional<ConSanSuperColliderDenseRouteEffect>[ \\t]+sc_dense_route" OR
-   NOT _consan_validation MATCHES
-       "sc_dense_route->is_well_formed" OR
-   NOT _consan_validation MATCHES
-       "sc_dense_route->same_route")
-    message(FATAL_ERROR
-        "SuperCollider dense dispatch lost its typed route effect"
-    )
-endif()
-foreach(_sc_dense_route_owner IN LISTS _consan_production_files)
+# SuperCollider access lowering is a client of the shared text relocator. Its
+# retired cave, indirect-island, dense-dispatch, and branch-only route models
+# must not survive as dormant patch metadata or target capabilities.
+foreach(_sc_retired_route_owner IN LISTS _consan_production_files)
     _consan_assert_no_match(
-        "${_sc_dense_route_owner}"
-        "sc_dense_(dispatcher_offset|call_return_sgpr|explicit_key_sgpr)|indirect_required_sgpr_count"
-        "dense routes and total SGPR requirements must retain one authority"
+        "${_sc_retired_route_owner}"
+        "ConSanSuperCollider(Dense|Indirect).*Route|TrampolineSc(IndirectBranchIsland|DenseCallDispatcher|DenseEntryHost)|supports_sc_branch_only_route|sc_dense_route_identity|sc_indirect_body_route|sc_dense_route"
+        "retired SuperCollider access routing must not return beside shared text relocation"
     )
 endforeach()
-_consan_assert_no_match(
-    "${_consan_dir}/modes/supercollider/consan_supercollider_dense_route.h.inc"
-    "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|consan_moi_|ConSanTargetProfile"
-    "SuperCollider dense-route effects must remain target and MOI independent"
-)
 
 # SCC-preserving indirect jumps have one mode/target-neutral scalar contract.
-# Patch publication retains exact MOI and SuperCollider effects instead of a
-# seven-field optional union whose meaning depended on patch kind.
+# Branch-only MOI publication retains one exact typed effect instead of a
+# flattened optional union whose meaning depends on patch kind.
 file(READ
     "${_consan_dir}/consan_indirect_jump_sgprs.h.inc"
     _indirect_jump_contract
-)
-file(READ
-    "${_consan_dir}/modes/supercollider/consan_supercollider_indirect_route.h.inc"
-    _sc_indirect_route_contract
 )
 file(READ
     "${_consan_dir}/consan_branch_only_continuation.h.inc"
@@ -2138,8 +2109,6 @@ if(NOT _shared_aggregate_contract MATCHES
        "consan_indirect_jump_sgprs[.]h[.]inc" OR
    NOT _shared_aggregate_contract MATCHES
        "consan_branch_only_continuation[.]h[.]inc" OR
-   NOT _shared_aggregate_contract MATCHES
-       "consan_supercollider_indirect_route[.]h[.]inc" OR
    NOT _indirect_jump_contract MATCHES
        "struct ConSanIndirectJumpSgprs" OR
    NOT _branch_only_route_contract MATCHES
@@ -2148,22 +2117,16 @@ if(NOT _shared_aggregate_contract MATCHES
        "std::variant<ConSanBranchOnlyRelayEntry, ConSanBranchOnlyBorrowedEntry" OR
    NOT _branch_only_route_contract MATCHES
        "ConSanIndirectJumpSgprs[ \t]+jump" OR
-   NOT _sc_indirect_route_contract MATCHES
-       "struct ConSanSuperColliderIndirectBodyRoute" OR
    NOT _patch_proof_contract MATCHES
        "std::optional<ConSanBranchOnlyContinuation>[ \t]+branch_only_route" OR
-   NOT _patch_proof_contract MATCHES
-       "std::optional<ConSanSuperColliderIndirectBodyRoute>[ \t]+sc_indirect_body_route" OR
    NOT _consan_validation MATCHES
        "validate_indirect_route_effect_roles" OR
    NOT _consan_validation MATCHES
        "[.]borrowed_entry[(]" OR
    NOT _consan_validation MATCHES
-       "[.]prologue_entry[(]" OR
-   NOT _consan_validation MATCHES
-       "sc_indirect_body_route->is_well_formed")
+       "[.]prologue_entry[(]")
     message(FATAL_ERROR
-        "indirect control flow lost its shared primitive or exact mode-local effects"
+        "indirect control flow lost its shared primitive or exact branch-only effect"
     )
 endif()
 _consan_assert_no_match(
@@ -2186,7 +2149,6 @@ _consan_assert_no_match(
 foreach(_indirect_contract IN ITEMS
     consan_indirect_jump_sgprs.h.inc
     consan_branch_only_continuation.h.inc
-    modes/supercollider/consan_supercollider_indirect_route.h.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_indirect_contract}"
@@ -2194,11 +2156,6 @@ foreach(_indirect_contract IN ITEMS
         "indirect route contracts must remain target independent"
     )
 endforeach()
-_consan_assert_no_match(
-    "${_consan_dir}/modes/supercollider/consan_supercollider_indirect_route.h.inc"
-    "consan_moi_|ConSanMoi"
-    "SuperCollider indirect route effects must remain MOI independent"
-)
 foreach(_indirect_owner IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_indirect_owner}"

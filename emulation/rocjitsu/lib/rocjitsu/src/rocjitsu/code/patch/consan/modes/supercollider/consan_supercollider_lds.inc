@@ -4,15 +4,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          ConSanTransformArtifacts &result) {
   const rj_code_arch_t arch = target.arch;
 
-  const auto delay_words =
-      consan_sc_delay_instruction_word_count(options, result.errors, "ConSan LDS check/trap proof");
-  if (!delay_words)
+  if (!consan_sc_delay_instruction_word_count(options, result.errors,
+                                              "ConSan LDS check/trap proof"))
     return;
 
   const std::unordered_set<uint64_t> admitted_lds_file_offsets = sc_admitted_access_file_offsets(
       result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::NativeLds);
-  const std::unordered_set<uint64_t> admitted_flat_file_offsets = sc_admitted_access_file_offsets(
-      result.program_inventory, result.coverage_ledger, ConSanAccessOrigin::Flat);
   std::map<uint64_t, const ConSanAccessInventorySite *> admitted_sites;
   for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites())
     if (access.origin == ConSanAccessOrigin::NativeLds &&
@@ -58,7 +55,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     uint64_t descriptor_file_offset = 0;
     KernelCfgScope scope;
     std::unique_ptr<LivenessAnalysis> liveness;
-    uint32_t wavefront_size = 0;
   };
   std::vector<ScReservoirOwnerContext> reservoir_owner_contexts;
   if (decoder) {
@@ -125,8 +121,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       reservoir_owner_contexts.push_back(
           {.descriptor_file_offset = kernel.descriptor_file_offset,
            .scope = std::move(*scope),
-           .liveness = nullptr,
-           .wavefront_size = kernel_wavefront_size(arch, *descriptor)});
+           .liveness = nullptr});
       ScReservoirOwnerContext &context = reservoir_owner_contexts.back();
       context.liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
                                                             LivenessAnalysisOptions{},
@@ -136,11 +131,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
 
   struct LdsCheckTrapCandidate {
     const ConSanAccessInventorySite *site = nullptr;
-    uint64_t container_entry_text_offset = 0;
-    uint64_t descriptor_file_offset = 0;
     uint16_t scratch_vgpr = 0;
     uint16_t vcc_save_sgpr = 0;
-    uint64_t requested_words = 0;
     std::optional<uint16_t> required_vgpr_allocation_count;
     std::optional<uint16_t> selectable_vgpr_bank_mode;
     std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
@@ -290,7 +282,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   std::vector<LdsCheckTrapCandidate> candidates;
-  bool skipped_supported_site_for_excessive_delay = false;
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
   size_t s_clause_blocked_candidate_count = 0;
@@ -340,8 +331,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto allocated_sgpr_count = site_context.common_allocated_sgpr_count;
     const auto min_auto_scratch_vgpr = site_context.min_auto_scratch_vgpr;
     const auto min_preferred_vcc_save_sgpr = site_context.min_preferred_vcc_save_sgpr;
-    const uint64_t primary_descriptor_file_offset =
-        site_context.owner_descriptor_file_offsets.front();
     {
       const ConSanAccessInventorySite &site = *site_context.site;
       const ConSanAccessLoweringForm &form = *site.lowering.form;
@@ -366,10 +355,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
         ++missing_width_plan_site_count;
         continue;
       }
-      auto action_words =
-          mismatch_action_word_count(options, target, result.errors, "ConSan LDS check/trap proof");
-      if (!action_words)
-        return;
       const uint32_t report_alignment_padding =
           options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
       const Instruction *site_inst = site_context.instruction;
@@ -408,33 +393,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                : report_alignment_padding + report_action_scratch_vgprs(options)) +
           (lds_load_clobbers_address(site) ? 1u : 0u);
       const uint32_t scratch_vgprs = probe_scratch_vgprs + (spill_vcc_save_to_vgpr ? 1u : 0u);
-      uint64_t requested_words = (lds_load_clobbers_address(site) ? 1u : 0u) + 2u +
-                                 lds_check_trap_predelay_setup_words(site) +
-                                 static_cast<uint64_t>(*delay_words) + 2u + 1u +
-                                 lds_check_trap_precompare_words(site) + 1u +
-                                 (2u + *action_words) * *required_vgprs + 1u;
-      if (split_two_address)
-        requested_words += split_two_address->total_additional_word_count();
-      if (form.destination_accvgpr &&
-          target.accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned)
-        requested_words += 2u * *required_vgprs;
-      if (spill_vcc_save_to_vgpr)
-        requested_words += 4u;
-      if (spill_vcc_save_to_vgpr && selectable_vgpr_bank_mode.value_or(0u) != 0u)
-        requested_words += 2u;
-      if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read &&
-          form.destination_vgpr) {
-        const uint32_t dst_bank =
-            static_cast<uint32_t>((selectable_vgpr_bank_mode.value_or(0u) >> 6u) & 0x3u);
-        for (uint16_t i = 0; i < *required_vgprs; ++i) {
-          if (dst_bank * 256u + *form.destination_vgpr + i >= 256u)
-            requested_words += 2u;
-        }
-      }
-      if (selectable_vgpr_bank_mode.value_or(0u) != 0u)
-        requested_words += 2u;
-      if (selectable_vgpr_bank_mode.value_or(0u) != 0u && lds_load_clobbers_address(site))
-        requested_words += 2u;
       const auto choose_context_scratch =
           [&](std::optional<uint16_t> allocation_limit) -> std::optional<uint16_t> {
         if (options.scratch_vgpr) {
@@ -536,7 +494,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                     : std::nullopt;
             if (spill && required_private_bytes && *required_private_bytes <= *private_limit) {
               spill->total_private_bytes = *required_private_bytes;
-              requested_words += spill->save_words.size() + spill->restore_words.size();
               private_spill_plans.insert_or_assign(
                   &site,
                   ScBracketLocalPrivateSpillPlan{
@@ -567,12 +524,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
             auto spill =
                 build_vgpr_spill_sequence(preview_manager, scratch_vgpr, scratch_vgprs, arch);
             if (spill) {
-              requested_words += spill->save_words.size() + spill->restore_words.size();
-              if (selectable_vgpr_bank_mode.value_or(0u) != 0u) {
-                requested_words += 2u;
-                if (spill_vcc_save_to_vgpr)
-                  requested_words -= 2u;
-              }
               private_spill_plans.insert_or_assign(
                   &site,
                   ScBracketLocalPrivateSpillPlan{
@@ -593,10 +544,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
       if (!scratch_selected) {
         ++missing_scratch_site_count;
-        continue;
-      }
-      if (requested_words > 256u) {
-        skipped_supported_site_for_excessive_delay = true;
         continue;
       }
       auto required_allocation =
@@ -624,11 +571,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
       LdsCheckTrapCandidate candidate;
       candidate.site = &site;
-      candidate.container_entry_text_offset = site_context.container_entry_text_offset;
-      candidate.descriptor_file_offset = primary_descriptor_file_offset;
       candidate.scratch_vgpr = scratch_vgpr;
       candidate.vcc_save_sgpr = *vcc_save;
-      candidate.requested_words = requested_words;
       candidate.required_vgpr_allocation_count = descriptor_growth;
       candidate.selectable_vgpr_bank_mode = selectable_vgpr_bank_mode;
       candidate.scalar_vcc_spill = scalar_vcc_spill;
@@ -730,12 +674,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   if (selected_candidates.empty()) {
-    if (skipped_supported_site_for_excessive_delay) {
-      result.warnings.emplace_back(
-          "ConSan LDS check/trap proof skipped: requested delay needs too much "
-          "padding for the supported LDS site");
-      return;
-    }
     result.warnings.emplace_back(
         "ConSan LDS check/trap proof found no resource-feasible "
         "ds_load_b{32,64,128}, ds_load_tr{8_b64,16_b128}, ds_load_2addr_b{32,64}, "
@@ -773,7 +711,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     const auto split_two_address =
         split_two_address_lds_expansion_plan(original_bytes, site, target);
     std::optional<uint32_t> guest_instruction_word_offset;
-    auto words = build_lds_check_trap_words(original_bytes, site, target, options, *delay_words,
+    auto words = build_lds_check_trap_words(original_bytes, site, target, options,
                                             candidate.scratch_vgpr, candidate.vcc_save_sgpr,
                                             candidate.selectable_vgpr_bank_mode.value_or(0u),
                                             guest_instruction_word_offset, result.errors);
@@ -959,36 +897,22 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  std::optional<AmdGpuCodeObject> composed_code_object;
-  const AmdGpuCodeObject *active_code_object = &code_object;
-  if (!result.replacement.empty()) {
-    composed_code_object.emplace(result.replacement.data(), result.replacement.size());
-    if (!composed_code_object->is_valid()) {
-      result.errors.emplace_back(
-          "ConSan LDS check/trap proof cannot parse the composed code object");
-      return;
-    }
-    active_code_object = &*composed_code_object;
-  }
-  CodeObjectPatcher patcher(*active_code_object);
-  if (!apply_consan_descriptor_mutations_to_patcher(
-          patcher, result.program_inventory, *active_code_object,
-          {descriptor_growths, descriptor_sgpr_growths, descriptor_private_requirements,
-           no_group_segment_requirements},
-          {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-           .inventory_proves_empty_accumulator_bank = false,
-           .maximum_group_segment_bytes = std::nullopt},
-          arch, "ConSan LDS check/trap proof", result.errors)) {
-    return;
-  }
+  std::vector<ConSanStagedTextRewrite> rewrites;
+  rewrites.reserve(planned_patches.size());
   for (PlannedLdsCheckTrapPatch &planned : planned_patches) {
-    result.staged_text_rewrites.push_back({
+    rewrites.push_back({
         .original_site = planned.site->physical_id,
         .intent_ids = std::move(planned.intent_ids),
         .words = std::move(planned.words),
         .patch = std::move(planned.info),
     });
   }
-  result.replacement = std::move(patcher).emit();
-  result.mark_modified();
+  (void)stage_consan_text_rewrites(
+      code_object, arch,
+      {descriptor_growths, descriptor_sgpr_growths, descriptor_private_requirements,
+       no_group_segment_requirements},
+      {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+       .inventory_proves_empty_accumulator_bank = false,
+       .maximum_group_segment_bytes = std::nullopt},
+      "ConSan LDS check/trap proof", std::move(rewrites), result);
 }

@@ -60,7 +60,6 @@ enum class BranchRelayReservoirShape : uint8_t {
 struct BranchRelayValidationInventory {
   std::unordered_set<uint64_t> continuation_slots;
   std::unordered_set<uint64_t> reservoir_target_vertices;
-  std::unordered_set<uint64_t> indirect_islands;
   std::unordered_map<uint64_t, uint64_t> branch_only_targets;
   std::vector<const ConSanPatchInfo *> nop_relays;
   std::vector<const ConSanPatchInfo *> reservoirs;
@@ -84,25 +83,11 @@ make_branch_relay_validation_inventory(std::span<const ConSanPatchInfo> patches)
   for (const ConSanPatchInfo &patch : patches) {
     for (uint64_t offset : patch.branch_relay_offsets)
       insert_shared_slot(offset);
-    const bool local_lds = (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-                            patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
-                           patch.original_size == 2u * sizeof(uint32_t);
-    if (local_lds)
-      insert_shared_slot(patch.anchor_offset + sizeof(uint32_t));
-    if ((patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-         patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
-        (patch.original_size == 2u * sizeof(uint32_t) ||
-         patch.original_size == 3u * sizeof(uint32_t))) {
-      insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
-                   patch.anchor_offset + patch.original_size);
-    }
     if (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore && patch.branch_only_route &&
         patch.original_size > sizeof(uint32_t)) {
       insert_words(inventory.continuation_slots, patch.anchor_offset + sizeof(uint32_t),
                    patch.anchor_offset + patch.original_size);
     }
-    if (patch.kind == ConSanPatchKind::TrampolineScIndirectBranchIsland)
-      inventory.indirect_islands.insert(patch.trampoline_offset);
     if (patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir) {
       inventory.reservoirs.push_back(&patch);
       switch (branch_relay_reservoir_shape(patch)) {
@@ -559,75 +544,17 @@ void validate_patch_decoding(const FinalValidationEnvironment &environment,
 void validate_indirect_route_effect_roles(const ConSanFinalValidationInput &result,
                                           std::vector<std::string> &errors) {
   for (const ConSanPatchInfo &patch : result.patches) {
-    const uint32_t route_count = static_cast<uint32_t>(patch.branch_only_route.has_value()) +
-                                 static_cast<uint32_t>(patch.sc_indirect_body_route.has_value()) +
-                                 static_cast<uint32_t>(patch.sc_dense_route.has_value());
     const ConSanBranchOnlyBorrowedEntry *borrowed_entry =
         patch.branch_only_route ? patch.branch_only_route->borrowed_entry() : nullptr;
     const bool valid_borrowed_entry =
         borrowed_entry == nullptr ||
         patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
         patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
-    const bool valid_sc_body = !patch.sc_indirect_body_route ||
-                               (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-                                patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
-                                patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-                                patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap);
-    if (route_count > 1u || !valid_borrowed_entry || !valid_sc_body) {
+    if (!valid_borrowed_entry) {
       errors.emplace_back("ConSan final validation found a misplaced indirect route effect");
       return;
     }
   }
-}
-
-void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &environment,
-                                           const ConSanFinalValidationInput &result,
-                                           std::vector<std::string> &errors) {
-  if (!environment.replacement_text.available)
-    return;
-  if (!environment.require_target(errors, "ConSan indirect-island proof found no target profile"))
-    return;
-  for (const ConSanPatchInfo &island : result.patches) {
-    if (island.kind != ConSanPatchKind::TrampolineScIndirectBranchIsland)
-      continue;
-    const auto body = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      return (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-              patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap ||
-              patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-              patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
-             patch.anchor_offset == island.anchor_offset && patch.sc_indirect_body_route;
-    });
-    if (body == result.patches.end()) {
-      errors.emplace_back("ConSan indirect-island proof found incomplete scalar state metadata");
-      continue;
-    }
-    const ConSanSuperColliderIndirectBodyRoute &route = *body->sc_indirect_body_route;
-    const uint16_t pc = route.jump.pc_sgpr;
-    const uint16_t scc_save = route.jump.scc_save_sgpr;
-    const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-                              body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
-    const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(environment.target_profile->arch);
-    const uint16_t vcc_save_width = is_flat_body || legacy_cdna ? 2u : 1u;
-    std::vector<uint32_t> expected_entry;
-    std::vector<uint32_t> expected_return;
-    const bool encoded =
-        append_lds_check_trap_indirect_jump(expected_entry, island.trampoline_offset,
-                                            body->trampoline_offset, pc, scc_save,
-                                            *environment.target_profile) &&
-        append_lds_check_trap_indirect_return(expected_return, route.return_offset,
-                                              body->anchor_offset + body->original_size, pc,
-                                              scc_save, *environment.target_profile);
-    if (!body->sc_indirect_body_route->is_well_formed(vcc_save_width) ||
-        body->required_sgpr_count < route.minimum_required_sgpr_count(vcc_save_width) || !encoded ||
-        expected_entry.size() != kLdsCheckTrapIndirectJumpWords ||
-        expected_return.size() != kLdsCheckTrapIndirectJumpWords ||
-        !environment.replacement_text.matches(island.trampoline_offset, expected_entry) ||
-        !environment.replacement_text.matches(route.return_offset, expected_return)) {
-      errors.emplace_back(
-          "ConSan indirect-island proof found corrupted SCC preservation or scalar resources");
-    }
-  }
-  return;
 }
 
 void validate_branch_only_continuation_semantics(const FinalValidationEnvironment &environment,
@@ -750,13 +677,6 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
     if (!patch.branch_only_route)
       continue;
     const ConSanBranchOnlyContinuation &route = *patch.branch_only_route;
-    const bool is_lds_body = (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-                              patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap) &&
-                             patch.original_size == 2u * sizeof(uint32_t);
-    const bool is_flat_body = (patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
-                               patch.kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap) &&
-                              (patch.original_size == 2u * sizeof(uint32_t) ||
-                               patch.original_size == 3u * sizeof(uint32_t));
     const bool is_moi_body = (patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
                               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
                               patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
@@ -767,7 +687,7 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
         patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
         branch_relay_reservoir_shape(patch) == BranchRelayReservoirShape::DirectInstruction &&
         patch.original_size >= 2u * sizeof(uint32_t);
-    if ((!is_lds_body && !is_flat_body && !is_moi_body && !is_routed_reservoir) ||
+    if ((!is_moi_body && !is_routed_reservoir) ||
         patch.trampoline_size < sizeof(uint32_t) || patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset) {
       errors.emplace_back("ConSan branch-only continuation proof found invalid geometry");
@@ -814,193 +734,6 @@ void validate_branch_only_continuation_semantics(const FinalValidationEnvironmen
   if (std::ranges::any_of(nop_relay_slots,
                           [&](uint64_t relay) { return !used_relay_slots.contains(relay); })) {
     errors.emplace_back("ConSan branch-only continuation proof found an unused original-NOP relay");
-  }
-  return;
-}
-
-void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environment,
-                                      const ConSanFinalValidationInput &result,
-                                      std::vector<std::string> &errors) {
-  const bool has_dense = std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher ||
-           patch.kind == ConSanPatchKind::TrampolineScDenseEntryHost;
-  });
-  if (!has_dense)
-    return;
-  if (!environment.original_text.available || !environment.replacement_text.available) {
-    errors.emplace_back("ConSan dense-call proof requires one executable text section");
-    return;
-  }
-  const std::span<const uint8_t> original_text = environment.original_text.bytes;
-  const std::span<const uint8_t> replacement_text = environment.replacement_text.bytes;
-  if (!environment.require_target(errors, "ConSan dense-call proof found no target profile"))
-    return;
-  const rj_code_arch_t arch = environment.arch();
-  const uint32_t nop = build_s_nop(0, arch);
-  const auto has_other_indirect_route = [](const ConSanPatchInfo &patch) {
-    return patch.branch_only_route || patch.sc_indirect_body_route;
-  };
-
-  for (const ConSanPatchInfo &dispatcher : result.patches) {
-    if (dispatcher.kind != ConSanPatchKind::TrampolineScDenseCallDispatcher)
-      continue;
-    if (!dispatcher.sc_dense_route || dispatcher.sc_dense_route->body ||
-        dispatcher.sc_dense_route->dispatcher_offset != dispatcher.trampoline_offset ||
-        !dispatcher.sc_dense_route->is_well_formed() || has_other_indirect_route(dispatcher) ||
-        dispatcher.required_sgpr_count < dispatcher.sc_dense_route->minimum_required_sgpr_count()) {
-      errors.emplace_back("ConSan dense-call proof found incomplete dispatcher metadata");
-      continue;
-    }
-    const ConSanSuperColliderDenseRouteEffect &route = *dispatcher.sc_dense_route;
-    const auto host = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
-      return patch.kind == ConSanPatchKind::TrampolineScDenseEntryHost && patch.sc_dense_route &&
-             patch.sc_dense_route->same_route(route);
-    });
-    if (host == result.patches.end() || host->original_size != 8u * sizeof(uint32_t) ||
-        host->trampoline_size != 15u * sizeof(uint32_t) || host->sc_dense_route->body ||
-        has_other_indirect_route(*host) ||
-        host->required_sgpr_count < route.minimum_required_sgpr_count() ||
-        host->anchor_offset > original_text.size() ||
-        host->original_size > original_text.size() - host->anchor_offset ||
-        host->trampoline_offset > replacement_text.size() ||
-        host->trampoline_size > replacement_text.size() - host->trampoline_offset) {
-      errors.emplace_back("ConSan dense-call proof found an invalid entry-host pairing");
-      continue;
-    }
-    const uint16_t jump_pc = route.jump.pc_sgpr;
-    const uint16_t saved_scc = route.jump.scc_save_sgpr;
-    const bool explicit_key = route.key_kind == ConSanSuperColliderDenseKeyKind::ExplicitScalar;
-    const uint16_t dispatch_key = route.key_sgpr;
-
-    std::vector<const ConSanPatchInfo *> bodies;
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (!patch.sc_dense_route || !patch.sc_dense_route->same_route(route))
-        continue;
-      if (patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap ||
-          patch.kind == ConSanPatchKind::LocalCaveLdsStoreCheckTrap)
-        bodies.push_back(&patch);
-    }
-    std::ranges::sort(bodies, {}, &ConSanPatchInfo::anchor_offset);
-    if (bodies.empty()) {
-      errors.emplace_back("ConSan dense-call proof found an empty dispatcher");
-      continue;
-    }
-
-    const uint64_t island_offset = host->anchor_offset + sizeof(uint32_t);
-    const std::optional<uint32_t> host_entry =
-        explicit_key ? std::optional<uint32_t>(
-                           build_s_mov_b32(dispatch_key, scalar_positive_inline_u32(0), arch))
-                     : instrumentation::build_s_call_i64(dispatch_key, 0, arch);
-    std::vector<uint32_t> island_words;
-    if (!host_entry ||
-        !append_lds_check_trap_indirect_jump(island_words, island_offset,
-                                             dispatcher.trampoline_offset, jump_pc, saved_scc,
-                                             *environment.target_profile) ||
-        island_words.size() != kLdsCheckTrapIndirectJumpWords) {
-      errors.emplace_back("ConSan dense-call proof could not reconstruct its entry host");
-      continue;
-    }
-    std::vector<uint32_t> expected_host_anchor = {*host_entry};
-    expected_host_anchor.insert(expected_host_anchor.end(), island_words.begin(),
-                                island_words.end());
-    if (!environment.replacement_text.matches(host->anchor_offset, expected_host_anchor)) {
-      errors.emplace_back("ConSan dense-call proof found a corrupted entry host");
-      continue;
-    }
-
-    std::vector<uint32_t> expected_host_body(host->original_size / sizeof(uint32_t));
-    std::memcpy(expected_host_body.data(), original_text.data() + host->anchor_offset,
-                host->original_size);
-    if (!append_lds_check_trap_indirect_jump(expected_host_body, host->trampoline_offset,
-                                             host->anchor_offset + host->original_size, jump_pc,
-                                             saved_scc, *environment.target_profile) ||
-        !environment.replacement_text.matches(host->trampoline_offset, expected_host_body)) {
-      errors.emplace_back("ConSan dense-call proof found a corrupted relocated entry host");
-      continue;
-    }
-
-    std::vector<uint32_t> dispatcher_words;
-    if (!explicit_key) {
-      const auto subtract_pc =
-          instrumentation::build_s_sub_u32(dispatch_key, dispatch_key, jump_pc, arch);
-      if (!subtract_pc) {
-        errors.emplace_back("ConSan dense-call proof could not reconstruct its dispatch key");
-        continue;
-      }
-      dispatcher_words.push_back(*subtract_pc);
-      dispatcher_words.push_back(build_s_add_u32(dispatch_key, dispatch_key, 255u, arch));
-      dispatcher_words.push_back(
-          static_cast<uint32_t>(dispatcher.trampoline_offset - island_offset));
-    }
-    const auto append_target = [&](uint32_t key, uint64_t target) {
-      const auto compare = instrumentation::build_s_cmp_eq_u32(
-          dispatch_key, explicit_key || key == 0u ? scalar_positive_inline_u32(key) : 255u, arch);
-      if (!compare)
-        return false;
-      dispatcher_words.push_back(*compare);
-      if (!explicit_key && key != 0u)
-        dispatcher_words.push_back(key);
-      std::vector<uint32_t> matched;
-      const uint64_t matched_offset =
-          dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
-      if (!append_lds_check_trap_indirect_return(matched, matched_offset, target, jump_pc,
-                                                 saved_scc, *environment.target_profile))
-        return false;
-      const auto skip =
-          instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched.size()), arch);
-      if (!skip)
-        return false;
-      dispatcher_words.push_back(*skip);
-      dispatcher_words.insert(dispatcher_words.end(), matched.begin(), matched.end());
-      return true;
-    };
-    bool valid = append_target(0u, host->trampoline_offset);
-    for (size_t body_index = 0; body_index < bodies.size(); ++body_index) {
-      const ConSanPatchInfo *body = bodies[body_index];
-      const auto body_route = body->sc_dense_route->body;
-      const bool isolated_route = !has_other_indirect_route(*body);
-      const uint16_t vcc_save_width =
-          consan_arch_is_cdna3_or_cdna4(environment.target_profile->arch) ? 2u : 1u;
-      const uint32_t body_required_sgprs =
-          body_route ? std::max<uint32_t>(route.minimum_required_sgpr_count(),
-                                          static_cast<uint32_t>(body_route->vcc_save_sgpr) +
-                                              vcc_save_width)
-                     : std::numeric_limits<uint32_t>::max();
-      const auto delta = compute_sopp_branch_simm16(
-          body->anchor_offset + (explicit_key ? sizeof(uint32_t) : 0u), island_offset);
-      std::optional<std::array<uint32_t, 2>> anchor;
-      if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
-          body_required_sgprs <= body->required_sgpr_count && explicit_key && delta &&
-          body_index < 64u) {
-        anchor = std::array<uint32_t, 2>{
-            build_s_mov_b32(dispatch_key,
-                            scalar_positive_inline_u32(static_cast<uint16_t>(body_index + 1u)),
-                            arch),
-            build_s_branch(*delta, arch)};
-      } else if (body_route && isolated_route && body->sc_dense_route->is_well_formed() &&
-                 body_required_sgprs <= body->required_sgpr_count && !explicit_key && delta) {
-        const auto call = instrumentation::build_s_call_i64(dispatch_key, *delta, arch);
-        if (call)
-          anchor = std::array<uint32_t, 2>{*call, nop};
-      }
-      std::vector<uint32_t> expected_return;
-      valid &=
-          body_route && anchor.has_value() &&
-          environment.replacement_text.matches(body->anchor_offset, *anchor) &&
-          append_lds_check_trap_indirect_return(expected_return, body_route->return_offset,
-                                                body->anchor_offset + body->original_size, jump_pc,
-                                                saved_scc, *environment.target_profile) &&
-          environment.replacement_text.matches(body_route->return_offset, expected_return) &&
-          append_target(explicit_key ? static_cast<uint32_t>(body_index + 1u)
-                                     : static_cast<uint32_t>(body->anchor_offset +
-                                                             sizeof(uint32_t) - island_offset),
-                        body->trampoline_offset);
-    }
-    dispatcher_words.push_back(build_s_endpgm(arch));
-    valid &= dispatcher.trampoline_size == dispatcher_words.size() * sizeof(uint32_t) &&
-             environment.replacement_text.matches(dispatcher.trampoline_offset, dispatcher_words);
-    if (!valid)
-      errors.emplace_back("ConSan dense-call proof found corrupted call or dispatch geometry");
   }
   return;
 }
@@ -1059,8 +792,7 @@ void validate_branch_relay_reservoir_semantics(const FinalValidationEnvironment 
         branch_only != inventory.branch_only_targets.end())
       return static_cast<uint64_t>(target) == branch_only->second;
     return target > static_cast<int64_t>(source) &&
-           (inventory.reservoir_target_vertices.contains(static_cast<uint64_t>(target)) ||
-            inventory.indirect_islands.contains(static_cast<uint64_t>(target)));
+           inventory.reservoir_target_vertices.contains(static_cast<uint64_t>(target));
   };
   const auto validate_relay_payload = [&](uint64_t begin, uint64_t end, std::string_view shape_name,
                                           uint64_t report_offset, uint64_t report_size) {
@@ -3881,9 +3613,7 @@ void validate_resource_and_metadata_deltas(const FinalValidationEnvironment &env
   validate_patch_byte_accounting(environment, result, errors, failure_cause);
   validate_patch_decoding(environment, result, errors);
   validate_indirect_route_effect_roles(result, errors);
-  validate_sc_indirect_island_semantics(environment, result, errors);
   validate_branch_only_continuation_semantics(environment, result, relay_inventory, errors);
-  validate_sc_dense_call_semantics(environment, result, errors);
   validate_branch_relay_reservoir_semantics(environment, result, relay_inventory, errors);
   validate_mutation_semantics(environment, result, errors);
   validate_sc_perturbation_semantics(original_bytes, environment, result,

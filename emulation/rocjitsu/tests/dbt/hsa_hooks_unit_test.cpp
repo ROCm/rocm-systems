@@ -4762,7 +4762,7 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
                                rocjitsu::ConSanProbeIntentKind::RedundantAccessObservation);
   rocjitsu::ConSanPatchInfo structural_patch;
   structural_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
-  structural_patch.kind = rocjitsu::ConSanPatchKind::TrampolineScDenseCallDispatcher;
+  structural_patch.kind = rocjitsu::ConSanPatchKind::TrampolineScPerturbation;
   structural_only.patches.push_back(structural_patch);
 
   run_hook_load_case(kConSanHookProfiles[0], false, structural_only,

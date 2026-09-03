@@ -28,116 +28,6 @@ sc_admitted_access_file_offsets(const ProgramInventory &inventory,
   return true;
 }
 
-[[nodiscard]] std::optional<ConSanCommittedLowering> make_sc_access_lowering_commit(
-    const ConSanObservationPlan &observation, std::span<const ConSanProbeIntentId> intent_ids,
-    const ConSanAccessInventorySite &site, const ConSanCommittedPatchGeometry &patch) {
-  if (patch.original_size == 0u || intent_ids.empty() ||
-      !std::ranges::all_of(intent_ids, [&](ConSanProbeIntentId id) {
-        const ConSanProbeIntent *intent = observation.intent(id);
-        return intent != nullptr && intent->physical_site == site.physical_id;
-      })) {
-    return std::nullopt;
-  }
-  return make_consan_instrumented_patch_lowering(observation, intent_ids, patch);
-}
-
-/// Commit every staged SuperCollider access program through one object-wide
-/// relocation. The staging boundary lets LDS and FLAT retain independent
-/// resource/probe planners while sharing all executable placement mechanics.
-[[nodiscard]] bool finalize_sc_text_rewrites(std::span<const uint8_t> descriptor_image,
-                                             rj_code_arch_t arch,
-                                             const ConSanOptions &options,
-                                             std::string_view subject,
-                                             ConSanTransformArtifacts &result) {
-  if (result.staged_text_rewrites.empty())
-    return true;
-
-  std::vector<ConSanInlineTextRewrite> rewrites;
-  rewrites.reserve(result.staged_text_rewrites.size());
-  for (const ConSanStagedTextRewrite &staged : result.staged_text_rewrites)
-    rewrites.push_back({staged.patch.anchor_offset, staged.words});
-
-  std::vector<SourceTextCodeRange> preexisting_patch_ranges;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.trampoline_size != 0u) {
-      preexisting_patch_ranges.push_back(
-          {.start_offset = patch.trampoline_offset, .size = patch.trampoline_size});
-    }
-  }
-
-  auto relocated = relocate_consan_text(
-      descriptor_image, arch, rewrites, options.patched_image_growth_limit,
-      result.program_inventory.code_object_id(), subject, preexisting_patch_ranges, result.errors,
-      &result.transform_failure_cause);
-  if (!relocated)
-    return false;
-  if (relocated->source_text_size > std::numeric_limits<uint64_t>::max() -
-                                        relocated->relocated_text_size ||
-      relocated->relocated_text_size > std::numeric_limits<uint32_t>::max()) {
-    result.errors.emplace_back("ConSan " + std::string(subject) +
-                               " relocated text is too large");
-    return false;
-  }
-
-  std::vector<ConSanPatchInfo> placed_patches;
-  std::vector<ConSanCommittedLowering> commits;
-  AmdGpuCodeObject relocated_object(relocated->image.data(), relocated->image.size());
-  if (!relocated_object.is_valid() || relocated_object.text_sections().size() != 1u) {
-    result.errors.emplace_back("ConSan " + std::string(subject) +
-                               " cannot inspect relocated executable text");
-    return false;
-  }
-  const uint64_t relocated_text_bytes = relocated_object.text_sections().front()->size();
-  commits.reserve(result.staged_text_rewrites.size());
-  for (const ConSanStagedTextRewrite &staged : result.staged_text_rewrites) {
-    std::optional<ConSanPatchInfo> primary;
-    for (const TranslatedTextPlacement &placement : relocated->placements) {
-      if (placement.source_offset != staged.patch.anchor_offset || !placement.client_rewrite)
-        continue;
-      ConSanPatchInfo placed = staged.patch;
-      placed.trampoline_offset = placement.target_offset;
-      if (placed.trampoline_offset > relocated_text_bytes ||
-          placed.trampoline_size > relocated_text_bytes - placed.trampoline_offset) {
-        result.errors.emplace_back(
-            "ConSan " + std::string(subject) + " placement exceeds relocated text: source=" +
-            std::to_string(staged.patch.anchor_offset) +
-            " target=" + std::to_string(placed.trampoline_offset) +
-            " size=" + std::to_string(placed.trampoline_size) +
-            " text=" + std::to_string(relocated_text_bytes));
-        return false;
-      }
-      if (placed.relocated_guest_instruction_offset) {
-        *placed.relocated_guest_instruction_offset += placement.target_offset;
-      }
-      if (!primary)
-        primary = placed;
-      placed_patches.push_back(std::move(placed));
-    }
-    if (!primary) {
-      result.errors.emplace_back("ConSan " + std::string(subject) +
-                                 " lost a relocated instruction placement");
-      return false;
-    }
-    auto commit = make_consan_instrumented_patch_lowering(
-        result.observation_plan(), staged.intent_ids, *primary);
-    if (!commit) {
-      result.errors.emplace_back("ConSan " + std::string(subject) +
-                                 " produced an invalid intent-bound lowering");
-      result.discard_candidate_modification();
-      return false;
-    }
-    commits.push_back(std::move(*commit));
-  }
-
-  result.text_relocation = ConSanTextRelocationProof{
-      relocated->source_text_size,
-      relocated->relocated_text_size,
-  };
-  result.staged_text_rewrites.clear();
-  return result.publish_access_lowering(std::move(relocated->image), subject, std::move(commits),
-                                        std::move(placed_patches));
-}
-
 /// Publish an explicit placement rejection for every SuperCollider access
 /// intent that no site-local lowering transaction consumed. This fallback
 /// consults only immutable intent identity and the ledger's pending state; it
@@ -249,11 +139,6 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
   return access.lowering.form && access.lowering.form->destination_preserves_unwritten_bits;
 }
 
-[[nodiscard]] uint32_t
-lds_check_trap_predelay_setup_words(const ConSanAccessInventorySite &access) {
-  return is_d16_lds_load(access) ? 2u : 0u;
-}
-
 [[nodiscard]] bool is_subdword_lds_store(const ConSanAccessInventorySite &access) {
   return access.lowering.form && access.lowering.form->access_kind == ConSanLdsAccessKind::Write &&
          access.lowering.form->element_width_bits < 32u;
@@ -275,12 +160,6 @@ struct SplitTwoAddressLdsExpansionPlan {
 
   [[nodiscard]] uint32_t access_word_count() const { return 4u + 2u * large_offset_count(); }
 
-  [[nodiscard]] uint32_t total_additional_word_count() const {
-    // The baseline sequence replays one two-word instruction before and after
-    // the delay. Splitting both replays adds two single-address instructions
-    // plus any address-adjustment literal pair for each out-of-range offset.
-    return 2u * (access_word_count() - 2u);
-  }
 };
 
 [[nodiscard]] std::optional<SplitTwoAddressLdsExpansionPlan>
@@ -313,134 +192,6 @@ split_two_address_lds_expansion_plan(std::span<const uint8_t> original_bytes,
       (expansion && expansion->large_offset_count() != 0u ? 1u : 0u));
 }
 
-[[nodiscard]] uint32_t lds_check_trap_precompare_words(const ConSanAccessInventorySite &access) {
-  if (!is_subdword_lds_store(access))
-    return 0u;
-  return is_high_d16_lds_store(access) ? 3u : 2u;
-}
-
-[[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_pc_sgpr(
-    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t search_start = 0) {
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
-    return std::nullopt;
-  // find_free_sgpr_pair scans the full ordinary SGPR file and depends only on
-  // liveness, not descriptor allocation. The first owner is therefore a
-  // complete candidate enumerator; the all-owner predicate below computes the
-  // actual intersection without making the result owner-order-dependent.
-  while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, search_start)) {
-    const RegisterRef ref{RegClass::SGPR, *pair, 2u};
-    if (!sc_sgpr_ranges_overlap(*pair, 2u, excluded_vcc_sgpr, excluded_vcc_width) &&
-        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->any_live_before(*inst, ref);
-        }))
-      return pair;
-    if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-      return std::nullopt;
-    search_start = static_cast<uint16_t>(*pair + 2u);
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint16_t> choose_lds_check_trap_indirect_scc_save_sgpr(
-    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    uint16_t excluded_vcc_sgpr, uint16_t excluded_vcc_width, uint16_t excluded_pair,
-    uint16_t search_start = 0) {
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
-    return std::nullopt;
-  // As above, the front owner enumerates every ordinary SGPR that can be dead
-  // in the intersection; it does not impose that owner's allocation range.
-  while (auto single = owner_liveness.front()->find_free_sgpr(inst, search_start)) {
-    const RegisterRef ref{RegClass::SGPR, *single, 1u};
-    if (!sc_sgpr_ranges_overlap(*single, 1u, excluded_vcc_sgpr, excluded_vcc_width) &&
-        !sc_sgpr_ranges_overlap(*single, 1u, excluded_pair, 2u) &&
-        std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->any_live_before(*inst, ref);
-        })) {
-      return single;
-    }
-    if (*single + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-      return std::nullopt;
-    search_start = static_cast<uint16_t>(*single + 1u);
-  }
-  return std::nullopt;
-}
-
-struct LdsCheckTrapIndirectScalarScratch {
-  uint16_t vcc_save_sgpr = 0;
-  ConSanIndirectJumpSgprs jump;
-};
-
-[[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
-choose_lds_check_trap_indirect_scalar_scratch(
-    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    std::optional<uint16_t> min_preferred_vcc_save, const ConSanTargetProfile &target) {
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
-    return std::nullopt;
-
-  uint16_t pair_search_start = min_preferred_vcc_save.value_or(0);
-  while (auto pair = owner_liveness.front()->find_free_sgpr_pair(inst, pair_search_start)) {
-    const RegisterRef pair_ref{RegClass::SGPR, *pair, 2u};
-    if (!std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-          return !liveness->any_live_before(*inst, pair_ref);
-        })) {
-      if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-        return std::nullopt;
-      pair_search_start = static_cast<uint16_t>(*pair + 2u);
-      continue;
-    }
-    const uint16_t vcc_width = sc_vcc_save_sgpr_width(target);
-    const auto find_disjoint_vcc = [&](uint16_t start) -> std::optional<uint16_t> {
-      if (vcc_width == 2u) {
-        while (auto vcc = owner_liveness.front()->find_free_sgpr_pair(inst, start)) {
-          const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 2u};
-          if (!sc_sgpr_ranges_overlap(*vcc, 2u, *pair, 2u) &&
-              std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-                return !liveness->any_live_before(*inst, vcc_ref);
-              }))
-            return vcc;
-          if (*vcc + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-            return std::nullopt;
-          start = static_cast<uint16_t>(*vcc + 2u);
-        }
-        return std::nullopt;
-      }
-      while (auto vcc = owner_liveness.front()->find_free_sgpr(inst, start)) {
-        const RegisterRef vcc_ref{RegClass::SGPR, *vcc, 1u};
-        if (!sc_sgpr_ranges_overlap(*vcc, 1u, *pair, 2u) &&
-            std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-              return !liveness->any_live_before(*inst, vcc_ref);
-            }))
-          return vcc;
-        if (*vcc + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-          return std::nullopt;
-        start = static_cast<uint16_t>(*vcc + 1u);
-      }
-      return std::nullopt;
-    };
-
-    std::optional<uint16_t> vcc_save;
-    if (min_preferred_vcc_save)
-      vcc_save = find_disjoint_vcc(*min_preferred_vcc_save);
-    if (!vcc_save)
-      vcc_save = find_disjoint_vcc(0);
-    if (vcc_save) {
-      const auto scc_save = choose_lds_check_trap_indirect_scc_save_sgpr(
-          inst, owner_liveness, *vcc_save, vcc_width, *pair, min_preferred_vcc_save.value_or(0));
-      if (scc_save)
-        return LdsCheckTrapIndirectScalarScratch{*vcc_save, {*pair, *scc_save}};
-    }
-
-    if (*pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-      return std::nullopt;
-    pair_search_start = static_cast<uint16_t>(*pair + 2u);
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] std::optional<uint32_t>
 build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t arch) {
   if (vdst > 255 || src_vgpr > 255)
@@ -460,22 +211,6 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
   // store in a later chunk. Reuse a wide readback tuple instead of requiring
   // three additional ordinary VGPRs at an AccVGPR boundary.
   return options.report_buffer_address.has_value() && readback_vgprs >= 3u;
-}
-
-[[nodiscard]] std::optional<uint32_t> mismatch_action_word_count(const ConSanOptions &options,
-                                                                 const ConSanTargetProfile &target,
-                                                                 std::vector<std::string> &errors,
-                                                                 std::string_view context) {
-  const rj_code_arch_t arch = target.arch;
-  if (!options.report_buffer_address)
-    return 1u;
-  const auto literal = instrumentation::build_v_mov_b32_literal(0u, 0u, arch);
-  const auto store = instrumentation::build_flat_store_b32(0u, 2u, arch);
-  if (!literal || !store) {
-    errors.emplace_back(std::string(context) + " could not size report-buffer action");
-    return std::nullopt;
-  }
-  return static_cast<uint32_t>(3u * literal->size() + store->size());
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -531,8 +266,8 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
     std::span<const uint8_t> original_bytes, const ConSanAccessInventorySite &site,
-    const ConSanTargetProfile &target, const ConSanOptions &options, uint32_t delay_words,
-    uint16_t scratch_vgpr, uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
+    const ConSanTargetProfile &target, const ConSanOptions &options, uint16_t scratch_vgpr,
+    uint16_t vcc_save_sgpr, uint16_t selectable_vgpr_bank_mode,
     std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   const rj_code_arch_t arch = target.arch;
   guest_instruction_word_offset.reset();
@@ -658,22 +393,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
     }
   }
 
-  uint32_t compare_mode_switch_words = 0;
-  if (target.has_selectable_vgpr_bank && site.kind == ConSanLdsAccessKind::Read) {
-    for (uint16_t i = 0; i < *required_vgprs; ++i) {
-      const auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
-      if (compare_vgpr && *compare_vgpr >= 256u)
-        compare_mode_switch_words += 2u;
-    }
-  }
-  const uint32_t total_words = static_cast<uint32_t>(
-      (preserve_address ? 1u : 0u) + 2u + lds_check_trap_predelay_setup_words(site) + delay_words +
-      2u + 1u + lds_check_trap_precompare_words(site) + 1u +
-      (2u + mismatch_action->size()) * *required_vgprs + 1u + compare_mode_switch_words +
-      (form.destination_accvgpr ? 2u * *required_vgprs : 0u) +
-      (split_two_address ? split_two_address->total_additional_word_count() : 0u));
   std::vector<uint32_t> words;
-  words.reserve(total_words);
   if (preserve_address) {
     auto save_address = build_v_mov_b32_e32_vgpr_word(saved_address_vgpr, *form.address_vgpr, arch);
     if (!save_address) {

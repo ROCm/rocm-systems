@@ -26,7 +26,6 @@
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_text_relocation.h"
 #include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_support.h"
-#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"

@@ -1245,10 +1245,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeReusesDirectRelayReservoir) {
                                ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             0u);
-  EXPECT_EQ(std::ranges::count(result.patches,
-                               ConSanPatchKind::TrampolineScIndirectBranchIsland,
-                               &ConSanPatchInfo::kind),
-            0u);
 }
 
 } // namespace

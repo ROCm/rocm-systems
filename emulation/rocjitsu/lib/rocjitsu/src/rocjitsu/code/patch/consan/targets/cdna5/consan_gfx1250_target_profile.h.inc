@@ -47,9 +47,7 @@ inline constexpr ConSanTargetProfile kConSanGfx1250TargetProfile = [] {
   profile.requires_even_vgpr_tuples = true;
   profile.requires_split_two_address_lds_relocation = true;
   profile.semantic_form_mask = kConSanGfx1250SemanticFormMask;
-  profile.supports_sc_branch_only_route = true;
   profile.requires_sc_runtime_flat_group_gate = true;
-  profile.sc_dense_route_identity = ConSanScDenseRouteIdentity::ReturnPc;
   profile.requires_raw_memory_order_qualifier = true;
   return profile;
 }();

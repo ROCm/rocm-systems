@@ -133,9 +133,6 @@ enum class ConSanPatchKind : uint8_t {
   TrampolineMoiFenceRecord,
   InlineMalformedBarrierAbort,
   TrampolineScPerturbation,
-  TrampolineScIndirectBranchIsland,
-  TrampolineScDenseCallDispatcher,
-  TrampolineScDenseEntryHost,
   TrampolineBranchRelayReservoir,
   TrampolineMoiIndirectBranchIsland,
   TrampolineNop,
@@ -597,17 +594,10 @@ struct ConSanPatchAbiEffects {
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
-  /// Exact route of an ordinary, non-dense SuperCollider indirect body.
-  std::optional<ConSanSuperColliderIndirectBodyRoute> sc_indirect_body_route;
-  /// Mutually exclusive wave32-VCC or ordinary-scalar route used by an
-  /// indirect SuperCollider relay reservoir.
   /// Entry island paired with this MOI dense dispatcher. This explicit
   /// relation lets later synchronization composition reuse an access router
   /// without depending on incidental result.patches ordering.
   std::optional<uint64_t> moi_dense_entry_island_offset;
-  /// Exact SuperCollider-only dispatcher route used by this coordinator or
-  /// body. Other modes and non-dense SuperCollider patches leave it absent.
-  std::optional<ConSanSuperColliderDenseRouteEffect> sc_dense_route;
   /// Complete owner-local persistent identity layout and the distinct,
   /// target-normalized base available to ephemeral spill state.
   std::optional<ConSanMoiPrivateStateLayout> private_state_layout;

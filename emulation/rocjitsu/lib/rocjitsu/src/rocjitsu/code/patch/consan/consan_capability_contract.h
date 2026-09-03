@@ -155,19 +155,6 @@ enum class ConSanDeviceCacheRefreshForm : uint8_t {
   Cdna4BufferInvSc1,
 };
 
-/// Selects the identity carried by a SuperCollider dense access route.
-///
-/// `None` means the target has no admitted dense route. `ExplicitInlineKey`
-/// materializes a bounded site index in the access anchor, while `ReturnPc`
-/// uses the target's direct-call return address as the site identity. This is
-/// a routing capability, not a request to use dense routing for any particular
-/// code object.
-enum class ConSanScDenseRouteIdentity : uint8_t {
-  None,
-  ExplicitInlineKey,
-  ReturnPc,
-};
-
 /// Describes what may happen to patched code before the target executes it.
 ///
 /// `DirectCodeObject` means the byte layout emitted by RocJitsu is the layout
@@ -366,10 +353,8 @@ struct ConSanTargetProfile {
   bool supports_moi_far_dense_atomic_route = false;
   bool supports_moi_far_dense_barrier_route = false;
   bool supports_moi_dense_s_call_b64 = false;
-  bool supports_sc_branch_only_route = false;
   bool supports_sc_inline_flat_trap_rewrite = false;
   bool requires_sc_runtime_flat_group_gate = false;
-  ConSanScDenseRouteIdentity sc_dense_route_identity = ConSanScDenseRouteIdentity::None;
   /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
   bool requires_raw_memory_order_qualifier = false;
 };
@@ -523,8 +508,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          !profile.supports_moi_far_dense_barrier_route) ||
         (profile.supports_moi_dense_s_call_b64 &&
          profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
-        (profile.supports_sc_branch_only_route && profile.arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-         profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
         (profile.supports_sc_inline_flat_trap_rewrite &&
          profile.arch != ROCJITSU_CODE_ARCH_RDNA4) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
@@ -537,12 +520,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.dispatch_identity == ConSanDispatchIdentitySource::PreloadedSgprPair)) ||
         (!profile.moi_access_reports_need_explicit_dispatch_identity &&
          profile.dispatch_identity != ConSanDispatchIdentitySource::CodeObjectLiteral) ||
-        static_cast<uint8_t>(profile.sc_dense_route_identity) >
-            static_cast<uint8_t>(ConSanScDenseRouteIdentity::ReturnPc) ||
-        (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ReturnPc &&
-         profile.direct_call_form != ConSanDirectCallForm::SCallI64) ||
-        (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ExplicitInlineKey &&
-         profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
         (profile.requires_raw_memory_order_qualifier !=
          (profile.arch == ROCJITSU_CODE_ARCH_RDNA3 || profile.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
           profile.arch == ROCJITSU_CODE_ARCH_CDNA5)) ||

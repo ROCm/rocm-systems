@@ -18,12 +18,6 @@ class AmdGpuCodeObject;
 
 void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage, std::vector<std::string> &errors);
 
-[[nodiscard]] bool finalize_sc_text_rewrites(std::span<const uint8_t> descriptor_image,
-                                             rj_code_arch_t arch,
-                                             const ConSanOptions &options,
-                                             std::string_view subject,
-                                             ConSanTransformArtifacts &result);
-
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                          const ConSanTargetProfile &target,
                                          const ConSanOptions &options,

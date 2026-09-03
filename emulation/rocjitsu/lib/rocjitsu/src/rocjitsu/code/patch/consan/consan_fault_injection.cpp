@@ -24,7 +24,6 @@
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
-#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"

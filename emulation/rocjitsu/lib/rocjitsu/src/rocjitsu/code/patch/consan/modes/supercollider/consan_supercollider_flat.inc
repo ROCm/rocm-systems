@@ -9,19 +9,6 @@ flat_check_trap_comparison_scratch_vgprs(const ConSanAccessInventorySite &access
              : 0u;
 }
 
-[[nodiscard]] uint32_t
-flat_check_trap_comparison_setup_words(const ConSanAccessInventorySite &access) {
-  if (!access.lowering.form)
-    return 0u;
-  const ConSanAccessLoweringForm &form = *access.lowering.form;
-  const bool high = form.register_value_placement == ConSanAccessRegisterValuePlacement::High16;
-  if (form.access_kind == ConSanLdsAccessKind::Read)
-    return high ? 2u : 0u;
-  if (form.access_kind == ConSanLdsAccessKind::Write)
-    return (high ? 1u : 0u) + (form.element_width_bits == 8u ? 2u : 0u);
-  return 0u;
-}
-
 [[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_vcc_save_sgpr(
     const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
     std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options,
@@ -68,74 +55,6 @@ flat_check_trap_comparison_setup_words(const ConSanAccessInventorySite &access) 
       return pair;
   }
   return std::nullopt;
-}
-
-[[nodiscard]] std::optional<LdsCheckTrapIndirectScalarScratch>
-choose_flat_check_trap_indirect_scalar_scratch(
-    const Instruction *inst, std::span<const LivenessAnalysis *const> owner_liveness,
-    std::optional<uint16_t> min_preferred_sgpr, const ConSanOptions &options) {
-  if (inst == nullptr || owner_liveness.empty() ||
-      std::ranges::any_of(owner_liveness, [](const auto *liveness) { return liveness == nullptr; }))
-    return std::nullopt;
-
-  const auto dead_for_every_owner = [&](uint16_t base, uint8_t width) {
-    const RegisterRef ref{RegClass::SGPR, base, width};
-    return std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
-      return !liveness->any_live_before(*inst, ref);
-    });
-  };
-  const auto search = [&](uint16_t start) -> std::optional<LdsCheckTrapIndirectScalarScratch> {
-    uint16_t vcc_start = start;
-    while (auto vcc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, vcc_start)) {
-      if (sc_sgpr_range_overlaps_delay_source(*vcc_pair, 2u, options) ||
-          !dead_for_every_owner(*vcc_pair, 2u)) {
-        if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-          return std::nullopt;
-        vcc_start = static_cast<uint16_t>(*vcc_pair + 2u);
-        continue;
-      }
-
-      uint16_t pc_start = start;
-      while (auto pc_pair = owner_liveness.front()->find_free_sgpr_pair(inst, pc_start)) {
-        if (sc_sgpr_ranges_overlap(*pc_pair, 2u, *vcc_pair, 2u) ||
-            sc_sgpr_range_overlaps_delay_source(*pc_pair, 2u, options) ||
-            !dead_for_every_owner(*pc_pair, 2u)) {
-          if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-            break;
-          pc_start = static_cast<uint16_t>(*pc_pair + 2u);
-          continue;
-        }
-
-        uint16_t scc_start = start;
-        while (auto scc_save = owner_liveness.front()->find_free_sgpr(inst, scc_start)) {
-          if (!sc_sgpr_ranges_overlap(*scc_save, 1u, *vcc_pair, 2u) &&
-              !sc_sgpr_ranges_overlap(*scc_save, 1u, *pc_pair, 2u) &&
-              !sc_sgpr_range_overlaps_delay_source(*scc_save, 1u, options) &&
-              dead_for_every_owner(*scc_save, 1u)) {
-            return LdsCheckTrapIndirectScalarScratch{*vcc_pair, {*pc_pair, *scc_save}};
-          }
-          if (*scc_save + 1u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-            break;
-          scc_start = static_cast<uint16_t>(*scc_save + 1u);
-        }
-
-        if (*pc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-          break;
-        pc_start = static_cast<uint16_t>(*pc_pair + 2u);
-      }
-
-      if (*vcc_pair + 2u >= REGISTER_SET_ALLOCATABLE_SGPRS)
-        break;
-      vcc_start = static_cast<uint16_t>(*vcc_pair + 2u);
-    }
-    return std::nullopt;
-  };
-
-  if (min_preferred_sgpr) {
-    if (auto high_scratch = search(*min_preferred_sgpr))
-      return high_scratch;
-  }
-  return search(0);
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_flat_check_trap_scratch_vgpr(
@@ -210,9 +129,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     return;
   }
 
-  const auto delay_words = consan_sc_delay_instruction_word_count(options, result.errors,
-                                                                  "ConSan flat check/trap proof");
-  if (!delay_words)
+  if (!consan_sc_delay_instruction_word_count(options, result.errors,
+                                              "ConSan flat check/trap proof"))
     return;
 
   const auto original_bytes = std::span<const uint8_t>(
@@ -251,7 +169,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   struct FlatCheckTrapCandidate {
     const ConSanAccessInventorySite *site = nullptr;
     uint16_t scratch_vgpr = 0;
-    uint64_t requested_words = 0;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     uint16_t vcc_save_sgpr = 0;
     std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill;
@@ -266,18 +183,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   };
 
   const auto make_candidate = [](const ConSanAccessInventorySite *site, uint16_t scratch_vgpr,
-                                 uint64_t requested_words,
                                  const std::vector<uint64_t> &owner_descriptor_file_offsets) {
     FlatCheckTrapCandidate candidate;
     candidate.site = site;
     candidate.scratch_vgpr = scratch_vgpr;
-    candidate.requested_words = requested_words;
     candidate.owner_descriptor_file_offsets = owner_descriptor_file_offsets;
     return candidate;
   };
 
   std::vector<FlatCheckTrapCandidate> candidates;
-  bool skipped_supported_site_for_excessive_delay = false;
   size_t supported_candidate_count = 0;
   size_t scratchable_candidate_count = 0;
   size_t spill_backed_candidate_count = 0;
@@ -296,27 +210,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     auto required_vgprs = access_dword_count(site);
     if (!required_vgprs)
       return;
-    auto action_words =
-        mismatch_action_word_count(options, target, result.errors, "ConSan flat check/trap proof");
-    if (!action_words)
-      return;
     const uint32_t comparison_scratch_vgprs = flat_check_trap_comparison_scratch_vgprs(site);
     const uint32_t probe_scratch_vgprs = *required_vgprs + comparison_scratch_vgprs;
     const uint32_t report_alignment_padding =
         options.report_buffer_address && target.requires_even_vgpr_tuples ? 1u : 0u;
     const uint32_t instrumentation_scratch_vgprs =
         probe_scratch_vgprs + report_alignment_padding + report_action_scratch_vgprs(options);
-    const uint64_t comparison_setup_words = flat_check_trap_comparison_setup_words(site);
-    const uint64_t mismatch_words =
-        *required_vgprs > 1u ? 2u * *required_vgprs + 1u + *action_words
-                             : comparison_setup_words + (2u + *action_words) * *required_vgprs;
-    const uint64_t access_words = site.instruction_size / sizeof(uint32_t);
-    const bool needs_runtime_group_gate =
-        target.requires_sc_runtime_flat_group_gate &&
-        site.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
-    uint64_t requested_words = access_words + static_cast<uint64_t>(*delay_words) +
-                               (needs_runtime_group_gate ? 2u : 0u) + access_words + 1u +
-                               mismatch_words + 2u;
     const Instruction *site_inst = find_instruction_at_text_offset(
         KernelBlockScope(block_ptrs), site.physical_id.original_text_offset);
     const bool uses_dynamic_stack = owner_stack_kind == FlatOwnerStackKind::Dynamic;
@@ -373,13 +272,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
         if (vgpr_spill || dynamic_stack_spill) {
           if (dynamic_stack_spill)
             spill_vcc_save_pair_to_vgprs = true;
-          if (dynamic_stack_spill) {
-            requested_words += 1u + dynamic_stack_spill->save_words.size() +
-                               dynamic_stack_spill->restore_words.size();
-          } else {
-            requested_words += 1u + vgpr_spill->save_words.size() + 2u * scalar_reservoir_count +
-                               vgpr_spill->restore_words.size();
-          }
           ++spill_backed_candidate_count;
         } else {
           scratch.reset();
@@ -389,18 +281,12 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
             ++private_spill_encoding_failure_count;
         }
       }
-    } else if (spill_vcc_save_pair_to_vgprs) {
-      requested_words += 8u;
     }
     if (!scratch) {
       (void)publish_sc_access_rejection(
           result.coverage_ledger, result.errors, site.physical_id,
           ConSanLoweringOutcomeKind::ResourceRejected,
           "SuperCollider FLAT lowerer found no encodable scratch or spill plan");
-      return;
-    }
-    if (requested_words > 256u) {
-      skipped_supported_site_for_excessive_delay = true;
       return;
     }
     const std::optional<ConSanSuperColliderScalarVccSpill> scalar_vcc_spill =
@@ -415,8 +301,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
               }}
             : std::nullopt;
     ++scratchable_candidate_count;
-    candidates.push_back(
-        make_candidate(&site, *scratch, requested_words, owner_descriptor_file_offsets));
+    candidates.push_back(make_candidate(&site, *scratch, owner_descriptor_file_offsets));
     candidates.back().vcc_save_sgpr = *vcc_save;
     candidates.back().scalar_vcc_spill = scalar_vcc_spill;
     candidates.back().vgpr_spill = vgpr_spill;
@@ -607,12 +492,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
   }
 
   if (selected_candidates.empty()) {
-    if (skipped_supported_site_for_excessive_delay) {
-      result.warnings.emplace_back(
-          "ConSan flat check/trap proof skipped: requested delay needs too much "
-          "padding for the supported flat site");
-      return;
-    }
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no selectable likely group-FLAT load/store site; "
         "supported_candidates=" +
@@ -712,7 +591,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       planned.info.dynamic_private_segment_addend =
           candidate.dynamic_stack_spill->dynamic_frame_bytes;
     }
-    planned.words.reserve(static_cast<size_t>(candidate.requested_words));
     InstructionSequence sequence(planned.words);
     const auto restore_vcc =
         instrumentation::build_s_mov_b64(kAmdGpuVccLo, candidate.vcc_save_sgpr, arch);
@@ -972,39 +850,24 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  std::optional<AmdGpuCodeObject> composed_code_object;
-  const AmdGpuCodeObject *active_code_object = &code_object;
-  if (!result.replacement.empty()) {
-    composed_code_object.emplace(result.replacement.data(), result.replacement.size());
-    if (!composed_code_object->is_valid()) {
-      result.errors.emplace_back(
-          "ConSan flat check/trap proof cannot parse the composed code object");
-      return;
-    }
-    active_code_object = &*composed_code_object;
-  }
-  CodeObjectPatcher patcher(*active_code_object);
-  if (!apply_consan_descriptor_mutations_to_patcher(
-          patcher, result.program_inventory, *active_code_object,
-          {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
-           no_group_segment_requirements},
-          {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-           .inventory_proves_empty_accumulator_bank = false,
-           .maximum_group_segment_bytes = std::nullopt},
-          arch, "ConSan flat check/trap proof", result.errors))
-    return;
-
-  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    result.staged_text_rewrites.push_back({
+  std::vector<ConSanStagedTextRewrite> rewrites;
+  rewrites.reserve(planned_patches.size());
+  for (PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    rewrites.push_back({
         .original_site = planned.site->physical_id,
-        .intent_ids = planned.intent_ids,
-        .words = planned.words,
-        .patch = planned.info,
+        .intent_ids = std::move(planned.intent_ids),
+        .words = std::move(planned.words),
+        .patch = std::move(planned.info),
     });
   }
-  std::vector<uint8_t> descriptor_image = std::move(patcher).emit();
-  result.replacement = std::move(descriptor_image);
-  result.mark_modified();
+  (void)stage_consan_text_rewrites(
+      code_object, arch,
+      {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
+       no_group_segment_requirements},
+      {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+       .inventory_proves_empty_accumulator_bank = false,
+       .maximum_group_segment_bytes = std::nullopt},
+      "ConSan flat check/trap proof", std::move(rewrites), result);
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,

@@ -8,6 +8,5 @@ inline constexpr ConSanTargetProfile kConSanGfx950TargetProfile = [] {
   profile.arch = ROCJITSU_CODE_ARCH_CDNA4;
   profile.device_cache_refresh = ConSanDeviceCacheRefreshForm::Cdna4BufferInvSc1;
   profile.workgroup_shadow_clear.encoding = ConSanWorkgroupShadowClearEncoding::SplitB32Pair;
-  profile.sc_dense_route_identity = ConSanScDenseRouteIdentity::ExplicitInlineKey;
   return profile;
 }();
