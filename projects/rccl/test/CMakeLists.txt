@@ -692,9 +692,10 @@ if(BUILD_TESTS)
     # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
     # their result is caught rather than reviewed for. On its own that is only a
     # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
-    # still build and carry on with the comms the helper just closed. Promote it
-    # to an error -- the guard under test/netibmpi-guards checks helper
-    # definitions, not call sites, so this is what covers the call sites.
+    # still build and carry on with the comms the helper just closed. Promoting
+    # the warning to an error here is the whole of the enforcement: nothing
+    # checks the call sites but the compiler, and nothing keeps the attribute on
+    # the helpers but review.
     #
     # Scoped to the NetIbMPI sources rather than the whole target: other MPI
     # tests discard [[nodiscard]] results of their own, and reworking those is
