@@ -247,7 +247,8 @@ must already exist and contain at least one `.cper` file — it is not
 auto-created.
 
 Human output is a `file_name | list of afids` table. `--json` and `--csv` emit a
-structured per-file record instead (`cper_file, afids, status, message, code`).
+structured per-file record instead (`cper_file, afids, decode_failed, status,
+message, code`). In JSON `afids` is a list. In CSV it is a space-joined string.
 Either way the command exits with the underlying `AMDSMI_STATUS_*` on a decode
 failure (or `205` when files fail with differing codes), so a scripted caller
 sees the failure.
