@@ -96,6 +96,12 @@ typedef struct hipUUID_t {
 #define __HIP_NODISCARD
 #endif
 
+#if defined(_MSC_VER) && (_MSC_VER >= 1800)
+#define UINT32_BASE :uint32_t
+#else
+#define UINT32_BASE
+#endif
+
 /**
  * HIP error type
  *
@@ -103,7 +109,7 @@ typedef struct hipUUID_t {
 // Developer note - when updating these, update the hipErrorName and hipErrorString functions in
 // NVCC and HIP-Clang paths Also update the hipCUDAErrorTohipError function in NVCC path.
 
-typedef enum __HIP_NODISCARD hipError_t {
+typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipSuccess = 0,            ///< Successful completion.
   hipErrorInvalidValue = 1,  ///< One or more of the parameters passed to the API call is NULL
                              ///< or not in an acceptable range.
