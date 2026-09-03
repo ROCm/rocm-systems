@@ -17,7 +17,7 @@
 #include "nccl_device/ptr.h"
 #include "algorithms/dda/device/CollCommon.h"
 
-namespace gin::sdma{
+namespace gin::sdma {
 using dda::common::vecElementAdd;
 
 // Scalar sum for the one-shot kernel; covers float, half and bf16.
