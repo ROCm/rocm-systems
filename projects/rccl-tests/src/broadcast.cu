@@ -855,7 +855,8 @@ __global__ void GinRingSmMultiBroadcastKernel(ncclWindow_t sendwin, size_t sendo
         BroadcastLocalCopy<T>(myRecv + cStart, mySend + cStart, cCount, tid, nthreads);
       }
     }
-    bar.sync(ncclCoopCta(), cuda::memory_order_release);
+    // acq_rel: next-step consumer reads peerRecv written here over xGMI.
+    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
   }
 }
 
@@ -957,7 +958,10 @@ __device__ void ginRingSmTableBroadcastBody(ncclWindow_t sendwin, size_t sendoff
         BroadcastLocalCopy<T>(myRecv + cStart, mySend + cStart, cCount, tid, nthreads);
       }
     }
-    bar.sync(ncclCoopCta(), cuda::memory_order_release);
+    // acq_rel: the consumer at the next step reads peerRecv written here over xGMI;
+    // release alone does not acquire the predecessor's stores (LSA barrier maps
+    // release to relaxed acquire on the inbox).
+    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
   }
 }
 
