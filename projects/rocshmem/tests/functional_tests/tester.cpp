@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "tester.hpp"
+#include "type_lists.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -86,7 +87,6 @@
 #include "host_team_sync_barrier_tester.hpp"
 #include "broadcast_wave_tester.hpp"
 #include "alltoall_wave_tester.hpp"
-#include "type_lists.hpp"
 #if defined(USE_GDA)
 #include "qp_ping_pong_tester.hpp"
 #include "qp_put_nbi_tester.hpp"
@@ -321,29 +321,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new PrimitiveTester(args));
       break;
     case TeamReductionTestType:
-<<<<<<< HEAD
       test_name = "All-to-All Team-based Reduction";
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReductionTester, float, args, testers)
       } else {
         ROCSHMEM_PUSH_REDUCTION_ALL(TeamReductionTester, args, testers)
       }
-=======
-      test_name = "Team-based Reduction";
-      testers.push_back(new TeamReductionTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 1;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
->>>>>>> users/kesag/rocshmem-add-type-support
       break;
     case TeamReduceScatterTestType:
       test_name = "Team-based Reduce-Scatter";
@@ -355,137 +338,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case ReduceWaveTestType:
       test_name = "Wave-level Reduction";
-<<<<<<< HEAD
       if (args.type_coverage == TypeCoverage::Minimal) {
         ROCSHMEM_PUSH_REDUCTION_FLOAT(ReduceWaveTester, float, args, testers)
       } else {
         ROCSHMEM_PUSH_REDUCTION_ALL(ReduceWaveTester, args, testers)
       }
-=======
-      testers.push_back(new ReduceWaveTester<char, ROCSHMEM_SUM>(
-          args,
-          [](char& f1, char& f2) { f1 = 1; f2 = 1; },
-          [](char v, char n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<signed char, ROCSHMEM_SUM>(
-          args,
-          [](signed char& f1, signed char& f2) { f1 = 1; f2 = 1; },
-          [](signed char v, signed char n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<unsigned char, ROCSHMEM_SUM>(
-          args,
-          [](unsigned char& f1, unsigned char& f2) { f1 = 1; f2 = 1; },
-          [](unsigned char v, unsigned char n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<short, ROCSHMEM_SUM>(
-          args,
-          [](short& f1, short& f2) { f1 = 1; f2 = 1; },
-          [](short v, short n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<unsigned short, ROCSHMEM_SUM>(
-          args,
-          [](unsigned short& f1, unsigned short& f2) { f1 = 1; f2 = 1; },
-          [](unsigned short v, unsigned short n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<int, ROCSHMEM_SUM>(
-          args,
-          [](int& f1, int& f2) { f1 = 1; f2 = 1; },
-          [](int v, int n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<unsigned int, ROCSHMEM_SUM>(
-          args,
-          [](unsigned int& f1, unsigned int& f2) { f1 = 1; f2 = 1; },
-          [](unsigned int v, unsigned int n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<long, ROCSHMEM_SUM>(
-          args,
-          [](long& f1, long& f2) { f1 = 1; f2 = 1; },
-          [](long v, long n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<unsigned long, ROCSHMEM_SUM>(
-          args,
-          [](unsigned long& f1, unsigned long& f2) { f1 = 1; f2 = 1; },
-          [](unsigned long v, unsigned long n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<long long, ROCSHMEM_SUM>(
-          args,
-          [](long long& f1, long long& f2) { f1 = 1; f2 = 1; },
-          [](long long v, long long n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<unsigned long long, ROCSHMEM_SUM>(
-          args,
-          [](unsigned long long& f1, unsigned long long& f2) { f1 = 1; f2 = 1; },
-          [](unsigned long long v, unsigned long long n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
-      testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
-          args,
-          [](float& f1, float& f2) {
-            f1 = 1;
-            f2 = 1;
-          },
-          [](float v, float n_pes) {
-            return (v == n_pes)
-                       ? std::make_pair(true, "")
-                       : std::make_pair(false, "Got " + std::to_string(v) +
-                                                   ", Expect " +
-                                                   std::to_string(n_pes));
-          }));
->>>>>>> users/kesag/rocshmem-add-type-support
       break;
     case TeamReduceScatterWaveTestType:
       test_name = "Team-based Reduce-Scatter Wave";
@@ -528,7 +385,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new BroadcastWaveTester<float>(args));
         testers.push_back(new BroadcastWaveTester<double>(args));
       } else {
-        ROCSHMEM_BCAST_WAVE_TYPES_FULL(PUSH_BWAVE)
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_BWAVE)
       }
       #undef PUSH_BWAVE
       break;
@@ -573,7 +430,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         testers.push_back(new AlltoallWaveTester<char>(args));
         testers.push_back(new AlltoallWaveTester<int>(args));
       } else {
-        ROCSHMEM_ALLTOALL_WAVE_TYPES_FULL(PUSH_A2AWAVE)
+        ROCSHMEM_COLL_TYPES_FULL(PUSH_A2AWAVE)
       }
       #undef PUSH_A2AWAVE
       break;
