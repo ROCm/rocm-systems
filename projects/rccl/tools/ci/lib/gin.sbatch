@@ -185,6 +185,11 @@ if [[ ! -x "${rccl_tests_build}/alltoall_perf" ]]; then
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
+  echo "ERROR: broadcast_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
 
 # Diag: confirm alltoall_perf exports the rocSHMEM host symbol librccl.so resolves
 # at runtime (log_flags); a miss here => runtime 'undefined symbol'.
@@ -200,6 +205,7 @@ nm -CD "${librccl}" 2>/dev/null | grep -E " U .*${sym}" || echo "  not undefined
 {
   printf 'export RCCL_INSTALL_PREFIX=%q\n' "${rccl_prefix}"
   printf 'export RCCL_TESTS_BIN_DIR=%q\n' "${rccl_tests_build}"
+  printf 'export RCCL_TESTS_DIR=%q\n' "${rccl_tests_src}"
   printf 'export RCCL_FIXTURES_BIN_DIR=%q\n' "$(dirname "${rccl_fixtures_bin}")"
 } > "${workdir}/.ci-out/rccl.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
