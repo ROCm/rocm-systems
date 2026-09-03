@@ -3221,7 +3221,12 @@ uint64_t SimulatedKfd::debugger_queue_exception_mask(const std::shared_ptr<KfdPr
       return 0;
     gpu_id = queue->second.gpu_id;
   }
-  return debug_stop_publishable(gpu_id) ? exception_mask & enabled_mask : 0;
+  // KFD makes one ownership decision for the complete event: any subscribed
+  // bit assigns the full decoded mask to the debugger. Splitting a combined
+  // event would let the runtime suspension prevent the handler from reaching
+  // trap completion and publishing the debugger-owned portion.
+  return debug_stop_publishable(gpu_id) && (exception_mask & enabled_mask) != 0 ? exception_mask
+                                                                                : 0;
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
@@ -3306,10 +3311,10 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     return false;
 
   // PC-sampling host/perf traps use MSG_INTERRUPT too, but put a completion
-  // event id in M0. Their GFX12 EXCP_FLAG_PRIV causes occupy bits 22 and 23 in
+  // event id in M0. Their GFX12 EXCP_FLAG_PRIV causes occupy bits 22 and 26 in
   // the common TRAPSTS representation. Do not reinterpret a large event id as
   // the queue-exception layout below.
-  constexpr uint32_t kProfilingTrapstsMask = (1u << 22) | (1u << 23);
+  constexpr uint32_t kProfilingTrapstsMask = (1u << 22) | (1u << 26);
   if ((wave.trapsts() & kProfilingTrapstsMask) != 0)
     return true;
 

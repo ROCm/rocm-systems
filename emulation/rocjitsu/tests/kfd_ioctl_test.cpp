@@ -655,6 +655,7 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   const uint32_t handler[] = {
       0xBEFD00FFu,        0x00000007u,              // s_mov_b32 m0, doorbell_id
       kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000400u, // s_mov_b32 m0, PC-sampling event 1024
+      kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000400u, // s_mov_b32 m0, perf event 1024
       kSSendmsgInterrupt, 0xBEFD00FFu, 0x00000407u, // s_mov_b32 m0, WAVE_ABORT | doorbell_id
       kSSendmsgInterrupt,
   };
@@ -691,9 +692,19 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
     std::lock_guard<std::mutex> lock(delivered_mutex);
     EXPECT_EQ(delivered_status, 0u);
   }
+  cu->step(); // Load a stochastic performance-sampling event id.
+  wave->set_trapsts(wave->trapsts() | (1u << 26));
+  cu->step(); // A performance-snapshot interrupt is not a queue exception.
+  wave->set_trapsts(wave->trapsts() & ~(1u << 26));
+  {
+    std::lock_guard<std::mutex> lock(delivered_mutex);
+    EXPECT_EQ(delivered_status, 0u);
+  }
   memory->write64(exception_status_address, kWaveTrap, driver_->local_process_id());
   cu->step(); // Add EC_QUEUE_WAVE_ABORT above the doorbell bits.
+  wave->set_trapsts(wave->trapsts() | (1u << 23));
   cu->step(); // Deliver it after releasing the CU wave-state lock.
+  wave->set_trapsts(wave->trapsts() & ~(1u << 23));
 
   {
     std::lock_guard<std::mutex> lock(delivered_mutex);
@@ -4615,6 +4626,8 @@ TEST_F(KfdIoctlTest, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitCwsrSu
   constexpr uint32_t kCwsrSize = 0x40000;
   constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
   constexpr uint32_t kSNop = 0xBF800000u;
+  constexpr uint64_t kReportedExceptions =
+      KFD_EC_MASK(EC_QUEUE_WAVE_ABORT) | KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR);
 
   std::vector<uint8_t> code_page(4096);
   std::vector<uint8_t> peer_page(4096);
@@ -4705,7 +4718,7 @@ TEST_F(KfdIoctlTest, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitCwsrSu
 
   for (uint32_t i = 0; i < 8 && !wave->debug_halted(); ++i) {
     if (wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
-      wave->set_m0((KFD_EC_MASK(EC_QUEUE_WAVE_ABORT) << 10) | create.queue_id);
+      wave->set_m0((kReportedExceptions << 10) | create.queue_id);
     cu->step();
   }
   ASSERT_TRUE(wave->debug_halted());
@@ -4725,7 +4738,7 @@ TEST_F(KfdIoctlTest, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitCwsrSu
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
   EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
   EXPECT_EQ(query.query_debug_event.gpu_id, kGpuId);
-  EXPECT_EQ(query.query_debug_event.exception_mask, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT));
+  EXPECT_EQ(query.query_debug_event.exception_mask, kReportedExceptions);
 
   // Notification alone does not publish queue state. ROCdbgapi explicitly
   // suspends the queue before decoding its authoritative CWSR snapshot.
