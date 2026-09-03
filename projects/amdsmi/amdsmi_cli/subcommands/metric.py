@@ -310,7 +310,11 @@ class MetricCommands:
         show_apu = bool(gpu_metric.get("is_apu", False))
         # APUs lack these discrete-GPU sensors. Drop them from the default dump only; a
         # section the user named explicitly still reports N/A rather than nothing.
-        apu_suppressed = show_apu and not any(current_platform_values)
+        # Derive this AFTER arg defaulting (line 291-293) to avoid reading stale values
+        # from the shared args namespace across watch iterations and multi-GPU recursion.
+        apu_suppressed = show_apu and all(
+            getattr(args, arg) == True for arg in current_platform_args
+        )
         if apu_suppressed:
             logging.debug(
                 "APU detected for gpu %s; omitting pcie, ecc_blocks, "
@@ -2321,7 +2325,9 @@ class MetricCommands:
 
         # On APU systems, drop only the N/A standard sensors from APU-relevant
         # sections; a standard field that reports a real value is preserved.
-        if show_apu:
+        # Scope this to the default dump (apu_suppressed) so an explicitly named
+        # section (e.g. --temperature) keeps its keys even if they are N/A.
+        if apu_suppressed:
             apu_only_sections = {"usage", "power", "clock", "temperature", "voltage", "throttle"}
             for section_key in list(values_dict.keys()):
                 section_val = values_dict[section_key]
