@@ -660,3 +660,70 @@ substantially. The stable direction is that a fact is decided once, represented
 for only as long as necessary, consumed through one obvious path, independently
 validated where trust requires it, and never multiplied by both mode and
 architecture.
+
+## 14. Execution ledger
+
+This section records pressure-test evidence as the campaign proceeds. A probe
+is not an accepted macro-slice, and its temporary production scaffolding does
+not survive unless it establishes an economically useful replacement.
+
+### 14.1 Initial whole-tree candidate audit
+
+The first pass classified all 56 architecture-predicate calls outside
+`targets/`. They ask for separate facts: VCC and accumulator layout, tuple
+alignment, scalar preload and call form, branch-only spill support, persistent
+bank behavior, CDNA5 replay behavior, and encodings shared by RDNA4 and CDNA5.
+Replacing those questions with a profile boolean for each spelling would add
+plumbing while leaving every downstream branch intact. The complete target
+component is only 2,297 implementation lines, so target dispatch cleanup alone
+cannot provide the required macro deletion. A target-normalization slice must
+instead prove that one of these facts causes a substantial lifecycle in common
+or mode code to disappear.
+
+Deep reads also rejected four tempting size-based candidates:
+
+- the report decoder, analyzer, renderer, trust, and lifecycle stages already
+  have distinct owners, and converting their counters to arrays would remove
+  only a few hundred lines while obscuring typed evidence;
+- Record/Replay, Sampled, and InlineShadow access lowering share orchestration
+  shape but not the probe body, entry gate, return ABI, evidence policy, or
+  fallback contract; a prior complete transaction prototype would have added
+  more common and adapter code than it removed;
+- synchronization event, sequence, fence-candidate, and barrier-lifecycle
+  records overlap in fields but represent different mutation and association
+  lifetimes; field/index consolidation alone is again only a few hundred
+  lines; and
+- replacing direct diagnostic publication with a generic failure sink removed
+  only about 58 lines from the hardest 1,482-line emitter before charging the
+  shared abstraction, and did not delete a semantic lifecycle.
+
+The configuration path was also rechecked rather than assumed to be broad
+legacy state. `HookConfig` already inherits the normalized request, transform,
+runtime, debug, mutation, and bound-resource contracts; `ConSanOptions` is a
+thin aggregate of the same contracts. There is no remaining parallel option
+representation large enough to replace.
+
+### 14.2 Hypothetical-mode identity pressure
+
+A temporary fifth `ConSanMoiEngine` enumerator was compiled through the full
+tree with exhaustive-switch warnings as errors, then removed. Before any
+mode-local implementation was added, the production edit ledger contained six
+choke points:
+
+1. the report ABI enum and its canonical spelling vocabulary;
+2. the public capability-engine projection;
+3. request validation;
+4. raw report-header engine validation;
+5. the host decoded-report variant selection; and
+6. the host analysis-variant/engine consistency check.
+
+All transformer sources beyond those choke points compiled unchanged. The
+many test compilation failures all originated in two exhaustive switches in
+the shared test-support header, not in repeated production policy. This is
+strong evidence that the existing `MoiModeOperations` boundary has already
+removed most transformer-side identity fanout. It is not yet the full vertical
+exercise: an access and synchronization implementation, report layout, host
+mode stages, validation, and the synthetic-target composition still need to be
+driven. The remaining question is whether those implementations reveal a
+duplicated lifecycle, not whether another callback should be added to the
+already broad operations product.
