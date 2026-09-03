@@ -44,6 +44,8 @@ class ReduceWaveTester : public Tester {
                                 const T1 &, const T1 &)> f2);
   virtual ~ReduceWaveTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 
