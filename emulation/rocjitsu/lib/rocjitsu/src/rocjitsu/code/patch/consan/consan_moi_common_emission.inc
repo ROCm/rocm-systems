@@ -1,61 +1,6 @@
 // Retained intentionally for the structural dense-routing template; compiled
 // shared lowering lives in consan_moi_shared_lowering.cpp.
 
-std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
-    std::span<const MoiDenseRelayRoute> routes, uint16_t jump_pc_sgpr,
-    uint16_t saved_scc_sgpr, uint16_t key_sgpr, uint16_t call_return_sgpr,
-    bool derive_key_at_entry, bool key_encodes_scc, bool match_call_return,
-    bool clone_local_routes, uint64_t dispatcher_offset, uint64_t island_offset,
-    const ConSanTargetProfile &target, rj_code_arch_t arch) {
-  std::vector<uint32_t> words;
-  InstructionSequence sequence(words);
-  if (key_encodes_scc) {
-    words.push_back(build_s_lshr_b32(jump_pc_sgpr, key_sgpr,
-                                     scalar_positive_inline_u32(1), arch));
-  }
-  if (!derive_key_at_entry && !match_call_return && !clone_local_routes) {
-    if (!sequence.emit(
-            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch)))
-      return std::nullopt;
-    words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
-    words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
-  }
-  for (const MoiDenseRelayRoute &route : routes) {
-    if (match_call_return) {
-      if (!append_moi_call_return_match(words, dispatcher_offset, route.caller_return,
-                                        jump_pc_sgpr, call_return_sgpr, arch))
-        return std::nullopt;
-    } else if (clone_local_routes) {
-      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch)))
-        return std::nullopt;
-    } else {
-      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
-              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch)))
-        return std::nullopt;
-      words.push_back(static_cast<uint32_t>(route.caller_return - island_offset) /
-                      (key_encodes_scc ? 2u : 1u));
-    }
-    std::vector<uint32_t> matched_words;
-    if (key_encodes_scc &&
-        !consan_detail::append_restore_moi_scc_from_route_key(
-            matched_words, {.encoded_sgpr = key_sgpr}, target))
-      return std::nullopt;
-    const uint64_t matched_offset =
-        dispatcher_offset + (words.size() + 1u) * sizeof(uint32_t);
-    if (!append_moi_scc_preserving_indirect_jump(
-            matched_words, matched_offset, route.target, jump_pc_sgpr, saved_scc_sgpr,
-            /*capture_scc=*/false, arch))
-      return std::nullopt;
-    if (!sequence.emit(instrumentation::build_s_cbranch_scc0(
-            static_cast<int16_t>(matched_words.size()), arch)) ||
-        !sequence.emit(matched_words))
-      return std::nullopt;
-  }
-  words.push_back(build_s_endpgm(arch));
-  return words;
-}
-
 /// Emit the owner-local dense entry island, dispatcher, optional relocated
 /// host entry, and original-site route anchors shared by all three access
 /// engines.

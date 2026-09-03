@@ -1243,30 +1243,86 @@ void try_apply_shared_barrier_patch(
       }
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
-      std::vector<MoiDenseRelayRoute> routes{
-          {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
-      routes.reserve(bodies.size() + 1u);
-      for (const DenseBarrierBody &body : bodies) {
-        const ConSanBarrierSite &site = planned_candidates[body.planned_index].candidate.site;
-        routes.push_back({.identity = static_cast<uint32_t>(routes.size()),
-                          .caller_return = site.text_offset + sizeof(uint32_t),
-                          .target = body.offset});
+      std::vector<uint32_t> dispatcher_words;
+      if (key_encodes_scc) {
+        dispatcher_words.push_back(
+            build_s_lshr_b32(jump_pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
       }
-      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
-          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr,
-          derive_key_at_entry, key_encodes_scc,
-          /*match_call_return=*/target->direct_call_form == ConSanDirectCallForm::SCallI64 &&
-              !derive_key_at_entry,
-          /*clone_local_routes=*/false,
-          dispatcher_offset, island_offset, *target, arch);
-      if (!dispatcher_words ||
-          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
+      if (!derive_key_at_entry && target->direct_call_form != ConSanDirectCallForm::SCallI64) {
+        const auto subtract_pc =
+            instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
+        if (!subtract_pc) {
+          result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its key");
+          return;
+        }
+        dispatcher_words.push_back(*subtract_pc);
+        dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
+        dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
+      }
+
+      const auto append_dispatch_target = [&](uint64_t caller_return,
+                                              uint64_t destination) -> bool {
+        if (target->direct_call_form == ConSanDirectCallForm::SCallI64 && !derive_key_at_entry) {
+          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
+                                            jump_pc_sgpr, call_return_sgpr, arch))
+            return false;
+        } else {
+          const auto compare = instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_pc_sgpr : key_sgpr, /*literal=*/255u, arch);
+          if (!compare)
+            return false;
+          dispatcher_words.push_back(*compare);
+          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset) /
+                                     (key_encodes_scc ? 2u : 1u));
+        }
+        std::vector<uint32_t> matched_words;
+        if (key_encodes_scc) {
+          const ConSanTargetProfile *matched_target = consan_target_profile(arch);
+          if (matched_target == nullptr || !consan_detail::append_restore_moi_scc_from_route_key(
+                                               matched_words,
+                                               consan_detail::MoiEncodedSccRestoreRequest{
+                                                   .encoded_sgpr = key_sgpr,
+                                                   .normalize_encoded_sgpr = true,
+                                               },
+                                               *matched_target)) {
+            return false;
+          }
+        }
+        const uint64_t matched_offset =
+            dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+        if (!append_moi_scc_preserving_indirect_jump(matched_words, matched_offset, destination,
+                                                     jump_pc_sgpr, saved_scc_sgpr,
+                                                     /*capture_scc=*/false, arch))
+          return false;
+        const auto skip =
+            instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
+        if (!skip)
+          return false;
+        dispatcher_words.push_back(*skip);
+        dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
+        return true;
+      };
+      if (!append_dispatch_target(/*caller_return=*/island_offset, host_body_offset)) {
         result.errors.emplace_back(
-            "ConSan MOI dense barrier relay could not encode its dispatcher");
+            "ConSan MOI dense barrier relay could not encode its host dispatch");
         return;
       }
-      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
-                  dispatcher_words->size() * sizeof(uint32_t));
+      for (const DenseBarrierBody &body : bodies) {
+        const ConSanBarrierSite &site = planned_candidates[body.planned_index].candidate.site;
+        if (!append_dispatch_target(site.text_offset + sizeof(uint32_t), body.offset)) {
+          result.errors.emplace_back(
+              "ConSan MOI dense barrier relay could not encode a barrier dispatch");
+          return;
+        }
+      }
+      dispatcher_words.push_back(build_s_endpgm(arch));
+      if (dispatcher_words.size() * sizeof(uint32_t) > dispatcher_reservation) {
+        result.errors.emplace_back(
+            "ConSan MOI dense barrier dispatcher exceeds its reserved relay space");
+        return;
+      }
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
+                  dispatcher_words.size() * sizeof(uint32_t));
 
       ConSanPatchInfo host_info;
       host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
@@ -1282,7 +1338,7 @@ void try_apply_shared_barrier_patch(
           planned_candidates[indices.front()].candidate.site.text_offset;
       dispatcher_info.trampoline_offset = dispatcher_offset;
       dispatcher_info.trampoline_size =
-          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t));
+          static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
       dispatcher_info.owner_descriptor_file_offsets = group_owner;
       patches.push_back(std::move(dispatcher_info));
 

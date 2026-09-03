@@ -9,7 +9,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
-#include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <algorithm>
