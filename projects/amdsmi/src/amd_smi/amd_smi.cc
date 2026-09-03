@@ -5155,27 +5155,33 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
+  // gpu_metrics marks an unavailable clock with UINT16_MAX. Widen it to the uint32
+  // marker the DF case returns, so every clk_type reports unavailable the same way.
+  auto widen_unavailable = [](uint16_t clk) -> uint32_t {
+    return clk == UINT16_MAX ? UINT32_MAX : static_cast<uint32_t>(clk);
+  };
+
   switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:
-      info->clk = metrics.current_gfxclk;
+      info->clk = widen_unavailable(metrics.current_gfxclk);
       break;
     case AMDSMI_CLK_TYPE_MEM:
-      info->clk = metrics.current_uclk;
+      info->clk = widen_unavailable(metrics.current_uclk);
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
-      info->clk = metrics.current_vclk0;
+      info->clk = widen_unavailable(metrics.current_vclk0);
       break;
     case AMDSMI_CLK_TYPE_VCLK1:
-      info->clk = metrics.current_vclk1;
+      info->clk = widen_unavailable(metrics.current_vclk1);
       break;
     case AMDSMI_CLK_TYPE_DCLK0:
-      info->clk = metrics.current_dclk0;
+      info->clk = widen_unavailable(metrics.current_dclk0);
       break;
     case AMDSMI_CLK_TYPE_DCLK1:
-      info->clk = metrics.current_dclk1;
+      info->clk = widen_unavailable(metrics.current_dclk1);
       break;
     case AMDSMI_CLK_TYPE_SOC:
-      info->clk = metrics.current_socclk;
+      info->clk = widen_unavailable(metrics.current_socclk);
       break;
     // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to
     // be valid
@@ -5400,11 +5406,17 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Validate the buffer holds a full header before dereferencing any header field
+  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
+       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
   const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if (cper->record_length > buf_size) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec
-       << buf_size << " is smaller than cper record length " << std::dec << cper->record_length
-       << "\n";
+  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
+       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   } else if (strncmp(cper->signature, "CPER", 4) != 0) {
@@ -5414,7 +5426,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper)) {
+  for (int afid : cper_decode(cper, buf_size)) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }

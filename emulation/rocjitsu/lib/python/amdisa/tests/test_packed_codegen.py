@@ -121,6 +121,32 @@ def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
     assert 'std::min(sum_lo, c_lo)' in unsigned
 
 
+def test_pk_mad_integer_clamp_saturates_both_selected_halves():
+    signed = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'i16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+    unsigned = gen_pk_ternary(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'mad',
+        'u16',
+        op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+        integer_clamp=True,
+    )
+
+    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
+    assert signed.count('inst_.clamp') == 2
+    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
+    assert unsigned.count('inst_.clamp') == 2
+
+
 def test_dot8_iu4_uses_operand_signedness_modifiers():
     cpp = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_i32_iu4')
 
@@ -429,7 +455,7 @@ def test_mad_mixlo_bf16_uses_true16_low_write():
     assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
 
 
-def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
+def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     cpp_f32 = gen_mad_mix_bf16(
         ['vdst'],
         ['src0', 'src1', 'src2'],
@@ -446,7 +472,25 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
         use_cdna5_helpers=True,
     )
+    cpp_hi = gen_mad_mix_bf16(
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        result='hi',
+        op_sel_hi_2_expr='inst_.pad_14',
+        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        use_cdna5_helpers=True,
+    )
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
     assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    assert 'util::f32_to_bf16(result)' in cpp_lo
+    mode_round = 'amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
+    assert mode_round in cpp_lo
+    assert mode_round in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_lo
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_hi
+    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' not in cpp_f32
+    assert 'std::fma(a, b, c)' not in cpp_lo
+    assert 'std::fma(a, b, c)' not in cpp_hi
+    assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_lo
+    assert 'util::f32_to_bf16(result)' not in cpp_hi
