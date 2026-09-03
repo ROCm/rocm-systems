@@ -6,6 +6,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
@@ -22,10 +23,12 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "simdojo/sim/simulation.h"
 #include "util/except.h"
 
@@ -54,6 +57,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -78,6 +82,14 @@ public:
     return &GpuMemory::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
   }
 
+  static uint64_t rejected_identity_accesses(const GpuMemory &memory) {
+    return memory.rejected_identity_accesses_.load(std::memory_order_relaxed);
+  }
+
+  static amdgpu::PageWritability page_writability(const uint8_t *page) {
+    return GpuMemory::host_page_writability(page);
+  }
+
 #if defined(RJ_AMDGPU_VM_TEST_WITH_ASAN)
   static void set_page_table_unlocked_hook(GpuMemory &memory, std::function<void()> *hook) {
     memory.asan_page_table_unlocked_hook_.store(hook, std::memory_order_release);
@@ -90,6 +102,45 @@ public:
 } // namespace rocjitsu::amdgpu
 
 namespace {
+
+/// @brief Records the addresses a memory violation was reported against.
+class RecordingFaultReporter : public rocjitsu::amdgpu::MemoryFaultReporter {
+public:
+  void report_memory_fault(uint32_t, uint64_t addr,
+                           rocjitsu::amdgpu::MemoryFaultCause cause) override {
+    addresses.push_back(addr);
+    causes.push_back(cause);
+  }
+  std::vector<uint64_t> addresses;
+  std::vector<rocjitsu::amdgpu::MemoryFaultCause> causes;
+};
+
+/// @brief One anonymous host page usable as an identity translation target.
+/// @details Passthrough resolves a GPU address to the identical host address,
+/// so a test that wants a *valid* identity translation needs a page it really
+/// owns, and one that wants an invalid one needs that page released or made
+/// inaccessible. Both start here.
+struct IdentityHostPage {
+  uint8_t *data = nullptr;
+
+  IdentityHostPage() {
+    void *raw = mmap(nullptr, rocjitsu::KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    data = raw == MAP_FAILED ? nullptr : static_cast<uint8_t *>(raw);
+  }
+  IdentityHostPage(const IdentityHostPage &) = delete;
+  IdentityHostPage &operator=(const IdentityHostPage &) = delete;
+  ~IdentityHostPage() { release(); }
+
+  uint64_t addr() const { return reinterpret_cast<uint64_t>(data); }
+
+  /// @brief Unmap the page, turning its address into a hole that outlives it.
+  void release() {
+    if (data)
+      munmap(data, rocjitsu::KfdProcess::kPageSize);
+    data = nullptr;
+  }
+};
 
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
@@ -214,6 +265,38 @@ TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
 
 TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
   EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryRejectsModelOnlyConcreteTarget) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .target = ROCJITSU_CODE_TARGET_GFX1251,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+
+  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
+               util::ConfigError);
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .target = ROCJITSU_CODE_TARGET_GFX950,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+
+  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
+               util::ConfigError);
 }
 
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
@@ -427,6 +510,96 @@ TEST(GpuMemoryTest, SparsePages) {
   EXPECT_EQ(mem->read32(0x0), 42u);
   EXPECT_EQ(mem->read32(0x100000), 99u);
   EXPECT_EQ(mem->read32(0x50000), 0u);
+}
+
+// An atomic modifies its operand in place, so it cannot let the kernel perform
+// the permission check as part of the access the way a block copy can -- it has
+// to ask first. Asking costs a scan of /proc/self/maps, which is why the answer
+// is skipped entirely for driver-owned extents: their backing is a memfd this
+// process mapped read-write and holds open, so no other party can change its
+// protection. Application-owned extents are the caller's own pages and are
+// asked about every time.
+TEST(GpuMemoryTest, AtomicsValidateApplicationPagesAndTrustDriverPages) {
+  amdgpu::GpuMemory mem("owner_mem");
+  KfdProcess process(/*process_id=*/321);
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+
+  auto *pages =
+      static_cast<uint8_t *>(mmap(nullptr, 2 * KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(pages, MAP_FAILED);
+  constexpr uint64_t kAppVa = 0x200000;
+  constexpr uint64_t kDriverVa = 0x300000;
+  process.map_pages(kAppVa, pages, KfdProcess::kPageSize, amdgpu::Mtype::RW,
+                    KfdProcess::HostExtentOwner::Application);
+  process.map_pages(kDriverVa, pages + KfdProcess::kPageSize, KfdProcess::kPageSize,
+                    amdgpu::Mtype::RW, KfdProcess::HostExtentOwner::Driver);
+
+  EXPECT_EQ(mem.atomic_store(kAppVa, sizeof(uint32_t), 7, process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+  EXPECT_EQ(mem.atomic_store(kDriverVa, sizeof(uint32_t), 9, process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+
+  // The application revokes write permission on its own page. The atomic must
+  // report a fault rather than store through it and take down the simulator.
+  ASSERT_EQ(mprotect(pages, KfdProcess::kPageSize, PROT_READ), 0);
+  EXPECT_EQ(mem.atomic_store(kAppVa, sizeof(uint32_t), 11, process.process_id()),
+            amdgpu::AccessOutcome::Faulted);
+
+  // The driver page is unaffected by anything the application did to its own.
+  EXPECT_EQ(mem.atomic_store(kDriverVa, sizeof(uint32_t), 13, process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+
+  ASSERT_EQ(mprotect(pages, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  munmap(pages, 2 * KfdProcess::kPageSize);
+  mem.unregister_process(process.process_id());
+}
+
+// The application can revoke a page the GPU page table still describes -- it is
+// the application's own memory, registered through USERPTR. Nothing checks
+// beforehand, because checking costs more than the access; the access is
+// attempted and the host fault it takes is turned into a GPU memory violation.
+// Without that, this test kills the process instead of failing.
+TEST(GpuMemoryTest, RevokedApplicationPagesFaultInsteadOfKillingTheProcess) {
+  amdgpu::GpuMemory mem("guarded_mem");
+  KfdProcess process(/*process_id=*/322);
+  mem.register_process(process.process_id(), &process.page_table_, &process.page_table_mutex_);
+
+  auto *page = static_cast<uint8_t *>(mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+                                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(page, MAP_FAILED);
+  constexpr uint64_t kVa = 0x400000;
+  process.map_pages(kVa, page, KfdProcess::kPageSize, amdgpu::Mtype::RW,
+                    KfdProcess::HostExtentOwner::Application);
+
+  const std::array<uint8_t, 4> payload{1, 2, 3, 4};
+  ASSERT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+
+  // Write permission withdrawn: the store faults, and the fault is reported.
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_READ), 0);
+  EXPECT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
+            amdgpu::AccessOutcome::Faulted);
+  // Reading it is still legitimate, so it must still work.
+  std::array<uint8_t, 4> readback{};
+  EXPECT_EQ(mem.read_block(kVa, std::span<uint8_t>(readback), process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+  EXPECT_EQ(readback, payload);
+
+  // Withdrawn entirely: the read faults too, and hands back nothing.
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_NONE), 0);
+  EXPECT_EQ(mem.read_block(kVa, std::span<uint8_t>(readback), process.process_id()),
+            amdgpu::AccessOutcome::Faulted);
+  EXPECT_EQ(readback, (std::array<uint8_t, 4>{0, 0, 0, 0}))
+      << "a refused read must not hand back bytes it could not fetch";
+
+  // The guard is not a one-shot: the thread keeps working afterwards.
+  ASSERT_EQ(mprotect(page, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  EXPECT_EQ(mem.write_block(kVa, std::span<const uint8_t>(payload), process.process_id()),
+            amdgpu::AccessOutcome::Complete);
+
+  munmap(page, KfdProcess::kPageSize);
+  mem.unregister_process(process.process_id());
 }
 
 TEST(GpuMemoryTest, FindHostRangeUsesVmidPageTable) {
@@ -845,9 +1018,12 @@ TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
         std::memcpy(storage, replacement.data(), replacement.size());
       },
       kPid);
-  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0x11, 0x22, 0, 0}));
-  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x31);
-  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x32);
+  // An atomic straddling the end of the backing is refused outright rather
+  // than applied to the bytes that exist: a torn fence or signal is worse than
+  // a reported fault, because the owner reads it as whole.
+  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0, 0, 0, 0}));
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x11);
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x22);
 
   std::array<uint8_t, kCacheLineSize> cache_line{};
   memory.read_block(kBaseVa, std::span<uint8_t>(cache_line), kPid);
@@ -1026,9 +1202,15 @@ TEST(GpuMemoryTest, SanitizedCacheLineAccessClipsRoundedMapping) {
         std::memcpy(storage, replacement.data(), replacement.size());
       },
       kPid);
-  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0x11, 0x22, 0, 0}));
-  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x31);
-  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x32);
+  // Refused outright rather than applied to the two bytes that do exist. An
+  // atomic is a promise about its whole operand, so half of one is not a
+  // smaller atomic -- it is a fence, signal or read pointer published torn,
+  // which the owner reads as whole. The callback still runs, against scratch
+  // that is then discarded, so a caller reading its operand back sees zeros
+  // rather than a value it might act on.
+  EXPECT_EQ(straddling_atomic_read, (std::array<uint8_t, sizeof(uint32_t)>{0, 0, 0, 0}));
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset], 0x11) << "a refused atomic stored anyway";
+  EXPECT_EQ(allocation[kStraddlingAtomicOffset + 1], 0x22) << "a refused atomic stored anyway";
 
   std::fill_n(allocation.get(), kAllocationSize, 0x5a);
   std::array<uint8_t, kCacheLineSize> cache_line{};
@@ -1114,6 +1296,75 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
 }
 
+TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  allocation[0] = 0x5a;
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  {
+    amdgpu::RequestMtypeResolver request(&memory, kPid);
+    EXPECT_EQ(request.at(kBaseVa), amdgpu::Mtype::UC);
+    EXPECT_EQ(hook_calls, 0u);
+  }
+
+  EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x5a);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, SanitizedL1BackingLookupAllowsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint32_t kInitial = 0x11112222;
+  constexpr uint32_t kReplacement = 0x33334444;
+  constexpr uint32_t kLatest = 0x55556666;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::memcpy(allocation.get(), &kInitial, sizeof(kInitial));
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+  l2.set_backing_memory(&memory);
+  l1.set_memory(&memory);
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::UC);
+    std::memcpy(allocation.get(), &kReplacement, sizeof(kReplacement));
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+
+  uint32_t result = 0;
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kReplacement);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::UC);
+
+  std::memcpy(allocation.get(), &kLatest, sizeof(kLatest));
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kLatest);
+}
+
 TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
@@ -1128,13 +1379,13 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
   process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
+                          process.page_table_generation(), process.page_table_request_mutex());
 
   std::function<void()> query_hook = [&] {
     amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
     memory.unregister_process(kPid);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            process.page_table_generation());
+                            process.page_table_generation(), process.page_table_request_mutex());
     EXPECT_EQ(memory.read8(kNestedVa, kPid), 0x22);
   };
   amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
@@ -1155,7 +1406,8 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
     new_page[0] = 0x22;
     process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            use_generation ? process.page_table_generation() : nullptr);
+                            use_generation ? process.page_table_generation() : nullptr,
+                            process.page_table_request_mutex());
 
     uint8_t *current_page = old_page.get();
     size_t hook_calls = 0;
@@ -1578,6 +1830,13 @@ TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
   allow_first_atomic_to_write.arrive_and_wait();
   first_atomic.join();
 
+  // The client fallback refuses a read-modify-write it cannot carry out
+  // atomically across the process boundary, so the first increment is reported
+  // rather than applied. The lock property above is what this test exists for;
+  // the end-to-end increment it used to assert is the behaviour that refusal
+  // replaced.
+  EXPECT_EQ(*target, 0u) << "a refused client atomic still wrote";
+
   process.map_pages(reinterpret_cast<uint64_t>(mapping.data), mapping.data, KfdProcess::kPageSize);
   memory.atomic_rmw(
       reinterpret_cast<uint64_t>(target), sizeof(*target),
@@ -1589,7 +1848,8 @@ TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
       },
       kVmid);
 
-  EXPECT_EQ(*target, 2u);
+  // Now page-table backed, so it is a genuine in-place atomic and lands.
+  EXPECT_EQ(*target, 1u);
 }
 
 TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
@@ -1667,7 +1927,11 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123, kPid), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
             nullptr);
-  EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+  // Below the limit still resolves by identity, but only where a host page
+  // really exists -- so this also shows the rejections above are the limit
+  // talking and not a blanket refusal.
+  IdentityHostPage page;
+  EXPECT_EQ(memory.resolve_host_ptr(page.addr() + 0x40, kPid), page.data + 0x40);
 }
 
 TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
@@ -1677,7 +1941,893 @@ TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
 
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit), nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + 0x123), nullptr);
-  EXPECT_EQ(memory.resolve_host_ptr(0x4000), reinterpret_cast<uint8_t *>(0x4000));
+  IdentityHostPage page;
+  EXPECT_EQ(memory.resolve_host_ptr(page.addr() + 0x40), page.data + 0x40);
+}
+
+/// @brief An identity translation must resolve only to a live host page.
+/// @details Passthrough reinterprets an unresolved GPU address as a host
+/// address. These cases cover the two ways that address can be uninhabited: a
+/// hole, and a PROT_NONE reservation -- the shape the runtime leaves behind
+/// when it reserves a VA aperture, and where an unresolved GPU VA most often
+/// lands. Both used to be handed back as raw pointers for callers to
+/// dereference, which is a host SIGSEGV or a write into whatever else lives
+/// there.
+TEST(GpuMemoryTest, PassthroughRejectsUninhabitedIdentityAddresses) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  // A reservation rather than a freed range: releasing an address does not keep
+  // it uninhabited, because any later allocation may be handed the same VA --
+  // under a sanitizer that happens readily enough to flip this test mid-run.
+  // PROT_NONE is stable, and is what a reserved runtime VA aperture looks like.
+  IdentityHostPage reserved;
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  const uint64_t reserved_addr = reserved.addr();
+
+  EXPECT_EQ(memory.resolve_host_ptr(reserved_addr, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(reserved_addr), nullptr);
+  // find_host_range()'s VMID-zero range is exactly the page translate()
+  // validated, so it has to refuse the same address.
+  EXPECT_EQ(memory.find_host_range(reserved_addr, 0), std::make_pair(uint64_t{0}, uint64_t{0}));
+
+  EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 3u);
+}
+
+/// @brief A rejected identity write must not reach host memory.
+/// @details The page is inhabited but inaccessible, so a raw dereference would
+/// have written through it. The access has to divert to sparse backing and
+/// leave the host bytes alone; restoring access afterwards is what proves it.
+TEST(GpuMemoryTest, PassthroughRejectedAccessLeavesHostMemoryUntouched) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint32_t kSentinel = 0xA5A5A5A5u;
+  constexpr uint32_t kWritten = 0x5A5A5A5Au;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage page;
+  std::memcpy(page.data, &kSentinel, sizeof(kSentinel));
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_NONE), 0);
+
+  memory.write32(page.addr(), kWritten, kPid);
+  EXPECT_EQ(memory.read32(page.addr(), kPid), kWritten);
+
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  uint32_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSentinel);
+}
+
+/// @brief A copy a registered client refuses must fault, not retry forever.
+/// @details An endpoint that is simply not mapped yet is worth waiting for, and
+/// the SDMA engine retries the packet for exactly that reason. An endpoint the
+/// client owns and the kernel refuses will never become readable, so the same
+/// answer wedges the queue: the packet re-runs on every doorbell and nothing
+/// ever reports why.
+TEST(GpuMemoryTest, ClientCopyFailureFaultsInsteadOfStayingRetryable) {
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kBytes = 64;
+
+  // Owned by this process as the client, but inaccessible, so the client access
+  // is refused rather than merely absent. PROT_NONE rather than an unmapped
+  // hole on purpose: a released address is handed straight back out by the next
+  // mmap, and the test would then be reading a live page.
+  IdentityHostPage refused;
+  ASSERT_NE(refused.data, nullptr);
+  ASSERT_EQ(mprotect(refused.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  const uint64_t refused_va = refused.addr();
+
+  {
+    amdgpu::GpuMemory memory("memory");
+    KfdProcess process(kPid);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    memory.set_process_client_pid(kPid, getpid());
+
+    IdentityHostPage destination;
+    ASSERT_NE(destination.data, nullptr);
+    process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
+
+    EXPECT_EQ(memory.copy_block(0x400000, refused_va, kBytes, kPid), amdgpu::CopyOutcome::Faulted)
+        << "a refused client source stayed retryable";
+    memory.unregister_process(kPid);
+  }
+
+  {
+    amdgpu::GpuMemory memory("memory");
+    KfdProcess process(kPid);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    memory.set_process_client_pid(kPid, getpid());
+
+    IdentityHostPage source;
+    ASSERT_NE(source.data, nullptr);
+    process.map_pages(0x400000, source.data, KfdProcess::kPageSize);
+
+    EXPECT_EQ(memory.copy_block(refused_va, 0x400000, kBytes, kPid), amdgpu::CopyOutcome::Faulted)
+        << "a refused client destination stayed retryable";
+    memory.unregister_process(kPid);
+  }
+}
+
+/// @brief A copy fault must reach the process before copy_block() returns.
+/// @details copy_block() is the one access entry point that arms a fault at its
+/// own level rather than inside a helper that dispatches for itself, so without
+/// its own dispatcher the refusal is merely left armed. The caller still sees
+/// Faulted, which is why an outcome-only test misses this: the exception is
+/// delivered by whatever unrelated access next happens to unwind a dispatcher,
+/// against the wrong address, or is overwritten before it ever is.
+TEST(GpuMemoryTest, RefusedClientCopyDeliversItsFaultBeforeReturning) {
+  class RecordingReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    void report_memory_fault(uint32_t, uint64_t addr, amdgpu::MemoryFaultCause) override {
+      addresses.push_back(addr);
+    }
+    std::vector<uint64_t> addresses;
+  };
+
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kBytes = 64;
+
+  IdentityHostPage refused;
+  ASSERT_NE(refused.data, nullptr);
+  ASSERT_EQ(mprotect(refused.data, KfdProcess::kPageSize, PROT_NONE), 0);
+
+  RecordingReporter reporter;
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+  memory.set_memory_fault_reporter(&reporter);
+
+  IdentityHostPage destination;
+  ASSERT_NE(destination.data, nullptr);
+  process.map_pages(0x400000, destination.data, KfdProcess::kPageSize);
+
+  EXPECT_EQ(memory.copy_block(0x400000, refused.addr(), kBytes, kPid),
+            amdgpu::CopyOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses.size(), 1u)
+      << "the violation was still armed when copy_block() returned";
+
+  // A later, unrelated access must not inherit the fault.
+  const size_t delivered = reporter.addresses.size();
+  IdentityHostPage healthy;
+  ASSERT_NE(healthy.data, nullptr);
+  process.map_pages(0x500000, healthy.data, KfdProcess::kPageSize);
+  EXPECT_EQ(memory.copy_block(0x500000, 0x400000, kBytes, kPid), amdgpu::CopyOutcome::Complete);
+  EXPECT_EQ(reporter.addresses.size(), delivered) << "a stale fault was delivered later";
+
+  memory.set_memory_fault_reporter(nullptr);
+  memory.unregister_process(kPid);
+}
+
+/// @brief A range that wraps the address space is refused, not walked.
+/// @details The page walks add an offset to the base without rechecking, so a
+/// range running past the end of the address space resumes at zero: the access
+/// would modify unrelated low memory and report that it completed. It is a
+/// malformed request rather than one waiting on a mapping, so no retry can make
+/// it valid.
+TEST(GpuMemoryTest, RangesThatWrapTheAddressSpaceAreRefused) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kNearTop = std::numeric_limits<uint64_t>::max() - 15;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  // Inside the 48 bytes a wrapped 64-byte walk from kNearTop would resume over,
+  // so this is actually in the blast radius rather than merely nearby.
+  constexpr uint64_t kWrapTarget = 0x10;
+  constexpr uint32_t kSentinel = 0xFEEDFACEu;
+  memory.write32(kWrapTarget, kSentinel, kPid);
+
+  // Every rejection must reach the process before the call returns, and must
+  // name the endpoint that is actually malformed. Arming a fault without
+  // delivering it leaves it for some later, unrelated access to hand to the
+  // wrong reporter against the wrong address.
+  RecordingFaultReporter reporter;
+  memory.set_memory_fault_reporter(&reporter);
+
+  std::array<uint8_t, 64> bytes{};
+  bytes.fill(0xA5);
+  EXPECT_EQ(memory.write_block(kNearTop, std::span<const uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{kNearTop}));
+
+  reporter.addresses.clear();
+  EXPECT_EQ(memory.read_block(kNearTop, std::span<uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{kNearTop}));
+  EXPECT_TRUE(std::ranges::all_of(bytes, [](uint8_t b) { return b == 0; }))
+      << "a refused read handed back bytes it never read";
+
+  reporter.addresses.clear();
+  EXPECT_EQ(memory.copy_block(0x400000, kNearTop, bytes.size(), kPid),
+            amdgpu::CopyOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{kNearTop}))
+      << "a source-wrapping copy named the wrong endpoint";
+
+  reporter.addresses.clear();
+  EXPECT_EQ(memory.copy_block(kNearTop, 0x400000, bytes.size(), kPid),
+            amdgpu::CopyOutcome::Faulted);
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{kNearTop}))
+      << "a destination-wrapping copy named the valid source instead";
+
+  // A healthy access afterwards must inherit nothing.
+  reporter.addresses.clear();
+  IdentityHostPage live;
+  ASSERT_NE(live.data, nullptr);
+  EXPECT_EQ(memory.write_block(live.addr(), std::span<const uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Complete);
+  EXPECT_TRUE(reporter.addresses.empty()) << "a stale fault was delivered later";
+
+  EXPECT_EQ(memory.read32(kWrapTarget, kPid), kSentinel) << "a wrapped range reached low memory";
+
+  memory.set_memory_fault_reporter(nullptr);
+  memory.unregister_process(kPid);
+}
+
+/// @brief A partially backed atomic must be refused, not partly applied.
+/// @details A page-table entry may carry disjoint host extents, so an atomic
+/// can straddle backed and unbacked bytes. Applying it to the bytes that exist
+/// publishes a torn fence, signal or queue pointer that the owner reads as
+/// whole, and reporting completion lets the engine carry on past it.
+TEST(GpuMemoryTest, PartiallyBackedAtomicIsRefusedRatherThanTorn) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kGpuVa = 0x400000;
+  constexpr uint64_t kSeed = 0x0123456789ABCDEFull;
+
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  std::memcpy(page.data, &kSeed, sizeof(kSeed));
+
+  // Back only the first four bytes of the eight the atomic will touch.
+  KfdProcess process(kPid);
+  process.map_pages(kGpuVa, page.data, sizeof(uint32_t));
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.atomic_fetch_add64(kGpuVa, 1, kPid), amdgpu::AccessOutcome::Faulted);
+
+  uint64_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "a refused atomic modified the bytes that were backed";
+
+  memory.unregister_process(kPid);
+}
+
+/// @brief A block write must stop at a fault, not step over it.
+/// @details Hardware halts the engine on a memory violation, so a payload that
+/// spans a writable page, an inaccessible one, and another writable one must
+/// leave the last page alone. Continuing the page walk is worse than the fault
+/// it followed: the write lands, so the transfer looks partially successful in
+/// a way no real engine produces, and the bytes for the faulted page get
+/// invented into sparse storage that nothing else can see.
+TEST(GpuMemoryTest, FaultedBlockWriteStopsInsteadOfSkippingThePage) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr uint8_t kSentinel = 0xA5;
+  constexpr uint8_t kPayload = 0x5A;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  // Three contiguous pages so one write spans all of them, with the middle one
+  // taken away.
+  auto *raw = static_cast<uint8_t *>(
+      mmap(nullptr, 3 * kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(raw, MAP_FAILED);
+  std::memset(raw, kSentinel, 3 * kPageSize);
+  ASSERT_EQ(mprotect(raw + kPageSize, kPageSize, PROT_NONE), 0);
+
+  std::vector<uint8_t> payload(3 * kPageSize, kPayload);
+  EXPECT_EQ(
+      memory.write_block(reinterpret_cast<uint64_t>(raw), std::span<const uint8_t>(payload), kPid),
+      amdgpu::AccessOutcome::Faulted);
+
+  ASSERT_EQ(mprotect(raw + kPageSize, kPageSize, PROT_READ | PROT_WRITE), 0);
+  for (size_t i = 0; i < kPageSize; ++i)
+    ASSERT_EQ(raw[i], kPayload) << "the page before the fault must have been written, byte " << i;
+  for (size_t i = 0; i < kPageSize; ++i)
+    ASSERT_EQ(raw[kPageSize + i], kSentinel) << "the faulted page was written, byte " << i;
+  for (size_t i = 0; i < kPageSize; ++i)
+    ASSERT_EQ(raw[2 * kPageSize + i], kSentinel)
+        << "the page after the fault was written, byte " << i;
+
+  munmap(raw, 3 * kPageSize);
+}
+
+/// @brief An identity atomic must fail closed on a page it may not store to.
+/// @details A hole or PROT_NONE reservation used to be handed to the callback as
+/// a raw pointer; a PROT_READ page passes any read probe and then faults on the
+/// store. Both have to become reported violations rather than a dead simulator.
+TEST(GpuMemoryTest, IdentityAtomicFailsClosedOnUnwritablePages) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  const auto bump = [](uint8_t *bytes) {
+    uint32_t value = 0;
+    std::memcpy(&value, bytes, sizeof(value));
+    value += 1;
+    std::memcpy(bytes, &value, sizeof(value));
+  };
+
+  IdentityHostPage reserved;
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  memory.atomic_rmw(reserved.addr(), sizeof(uint32_t), bump, kPid);
+
+  IdentityHostPage read_only;
+  constexpr uint32_t kSeed = 0x0BADF00Du;
+  std::memcpy(read_only.data, &kSeed, sizeof(kSeed));
+  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ), 0);
+  memory.atomic_rmw(read_only.addr(), sizeof(uint32_t), bump, kPid);
+
+  EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 2u);
+
+  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  uint32_t observed = 0;
+  std::memcpy(&observed, read_only.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "the refused store must not have reached the page";
+}
+
+/// @brief An identity atomic must be atomic against the host, not just the GPU.
+/// @details The HSA contract makes device atomics on fine-grained system memory
+/// act at system scope, so an application thread incrementing the same address
+/// takes part in the same sequence. A read-modify-write split across two
+/// syscalls cannot offer that: both sides read the same value and one increment
+/// is lost. Hammering from both ends is what tells the two implementations
+/// apart -- a split RMW loses updates here, an in-place atomic does not.
+TEST(GpuMemoryTest, IdentityAtomicIsAtomicAgainstConcurrentHostUpdates) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint32_t kIterations = 20000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage page;
+  std::memset(page.data, 0, sizeof(uint32_t));
+  auto *counter = reinterpret_cast<uint32_t *>(page.data);
+
+  std::thread host([&] {
+    for (uint32_t i = 0; i < kIterations; ++i)
+      std::atomic_ref<uint32_t>(*counter).fetch_add(1, std::memory_order_relaxed);
+  });
+  for (uint32_t i = 0; i < kIterations; ++i) {
+    memory.atomic_rmw(
+        page.addr(), sizeof(uint32_t),
+        [](uint8_t *bytes) {
+          std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(bytes))
+              .fetch_add(1, std::memory_order_relaxed);
+        },
+        kPid);
+  }
+  host.join();
+
+  EXPECT_EQ(std::atomic_ref<uint32_t>(*counter).load(std::memory_order_relaxed), 2 * kIterations)
+      << "an update was lost, so the emulated atomic is not system scoped";
+}
+
+/// @brief A faulted address must be told apart from unwritten GPU memory.
+/// @details Sparse backing is legitimate -- memory never written reads as zero
+/// and has to keep doing so -- and the block accessors used to answer the same
+/// way for an address that does not exist. That is what let an invalid SDMA
+/// transfer report success, and what left the range gates unable to tell the two
+/// apart. The outcome now distinguishes them so the command processor can retire
+/// a faulted packet instead of retrying it forever or completing it silently.
+TEST(GpuMemoryTest, FaultedAccessIsDistinguishedFromSparseBacking) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage reserved;
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+
+  std::vector<uint8_t> bytes(64, 0xff);
+  EXPECT_EQ(memory.read_block(reserved.addr(), std::span<uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Faulted);
+  EXPECT_EQ(memory.write_block(reserved.addr(), std::span<const uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Faulted);
+
+  IdentityHostPage live;
+  EXPECT_EQ(memory.read_block(live.addr(), std::span<uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Complete);
+
+  // An address with no page table entry and no passthrough page is unwritten GPU
+  // memory, not a violation: it must still read as zero and report completion.
+  amdgpu::GpuMemory sparse_only("sparse");
+  KfdProcess sparse_process(kPid);
+  sparse_only.register_process(kPid, &sparse_process.page_table_, &sparse_process.page_table_mutex_,
+                               sparse_process.page_table_generation());
+  EXPECT_EQ(sparse_only.read_block(0x800000000000ULL + 0x1000, std::span<uint8_t>(bytes), kPid),
+            amdgpu::AccessOutcome::Complete);
+
+  // A copy naming a faulted endpoint can never succeed, so it must say so rather
+  // than ask to be retried.
+  EXPECT_EQ(memory.copy_block(live.addr(), reserved.addr(), 64, kPid),
+            amdgpu::CopyOutcome::Faulted);
+  EXPECT_EQ(memory.copy_block(live.addr(), live.addr() + 128, 64, kPid),
+            amdgpu::CopyOutcome::Complete);
+}
+
+/// @brief A fault must not be reported while translation locks are held.
+/// @details The driver takes its process-table lock to deliver a fault, and
+/// takes that same lock before registering a process, which needs this class's
+/// VMID lock. Reporting from inside a translation would close the cycle, so a
+/// reopen racing a faulting access could deadlock. This pins the ordering by
+/// having the reporter re-enter the memory model: under the old arrangement it
+/// runs with the VMID lock already held and wedges, which is exactly the shape
+/// of the real deadlock.
+TEST(GpuMemoryTest, FaultsAreReportedOutsideTranslationLocks) {
+  class ReenteringReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    ReenteringReporter(amdgpu::GpuMemory &memory, KfdProcess &process)
+        : memory_(memory), process_(process) {}
+
+    void report_memory_fault(uint32_t vmid, uint64_t, amdgpu::MemoryFaultCause) override {
+      // Stands in for the driver's own lock order: this needs the VMID lock,
+      // which the faulting access must therefore no longer be holding.
+      memory_.register_process(vmid, &process_.page_table_, &process_.page_table_mutex_,
+                               process_.page_table_generation());
+      ++calls;
+    }
+
+    std::atomic<uint32_t> calls{0};
+
+  private:
+    amdgpu::GpuMemory &memory_;
+    KfdProcess &process_;
+  };
+
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  ReenteringReporter reporter(memory, process);
+  memory.set_memory_fault_reporter(&reporter);
+
+  IdentityHostPage reserved;
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+
+  // Each of these discovers the miss under the VMID lock.
+  memory.atomic_rmw(reserved.addr(), sizeof(uint32_t), [](uint8_t *) {}, kPid);
+  EXPECT_EQ(memory.resolve_host_ptr(reserved.addr(), kPid), nullptr);
+  std::vector<uint8_t> bytes(8, 0);
+  memory.read_block(reserved.addr(), std::span<uint8_t>(bytes), kPid);
+  memory.write_block(reserved.addr(), std::span<const uint8_t>(bytes), kPid);
+
+  EXPECT_GE(reporter.calls.load(), 1u) << "the fault never reached the reporter";
+  memory.set_memory_fault_reporter(nullptr);
+}
+
+/// @brief The mapping cannot change between an atomic's check and its modify.
+/// @details An atomic establishes that a page is writable and then modifies it
+/// in place, so the two steps have to be one indivisible region with respect to
+/// the application's mapping calls -- otherwise an mprotect or munmap landing
+/// between them faults the host or redirects the write to whatever replaced the
+/// page. This blocks inside the callback, which is the middle of that region,
+/// and requires a mapping change to be unable to proceed until it finishes.
+TEST(GpuMemoryTest, IdentityAtomicHoldsTheMappingStillWhileItRuns) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage page;
+  std::memset(page.data, 0, sizeof(uint32_t));
+
+  std::atomic<bool> inside_atomic{false};
+  std::atomic<bool> release_atomic{false};
+  std::atomic<bool> mapping_change_completed{false};
+
+  std::thread gpu([&] {
+    memory.atomic_rmw(
+        page.addr(), sizeof(uint32_t),
+        [&](uint8_t *bytes) {
+          inside_atomic.store(true, std::memory_order_release);
+          while (!release_atomic.load(std::memory_order_acquire))
+            std::this_thread::yield();
+          std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(bytes))
+              .fetch_add(1, std::memory_order_relaxed);
+        },
+        kPid);
+  });
+
+  while (!inside_atomic.load(std::memory_order_acquire))
+    std::this_thread::yield();
+
+  // Stands in for the interposer's mapping hooks, which take this exclusively
+  // around the application's mmap, mprotect and munmap.
+  std::thread mapper([&] {
+    auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+    mapping_change_completed.store(true, std::memory_order_release);
+  });
+
+  // Wait until the mapping change is provably blocked rather than sleeping and
+  // inferring it from elapsed time: a machine busy enough to leave the thread
+  // unscheduled would satisfy a sleep even with no lock at all.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool blocked = false;
+  while (!(blocked = rocjitsu::host_mapping_lock().blocked_writers() != 0)) {
+    if (std::chrono::steady_clock::now() > deadline)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(blocked) << "the mapping change never took the lock";
+
+  // The atomic is mid-flight, so the mapping change must not have gone through.
+  EXPECT_FALSE(!blocked || mapping_change_completed.load(std::memory_order_acquire))
+      << "a mapping change ran while an atomic held a pointer into the page";
+
+  release_atomic.store(true, std::memory_order_release);
+  gpu.join();
+  mapper.join();
+  EXPECT_TRUE(mapping_change_completed.load(std::memory_order_acquire));
+
+  uint32_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, 1u);
+}
+
+/// @brief An atomic the client refused must fault, not land in sparse storage.
+/// @details When a client process owns the address, its answer is the only
+/// answer. Standing the simulator's sparse store in for an access the kernel
+/// refused reports a successful atomic on memory nobody else can see: a read
+/// pointer or completion signal appears to advance while the value the client
+/// reads never changes, which presents as a hang attributed to nothing.
+TEST(GpuMemoryTest, ClientAtomicFailureDoesNotFallBackToSparseStorage) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  // Never mapped in this process, and owned by a client that cannot be read,
+  // so neither endpoint can service it.
+  constexpr uint64_t kAddr = 0x4000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, std::numeric_limits<pid_t>::max());
+
+  EXPECT_EQ(memory.atomic_fetch_add64(kAddr, 1, kPid), amdgpu::AccessOutcome::Faulted);
+  EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 1u);
+  EXPECT_EQ(memory.read64(kAddr, kPid), 0u) << "a refused atomic invented sparse storage";
+
+  memory.unregister_process(kPid);
+}
+
+/// @brief Not being able to look must not be reported as a protection fault.
+/// @details The probe answers by reading procfs, so it can fail for reasons
+/// that have nothing to do with the address: no descriptor available, or a
+/// read cut short. Collapsing that into "not writable" blames the workload for
+/// the simulator running out of descriptors and raises a read-only memory
+/// exception against a page that is perfectly writable. It stays a distinct,
+/// indeterminate answer -- still fail-closed, but not a lie about the mapping.
+TEST(GpuMemoryTest, UnreadableProcMapsIsNotReportedAsAProtectionViolation) {
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  ASSERT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(page.data),
+            amdgpu::PageWritability::Writable);
+
+  rlimit original{};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
+  rlimit exhausted = original;
+  exhausted.rlim_cur = 0;
+  if (setrlimit(RLIMIT_NOFILE, &exhausted) != 0)
+    GTEST_SKIP() << "cannot lower RLIMIT_NOFILE in this environment";
+
+  const auto answer = amdgpu::GpuMemoryTestAccess::page_writability(page.data);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &original), 0);
+
+  EXPECT_EQ(answer, amdgpu::PageWritability::Indeterminate)
+      << "a writable page was called unwritable because procfs could not be opened";
+}
+
+/// @brief Absent memory and protected memory are different faults.
+/// @details The runtime reads the not-present and read-only bits separately,
+/// so a stale page-table entry whose backing was unmapped, or one aimed into a
+/// PROT_NONE aperture reservation, must not be reported as a protection
+/// violation on memory that is simply not there.
+TEST(GpuMemoryTest, WritabilityDistinguishesProtectedFromAbsentMemory) {
+  IdentityHostPage writable;
+  ASSERT_NE(writable.data, nullptr);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(writable.data),
+            amdgpu::PageWritability::Writable);
+
+  IdentityHostPage read_only;
+  ASSERT_NE(read_only.data, nullptr);
+  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ), 0);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(read_only.data),
+            amdgpu::PageWritability::ReadOnly);
+  ASSERT_EQ(mprotect(read_only.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+
+  IdentityHostPage reserved;
+  ASSERT_NE(reserved.data, nullptr);
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_NONE), 0);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(reserved.data),
+            amdgpu::PageWritability::Inaccessible)
+      << "a PROT_NONE reservation is absent to the GPU, not merely protected";
+  ASSERT_EQ(mprotect(reserved.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+
+  IdentityHostPage released;
+  ASSERT_NE(released.data, nullptr);
+  auto *hole = released.data;
+  released.release();
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(hole),
+            amdgpu::PageWritability::Inaccessible);
+}
+
+/// @brief An atomic on another process's memory cannot be approximated.
+/// @details A read-modify-write split across two syscalls loses a concurrent
+/// client update and can land its write-back on whatever replaced the page in
+/// between. A blind store is no better: the release store lands on a local
+/// buffer rather than on the client's object, and process_vm_writev() is not
+/// documented to be atomic, so the client can observe a torn value with none of
+/// the ordering publication depends on. The HSA contract puts device atomics on
+/// fine-grained system memory at system scope, so both are refused rather than
+/// reported complete.
+TEST(GpuMemoryTest, ClientOwnedAtomicsAreRefusedRatherThanApproximated) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kSeed = 0x0123456789ABCDEFull;
+
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  std::memcpy(page.data, &kSeed, sizeof(kSeed));
+
+  RecordingFaultReporter reporter;
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+  memory.set_memory_fault_reporter(&reporter);
+
+  // Passthrough off and no page-table entry, so both reach the client path.
+  EXPECT_EQ(memory.atomic_fetch_add64(page.addr(), 1, kPid), amdgpu::AccessOutcome::Faulted);
+  uint64_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "a refused read-modify-write still wrote";
+  ASSERT_EQ(reporter.causes.size(), 1u);
+  EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::Indeterminate);
+
+  constexpr uint64_t kStored = 0xFEEDFACECAFEBEEFull;
+  EXPECT_EQ(memory.atomic_store(page.addr(), sizeof(uint64_t), kStored, kPid),
+            amdgpu::AccessOutcome::Faulted);
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "a refused client store still wrote";
+  EXPECT_EQ(reporter.causes.size(), 2u);
+
+  memory.set_memory_fault_reporter(nullptr);
+  memory.unregister_process(kPid);
+}
+
+/// @brief A refused client write must not be blamed on the protection.
+/// @details process_vm_writev() reports EFAULT for a range the client unmapped
+/// and for one it merely protected, and ESRCH for a client that exited, so a
+/// failed write establishes that the access did not land and nothing else.
+/// Naming a read-only violation would put a cause in the KFD event that was
+/// never determined. Here the read succeeds and only the write is refused,
+/// which is the case a blanket ReadOnly gets wrong.
+TEST(GpuMemoryTest, RefusedClientWriteReportsAnUndeterminedCause) {
+  class RecordingReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    void report_memory_fault(uint32_t, uint64_t, amdgpu::MemoryFaultCause cause) override {
+      causes.push_back(cause);
+    }
+    std::vector<amdgpu::MemoryFaultCause> causes;
+  };
+
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kSeed = 0x0123456789ABCDEFull;
+
+  // Readable but not writable, and owned by this process as the client: the
+  // client read succeeds and only the client write is refused.
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  std::memcpy(page.data, &kSeed, sizeof(kSeed));
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ), 0);
+
+  RecordingReporter reporter;
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  memory.set_process_client_pid(kPid, getpid());
+  memory.set_memory_fault_reporter(&reporter);
+
+  // A block write rather than an atomic: atomics on client-owned memory are
+  // refused before any syscall is attempted, so they would never reach the
+  // failing client write whose classification is the subject here.
+  std::array<uint8_t, sizeof(uint64_t)> payload{};
+  payload.fill(0xA5);
+  EXPECT_EQ(memory.write_block(page.addr(), std::span<const uint8_t>(payload), kPid),
+            amdgpu::AccessOutcome::Faulted);
+
+  memory.set_memory_fault_reporter(nullptr);
+  memory.unregister_process(kPid);
+
+  ASSERT_EQ(reporter.causes.size(), 1u);
+  EXPECT_EQ(reporter.causes.front(), amdgpu::MemoryFaultCause::Indeterminate);
+
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  uint64_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "the refused write still reached the page";
+}
+
+/// @brief A mapped atomic must not stall against page-table mutation.
+/// @details The writability probe runs while the atomic holds the VMID and
+/// page-table locks, so whatever it reaches becomes part of this path's lock
+/// order. It reads procfs, and rocjitsu interposes open() and close() with
+/// hooks that take the interposer's descriptor lock -- which a DRM GEM_VA
+/// ioctl holds while it calls into the page table. Reaching those hooks here
+/// would close an ABBA cycle, so the probe issues raw syscalls instead.
+///
+/// This covers the page-table half of that order under contention and bounds
+/// it in time. It does not drive a real GEM_VA ioctl: that side needs the
+/// preloaded interposer and this binary has the memory model, and no test
+/// binary currently has both.
+TEST(GpuMemoryTest, MappedAtomicMakesProgressAgainstPageTableMutation) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kGpuVa = 0x400000;
+  constexpr uint64_t kSpareVa = 0x500000;
+  constexpr int kIterations = 2000;
+
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  IdentityHostPage spare;
+  ASSERT_NE(spare.data, nullptr);
+
+  KfdProcess process(kPid);
+  process.map_pages(kGpuVa, page.data, KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  std::atomic<bool> stop{false};
+  std::atomic<int> completed{0};
+  std::thread mutator([&] {
+    while (!stop.load(std::memory_order_acquire)) {
+      process.map_pages(kSpareVa, spare.data, KfdProcess::kPageSize);
+      process.unmap_pages(kSpareVa, KfdProcess::kPageSize);
+    }
+  });
+
+  std::thread atomics([&] {
+    for (int i = 0; i < kIterations; ++i) {
+      if (memory.atomic_fetch_add64(kGpuVa, 1, kPid) == amdgpu::AccessOutcome::Complete)
+        completed.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+
+  atomics.join();
+  stop.store(true, std::memory_order_release);
+  mutator.join();
+
+  EXPECT_EQ(completed.load(), kIterations);
+  uint64_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, static_cast<uint64_t>(kIterations));
+
+  memory.unregister_process(kPid);
+}
+
+/// @brief A page-table-backed atomic must refuse a read-only host page.
+/// @details A PTE says where bytes live, not what may be done to them, and in
+/// local mode the host page it names is the application's own mapping -- a
+/// queue read pointer mapped PROT_READ is the ordinary shape. An atomic stores
+/// in place, so taking the PTE as permission is a host SIGSEGV inside the
+/// emulated command processor. Passthrough is deliberately off: this must hold
+/// on the mapped path, not only the identity one.
+TEST(GpuMemoryTest, MappedAtomicFailsClosedOnUnwritableHostPages) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kGpuVa = 0x400000;
+  constexpr uint64_t kSeed = 0x0123456789ABCDEFull;
+
+  IdentityHostPage page;
+  ASSERT_NE(page.data, nullptr);
+  std::memcpy(page.data, &kSeed, sizeof(kSeed));
+  ASSERT_EQ(mprotect(page.data, KfdProcess::kPageSize, PROT_READ), 0);
+
+  KfdProcess process(kPid);
+  process.map_pages(kGpuVa, page.data, KfdProcess::kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.atomic_fetch_add64(kGpuVa, 1, kPid), amdgpu::AccessOutcome::Faulted);
+  EXPECT_GE(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 1u);
+
+  uint64_t observed = 0;
+  std::memcpy(&observed, page.data, sizeof(observed));
+  EXPECT_EQ(observed, kSeed) << "a refused atomic still modified the page";
+
+  memory.unregister_process(kPid);
+}
+
+/// @brief A 64-bit atomic add must accept any operand bit pattern.
+/// @details The packet field is raw 64 bits. Reaching an addition by negating a
+/// signed operand cannot express INT64_MIN -- negating it is undefined -- so the
+/// operation is unsigned and wraps, which is what the hardware does.
+TEST(GpuMemoryTest, Atomic64AddAcceptsExtremeOperands) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage page;
+  const uint64_t extremes[] = {static_cast<uint64_t>(std::numeric_limits<int64_t>::min()),
+                               std::numeric_limits<uint64_t>::max(), 1u};
+  for (uint64_t operand : extremes) {
+    constexpr uint64_t kSeed = 0x0123456789ABCDEFull;
+    std::memcpy(page.data, &kSeed, sizeof(kSeed));
+    EXPECT_EQ(memory.atomic_fetch_add64(page.addr(), operand, kPid),
+              amdgpu::AccessOutcome::Complete);
+    uint64_t observed = 0;
+    std::memcpy(&observed, page.data, sizeof(observed));
+    EXPECT_EQ(observed, static_cast<uint64_t>(kSeed + operand)) << "operand " << operand;
+  }
+}
+
+/// @brief A live host buffer must keep resolving by identity.
+/// @details The failure mode that matters most here is over-rejection: local
+/// mode leans on identity translation for every pageable host pointer, so a
+/// probe that wrongly refuses one breaks every local-mode workload rather than
+/// just the invalid accesses this is meant to catch.
+TEST(GpuMemoryTest, PassthroughStillResolvesLiveHostMemory) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint32_t kValue = 0xdecafbadu;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  IdentityHostPage page;
+  const uint64_t addr = page.addr() + 0x80;
+
+  memory.write32(addr, kValue, kPid);
+  uint32_t observed = 0;
+  std::memcpy(&observed, page.data + 0x80, sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+  EXPECT_EQ(memory.read32(addr, kPid), kValue);
+  EXPECT_EQ(memory.resolve_host_ptr(addr, kPid), page.data + 0x80);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::rejected_identity_accesses(memory), 0u);
 }
 
 TEST(GpuMemoryTest, ZeroPassthroughAddressUsesFallbackStorage) {
@@ -2118,6 +3268,46 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->num_wfs(), kSlots);
   // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
+}
+
+TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
+  amdgpu::GpuMemory mem("cdna4_setpc_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_setpc_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_setpc_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  test::HaltSnapshotPlugin *snapshot = nullptr;
+  cu->set_plugin_group(test::make_halt_snapshot_group(&snapshot));
+  ASSERT_NE(snapshot, nullptr);
+
+  constexpr uint64_t kStartPc = 0x1000;
+  constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
+  constexpr uint32_t kTtmp0Selector = 108;
+  const std::array<uint32_t, 4> code = {
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
+
+  auto *wavefront = cu->dispatch_wf(/*wg_id=*/0, kStartPc, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wavefront, nullptr);
+  wavefront->set_ttmp(/*TTMP0=*/0, static_cast<uint32_t>(kTargetPc));
+  wavefront->set_ttmp(/*TTMP1=*/1, static_cast<uint32_t>(kTargetPc >> 32));
+
+  for (uint32_t step = 0; step < code.size() && cu->has_active_wfs(); ++step)
+    static_cast<void>(cu->step());
+
+  ASSERT_FALSE(cu->has_active_wfs());
+  ASSERT_EQ(snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(snapshot->snapshots()[0].sgpr(0), 1u);
 }
 
 TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) {
@@ -2735,6 +3925,7 @@ constexpr uint32_t sop1(uint32_t op, uint32_t sdst, uint32_t ssrc0) {
   return (0x17Du << 23) | (sdst << 16) | (op << 8) | ssrc0;
 }
 constexpr uint32_t s_mov_b32(uint32_t sdst, uint32_t ssrc0) { return sop1(0, sdst, ssrc0); }
+constexpr uint32_t s_mov_b64(uint32_t sdst, uint32_t ssrc0) { return sop1(1, sdst, ssrc0); }
 
 // SOP2: encoding[31:30]=0x2, op[29:23], sdst[22:16], ssrc1[15:8], ssrc0[7:0]
 constexpr uint32_t sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0, uint32_t ssrc1) {
@@ -2824,6 +4015,18 @@ constexpr uint32_t mubuf_lo(uint32_t op, uint32_t offset = 0, uint32_t offen = 0
 constexpr uint32_t mubuf_hi(uint32_t vdata, uint32_t vaddr, uint32_t srsrc,
                             uint32_t soffset = INLINE_CONST(0)) {
   return (soffset << 24) | (srsrc << 16) | (vdata << 8) | vaddr;
+}
+
+// SMEM (64-bit): CDNA layout.
+// dword0: sbase[5:0], sdata[12:6], soffset_en[14], nv[15], glc[16], imm[17],
+//         op[25:18], encoding[31:26]=0x30
+// dword1: offset[20:0], soffset[31:25]
+constexpr uint32_t smem_lo(uint32_t op, uint32_t sdata, uint32_t sbase, uint32_t imm = 0,
+                           uint32_t soffset_en = 0) {
+  return (0x30u << 26) | (op << 18) | (imm << 17) | (soffset_en << 14) | (sdata << 6) | sbase;
+}
+constexpr uint32_t smem_hi(uint32_t offset, uint32_t soffset = 0) {
+  return (soffset << 25) | (offset & 0x1FFFFFu);
 }
 
 constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
@@ -3280,6 +4483,82 @@ TEST_P(IsaTest, BranchLoop) {
   step_until_halted(*fx.f.engine, {fx.cu()});
 
   EXPECT_EQ(fx.read_sgpr(3), 0u);
+  EXPECT_TRUE(fx.halted());
+}
+
+// SMEM offset forms: IMM=0 (SGPR, M0, unaligned SGPR, s_scratch x64), IMM=1 (aligned,
+// unaligned), IMM=1+SOE, SOE=1 (SGPR, M0, VCC_LO, unaligned SGPR), SBASE = VCC.
+TEST_P(IsaTest, SLoad_OffsetForms) {
+  ExecFixture fx(arch());
+  constexpr uint64_t kBufferAddr = 0x2000;
+  for (uint32_t i = 0; i < 64; ++i)
+    fx.f.mem()->write32(kBufferAddr + i * 4, 0x1000 + i);
+
+  using namespace enc;
+  constexpr uint32_t kM0 = 124, kVccLo = 106;
+  const std::vector<uint32_t> code = {
+      s_mov_b32(SGPR(4), 255), // s[4:5] = kBufferAddr
+      static_cast<uint32_t>(kBufferAddr),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      s_mov_b32(SGPR(6), INLINE_CONST(64)),
+      s_mov_b32(kM0, INLINE_CONST(32)),
+      s_mov_b32(kVccLo, INLINE_CONST(48)),
+      s_mov_b32(SGPR(2), INLINE_CONST(2)),
+      s_mov_b32(SGPR(11), INLINE_CONST(63)),
+      s_mov_b32(SGPR(12), SGPR(4)), // V# s[12:15]: base, stride 0, 256 records
+      s_mov_b32(SGPR(13), INLINE_CONST(0)),
+      s_mov_b32(SGPR(14), 255),
+      256u,
+      s_mov_b32(SGPR(15), INLINE_CONST(0)),
+      smem_lo(cdna4::kSLoadDwordSmem, 7, SGPR(4) / 2),
+      smem_hi(6), // s7 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordx2Smem, 8, SGPR(4) / 2),
+      smem_hi(6), // s[8:9] = [s[4:5] + s6]
+      smem_lo(cdna4::kSBufferLoadDwordSmem, 10, SGPR(12) / 2),
+      smem_hi(6), // s10 = [V# + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 16, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x8), // s16 = [s[4:5] + 8]
+      smem_lo(cdna4::kSLoadDwordSmem, 17, SGPR(4) / 2, /*imm=*/1, /*soffset_en=*/1),
+      smem_hi(0x8, 6), // s17 = [s[4:5] + 8 + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 18, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 6), // s18 = [s[4:5] + s6]
+      smem_lo(cdna4::kSLoadDwordSmem, 19, SGPR(4) / 2),
+      smem_hi(kM0), // s19 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 20, SGPR(4) / 2),
+      smem_hi(11), // s20 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 21, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kM0), // s21 = [s[4:5] + m0]
+      smem_lo(cdna4::kSLoadDwordSmem, 22, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, kVccLo), // s22 = [s[4:5] + vcc_lo]
+      smem_lo(cdna4::kSLoadDwordSmem, 23, SGPR(4) / 2, /*imm=*/0, /*soffset_en=*/1),
+      smem_hi(0, 11), // s23 = [s[4:5] + (s11 & ~3)]
+      smem_lo(cdna4::kSLoadDwordSmem, 24, SGPR(4) / 2, /*imm=*/1),
+      smem_hi(0x9), // s24 = [s[4:5] + (9 & ~3)]
+      smem_lo(cdna4::kSScratchLoadDwordSmem, 25, SGPR(4) / 2),
+      smem_hi(2),                 // s25 = [s[4:5] + s2 * 64]
+      s_mov_b64(kVccLo, SGPR(4)), // vcc = s[4:5]
+      smem_lo(cdna4::kSLoadDwordSmem, 26, kVccLo / 2),
+      smem_hi(6), // s26 = [vcc + s6]
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  fx.load_program(code);
+
+  EXPECT_EQ(fx.read_sgpr(7), 0x1010u) << "IMM=0 s_load_dword";
+  EXPECT_EQ(fx.read_sgpr(8), 0x1010u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(9), 0x1011u) << "IMM=0 s_load_dwordx2";
+  EXPECT_EQ(fx.read_sgpr(10), 0x1010u) << "IMM=0 s_buffer_load_dword";
+  EXPECT_EQ(fx.read_sgpr(16), 0x1002u) << "IMM=1";
+  EXPECT_EQ(fx.read_sgpr(17), 0x1012u) << "IMM=1 SOE=1";
+  EXPECT_EQ(fx.read_sgpr(18), 0x1010u) << "SOE=1";
+  EXPECT_EQ(fx.read_sgpr(19), 0x1008u) << "IMM=0 M0";
+  EXPECT_EQ(fx.read_sgpr(20), 0x100fu) << "IMM=0 unaligned";
+  EXPECT_EQ(fx.read_sgpr(21), 0x1008u) << "SOE=1 M0";
+  EXPECT_EQ(fx.read_sgpr(22), 0x100cu) << "SOE=1 VCC_LO";
+  EXPECT_EQ(fx.read_sgpr(23), 0x100fu) << "SOE=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(24), 0x1002u) << "IMM=1 unaligned";
+  EXPECT_EQ(fx.read_sgpr(25), 0x1020u) << "IMM=0 s_scratch_load_dword";
+  EXPECT_EQ(fx.read_sgpr(26), 0x1010u) << "SBASE=VCC";
   EXPECT_TRUE(fx.halted());
 }
 

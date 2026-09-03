@@ -219,6 +219,21 @@ def _modern_rdna_dpp_opcode_rule(
     return DppOpcodeRule.ALLOW
 
 
+class WaveStateLayout(Enum):
+    """Architectural layout of wave status, exception, and trap-control state."""
+
+    LEGACY = 'Legacy'
+    GFX12 = 'Gfx12'
+    GFX12_5 = 'Gfx12_5'
+
+
+class DppCtrlDialect(Enum):
+    """Names and validity rules for DPP_CTRL values."""
+
+    GFX9 = auto()
+    GFX10_PLUS = auto()
+
+
 @dataclass
 class EncodingModifier:
     """A disassembly modifier to append to an encoding's mnemonic output.
@@ -441,6 +456,11 @@ class IsaProfile(ABC):
         return {}
 
     @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        """Opcode slots owned by instructions synthesized after XML parsing."""
+        return {}
+
+    @property
     def vop3px2_prefix_opcode(self) -> int | None:
         """VOP3P opcode slot for a VOP3PX2 prefix decoder, if any."""
         return None
@@ -494,6 +514,48 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        """Whether GFX11 image operands and modifiers use canonical syntax."""
+        return False
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        """Whether DS 2ADDR instructions render two independent offsets."""
+        return False
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        """VOP3P instructions whose NEG fields encode source abs and negate."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        """GFX11 MIMG instructions with gather-style VDATA sizing."""
+        return frozenset()
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        """GFX11 MIMG instructions with a fixed VDATA width in DWORDs."""
+        return {}
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        """GFX11 MIMG VADDR widths as ``(default, a16)`` DWORD counts."""
+        return {}
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        """GFX11 partial-NSA group widths as ``(default, a16)`` tuples."""
+        return {}
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        """Whether return-message selectors use symbolic assembly syntax."""
+        return False
+
+    @property
     def split_execution_sources(self) -> bool:
         """True when execution bodies are emitted to separate source files."""
         return False
@@ -502,6 +564,97 @@ class IsaProfile(ABC):
     def uses_true16_vop3_opsel(self) -> bool:
         """True when VOP3 16-bit operands use op_sel half selectors."""
         return False
+
+    @property
+    def renders_true16_vop3_operands(self) -> bool:
+        """True when VOP3 operands use explicit ``.l``/``.h`` suffixes."""
+        return False
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        """VOP3 instructions whose half selection is shown only on operands."""
+        return frozenset()
+
+    @property
+    def vop3p_source_modifier_omissions(self) -> frozenset[str]:
+        """VOP3P instructions that do not use packed source modifier fields."""
+        return frozenset()
+
+    @property
+    def integer_clamp_dtypes(self) -> dict[str, str]:
+        """Integer instructions that require saturation-aware lowering.
+
+        CLAMP is present in the shared VOP3 encoding, but it is not legal for
+        every opcode in that encoding. Keep the instruction-level policy here
+        instead of inferring support from the encoding field alone. ADD_MIN/MAX
+        always saturate their internal addition; the remaining instructions use
+        this policy to apply their encoded CLAMP modifier.
+        """
+        return {
+            'V_ADDC_CO_U32': 'u32',
+            'V_ADD_MAX_I32': 'i32',
+            'V_ADD_MAX_U32': 'u32',
+            'V_ADD_MIN_I32': 'i32',
+            'V_ADD_MIN_U32': 'u32',
+            'V_ADD_CO_CI_U32': 'u32',
+            'V_ADD_CO_U32': 'u32',
+            'V_ADD_I16': 'i16',
+            'V_ADD_I32': 'i32',
+            'V_ADD_NC_I16': 'i16',
+            'V_ADD_NC_I32': 'i32',
+            'V_ADD_NC_U16': 'u16',
+            'V_ADD_NC_U32': 'u32',
+            'V_ADD_NC_U64': 'u64',
+            'V_ADD_U16': 'u16',
+            'V_ADD_U32': 'u32',
+            'V_MAD_I16': 'i16',
+            'V_MAD_I32_I16': 'i32',
+            'V_MAD_I32_I24': 'i32',
+            'V_MAD_I64_I32': 'i64',
+            'V_MAD_CO_I64_I32': 'i64',
+            'V_MAD_CO_U64_U32': 'u64',
+            'V_MAD_NC_I64_I32': 'i64',
+            'V_MAD_NC_U64_U32': 'u64',
+            'V_MAD_U16': 'u16',
+            'V_MAD_U32_U16': 'u32',
+            'V_MAD_U32_U24': 'u32',
+            'V_MAD_U64_U32': 'u64',
+            'V_MQSAD_PK_U16_U8': 'u16',
+            'V_MQSAD_U32_U8': 'u32',
+            'V_MSAD_U8': 'u32',
+            'V_MUL_I32_I24': 'i32',
+            'V_MUL_U32_U24': 'u32',
+            'V_PK_MAD_I16': 'i16',
+            'V_PK_MAD_U16': 'u16',
+            'V_SAD_HI_U8': 'u32',
+            'V_SAD_U8': 'u32',
+            'V_SAD_U16': 'u32',
+            'V_SAD_U32': 'u32',
+            'V_QSAD_PK_U16_U8': 'u16',
+            'V_SUBBREV_CO_U32': 'u32',
+            'V_SUBB_CO_U32': 'u32',
+            'V_SUBREV_CO_CI_U32': 'u32',
+            'V_SUBREV_CO_U32': 'u32',
+            'V_SUBREV_NC_U32': 'u32',
+            'V_SUBREV_U16': 'u16',
+            'V_SUBREV_U32': 'u32',
+            'V_SUB_CO_CI_U32': 'u32',
+            'V_SUB_CO_U32': 'u32',
+            'V_SUB_I16': 'i16',
+            'V_SUB_I32': 'i32',
+            'V_SUB_NC_I16': 'i16',
+            'V_SUB_NC_I32': 'i32',
+            'V_SUB_NC_U16': 'u16',
+            'V_SUB_NC_U32': 'u32',
+            'V_SUB_NC_U64': 'u64',
+            'V_SUB_U16': 'u16',
+            'V_SUB_U32': 'u32',
+        }
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        """DPP_CTRL naming and validity rules for this ISA."""
+        return DppCtrlDialect.GFX9
 
     @property
     def scalar_null_precedes_m0(self) -> bool:
@@ -983,7 +1136,8 @@ _FLAT_MODIFIERS_GLC_DLC = [
     EncodingModifier('slc'),
 ]
 
-# GFX12 (RDNA4): SCOPE+TH model; flag modifier is NV only.
+# GFX12 (RDNA4): encoding-specific modifiers beyond the data-driven SCOPE+TH
+# cache policy emitted for every encoding that carries op/scope/th fields.
 _SMEM_MODIFIERS_RDNA4 = [
     EncodingModifier('nv'),
 ]
@@ -996,6 +1150,10 @@ _VBUFFER_MODIFIERS_RDNA4 = [
 ]
 
 _VFLAT_MODIFIERS_RDNA4 = [
+    EncodingModifier('nv'),
+]
+
+_IMAGE_MODIFIERS_RDNA4 = [
     EncodingModifier('nv'),
 ]
 
@@ -1204,6 +1362,21 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        """Layout of shader-visible wave state and the first-level trap ABI."""
+        return WaveStateLayout.LEGACY
+
+    @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        """Bytes represented by one COMPUTE_TMPRING_SIZE.WAVESIZE unit."""
+        return 1024
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        """Width of the COMPUTE_TMPRING_SIZE.WAVESIZE field."""
+        return 13
+
+    @property
     def max_addressable_vgprs_per_wf(self) -> int:
         """Maximum VGPR index space addressable by one wavefront."""
         return 256
@@ -1347,6 +1520,16 @@ class _AmdgpuProfileBase(IsaProfile):
         RDNA4 renames these to ``('opsel', 'opsel_hi')`` (no underscores).
         """
         return ('op_sel', 'op_sel_hi')
+
+    @property
+    def vop3p_opsel_hi_high_field(self) -> str:
+        """Return the machine field carrying VOP3P op_sel_hi bit 2."""
+        return 'op_sel_hi_2'
+
+    @property
+    def vop3_opsel_field(self) -> str:
+        """Return the source and destination half-selector field for VOP3."""
+        return 'op_sel'
 
     @property
     def smem_direct_offset_field(self) -> str | None:
@@ -1512,6 +1695,12 @@ class CdnaProfile(_AmdgpuProfileBase):
         # bit [3] for destination half selection. Low-destination writes
         # zero the upper half; see the CDNA ISA OP_SEL field description.
         return True
+
+    @property
+    def vop3p_source_modifier_omissions(self) -> frozenset[str]:
+        # These B32 accumulator moves reuse the VOP3P encoding but do not have
+        # packed half-selection or per-half negate semantics.
+        return frozenset({'V_ACCVGPR_READ', 'V_ACCVGPR_WRITE'})
 
     @property
     def d16_loads_zero_unselected_half(self) -> bool:
@@ -1753,6 +1942,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
+    @property
     def waitcnt_lgkmcnt_mask(self) -> str:
         # RDNA1/2 uses a 6-bit lgkmcnt field at bits [13:8].
         return '0x3F'
@@ -1963,6 +2156,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        return 256
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        return 15
+
+    @property
     def descriptor_sgpr_count_encoded(self) -> bool:
         return False
 
@@ -2022,6 +2223,18 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def renders_true16_vop3_operands(self) -> bool:
+        return True
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        return frozenset({'V_CNDMASK_B16'})
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         return 'offset'
 
@@ -2045,6 +2258,49 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
+    def split_ds_2addr_offsets(self) -> bool:
+        return True
+
+    @property
+    def vop3p_absolute_source_instructions(self) -> frozenset[str]:
+        return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def sendmsg_return_symbolic(self) -> bool:
+        return True
 
 
 class Rdna4Profile(_AmdgpuProfileBase):
@@ -2108,7 +2364,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def dpp_requires_opsel_lane_alignment(self) -> bool:
-        return True
+        return False
 
     def dpp_opcode_rule(
         self,
@@ -2147,6 +2403,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return Rdna3Profile.waitcnt_decode.fget(self)
 
     @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_SOPP', 9): 'S_WAITCNT'}
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.1.0', '1.1.1']
 
@@ -2177,6 +2437,18 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def uses_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        return WaveStateLayout.GFX12
+
+    @property
+    def compute_tmpring_wavesize_granule(self) -> int:
+        return 256
+
+    @property
+    def compute_tmpring_wavesize_bits(self) -> int:
+        return 18
 
     @property
     def descriptor_sgpr_count_encoded(self) -> bool:
@@ -2242,6 +2514,18 @@ class Rdna4Profile(_AmdgpuProfileBase):
             'S_BARRIER_WAIT': ('barrier', '', ''),
         }
 
+    @property
+    def renders_true16_vop3_operands(self) -> bool:
+        return True
+
+    @property
+    def vop3_opsel_omissions(self) -> frozenset[str]:
+        return frozenset({'V_CNDMASK_B16'})
+
+    @property
+    def dpp_ctrl_dialect(self) -> DppCtrlDialect:
+        return DppCtrlDialect.GFX10_PLUS
+
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
 
@@ -2271,6 +2555,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return ('opsel', 'opsel_hi')
 
     @property
+    def vop3p_opsel_hi_high_field(self) -> str:
+        return 'opsel_hi_2'
+
+    @property
+    def vop3_opsel_field(self) -> str:
+        return 'opsel'
+
+    @property
     def smem_direct_offset_field(self) -> str | None:
         return 'ioffset'
 
@@ -2281,7 +2573,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         """RDNA4 encoding modifiers.
 
-        Uses GFX12 SCOPE+TH model: SMEM/VBUFFER/VFLAT show only NV.
+        Render the GFX12 SCOPE+TH policy and NV flag for every memory encoding
+        that carries those fields.
         """
         upper = enc_name.upper()
         if upper == 'ENC_SMEM':
@@ -2290,6 +2583,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
             return _VBUFFER_MODIFIERS_RDNA4
         if upper in ('ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH'):
             return _VFLAT_MODIFIERS_RDNA4
+        if upper in ('ENC_VIMAGE', 'ENC_VSAMPLE'):
+            return _IMAGE_MODIFIERS_RDNA4
         return []
 
 
@@ -2463,6 +2758,10 @@ class Cdna5Profile(Rdna4Profile):
         renames['literal'] = 'simm32'
         return renames
 
+    @property
+    def compatibility_instruction_slots(self) -> dict[tuple[str, int], str]:
+        return {('ENC_VOP1', 103): 'V_PERMLANE64_B32'}
+
     def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
         # Keep the concrete gfx1250 operand identity distinct from earlier
         # CDNA/RDNA specs; its local generator path maps it to the renamed
@@ -2506,6 +2805,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def uses_cluster_ttmp_workgroup_ids(self) -> bool:
         return True
+
+    @property
+    def wave_state_layout(self) -> WaveStateLayout:
+        return WaveStateLayout.GFX12_5
 
     @property
     def max_addressable_vgprs_per_wf(self) -> int:

@@ -1,4 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+
 # UALOE Library CMake configuration
 
 # Netlink dependencies (LIBNL3/LIBNLGENL3/LIBMNL) are resolved once by the

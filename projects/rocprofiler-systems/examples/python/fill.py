@@ -7,7 +7,6 @@ import os
 import sys
 import time
 import rocprofsys
-from rocprofsys.user import region as omni_user_region
 from rocprofsys.profiler import config as omni_config
 
 _prefix = ""

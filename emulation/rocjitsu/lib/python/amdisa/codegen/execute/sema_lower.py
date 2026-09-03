@@ -128,6 +128,7 @@ class LoweringContext:
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
     mode_sensitive_f16_dst: bool = True
+    integer_saturation_dtype: str | None = None
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -537,6 +538,12 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind == SemaNodeKind.ID:
         return _lower_id(node, ctx)
 
+    if (
+        kind in (SemaNodeKind.ADD, SemaNodeKind.SUB)
+        and ctx.integer_saturation_dtype is not None
+    ):
+        return _lower_saturating_integer_binary(node, ctx)
+
     if kind in _INFIX_OPS:
         if (expr := _lower_less_greater_once(node, ctx)) is not None:
             return expr
@@ -725,6 +732,33 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'/* stmt-in-expr: {kind.name} */'
 
     raise ValueError(f'Unhandled SemaNodeKind in lowering: {kind.name}')
+
+
+def _lower_saturating_integer_binary(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower VOP3 integer add/sub with optional CLAMP saturation."""
+    dtype = ctx.integer_saturation_dtype
+    if dtype not in ('i16', 'u16', 'i32', 'u32', 'u64'):
+        raise ValueError(f'Unsupported integer saturation type: {dtype}')
+
+    child_ctx = replace(ctx, integer_saturation_dtype=None)
+    if node.kind == SemaNodeKind.ADD and node.children[0].kind == SemaNodeKind.MUL:
+        product = node.children[0]
+        lhs = _lower_expr(product.children[0], child_ctx)
+        rhs = _lower_expr(product.children[1], child_ctx)
+        addend = _lower_expr(node.children[1], child_ctx)
+        cpp_type = f'{"int" if dtype.startswith("i") else "uint"}{dtype[1:]}_t'
+        return (
+            f'amdgpu::vop3_integer_mad<{cpp_type}, {dtype[1:]}>('
+            f'{lhs}, {rhs}, {addend}, inst_.clamp)'
+        )
+
+    lhs = _lower_expr(node.children[0], child_ctx)
+    rhs = _lower_expr(node.children[1], child_ctx)
+    operation = 'add' if node.kind == SemaNodeKind.ADD else 'sub'
+    cpp_type = f'{"int" if dtype.startswith("i") else "uint"}{dtype[1:]}_t'
+    return (
+        f'amdgpu::vop3_integer_{operation}<{cpp_type}>(' f'{lhs}, {rhs}, inst_.clamp)'
+    )
 
 
 def _lower_lit(node: SemaNode) -> str:
@@ -1224,7 +1258,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'cls_i32': '[&]() {{ auto s = static_cast<int32_t>({0});'
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
-    ' return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1; }}()',
+    ' return a == 0 ? static_cast<uint32_t>(-1)'
+    ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'frexp_exp_f32': '[&]() {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
     ' return static_cast<uint32_t>(exp); }}()',
@@ -1727,6 +1762,66 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
+
+    add_minmax_calls = {
+        'add_max_i32': ('int32_t', 'true'),
+        'add_max_u32': ('uint32_t', 'true'),
+        'add_min_i32': ('int32_t', 'false'),
+        'add_min_u32': ('uint32_t', 'false'),
+    }
+    if ctx.integer_saturation_dtype is not None and callee in add_minmax_calls:
+        cpp_type, select_max = add_minmax_calls[callee]
+        return (
+            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>(' f'{args_str})'
+        )
+
+    saturating_calls = {
+        'mul_i24': ('int32_t', 24, False),
+        'mul_u24': ('uint32_t', 24, False),
+        'mad_i24': ('int32_t', 24, True),
+        'mad_u24': ('uint32_t', 24, True),
+        'mad_lo_u16': ('uint16_t', 16, True),
+    }
+    if ctx.integer_saturation_dtype is not None and callee in saturating_calls:
+        cpp_type, source_bits, has_addend = saturating_calls[callee]
+        helper = 'vop3_integer_mad' if has_addend else 'vop3_integer_mul'
+        return (
+            f'amdgpu::{helper}<{cpp_type}, {source_bits}>(' f'{args_str}, inst_.clamp)'
+        )
+
+    if ctx.integer_saturation_dtype == 'u32' and callee in (
+        'sad_hi_u8',
+        'sad_u8',
+        'sad_u16',
+        'sad_u32',
+        'msad_u8',
+    ):
+        return f'amdgpu::vop3_integer_{callee}({args_str}, inst_.clamp)'
+
+    if ctx.integer_saturation_dtype == 'u32' and callee in (
+        'add_co',
+        'sub_co',
+        'addc_co',
+        'subbc_co',
+    ):
+        if callee in ('add_co', 'addc_co'):
+            terms = ' + '.join(f'static_cast<uint64_t>({arg})' for arg in args)
+            return (
+                f'[&]() {{ uint64_t w = {terms};'
+                ' if (w > 0xFFFFFFFFULL) vcc |= (1ULL << lane);'
+                ' else vcc &= ~(1ULL << lane);'
+                ' return inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX'
+                ' : static_cast<uint32_t>(w); }()'
+            )
+        minuend, subtrahend, *borrow = args
+        borrow_expr = f' + static_cast<uint64_t>({borrow[0]})' if borrow else ''
+        return (
+            f'[&]() {{ uint64_t a = static_cast<uint64_t>({minuend}),'
+            f' b = static_cast<uint64_t>({subtrahend}){borrow_expr};'
+            ' if (a < b) vcc |= (1ULL << lane);'
+            ' else vcc &= ~(1ULL << lane);'
+            ' return inst_.clamp && a < b ? 0u : static_cast<uint32_t>(a - b); }()'
+        )
 
     pseudo_scalar_operations = {
         'exp2': 'EXP2',

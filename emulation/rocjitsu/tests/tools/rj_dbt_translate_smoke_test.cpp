@@ -36,6 +36,18 @@
 namespace {
 
 std::filesystem::path g_translate_tool;
+std::filesystem::path g_decode_benchmark;
+
+rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
+capture_gfx1251_targets(const rocjitsu::tools::TranslateOptions &options) {
+  EXPECT_EQ(options.input_target, ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(options.guest_arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(options.host_arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(options.target_mach, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  EXPECT_EQ(options.input_revision, rocjitsu::ProcessorRevision::Unspecified);
+  EXPECT_EQ(options.output_revision, rocjitsu::ProcessorRevision::Unspecified);
+  return {};
+}
 
 rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
 synthetic_idempotence_mismatch(const rocjitsu::tools::TranslateOptions &options) {
@@ -657,6 +669,178 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
+TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
+  std::array arguments = {
+      std::string("rj_dbt_translate"), std::string("synthetic.co"),
+      std::string("--input-target"),   std::string("gfx1251"),
+      std::string("--output-target"),  std::string("gfx1251"),
+      std::string("--output-mode"),    std::string("diff"),
+  };
+  std::vector<char *> argv;
+  argv.reserve(arguments.size());
+  for (std::string &argument : arguments)
+    argv.push_back(argument.data());
+
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  const int status = rocjitsu::tools::detail::run_dbt_translate_cli(
+      static_cast<int>(argv.size()), argv.data(), capture_gfx1251_targets);
+  const std::string stderr_text = testing::internal::GetCapturedStderr();
+  const std::string stdout_text = testing::internal::GetCapturedStdout();
+
+  EXPECT_EQ(status, 0) << stderr_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "input_target: gfx1251")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "output_target: gfx1251")) << stdout_text;
+}
+
+TEST(RjDbtTranslate, RejectsGfx1250RevisionOptionsForGfx1251) {
+  rocjitsu::tools::TranslateOptions options;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+
+  auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--input-revision is only valid when --input-target is gfx1250");
+
+  options.input_revision = rocjitsu::ProcessorRevision::Unspecified;
+  options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+  error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--output-revision is only valid when --output-target is gfx1250");
+}
+
+TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) {
+  rocjitsu::tools::TranslateOptions options;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
+  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.target_mach = 0;
+
+  const auto error = rocjitsu::tools::translation_request_error(options);
+  ASSERT_TRUE(error.has_value());
+  EXPECT_EQ(*error, "--output-revision is required when --output-target is gfx1250");
+}
+
+TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_gfx1251_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "gfx1251.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 2> gfx1251_only_instruction = {
+      0xCC4B4004u,
+      0x1A021908u,
+  };
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, gfx1251_only_instruction);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string automatic_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) + " 2> " +
+      shell_quote(error.string());
+  int status = std::system(automatic_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output), "1 valid instructions")) << read_text_file(output);
+
+  const std::string explicit_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1251 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(explicit_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+
+  const std::string mismatch_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1250 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(mismatch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 2));
+  EXPECT_TRUE(contains(read_text_file(error), "does not match code-object target"))
+      << read_text_file(error);
+}
+
+TEST(RjDbtTranslate, RejectsStandaloneConcreteTargetMismatch) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_target_mismatch_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "input.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
+  const auto run_mismatch = [&](uint32_t elf_mach, std::string_view arguments) {
+    const std::vector<uint8_t> image = make_smoke_code_object(elf_mach, text_words);
+    {
+      std::ofstream out(input, std::ios::binary);
+      out.write(reinterpret_cast<const char *>(image.data()),
+                static_cast<std::streamsize>(image.size()));
+    }
+    const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                                shell_quote(input.string()) + " " + std::string(arguments) + " > " +
+                                shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+    const int status = std::system(command.c_str());
+    EXPECT_TRUE(command_exited_with(status, 2));
+    EXPECT_TRUE(contains(read_text_file(error),
+                         "input target does not match standalone code-object target metadata"))
+        << read_text_file(error);
+  };
+
+  run_mismatch(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250,
+               "--input-target gfx1251 --output-target gfx1251 --output-mode diff");
+  run_mismatch(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251,
+               "--input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+               "--output-revision a0 --output-mode diff");
+}
+
+TEST(RjDbtTranslate, ReportsGfx1251OnlyInstructionWithConcreteDecoders) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_gfx1251_report_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const auto input = temp_path / "gfx1251.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 3> gfx1251_only_instruction = {
+      0xCC4B4004u,
+      0x1A021908u,
+      0xBFB00000u,
+  };
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, gfx1251_only_instruction);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1251 --output-target gfx1251 --output-mode diff "
+                              "--show-all-translations > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+  EXPECT_TRUE(contains(stdout_text, "source: v_pk_add_f64")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "target: v_pk_add_f64")) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "section .text bytes=12 instructions=2 decode_failures=0"))
+      << stdout_text;
+}
+
 TEST(RjDbtTranslate, VerifiesGfx1250B0ToA0Idempotence) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_idempotence_");
   const std::filesystem::path temp_path(temp_dir.path());
@@ -738,6 +922,8 @@ TEST(RjDbtTranslate, RejectsInvalidRewriteDischargeOptionCombinations) {
 
   options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.input_target = ROCJITSU_CODE_TARGET_GFX1250;
+  options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
   options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
   options.skip_failed_kernels = true;
@@ -925,12 +1111,14 @@ TEST(RjDbtTranslate, ReportsUnclassifiedSemanticExpansionInTheDiff) {
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate>\n";
+  if (argc < 3) {
+    std::cerr << "usage: rj_dbt_translate_smoke_test <rj_dbt_translate> "
+                 "<rj_decode_benchmark>\n";
     return 2;
   }
 
   g_translate_tool = argv[1];
+  g_decode_benchmark = argv[2];
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

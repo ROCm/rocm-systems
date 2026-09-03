@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_device.h"
 
@@ -691,7 +672,19 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
   }
 
 Device::Device(std::string p, RocmSMI_env_vars const* e)
-    : monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1), m_gpu_metrics_header{0, 0, 0} {
+    : monitor_(nullptr),
+      path_(p),
+      card_indx_(0),
+      drm_render_minor_(0),
+      env_(e),
+      bdfid_(UINT64_MAX),
+      kfd_gpu_id_(0),
+      evt_notif_anon_fd_(-1),
+      evt_notif_anon_file_ptr_(nullptr),
+      m_gpu_metrics_header{0, 0, 0},
+      m_gpu_metrics_updated_timestamp(0),
+      m_device_id(0),
+      m_partition_id(0) {
 #ifndef DEBUG
   env_ = nullptr;
 #endif

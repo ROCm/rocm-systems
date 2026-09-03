@@ -10,6 +10,7 @@ Pre-built simulator configs are in `configs/`:
 
 | File | Description |
 |---|---|
+| `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
@@ -95,18 +96,38 @@ deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
 partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
 partition.
 
+Raising `num_threads` only pays off if the work reaches more than one XCD, which
+is decided by `HwQueue::xcd_fanout` rather than by how the queue was created (see
+*Queue ownership and XCD fan-out* in `vm-design.md`). KFD sets the flag for
+compute queues, and a test can opt in when it registers a queue directly; a queue
+without the flag keeps its whole grid on its owning XCD and leaves the other
+partitions idle no matter how `num_threads` is set.
+
+Setting the flag is not a guarantee that every partition gets work. The grid is
+split in dispatch chunks, and a chunk is a whole cluster for a clustered
+dispatch and a single workgroup otherwise, so what has to reach the XCD count is
+the chunk count rather than the workgroup count: 16 workgroups in two
+eight-workgroup clusters are two chunks, and on an eight-XCD SoC six XCDs take
+an empty share and run nothing. Fan-out also reaches only the XCDs of the SoC
+that owns the queue -- so in the two-GPU example above, one dispatch occupies at
+most the partitions covering its own GPU.
+
 ### Topology
 
 Components are defined hierarchically under `topology.root`. Range
 expansion (`xcd[0:8]`) creates multiple instances. Links connect
 component ports using pattern expressions with loop variables.
 
-### KFD device section
+### KFD device sections
 
-KFD-mode configs include a `vm.gpu.device` section that defines the
-properties reported through the simulated sysfs topology (GPU ID,
-vendor/device IDs, CU counts, memory sizes, etc.). These must match
-the component hierarchy defined in `topology`.
+KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
+by `dbt_guest.guest_device` for a DBT guest. These sections define properties
+reported through the simulated sysfs topology (GPU ID, vendor/device IDs, CU
+counts, memory sizes, etc.). A simulated device's properties must match the
+component hierarchy defined in `topology`.
+
+In either device section, a device with one or more regular SDMA engines must
+explicitly set a nonzero `num_sdma_queues_per_engine` value.
 
 ## FlatBuffers schema
 
