@@ -884,26 +884,17 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     // gives the common retry loop one uniform entry point at a small fast-path
     // cost and removes exact-shadow's private refresh/re-entry lifecycle.
     if (!append_atomic_load_u32(words, address_lo_vgpr, ready_version_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, packed_access),
-                                        old_value_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, packed_access) +
-                                            sizeof(uint32_t),
-                                        static_cast<uint16_t>(old_value_vgpr + 1u), arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
-                                        prior_dispatch_low_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) +
-                                            sizeof(uint32_t),
-                                        prior_dispatch_high_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
-                                        tmp_vgpr, arch) ||
-        !append_load_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                        offsetof(ConSanMoiInlineExactShadowSlot, version),
-                                        cas_expected_vgpr, arch))
+        !append_moi_publication_loads(
+            words, address_lo_vgpr,
+            {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), old_value_vgpr},
+             {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
+              static_cast<uint16_t>(old_value_vgpr + 1u)},
+             {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id), prior_dispatch_low_vgpr},
+             {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t),
+              prior_dispatch_high_vgpr},
+             {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), tmp_vgpr},
+             {offsetof(ConSanMoiInlineExactShadowSlot, version), cas_expected_vgpr}},
+            arch))
       return false;
 
     // A changed read, odd predecessor, or terminal version is unusable. Keep
@@ -1089,39 +1080,29 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
   restore_slot_address();
 
   failure.stage = "publication";
-  if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, packed_access),
-                                       saved_current_low_vgpr, arch) ||
-      !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, packed_access) +
-                                           sizeof(uint32_t),
-                                       saved_current_high_vgpr, arch)) {
-    return false;
-  }
-  if (!append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance),
-                                       current_low_vgpr, arch)) {
-    return false;
-  }
-  if (!append_moi_report_dispatch_id_pair(words, plan.dispatch_id, current_low_vgpr,
+  if (!append_moi_publication_stores(
+          words, address_lo_vgpr,
+          {{offsetof(ConSanMoiInlineExactShadowSlot, packed_access), saved_current_low_vgpr},
+           {offsetof(ConSanMoiInlineExactShadowSlot, packed_access) + sizeof(uint32_t),
+            saved_current_high_vgpr},
+           {offsetof(ConSanMoiInlineExactShadowSlot, byte_provenance), current_low_vgpr}},
+          arch) ||
+      !append_moi_report_dispatch_id_pair(words, plan.dispatch_id, current_low_vgpr,
                                           static_cast<uint16_t>(current_low_vgpr + 1u), arch) ||
-      !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id),
-                                       current_low_vgpr, arch) ||
-      !append_store_u32_vgpr_at_offset(words, address_lo_vgpr,
-                                       offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) +
-                                           sizeof(uint32_t),
-                                       static_cast<uint16_t>(current_low_vgpr + 1u), arch)) {
+      !append_moi_publication_stores(
+          words, address_lo_vgpr,
+          {{offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id), current_low_vgpr},
+           {offsetof(ConSanMoiInlineExactShadowSlot, dispatch_id) + sizeof(uint32_t),
+            static_cast<uint16_t>(current_low_vgpr + 1u)}},
+          arch)) {
     return false;
   }
   if (!sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
     return false;
 
   failure.stage = "commit";
-  if (!append_add_literal_field(words, address_lo_vgpr,
-                                offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
-                                arch) ||
-      !append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
+  if (!append_moi_version_transition(words, sequence, exec_masks, address_lo_vgpr,
+                                     offsetof(ConSanMoiInlineExactShadowSlot, version),
                                      ready_version_vgpr, cas_new_vgpr, cas_expected_vgpr,
                                      /*desired_delta=*/2u, /*expected_delta=*/1u, arch)) {
     return false;

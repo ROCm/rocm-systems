@@ -574,27 +574,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     if (!valid_union)
       return false;
     words.push_back(*valid_union);
-    words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(expected), arch));
-    const auto increment =
-        instrumentation::build_v_add_u32(value, scalar_positive_inline_u32(1), value, arch);
-    if (!increment ||
-        !append_add_literal_field(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), hash, arch))
-      return false;
-    words.insert(words.end(), increment->begin(), increment->end());
-    const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
-        base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch);
-    if (!claim)
-      return false;
-    words.insert(words.end(), claim->begin(), claim->end());
-    if (!append_moi_global_atomic_wait(words, arch))
-      return false;
-    const auto won =
-        instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected), value, arch);
-    if (!won)
-      return false;
-    words.push_back(*won);
-    if (!narrow_vcc() ||
+    if (!append_moi_version_transition(words, sequence, exec_masks, base,
+                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
+                                       expected, value, expected,
+                                       /*desired_delta=*/1u, /*expected_delta=*/0u, arch) ||
         !append_store_u32_vgpr_at_offset(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
             expected, arch) ||
@@ -631,31 +614,19 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
     }
     if (!select_identity(index) || !derive_slot() ||
-        !append_load_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
-            expected, arch) ||
-        !append_load_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), value, arch))
+        !append_moi_publication_loads(
+            words, base,
+            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version), expected},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), value}},
+            arch))
       return false;
     if (!sequence.emit(instrumentation::build_v_and_b32_literal(hash, 1u, value, arch)) ||
         !exec_masks.narrow(
             instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), hash, arch)) ||
-        !append_add_literal_field(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), hash, arch))
-      return false;
-    // The compare-swap source pair is [new, expected]. `expected` currently
-    // contains the journaled prior even version while `value` contains the
-    // current odd reservation. They are adjacent members of that source pair,
-    // so use the now-dead hash temporary to swap them without destroying the
-    // rollback value (the former two-move sequence made both operands odd and
-    // silently left an empty reservation at version 1).
-    words.push_back(build_v_mov_b32_e32(hash, vector_source_vgpr(expected), arch));
-    words.push_back(build_v_mov_b32_e32(expected, vector_source_vgpr(value), arch));
-    words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(hash), arch));
-    if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-            base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
-      return false;
-    if (!append_moi_global_atomic_wait(words, arch))
+        !append_moi_version_transition(words, sequence, exec_masks, base,
+                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
+                                       expected, value, expected,
+                                       /*desired_delta=*/0u, /*expected_delta=*/1u, arch))
       return false;
   }
 
@@ -672,18 +643,16 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
     }
     if (!select_identity(index) || !derive_slot() ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-            plan.owner_epoch_vgprs.owner, arch) ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-            direct_owner_vgpr, arch) ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
-            direct_epoch_vgpr, arch) ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-            workgroup_key_vgpr, arch))
+        !append_moi_publication_stores(
+            words, base,
+            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
+              plan.owner_epoch_vgprs.owner},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
+              direct_owner_vgpr},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
+              direct_epoch_vgpr},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key), workgroup_key_vgpr}},
+            arch))
       return false;
     if (!sequence.emit(instrumentation::build_v_mov_b32_literal(
             value,
@@ -713,19 +682,17 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       if (!restore_exec(kind_exec))
         return false;
     }
-    if (!append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind), value, arch) ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-            source_address_vgpr, arch) ||
-        !append_store_u32_vgpr_at_offset(
+    if (!append_moi_publication_stores(
             words, base,
-            offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
-                sizeof(uint32_t),
-            static_cast<uint16_t>(source_address_vgpr + 1u), arch) ||
-        !append_store_u32_vgpr_at_offset(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-            saved_source_version, arch))
+            {{offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind), value},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
+              source_address_vgpr},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) +
+                  sizeof(uint32_t),
+              static_cast<uint16_t>(source_address_vgpr + 1u)},
+             {offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
+              saved_source_version}},
+            arch))
       return false;
     if (!sequence.emit_all(instrumentation::build_v_add_u32(value, scalar_positive_inline_u32(1),
                                                             plan.owner_epoch_vgprs.epoch, arch),
@@ -761,15 +728,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         !sequence.emit(instrumentation::build_s_wait_global_store0(arch)))
       return false;
     words.push_back(build_v_mov_b32_e32(expected, vector_source_vgpr(value), arch));
-    if (!append_add_literal_field(
-            words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), hash, arch) ||
-        !sequence.emit(
-            instrumentation::build_v_add_u32(value, scalar_positive_inline_u32(1), value, arch)))
-      return false;
-    if (!sequence.emit(instrumentation::build_flat_atomic_cmpswap_b32(
-            base, value, value, /*return_old_value=*/true, kAmdGpuScopeDevice, arch)))
-      return false;
-    if (!append_moi_global_atomic_wait(words, arch))
+    if (!append_moi_version_transition(words, sequence, exec_masks, base,
+                                       offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version),
+                                       expected, value, expected,
+                                       /*desired_delta=*/1u, /*expected_delta=*/0u, arch))
       return false;
   }
   return restore_exec(winners);
@@ -1422,19 +1384,20 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
       !append_inline_causal_snapshot_address(words, snapshot_table_base, snapshot_table_capacity,
                                              atomic_address_vgpr, snapshot_address, temporary,
                                              loop_index, arch) ||
-      !append_store_u32_vgpr_at_offset(words, snapshot_address,
-                                       offsetof(ConSanMoiInlineCausalSnapshot, entry_count), count,
-                                       arch) ||
-      !append_store_u32_vgpr_at_offset(words, snapshot_address,
-                                       offsetof(ConSanMoiInlineCausalSnapshot, flags), flags, arch))
+      !append_moi_publication_stores(words, snapshot_address,
+                                     {{offsetof(ConSanMoiInlineCausalSnapshot, entry_count), count},
+                                      {offsetof(ConSanMoiInlineCausalSnapshot, flags), flags}},
+                                     arch))
     return false;
   for (uint16_t i = 0; i < 4u; ++i) {
     const size_t entry_offset = offsetof(ConSanMoiInlineCausalSnapshot, entries) +
                                 i * sizeof(ConSanMoiInlineCausalSnapshotEntry);
-    if (!append_store_u32_vgpr_at_offset(words, snapshot_address, entry_offset,
-                                         static_cast<uint16_t>(owners + i), arch) ||
-        !append_store_u32_vgpr_at_offset(words, snapshot_address, entry_offset + sizeof(uint32_t),
-                                         static_cast<uint16_t>(epochs + i), arch))
+    if (!append_moi_publication_stores(
+            words, snapshot_address,
+            {{static_cast<uint32_t>(entry_offset), static_cast<uint16_t>(owners + i)},
+             {static_cast<uint32_t>(entry_offset + sizeof(uint32_t)),
+              static_cast<uint16_t>(epochs + i)}},
+            arch))
       return false;
   }
   return sequence.bind(scan_done) && sequence.resolve_branches(arch);
@@ -1718,11 +1681,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
         return false;
       words.push_back(build_v_mov_b32_e32(
           prior_version, vector_source_vgpr(static_cast<uint16_t>(base + 8u)), arch));
-      if (!append_add_literal_field(words, slot_address,
-                                    offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                    arch) ||
-          !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
-                                         cas_new, cas_expected, /*desired_delta=*/0u,
+      if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                         offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                         prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
                                          /*expected_delta=*/1u, arch) ||
           !save_exec(committed_exec))
         return false;
@@ -1776,11 +1737,9 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
     // with detector state just before the final restore.
     if (!restore_exec(claimed_exec))
       return false;
-    if (!append_add_literal_field(words, slot_address,
-                                  offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                  arch) ||
-        !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
-                                       cas_new, cas_expected, /*desired_delta=*/0u,
+    if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                       prior_version, cas_new, cas_expected, /*desired_delta=*/0u,
                                        /*expected_delta=*/1u, arch) ||
         !save_exec(committed_exec))
       return false;
@@ -1825,22 +1784,15 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
           instrumentation::build_v_min_u32_literal(temporary, consan_moi_exact_shadow::max_epoch,
                                                    temporary, arch)))
     return false;
-  if (!append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                                       plan.owner_epoch_vgprs.owner, arch) ||
-      !append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
-                                       temporary, arch) ||
-      !append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key),
-                                       workgroup_key, arch) ||
-      !append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-                                       stable_guest_address, arch) ||
-      !append_store_u32_vgpr_at_offset(words, slot_address,
-                                       offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                                           sizeof(uint32_t),
-                                       static_cast<uint16_t>(stable_guest_address + 1u), arch))
+  if (!append_moi_publication_stores(
+          words, slot_address,
+          {{offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id), plan.owner_epoch_vgprs.owner},
+           {offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one), temporary},
+           {offsetof(ConSanMoiInlineAtomicReleaseSlot, workgroup_key), workgroup_key},
+           {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address), stable_guest_address},
+           {offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) + sizeof(uint32_t),
+            static_cast<uint16_t>(stable_guest_address + 1u)}},
+          arch))
     return false;
   if (!append_moi_report_dispatch_id_word(words, plan.dispatch_id, temporary,
                                           /*high_word=*/false, arch)) {
@@ -1915,12 +1867,10 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
   if (!append_save_moi_special_state(words, plan.special_state, arch) ||
       !restore_exec(claimed_exec))
     return false;
-  if (!append_add_literal_field(words, slot_address,
-                                offsetof(ConSanMoiInlineAtomicReleaseSlot, version), temporary,
-                                arch) ||
-      !append_moi_version_transition(words, sequence, exec_masks, slot_address, prior_version,
-                                     cas_new, cas_expected, /*desired_delta=*/2u,
-                                     /*expected_delta=*/1u, arch) ||
+  if (!append_moi_version_transition(words, sequence, exec_masks, slot_address,
+                                     offsetof(ConSanMoiInlineAtomicReleaseSlot, version),
+                                     prior_version, cas_new, cas_expected,
+                                     /*desired_delta=*/2u, /*expected_delta=*/1u, arch) ||
       !save_exec(committed_exec))
     return false;
   if (!sequence.emit(

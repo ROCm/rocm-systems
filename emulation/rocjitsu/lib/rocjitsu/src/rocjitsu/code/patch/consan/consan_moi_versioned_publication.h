@@ -8,11 +8,13 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <cstdint>
+#include <initializer_list>
 #include <vector>
 
 namespace rocjitsu::consan_moi_impl {
@@ -80,6 +82,39 @@ struct MoiVersionClaim {
   uint32_t sleep_delay = 0;
 };
 
+/// One typed word in a publication payload. Slot layout stays domain-owned;
+/// the shared protocol owns the ordered memory operation over that layout.
+struct MoiPublicationField {
+  uint32_t offset = 0;
+  uint16_t vgpr = 0;
+};
+
+[[nodiscard]] inline bool
+append_moi_publication_loads(std::vector<uint32_t> &words, uint16_t slot_address_vgpr,
+                             std::initializer_list<MoiPublicationField> fields,
+                             rj_code_arch_t arch) {
+  for (const MoiPublicationField field : fields) {
+    if (!consan_moi_detail::append_load_u32_vgpr_at_offset(words, slot_address_vgpr, field.offset,
+                                                           field.vgpr, arch)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] inline bool
+append_moi_publication_stores(std::vector<uint32_t> &words, uint16_t slot_address_vgpr,
+                              std::initializer_list<MoiPublicationField> fields,
+                              rj_code_arch_t arch) {
+  for (const MoiPublicationField field : fields) {
+    if (!consan_moi_detail::append_store_u32_vgpr_at_offset(words, slot_address_vgpr, field.offset,
+                                                            field.vgpr, arch)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Emit one odd/even version transition through a device-scope compare-swap.
 ///
 /// `desired_vgpr` and `expected_vgpr` are the adjacent data pair required by
@@ -87,10 +122,12 @@ struct MoiVersionClaim {
 /// `desired_vgpr`; successful lanes remain in EXEC. A delta of zero is an
 /// explicit restoration of `base_version_vgpr`, allowing the same operation
 /// to claim, commit, or roll back a slot without bespoke CAS sequences.
-[[nodiscard]] inline bool append_moi_version_transition(
-    std::vector<uint32_t> &words, InstructionSequence &sequence, MoiPublicationExec &exec,
-    uint16_t slot_address_vgpr, uint16_t base_version_vgpr, uint16_t desired_vgpr,
-    uint16_t expected_vgpr, uint32_t desired_delta, uint32_t expected_delta, rj_code_arch_t arch) {
+[[nodiscard]] inline bool
+append_moi_version_transition(std::vector<uint32_t> &words, InstructionSequence &sequence,
+                              MoiPublicationExec &exec, uint16_t slot_address_vgpr,
+                              uint32_t version_offset, uint16_t base_version_vgpr,
+                              uint16_t desired_vgpr, uint16_t expected_vgpr, uint32_t desired_delta,
+                              uint32_t expected_delta, rj_code_arch_t arch) {
   if (expected_vgpr != static_cast<uint16_t>(desired_vgpr + 1u))
     return false;
   const auto materialize = [&](uint16_t destination, uint32_t delta) {
@@ -103,6 +140,7 @@ struct MoiVersionClaim {
   const auto desired = materialize(desired_vgpr, desired_delta);
   const auto expected = materialize(expected_vgpr, expected_delta);
   if (!desired || !expected ||
+      !append_add_literal_field(words, slot_address_vgpr, version_offset, desired_vgpr, arch) ||
       !sequence.emit_all(*desired, *expected,
                          instrumentation::build_flat_atomic_cmpswap_b32(
                              slot_address_vgpr, desired_vgpr, desired_vgpr,
@@ -137,11 +175,9 @@ append_moi_bounded_version_claim(std::vector<uint32_t> &words, InstructionSequen
 
   const InstructionSequence::Label retry = sequence.mark_label();
   if (!exec.restore(claim.eligible_exec_sgpr) || !append_candidate() ||
-      !append_add_literal_field(words, claim.slot_address_vgpr, claim.version_offset,
-                                claim.desired_vgpr, arch) ||
       !append_moi_version_transition(words, sequence, exec, claim.slot_address_vgpr,
-                                     claim.base_version_vgpr, claim.desired_vgpr,
-                                     claim.expected_vgpr, /*desired_delta=*/1u,
+                                     claim.version_offset, claim.base_version_vgpr,
+                                     claim.desired_vgpr, claim.expected_vgpr, /*desired_delta=*/1u,
                                      /*expected_delta=*/0u, arch) ||
       !exec.save(claim.claimed_exec_sgpr)) {
     return false;
