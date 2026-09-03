@@ -944,6 +944,66 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
             self.assertIn(valid, message)
 
+    def test_output_file_prompt_declined_exits_user_aborted(self):
+        """Both exits from the --file overwrite prompt are user aborts: typing
+        the advertised Cancel (or anything unrecognized), and EOF on stdin.
+        Neither may reuse INVALID_FILE_PATH or a bare exit 1 -- the path was
+        valid, the user just said no.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import argparse
+        import builtins
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        class _Host:
+            class helpers:
+                @staticmethod
+                def get_output_format():
+                    return "human"
+
+        host: Any = _Host()
+        action_cls = AMDSMIParser._check_output_file_path(host)
+        action = action_cls(option_strings=["--file"], dest="file")
+
+        # "" is a bare Enter, which the [o/a/N] default sends down the same branch.
+        for response in ("n", "no", "", "typo"):
+            with self.subTest(response=response):
+                with tempfile.TemporaryDirectory() as folder:
+                    existing = Path(folder) / "out.json"
+                    existing.touch()
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(sys, "stdin", io.StringIO()))
+                        stack.enter_context(mock.patch.object(sys.stdin, "isatty", lambda: True))
+                        stack.enter_context(
+                            mock.patch.object(builtins, "input", lambda *a: response)
+                        )
+                        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                        with self.assertRaises(SystemExit) as ctx:
+                            action(None, argparse.Namespace(), str(existing))
+                self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
+        # EOF at the prompt (Ctrl-D) takes the except branch, not the else.
+        with tempfile.TemporaryDirectory() as folder:
+            existing = Path(folder) / "out.json"
+            existing.touch()
+
+            def _eof(*args):
+                raise EOFError
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.object(sys, "stdin", io.StringIO()))
+                stack.enter_context(mock.patch.object(sys.stdin, "isatty", lambda: True))
+                stack.enter_context(mock.patch.object(builtins, "input", _eof))
+                stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                with self.assertRaises(SystemExit) as ctx:
+                    action(None, argparse.Namespace(), str(existing))
+        self.assertEqual(ctx.exception.code, int(self.ExitCode.USER_ABORTED))
+
     def test_set_cpu_without_target_raises_required_command(self):
         """set_cpu with no CPU target raises AmdSmiRequiredCommandException
         (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call

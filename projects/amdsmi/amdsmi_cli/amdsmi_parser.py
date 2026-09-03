@@ -714,7 +714,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                             .lower()
                         )
                     except Exception:
-                        sys.exit("Confirmation not given. Exiting without setting value")
+                        print(
+                            "Confirmation not given. Exiting without setting value", file=sys.stderr
+                        )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                     if resp in ("a", "append"):
                         setattr(args, self.dest, path)
                         return
@@ -723,12 +726,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                         setattr(args, self.dest, path)
                         return
                     else:
-                        # User declined to overwrite
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                            path,
-                            CheckOutputFilePath.outputformat,
-                            "User declined to overwrite or append existing file.",
+                        # Declining is not a bad path: the file was fine, the user said no.
+                        print(
+                            "User declined to overwrite or append existing file.", file=sys.stderr
                         )
+                        sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
                 else:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
                         path, CheckOutputFilePath.outputformat
