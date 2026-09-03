@@ -634,7 +634,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
-                   [-A PROFILE_NAME | --ampp-configure PROFILE_NAME [KEY=VALUE ...]]
+                   [-A PROFILE_NAME] [--ampp-configure PROFILE_NAME [KEY=VALUE ...]]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -1690,7 +1690,10 @@ an `"ampp"."profiles"` list.
 Profiles are restored one at a time and independently: a failure on one
 profile (for example, a malformed `fields` entry, or the driver rejecting a
 value) is reported per-profile and does not stop the remaining profiles in
-the file from being applied, nor roll back ones already applied.
+the file from being applied, nor roll back ones already applied. The one
+exception is a permission error (not run with `sudo`), which aborts the
+whole `--ampp-configure @<path>` call immediately instead of continuing to
+the remaining profiles.
 
 ### Prerequisites
 

@@ -351,6 +351,21 @@ class TestCliStaticAmpp(unittest.TestCase):
         self.assertIn("profile_0(active=True,configured=True,writable=False)", static_dict["ampp"])
         self.assertIn("profile_2(active=False,configured=True,writable=True)", static_dict["ampp"])
 
+    def test_unconfigured_writable_profile_reports_no_fields(self):
+        unconfigured = copy.deepcopy(_PROFILES) + [
+            {
+                "name": "profile_3",
+                "index": 3,
+                "is_active": False,
+                "is_writable": True,
+                "is_configured": False,
+            }
+        ]
+        self.holder["get_profiles"] = lambda: ("1.0", unconfigured)
+        static_dict = self._run_ampp("human")
+        ampp_text = static_dict["ampp"]
+        self.assertIn(" [3] profile_3 (writable, unconfigured)", ampp_text)
+
     def test_field_with_empty_unit_displayed_without_extra_formatting(self):
         self.holder["get_profiles"] = lambda: ("1.0", copy.deepcopy(_PROFILES))
         self.holder["get_fields"] = lambda _name: [

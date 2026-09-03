@@ -25,9 +25,10 @@ import math
 import sys
 
 from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException, AmdSmiRequiredCommandException
+from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
-from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_STRING_LENGTH, AMDSMI_MAX_UTIL
+from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
 
 
 class SetValueCommands:
@@ -852,22 +853,13 @@ class SetValueCommands:
         # TypeError/ValueError/OverflowError (not AmdSmiLibraryException) for a
         # non-string name or an out-of-range value -- reject those here so one bad
         # field can't abort the whole file-restore loop with an unhandled traceback.
+        # Shares its name/value checks with the --ampp-configure argv parser
+        # (amdsmi_parser.py) via AMDSMIHelpers so the two can't drift apart.
         if not isinstance(field, dict) or "name" not in field or "value" not in field:
             return False
-        name = field["name"]
-        if (
-            not isinstance(name, str)
-            or not name
-            or len(name.encode("utf-8")) >= AMDSMI_MAX_STRING_LENGTH
-        ):
+        if not AMDSMIHelpers.is_valid_ampp_field_name(field["name"]):
             return False
-        try:
-            value = int(field["value"])
-        except (TypeError, ValueError):
-            return False
-        if not -(2**63) <= value < 2**63:
-            return False
-        return True
+        return AMDSMIHelpers.parse_ampp_field_value(field["value"]) is not None
 
     def _configure_ampp_from_file(self, args, file_path, gpu_bdf, gpu_id):
         # Restores every writable profile for this GPU's entry from a
@@ -930,6 +922,7 @@ class SetValueCommands:
             p
             for p in profiles
             if isinstance(p, dict)
+            and isinstance(p.get("name"), str)
             and p.get("name")
             and p.get("is_writable")
             and isinstance(p.get("fields"), list)

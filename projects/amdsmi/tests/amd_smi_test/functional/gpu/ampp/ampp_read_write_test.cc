@@ -139,11 +139,14 @@ void TestAmppReadWrite::Run(void) {
     // instead of overflowing it, and num_profiles must still be updated to
     // the true required count so the caller can retry correctly.
     if (num_profiles > 0) {
-      std::vector<amdsmi_ampp_profile_t> undersized(num_profiles - 1);
+      // Fixed 1-element buffer (not sized to num_profiles - 1): an empty
+      // vector's .data() returns nullptr, which the API treats as a sizing
+      // call rather than an undersized buffer, so this must stay non-null.
+      amdsmi_ampp_profile_t undersized[1];
       uint32_t requested = num_profiles - 1;
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_profiles",
                          "gpu=" + std::to_string(dv_ind) + " (undersized buffer)", VERB(STANDARD));
-      ret = amdsmi_get_ampp_profiles(handle, version, undersized.data(), &requested);
+      ret = amdsmi_get_ampp_profiles(handle, version, undersized, &requested);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);
@@ -210,15 +213,16 @@ void TestAmppReadWrite::Run(void) {
       CHK_ERR_ASRT(ret)
       ASSERT_GT(num_fields, 0u);
 
-      // Same under-sized-buffer contract as amdsmi_get_ampp_profiles above.
-      std::vector<amdsmi_ampp_field_t> undersized_fields(num_fields - 1);
+      // Same under-sized-buffer contract as amdsmi_get_ampp_profiles above;
+      // fixed 1-element buffer for the same nullptr-.data() reason.
+      amdsmi_ampp_field_t undersized_fields[1];
       uint32_t requested_fields = num_fields - 1;
       DISPLAY_AMDSMI_API("amdsmi_get_ampp_fields",
                          "gpu=" + std::to_string(dv_ind) + ", profile=" + configured_profile_name +
                              " (undersized buffer)",
                          VERB(STANDARD));
       ret = amdsmi_get_ampp_fields(handle, configured_profile_name.c_str(), &requested_fields,
-                                   undersized_fields.data());
+                                   undersized_fields);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret,
                             AMDSMI_STATUS_OUT_OF_RESOURCES);
       ASSERT_EQ(ret, AMDSMI_STATUS_OUT_OF_RESOURCES);

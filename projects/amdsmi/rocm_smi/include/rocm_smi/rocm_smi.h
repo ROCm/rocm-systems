@@ -660,6 +660,7 @@ typedef struct {
   int64_t min_value;
   int64_t max_value;
   bool has_limits;
+  uint32_t reserved[4];
 } rsmi_ampp_field_t;
 
 /**
@@ -671,6 +672,7 @@ typedef struct {
   bool is_active;
   bool is_writable;
   bool is_configured;
+  uint32_t reserved[4];
 } rsmi_ampp_profile_t;
 
 /**

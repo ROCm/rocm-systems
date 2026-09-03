@@ -4856,7 +4856,9 @@ struct_amdsmi_ampp_field_t._fields_ = [
     ('min_value', ctypes.c_int64),
     ('max_value', ctypes.c_int64),
     ('has_limits', ctypes.c_bool),
-    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('reserved', ctypes.c_uint32 * 4),
+    ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_ampp_field_t = struct_amdsmi_ampp_field_t
@@ -4872,6 +4874,7 @@ struct_amdsmi_ampp_profile_t._fields_ = [
     ('is_writable', ctypes.c_bool),
     ('is_configured', ctypes.c_bool),
     ('PADDING_0', ctypes.c_ubyte),
+    ('reserved', ctypes.c_uint32 * 4),
 ]
 
 amdsmi_ampp_profile_t = struct_amdsmi_ampp_profile_t

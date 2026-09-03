@@ -6065,6 +6065,11 @@ Exceptions that can be thrown by `amdsmi_get_ampp_profiles` function:
 - `AMDSMI_STATUS_NOT_SUPPORTED` - The device has no `app_modes/` (AMPP not
   implemented on this ASIC)
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
+  profile-slot range)
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `profiles` buffer
+  is smaller than the number of published profiles
 
 Example:
 
@@ -6124,6 +6129,11 @@ Exceptions that can be thrown by `amdsmi_get_ampp_fields` function:
   custom slot
 - `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
   `profile_N` directory
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
+  profile-slot range)
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `fields` buffer is
+  smaller than the number of published fields for this profile
 
 Example:
 
@@ -6225,6 +6235,9 @@ Exceptions that can be thrown by `amdsmi_configure_ampp_profile` function:
 - `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
   `profile_N`, `fields` contains a field name not recognized for this
   profile, or `fields` is `None`/empty
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix, unparsable, or a bit set outside the known
+  profile-slot range)
 
 Example:
 

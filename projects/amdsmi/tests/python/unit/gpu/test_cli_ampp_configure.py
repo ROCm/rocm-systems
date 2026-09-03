@@ -107,12 +107,33 @@ def _install_fake_modules():
     sys.modules["amdsmi.amdsmi_exception"] = exception
     sys.modules["amdsmi.amdsmi_wrapper"] = wrapper
 
-    # amdsmi_parser.py additionally imports these sibling modules by bare
-    # name at module scope; the tests here never construct a real
-    # AMDSMIParser (only its unbound ``_ampp_configure_options`` method), so
-    # a minimal stand-in is enough.
+    # amdsmi_parser.py and set_value.py additionally import this sibling
+    # module by bare name at module scope; the tests here never construct a
+    # real AMDSMIParser/heavyweight AMDSMIHelpers (only the unbound
+    # ``_ampp_configure_options`` method and the two static AMPP validators),
+    # so a minimal stand-in mirroring those two static methods is enough.
+    class _FakeAMDSMIHelpers:
+        @staticmethod
+        def is_valid_ampp_field_name(name):
+            if not isinstance(name, str) or not name:
+                return False
+            try:
+                return len(name.encode("utf-8")) < interface.AMDSMI_MAX_STRING_LENGTH
+            except UnicodeEncodeError:
+                return False
+
+        @staticmethod
+        def parse_ampp_field_value(value):
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if not -(2**63) <= parsed < 2**63:
+                return None
+            return parsed
+
     helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = object
+    helpers_mod.AMDSMIHelpers = _FakeAMDSMIHelpers
     sys.modules["amdsmi_helpers"] = helpers_mod
 
     version_mod = types.ModuleType("_version")
@@ -241,6 +262,15 @@ class TestAmppConfigureParserAction(unittest.TestCase):
     def test_field_non_integer_value_raises(self):
         with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
             self._invoke(["profile_2", "PPT0_Limit=not_a_number"])
+
+    def test_field_oversized_name_raises(self):
+        oversized_key = "K" * 256
+        with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
+            self._invoke(["profile_2", f"{oversized_key}=300"])
+
+    def test_field_out_of_int64_range_value_raises(self):
+        with self.assertRaises(self.exceptions_module.AmdSmiInvalidParameterValueException):
+            self._invoke(["profile_2", f"PPT0_Limit={2**63}"])
 
     def test_file_path_parses(self):
         result = self._invoke(["@profiles.json"])
