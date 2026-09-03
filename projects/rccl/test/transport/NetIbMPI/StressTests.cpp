@@ -98,9 +98,9 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
         std::atomic<bool> registerFailed{false};
         static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded MrCacheRefCount",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 (void)threadIdx;
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -143,8 +143,6 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MrCacheRefCount");
         return;
     }
 
@@ -274,25 +272,16 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
     static constexpr int kTagZeroIters = 50;
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Spread(), nThreads,
+            "threaded TagZeroReuse",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
                 const size_t sz = kSmallBufferSize;
-                void* buffer = malloc(sz);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mh = nullptr;
-                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mh = h.mhandle;
+                ThreadResult result;
 
                 // One pattern per worker, held for the whole loop, rather than one
                 // per iteration. makeBytePattern sees the seed modulo 256, and
@@ -313,8 +302,6 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded TagZeroReuse");
         return;
     }
 
@@ -479,25 +466,16 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     if (nThreads > 1) {
         static constexpr int kThreadedMsgs = 20;
         static constexpr int kThreadedRecvDelayUs = 50000; // 50ms
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded FifoPressureSenderFast",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
                 const size_t sz = kSmallBufferSize;
-                void* buffer = malloc(sz);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mh = nullptr;
-                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mh = h.mhandle;
+                ThreadResult result;
 
                 // One pattern per worker, held for the whole run rather than
                 // varying per message. makeBytePattern sees the seed modulo 256
@@ -554,8 +532,6 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded FifoPressureSenderFast");
         return;
     }
 
@@ -635,24 +611,15 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     static constexpr int kMaxReqsPerComm = 32; // NCCL_NET_MAX_REQUESTS
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads, "threaded RequestSlotExhaustion",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 const size_t sz = 256;
-                void* buffer = malloc(sz * kMaxReqsPerComm);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mh = nullptr;
-                result = WorkerRegister(comm, buffer, sz * kMaxReqsPerComm, NCCL_PTR_HOST, &mh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz * kMaxReqsPerComm);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mh = h.mhandle;
+                ThreadResult result;
 
                 // No rank handshake here: the sender's retry loop waits for the
                 // receiver's FIFO slots instead of a barrier the worker cannot use.
@@ -711,8 +678,6 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded RequestSlotExhaustion");
         return;
     }
 
@@ -791,9 +756,9 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
         // verification transfer outlives any sane timeout.
         const int kThreadedBufs = std::max(16, 512 / nThreads);
         static constexpr size_t kThreadedBufSz = 4096;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads, "threaded MemoryRegistrationStorm",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -869,8 +834,6 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
                 return WorkerHostTransfer(rank, pair, kThreadedBufSz, 0,
                                           WorkerSeed(threadIdx, 999), kStressTimeoutMs);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MemoryRegistrationStorm");
         return;
     }
 
@@ -1838,25 +1801,16 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         static constexpr int kThreadedIters = 2000;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Spread(), nThreads,
+            "threaded LongRunningEndurance",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
                 const size_t sz = kSmallBufferSize;
-                void* buffer = malloc(sz);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mh = nullptr;
-                result = WorkerRegister(comm, buffer, sz, NCCL_PTR_HOST, &mh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mh = h.mhandle;
+                ThreadResult result;
 
                 // Worker-constant pattern, for the same reason as the slot test: a
                 // per-iteration seed reduces modulo 256 into another worker's space.
@@ -1868,8 +1822,6 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded LongRunningEndurance");
         return;
     }
 
@@ -1928,9 +1880,9 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
     const int nThreads = MPIEnvironment::nThreads;
     if (nThreads > 1) {
         static constexpr int kThreadedCycles = 3;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads, "threaded GpuMemoryTransferStress",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t cycleSizes[kThreadedCycles] = {512 * 1024, 1024 * 1024,
                                                             2 * 1024 * 1024};
@@ -2004,8 +1956,6 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded GpuMemoryTransferStress");
         return;
     }
 
@@ -2081,24 +2031,15 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
     if (nThreads > 1) {
         static constexpr int kThreadedCycles = 25;
         static constexpr int kThreadedBatch  = 32;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            ThreadDevPolicy::Fixed(0), nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
-                ThreadResult result;
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(0), nThreads, "threaded RapidRecvPostDrain",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 const size_t sz = 256;
-                void* buffer = malloc(sz * kThreadedBatch);
-                if (!buffer) {
-                    result.ok = false;
-                    result.msg = "malloc failed";
-                    return result;
-                }
-                auto bufferGuard = makeHostBufferAutoGuard(buffer);
-
-                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                void* mh = nullptr;
-                result = WorkerRegister(comm, buffer, sz * kThreadedBatch, NCCL_PTR_HOST, &mh);
-                if (!result.ok) return result;
-                NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
+                WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, sz * kThreadedBatch);
+                if (!h.result.ok) return h.result;
+                void* buffer = h.buffer;
+                void* mh = h.mhandle;
+                ThreadResult result;
 
                 // One pattern per worker: the whole batch is in flight at once, so a
                 // per-slot seed would alias into another worker's patterns modulo 256.
@@ -2148,8 +2089,6 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded RapidRecvPostDrain");
         return;
     }
 

@@ -1260,26 +1260,52 @@ protected:
         return result;
     }
 
-    // Composite: allocate a host buffer, register it, run one seeded transfer,
-    // and release both. Covers the common single-transfer worker body.
-    ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
-                                    int seed, int timeoutMs = kDefaultTimeoutMs) {
+    // A worker's registered host buffer, kept alive as one movable value: the
+    // allocation and its registration, released registration-first when this
+    // dies because mhandleGuard is declared after bufferGuard. Returning it lets
+    // a body that needs the handle for a loop hold both without re-pasting the
+    // preamble, and keeps the guard order one reviewed fact rather than one per
+    // call site. On failure `result.ok` is false and the guards are empty no-ops.
+    struct WorkerHostBuffer {
         ThreadResult result;
-        void* buffer = malloc(size ? size : 1);
-        if (!buffer) {
-            result.ok = false;
-            result.msg = "malloc failed";
-            return result;
+        void* buffer = nullptr;
+        void* mhandle = nullptr;
+        HostBufferAutoGuard bufferGuard;
+        NetMHandleWorkerGuard mhandleGuard;
+    };
+
+    // The allocate-and-register preamble on its own: malloc(size, floored to 1),
+    // register it on this rank's comm, and hand back both guards live. A zero
+    // size still yields a one-byte registered buffer, as the transfer helpers
+    // expect.
+    WorkerHostBuffer WorkerSetupHostBuffer(int rank, ConnectionPair& pair, size_t size) {
+        WorkerHostBuffer h;
+        const size_t allocSize = size ? size : 1;
+        h.buffer = malloc(allocSize);
+        if (!h.buffer) {
+            h.result.ok = false;
+            h.result.msg = "malloc failed";
+            return h;
         }
-        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+        h.bufferGuard = makeHostBufferAutoGuard(h.buffer);
 
         void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-        void* mhandle = nullptr;
-        result = WorkerRegister(comm, buffer, size ? size : 1, NCCL_PTR_HOST, &mhandle);
-        if (!result.ok) return result;
-        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+        h.result = WorkerRegister(comm, h.buffer, allocSize, NCCL_PTR_HOST, &h.mhandle);
+        if (!h.result.ok) return h;
+        h.mhandleGuard = NetMHandleWorkerGuard(h.mhandle, NetMHandleWorkerDeleter(net_, comm));
+        return h;
+    }
 
-        return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+    // Composite: allocate a host buffer, register it, run one seeded transfer,
+    // and release both. Covers the common single-transfer worker body. The
+    // holder outlives the transfer, so the buffer is deregistered and freed only
+    // after WorkerSendRecvPattern has returned.
+    ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
+                                    int seed, int timeoutMs = kDefaultTimeoutMs) {
+        WorkerHostBuffer h = WorkerSetupHostBuffer(rank, pair, size);
+        if (!h.result.ok) return h.result;
+
+        return WorkerSendRecvPattern(rank, pair, h.buffer, size, tag, h.mhandle, seed, timeoutMs);
     }
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
@@ -1710,28 +1736,31 @@ protected:
         RunMultiThreadedIndependent(ThreadDevPolicy::Fixed(dev), nThreads, body);
     }
 
-    // How a threaded size sweep registers memory. Some serial bodies register the
-    // whole buffer once, others register exactly the current size on every step;
-    // on a fused device that second shape is the point of the test, since each
-    // registration fans out across both members' protection domains and caches.
-    // The threaded branch has to match whichever its serial body does, or it
-    // quietly covers less.
-    enum class SweepRegistration { Once, PerSize };
+    // The envelope every threaded test body shares: snapshot the RDMA resource
+    // counts, run the workers, barrier so no rank captures its "after" while a
+    // peer is still releasing, and fail if anything leaked. Held here so the
+    // load-bearing barrier is not retyped by hand at each site.
+    void RunThreadedBody(ThreadDevPolicy policy, int nThreads, const char* label,
+                         std::function<ThreadResult(int, ConnectionPair&)> body) {
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(policy, nThreads, std::move(body));
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
+    }
 
     // Threaded size sweep: every worker walks the list on its own connection with
     // a per-worker payload seed, so a transfer delivered on the wrong connection
-    // fails verification. Wraps the run in an RDMA resource leak check.
+    // fails verification. Registers the whole buffer once and reuses that handle
+    // for every size. Wraps the run in an RDMA resource leak check.
     void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
                               const std::vector<size_t>& sizes, int repeats,
-                              const char* label,
-                              SweepRegistration registration = SweepRegistration::Once) {
+                              const char* label) {
         const int rank = MPIEnvironment::world_rank;
         size_t maxSize = 1;
         for (size_t size : sizes) maxSize = std::max(maxSize, size);
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            policy, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        RunThreadedBody(
+            policy, nThreads, label, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 void* buffer = malloc(maxSize);
                 if (!buffer) {
@@ -1742,15 +1771,10 @@ protected:
                 auto bufferGuard = makeHostBufferAutoGuard(buffer);
 
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-                const bool perSize = (registration == SweepRegistration::PerSize);
-
-                void* wholeMhandle = nullptr;
-                if (!perSize) {
-                    result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &wholeMhandle);
-                    if (!result.ok) return result;
-                }
-                NetMHandleWorkerGuard wholeGuard(wholeMhandle,
-                                                 NetMHandleWorkerDeleter(net_, comm));
+                void* mhandle = nullptr;
+                result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle);
+                if (!result.ok) return result;
+                NetMHandleWorkerGuard mhGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
 
                 // One pattern for this worker across the whole sweep. Varying it per
                 // step aliased modulo 256 -- WorkerSeed(0, 8) and WorkerSeed(8, 0) are
@@ -1762,17 +1786,6 @@ protected:
                 const int workerPattern = WorkerSeed(threadIdx, 0);
                 int tag = 0;
                 for (size_t size : sizes) {
-                    void* sizeMhandle = nullptr;
-                    if (perSize) {
-                        result = WorkerRegister(comm, buffer, size, NCCL_PTR_HOST, &sizeMhandle);
-                        if (!result.ok) return result;
-                    }
-                    // Released at the end of this size, so the next one registers
-                    // again, as the serial body does.
-                    NetMHandleWorkerGuard sizeGuard(sizeMhandle,
-                                                    NetMHandleWorkerDeleter(net_, comm));
-                    void* mhandle = perSize ? sizeMhandle : wholeMhandle;
-
                     for (int repeat = 0; repeat < repeats; repeat++) {
                         const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
                                                                  : kDefaultTimeoutMs;
@@ -1784,8 +1797,6 @@ protected:
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
     }
 
     // ===============================================================

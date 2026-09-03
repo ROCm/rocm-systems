@@ -372,12 +372,12 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
     std::vector<size_t> testSizes = {1, 64, 256, 1024, 4096, 16384, 65536};
 
     if (nThreads > 1) {
-        const RdmaResourceCounts before = CaptureRdmaResources();
         // Pinned, unlike SimpleSendRecv: this test's claim is the shared per-device MR
         // cache, and spreading workers across NICs gives each its own cache, so at two
         // and four workers on a four-NIC host the contention would not exist at all.
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded SendRecvMultipleSizes",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 // One pattern per worker across the whole ladder. Folding the size into
@@ -391,8 +391,6 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SendRecvMultipleSizes");
         return;
     }
 
@@ -794,18 +792,16 @@ TEST_F(NetIbMPITest, LargeTransfer) {
     const int nThreads = MPIEnvironment::nThreads;
 
     if (nThreads > 1) {
-        const RdmaResourceCounts before = CaptureRdmaResources();
         // Pinned for the same reason: several large registrations live on one device is
         // the claim, which spreading would defeat.
-        RunMultiThreadedIndependent(
+        RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
+            "threaded LargeTransfer",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 return WorkerHostTransfer(rank, pair, kLargeBufferSize, 400,
                                           WorkerSeed(threadIdx, kBaseSeedOffset),
                                           kLargeTransferTimeout);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded LargeTransfer");
         return;
     }
 
