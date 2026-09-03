@@ -55,6 +55,13 @@
       "args": "-k GinSdma -v"
     },
     {
+      "name": "rccl-gin-bcast-policy-ut",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsGinSdmaBroadcastPolicy",
+      "env": [],
+      "args": ""
+    },
+    {
       "name": "rccl-gin-fixtures-anvil-gda",
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
