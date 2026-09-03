@@ -5,13 +5,13 @@
 Unit tests for counter allocation pipeline in soc_base.py.
 
 Tests LimitedSet, CounterFile, and the bin-packing helpers used by
-perfmon_coalesce — no GPU hardware required.
+perfmon_coalesce. No GPU hardware required.
 """
 
-from contextlib import contextmanager
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -42,6 +42,20 @@ PERFMON_CONFIG = {
     "GDS": 4,
 }
 
+GFX1250_PERFMON_CONFIG = {
+    "GRBM": 2,
+    "SQ": 8,
+    "SPI": 6,
+}
+
+# CP Utilization (metric id 17.1.1): a GRBM ratio whose numerator and
+# denominator must land in the same perfmon pass.
+CP_UTIL_METRIC_YAML = (
+    "avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)\n"
+    "min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
+    "max: 100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
+)
+
 # One unique synthetic counter per metric table, so the counter set returned by
 # detect_counters() reveals exactly which tables were selected.
 BASELINE_COUNTER = "SQ_BASELINE_COUNTER"  # table 201, outside block 30
@@ -58,6 +72,11 @@ def perfmon_config():
 @pytest.fixture
 def empty_counter_file(perfmon_config):
     return CounterFile("0", perfmon_config)
+
+
+@pytest.fixture
+def gfx1250_perfmon_config():
+    return dict(GFX1250_PERFMON_CONFIG)
 
 
 @pytest.fixture
@@ -136,6 +155,30 @@ def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
     return soc
 
 
+@pytest.fixture
+def gfx1250_soc(gfx1250_perfmon_config) -> OmniSoC_Base:
+    """Minimal gfx1250 OmniSoC for metric-aware coalesce tests."""
+    soc = _make_soc(gfx1250_perfmon_config, arch="gfx1250")
+    soc._mspec.gpu_series = "GFX1250_SERIES"
+    return soc
+
+
+def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) -> None:
+    """Make CP Utilization the only same-bucket priority metric on soc."""
+    patch_stack.enter_context(
+        patch.object(soc, "_same_bucket_priority_metric_ids", return_value=("17.1.1",))
+    )
+    patch_stack.enter_context(
+        patch.object(
+            soc,
+            "_iter_arch_analysis_yaml_metrics",
+            return_value=iter([
+                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_YAML)
+            ]),
+        )
+    )
+
+
 # =============================================================================
 # A. LimitedSet
 # =============================================================================
@@ -155,10 +198,10 @@ def test_limited_set_tcc_channel_coalescing():
     ls = LimitedSet(1)
     assert ls.add("TCC_HIT[0]") is True
     assert ls.avail == 0
-    # Same TCC base — bypasses capacity
+    # Same TCC base: bypasses capacity
     assert ls.add("TCC_HIT[1]") is True
     assert ls.add("TCC_HIT[2]") is True
-    # Different TCC base — rejected (no capacity left)
+    # Different TCC base: rejected (no capacity left)
     assert ls.add("TCC_MISS[0]") is False
     assert len(ls.elements) == 3
 
@@ -300,7 +343,7 @@ def test_trial_counter_file_with_extra_overflow(perfmon_config):
     basis.add("TA_ADDR")
     basis.add("TA_DATA")
 
-    # Try adding a third TA counter — should fail
+    # Try adding a third TA counter, should fail
     result = _trial_counter_file_with_extra(basis, perfmon_config, ["TA_EXTRA"])
     assert result is None
 
@@ -374,7 +417,7 @@ def test_allocate_level_counters_get_dedicated_files(perfmon_config):
 
 def test_allocate_first_fit_packing(perfmon_config):
     soc = _make_soc(perfmon_config)
-    # 3 SQ counters — all fit in one bucket (SQ capacity 8)
+    # 3 SQ counters all fit in one bucket (SQ capacity 8)
     counters = {"SQ_WAVES", "SQ_BUSY", "SQ_INSTS"}
 
     with patch.object(soc, "_same_bucket_priority_metric_ids", return_value=()):
@@ -408,68 +451,49 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
 
 
 # =============================================================================
-# F2. metric-aware coalesce — accum buckets and formula-only grouping
+# F2. metric-aware coalesce: accum buckets and formula-only grouping
 # =============================================================================
 
-GFX1250_PERFMON_CONFIG = {
-    "GRBM": 2,
-    "SQ": 8,
-    "SPI": 6,
-}
 
-CP_UTIL_METRIC_YAML = (
-    "avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)\n"
-    "min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
-    "max: 100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
-)
-
-
-def _cp_util_metric_rows():
-    return iter([
-        ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_YAML),
-    ])
-
-
-@pytest.fixture
-def gfx1250_soc() -> OmniSoC_Base:
-    """Minimal gfx1250 OmniSoC for metric-aware coalesce tests."""
-    soc = _make_soc(GFX1250_PERFMON_CONFIG, arch="gfx1250")
-    soc._mspec.gpu_series = "MI300"
-    return soc
-
-
-@contextmanager
-def _patch_cp_util_coalesce(soc: OmniSoC_Base) -> Iterator[None]:
-    with patch.object(
-        soc, "_same_bucket_priority_metric_ids", return_value=("17.1.1",)
-    ):
-        with patch.object(
-            soc, "_iter_arch_analysis_yaml_metrics", return_value=_cp_util_metric_rows()
-        ):
-            yield
-
-
-def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket(gfx1250_soc):
-    accum = CounterFile("SQ_INST_LEVEL_LDS_ACCUM", GFX1250_PERFMON_CONFIG)
+def test_metric_aware_coalesce_packs_regular_counters_into_accum_bucket(
+    gfx1250_soc, gfx1250_perfmon_config
+):
+    """Regular PMCs may fill spare capacity in a dedicated accumulator bucket."""
+    accum = CounterFile("SQ_INST_LEVEL_LDS_ACCUM", gfx1250_perfmon_config)
     accum.add("SQ_INST_LEVEL_LDS_ACCUM")
     accum.reserve("SQ_INST_LEVEL_LDS_ACCUM", 1)
 
-    work = {
-        "GRBM_CP_BUSY_sum",
-        "GRBM_GUI_ACTIVE_sum",
-        "SQ_INST_LEVEL_LDS_ACCUM",
-    }
+    work = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
 
-    with _patch_cp_util_coalesce(gfx1250_soc):
+    with ExitStack() as patch_stack:
+        apply_cp_util_priority_patches(gfx1250_soc, patch_stack)
         remaining, files, _ = gfx1250_soc._metric_aware_coalesce_pass(work, [accum], 0)
 
-    assert remaining == {"SQ_INST_LEVEL_LDS_ACCUM"}
+    assert remaining == set()
     flat = set(flat_counters_in_perfmon_file(files[0]))
-    assert {
-        "GRBM_CP_BUSY_sum",
-        "GRBM_GUI_ACTIVE_sum",
-        "SQ_INST_LEVEL_LDS_ACCUM",
-    }.issubset(flat)
+    assert {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}.issubset(flat)
+
+
+def test_metric_aware_coalesce_groups_on_formula_counters_only(
+    gfx1250_soc, gfx1250_perfmon_config
+):
+    """SQ_WAVES reaches this metric through SUPPORTED_DENOM, not the CP
+    Utilization formula, so an exhausted SQ block must not push the GRBM pair
+    out of a bucket that still has room for it."""
+    bucket = CounterFile("0", gfx1250_perfmon_config)
+    for filler_idx in range(gfx1250_perfmon_config["SQ"]):
+        bucket.add(f"SQ_FILLER_{filler_idx}")
+
+    work = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum", "SQ_WAVES"}
+
+    with ExitStack() as patch_stack:
+        apply_cp_util_priority_patches(gfx1250_soc, patch_stack)
+        remaining, files, _ = gfx1250_soc._metric_aware_coalesce_pass(work, [bucket], 0)
+
+    assert len(files) == 1
+    flat = set(flat_counters_in_perfmon_file(files[0]))
+    assert {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}.issubset(flat)
+    assert remaining == {"SQ_WAVES"}
 
 
 def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom(
@@ -478,7 +502,8 @@ def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom(
     """Ratio partners co-locate; SUPPORTED_DENOM spill may use other buckets."""
     counters = {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum", "SQ_WAVES"}
 
-    with _patch_cp_util_coalesce(gfx1250_soc):
+    with ExitStack() as patch_stack:
+        apply_cp_util_priority_patches(gfx1250_soc, patch_stack)
         files, _, _ = gfx1250_soc._allocate_perfmon_counter_files(counters)
 
     def bucket_for(counter: str) -> str:
@@ -491,9 +516,36 @@ def test_allocate_priority_ratio_partners_share_bucket_despite_global_denom(
     assert bucket_for("GRBM_CP_BUSY_sum") == bucket_for("GRBM_GUI_ACTIVE_sum")
 
 
+def test_allocate_keeps_one_accum_counter_per_bucket(gfx1250_soc):
+    """Every *_ACCUM counter aliases the single SQ_ACCUM_PREV_HIRES register,
+    so no perfmon pass may hold two of them."""
+    counters = {
+        "SQ_INST_LEVEL_LDS_ACCUM",
+        "SQ_IFETCH_LEVEL_ACCUM",
+        "GRBM_CP_BUSY_sum",
+        "GRBM_GUI_ACTIVE_sum",
+        "SQ_WAVES",
+    }
+
+    with ExitStack() as patch_stack:
+        apply_cp_util_priority_patches(gfx1250_soc, patch_stack)
+        files, _, accu_file_count = gfx1250_soc._allocate_perfmon_counter_files(
+            counters
+        )
+
+    assert accu_file_count == 2
+    for counter_file in files:
+        accum_counters = [
+            ctr
+            for ctr in flat_counters_in_perfmon_file(counter_file)
+            if ctr.endswith("_ACCUM")
+        ]
+        assert len(accum_counters) <= 1
+
+
 @pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153"])
 def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
-    """gfx1151–gfx1153 share profiling_counter_grouping_policy.yaml gfx115x block."""
+    """gfx115x parts share one profiling_counter_grouping_policy.yaml block."""
     soc = _make_soc(PERFMON_CONFIG, arch=gpu_arch)
     ids = soc._same_bucket_priority_metric_ids()
     assert "2.1.3" in ids
@@ -529,7 +581,7 @@ def test_expand_tcc_no_templates(perfmon_config):
     inp = {"SQ_WAVES", "TA_ADDR", "TCC_HIT[0]"}
     result = soc._expand_tcc_template_counters(inp)
 
-    # No templates — input unchanged
+    # No templates: input unchanged
     assert result == inp
 
 

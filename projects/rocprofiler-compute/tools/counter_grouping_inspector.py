@@ -50,7 +50,7 @@ from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
-    extract_metric_formula_hw_counters,
+    extract_counters_and_variables,
 )
 from vendored import yaml  # noqa: E402
 
@@ -316,7 +316,9 @@ def generate_bucket_metrics(
         config_dir, arch
     ):
         total_metrics += 1
-        hardware_counters = extract_metric_formula_hw_counters(metric_yaml, gpu_series)
+        hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
+            metric_yaml, gpu_series, include_supported_denom=False
+        )
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
             bucket_label = counter_to_bucket.get(formula_counter)
@@ -379,7 +381,7 @@ def generate_bucket_metrics(
             buf.write(pipe_line(row) + "\n")
     else:
         buf.write(
-            "(none listed — in-collection counters stay in one bucket per metric)\n"
+            "(none listed: in-collection counters stay in one bucket per metric)\n"
         )
 
     buf.write("\n")
@@ -414,7 +416,7 @@ def generate_bucket_metrics(
             buf.write(pipe_line(row) + "\n")
     else:
         buf.write(
-            "(none listed — no metric has in-collection PMCs confined to one bucket)\n"
+            "(none listed: no metric has in-collection PMCs confined to one bucket)\n"
         )
     buf.write("\n")
 
