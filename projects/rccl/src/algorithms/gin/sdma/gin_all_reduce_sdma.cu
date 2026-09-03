@@ -69,6 +69,7 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   reqs.ginSignalCount = kGinAllReduceLsaCtas;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
+  state->initialized = true;
 
   // Two words (arrived, sense) for ginIntraGpuCtaBarrier. ncclCudaCalloc is capture-safe
   // (relaxed + side stream). Sense-reversing needs no per-launch host reset.
@@ -99,7 +100,6 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   CUDACHECK(resetErr);
 
-  state->initialized = true;
   return ncclSuccess;
 }
 

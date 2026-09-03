@@ -313,21 +313,22 @@ __launch_bounds__(512)
   // --- Shot 2: CTA 0 GIN all-gather of the full reduced column ---
   // The wait target is relative to a baseline read on the device at launch time, so it stays
   // correct across graph replays: nothing about the expected signal value is fixed on the host.
-  const unsigned int signalIndex = static_cast<unsigned int>(blockIdx.x);
-  const uint64_t signalValue = gin.readSignal(signalIndex);
-  ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
-  ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
-
   if (blockIdx.x == 0) {
+    const unsigned int signalIndex = static_cast<unsigned int>(blockIdx.x);
+    const uint64_t signalValue = gin.readSignal(signalIndex);
+    ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
+    ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
+
     for (int dst = static_cast<int>(threadIdx.x); dst < nRanks; dst += static_cast<int>(blockDim.x)) {
       gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
               ncclGin_SignalInc{signalIndex});
     }
     gin.waitSignal(cta, signalIndex, signalValue + static_cast<uint64_t>(nRanks));
-  }
-  gin.flush(cta);
+  
+    gin.flush(cta);
 
-  ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
+    ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
+  }
 
 }
 
