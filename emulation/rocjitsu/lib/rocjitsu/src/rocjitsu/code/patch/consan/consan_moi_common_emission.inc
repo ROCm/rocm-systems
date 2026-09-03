@@ -5,15 +5,16 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
     std::span<const MoiDenseRelayRoute> routes, uint16_t jump_pc_sgpr,
     uint16_t saved_scc_sgpr, uint16_t key_sgpr, uint16_t call_return_sgpr,
     bool derive_key_at_entry, bool key_encodes_scc, bool match_call_return,
-    bool clone_local_routes, uint64_t dispatcher_offset, uint64_t island_offset,
-    const ConSanTargetProfile &target, rj_code_arch_t arch) {
+    bool clone_local_routes, bool explicit_key, bool normalize_encoded_scc,
+    uint64_t dispatcher_offset, uint64_t island_offset, const ConSanTargetProfile &target,
+    rj_code_arch_t arch) {
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   if (key_encodes_scc) {
     words.push_back(build_s_lshr_b32(jump_pc_sgpr, key_sgpr,
                                      scalar_positive_inline_u32(1), arch));
   }
-  if (!derive_key_at_entry && !match_call_return && !clone_local_routes) {
+  if (!derive_key_at_entry && !match_call_return && !clone_local_routes && !explicit_key) {
     if (!sequence.emit(
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch)))
       return std::nullopt;
@@ -21,13 +22,14 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
     words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
   }
   for (const MoiDenseRelayRoute &route : routes) {
-    if (match_call_return) {
+    if (explicit_key || clone_local_routes) {
+      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
+              key_encodes_scc ? jump_pc_sgpr : key_sgpr,
+              scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch)))
+        return std::nullopt;
+    } else if (match_call_return) {
       if (!append_moi_call_return_match(words, dispatcher_offset, route.caller_return,
                                         jump_pc_sgpr, call_return_sgpr, arch))
-        return std::nullopt;
-    } else if (clone_local_routes) {
-      if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
-              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch)))
         return std::nullopt;
     } else {
       if (!sequence.emit(instrumentation::build_s_cmp_eq_u32(
@@ -39,14 +41,26 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
     std::vector<uint32_t> matched_words;
     if (key_encodes_scc &&
         !consan_detail::append_restore_moi_scc_from_route_key(
-            matched_words, {.encoded_sgpr = key_sgpr}, target))
+            matched_words,
+            {.encoded_sgpr = key_sgpr,
+             .normalize_encoded_sgpr = normalize_encoded_scc},
+            target))
       return std::nullopt;
     const uint64_t matched_offset =
         dispatcher_offset + (words.size() + 1u) * sizeof(uint32_t);
-    if (!append_moi_scc_preserving_indirect_jump(
-            matched_words, matched_offset, route.target, jump_pc_sgpr, saved_scc_sgpr,
-            /*capture_scc=*/false, arch))
+    const uint64_t direct_branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
+    const auto direct = explicit_key
+                            ? compute_sopp_branch_simm16(direct_branch_offset, route.target)
+                            : std::nullopt;
+    if (direct) {
+      matched_words.push_back(build_s_branch(*direct, arch));
+    } else if (!append_moi_scc_preserving_indirect_jump(
+                   matched_words, matched_offset, route.target, jump_pc_sgpr, saved_scc_sgpr,
+                   /*capture_scc=*/false, arch)) {
       return std::nullopt;
+    } else if (explicit_key && key_encodes_scc) {
+      matched_words[matched_words.size() - 2u] = matched_words.front();
+    }
     if (!sequence.emit(instrumentation::build_s_cbranch_scc0(
             static_cast<int16_t>(matched_words.size()), arch)) ||
         !sequence.emit(matched_words))
@@ -54,6 +68,200 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
   }
   words.push_back(build_s_endpgm(arch));
   return words;
+}
+
+uint64_t moi_dense_call_relay_island_words(size_t route_count, bool derive_key_at_entry,
+                                           bool key_encodes_scc, bool clone_local_routes) {
+  return clone_local_routes
+             ? 2u * route_count + kMoiCompactIndirectIslandWords
+             : moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
+}
+
+bool emit_moi_dense_relay(const MoiDenseRelayPlan &plan, rj_code_arch_t arch,
+                          std::string_view diagnostic_subject, std::vector<uint8_t> &new_text,
+                          std::vector<ConSanPatchInfo> &patches,
+                          std::vector<std::string> &errors) {
+  const auto fail = [&](std::string detail) {
+    errors.emplace_back("ConSan MOI " + std::string(diagnostic_subject) + " " +
+                        std::move(detail));
+    return false;
+  };
+  if (plan.routes.empty() || plan.routes.front().anchor_size != 0u ||
+      plan.host_body_offset != new_text.size() ||
+      plan.island_offset != plan.host_offset + sizeof(uint32_t))
+    return fail("received an incomplete dense-relay plan");
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return fail("has no target profile");
+
+  const uint64_t island_words_count =
+      plan.entry_island_words != 0u
+          ? plan.entry_island_words
+          : moi_dense_call_relay_island_words(plan.routes.size(), plan.derive_key_at_entry,
+                                              plan.key_encodes_scc,
+                                              plan.clone_local_routes);
+  const uint64_t host_words_count = island_words_count + 1u;
+  const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
+  if (plan.displaced_host_words.size() != host_words_count ||
+      plan.host_offset > new_text.size() || host_bytes > new_text.size() - plan.host_offset)
+    return fail("has stale relocated-host geometry");
+
+  std::vector<uint32_t> host_words(plan.displaced_host_words.begin(),
+                                   plan.displaced_host_words.end());
+  if (!append_moi_scc_preserving_indirect_jump(
+          host_words, plan.host_body_offset, plan.host_offset + host_bytes,
+          plan.indirect_jump.pc_sgpr, plan.indirect_jump.scc_save_sgpr,
+          /*capture_scc=*/true, arch))
+    return fail("could not return from its relocated host");
+  append_words_bytes(new_text, host_words);
+
+  std::optional<std::vector<uint32_t>> island_words;
+  if (plan.explicit_key) {
+    std::vector<uint32_t> words;
+    if (plan.key_encodes_scc)
+      words.push_back(build_s_nop(0, arch));
+    if (!append_moi_scc_preserving_indirect_jump(
+            words, plan.island_offset, plan.dispatcher_offset, plan.indirect_jump.pc_sgpr,
+            plan.indirect_jump.scc_save_sgpr,
+            /*capture_scc=*/!plan.key_encodes_scc, arch))
+      return fail("could not encode its keyed entry island");
+    if (plan.requires_indirect_pc_wait) {
+      const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
+      if (!wait_pc || words.empty())
+        return fail("could not encode its keyed entry dependency wait");
+      words.insert(words.end() - 1u, *wait_pc);
+    }
+    island_words = std::move(words);
+  } else if (plan.clone_local_routes) {
+    std::vector<uint32_t> words;
+    words.reserve(island_words_count);
+    const uint64_t common_entry_offset =
+        plan.island_offset + 2u * plan.routes.size() * sizeof(uint32_t);
+    for (const MoiDenseRelayRoute &route : plan.routes) {
+      words.push_back(build_s_mov_b32(
+          plan.key_sgpr,
+          scalar_positive_inline_u32(static_cast<uint16_t>(route.identity)), arch));
+      const uint64_t branch_offset = plan.island_offset + words.size() * sizeof(uint32_t);
+      const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
+      if (!branch_delta)
+        return fail("could not encode a clone-local route");
+      words.push_back(build_s_branch(*branch_delta, arch));
+    }
+    if (!append_moi_scc_preserving_indirect_jump(
+            words, plan.island_offset, plan.dispatcher_offset, plan.indirect_jump.pc_sgpr,
+            plan.indirect_jump.scc_save_sgpr, /*capture_scc=*/true, arch))
+      return fail("could not encode its common clone-local entry");
+    island_words = std::move(words);
+  } else {
+    island_words = build_moi_dense_barrier_entry_island(
+        plan.island_offset, plan.dispatcher_offset,
+        {.jump_pc_sgpr = plan.indirect_jump.pc_sgpr,
+         .saved_scc_sgpr = plan.indirect_jump.scc_save_sgpr,
+         .key_sgpr = plan.key_sgpr,
+         .call_return_sgpr = plan.call_return_sgpr},
+        plan.derive_key_at_entry, arch);
+  }
+  if (!island_words || island_words->size() != island_words_count)
+    return fail("could not encode its entry island");
+  std::memcpy(new_text.data() + plan.island_offset, island_words->data(),
+              island_words->size() * sizeof(uint32_t));
+
+  const auto build_call = [&](int16_t simm16) -> std::optional<uint32_t> {
+    if (plan.call_form == ConSanDirectCallForm::SCallI64)
+      return instrumentation::build_s_call_i64(plan.call_return_sgpr, simm16, arch);
+    if (plan.call_form == ConSanDirectCallForm::SCallB64)
+      return build_s_call_b64(plan.call_return_sgpr, simm16, arch);
+    return std::nullopt;
+  };
+  std::optional<uint32_t> host_entry;
+  if (plan.explicit_key) {
+    host_entry =
+        plan.key_encodes_scc
+            ? instrumentation::build_s_cselect_b32(plan.key_sgpr,
+                                                   scalar_positive_inline_u32(1u),
+                                                   scalar_positive_inline_u32(0u), arch)
+            : std::optional<uint32_t>(build_s_mov_b32(
+                  plan.key_sgpr, scalar_positive_inline_u32(0u), arch));
+  } else {
+    host_entry = build_call(/*next instruction=*/0);
+  }
+  if (!host_entry)
+    return fail("could not encode its relocated-host entry");
+  std::memcpy(new_text.data() + plan.host_offset, &*host_entry, sizeof(uint32_t));
+
+  const auto dispatcher_words = build_moi_dense_relay_dispatcher(
+      plan.routes, plan.indirect_jump.pc_sgpr, plan.indirect_jump.scc_save_sgpr,
+      plan.key_sgpr, plan.call_return_sgpr, plan.derive_key_at_entry, plan.key_encodes_scc,
+      plan.match_call_return, plan.clone_local_routes, plan.explicit_key,
+      plan.normalize_encoded_scc, plan.dispatcher_offset, plan.island_offset, *target, arch);
+  if (!dispatcher_words ||
+      dispatcher_words->size() * sizeof(uint32_t) > plan.dispatcher_capacity_bytes ||
+      plan.dispatcher_offset > new_text.size() ||
+      dispatcher_words->size() * sizeof(uint32_t) > new_text.size() - plan.dispatcher_offset)
+    return fail("could not fit its dispatcher");
+  std::memcpy(new_text.data() + plan.dispatcher_offset, dispatcher_words->data(),
+              dispatcher_words->size() * sizeof(uint32_t));
+
+  for (const MoiDenseRelayRoute &route : plan.routes) {
+    if (route.anchor_size == 0u)
+      continue;
+    if (route.anchor > new_text.size() ||
+        route.anchor_size > new_text.size() - route.anchor ||
+        route.anchor_size < (plan.explicit_key ? 2u : 1u) * sizeof(uint32_t))
+      return fail("could not encode a semantic route anchor");
+    std::vector<uint32_t> anchor_words(route.anchor_size / sizeof(uint32_t),
+                                       build_s_nop(0, arch));
+    if (plan.explicit_key) {
+      const uint16_t identity = static_cast<uint16_t>(route.identity);
+      const uint16_t tagged_identity = static_cast<uint16_t>(2u * identity);
+      const auto route_key =
+          plan.key_encodes_scc
+              ? instrumentation::build_s_cselect_b32(
+                    plan.key_sgpr, scalar_positive_inline_u32(tagged_identity + 1u),
+                    scalar_positive_inline_u32(tagged_identity), arch)
+              : std::optional<uint32_t>(build_s_mov_b32(
+                    plan.key_sgpr, scalar_positive_inline_u32(identity), arch));
+      const auto branch_delta =
+          compute_sopp_branch_simm16(route.anchor + sizeof(uint32_t), plan.island_offset);
+      if (!route_key || !branch_delta)
+        return fail("could not encode a keyed semantic route anchor");
+      anchor_words[0] = *route_key;
+      anchor_words[1] = build_s_branch(*branch_delta, arch);
+    } else {
+      const uint64_t call_target =
+          plan.clone_local_routes
+              ? plan.island_offset + 2u * route.identity * sizeof(uint32_t)
+              : plan.island_offset;
+      const auto call_delta = compute_sopp_branch_simm16(route.anchor, call_target);
+      const auto call = call_delta ? build_call(*call_delta) : std::nullopt;
+      if (!call)
+        return fail("could not encode a semantic call anchor");
+      anchor_words.front() = *call;
+    }
+    std::memcpy(new_text.data() + route.anchor, anchor_words.data(), route.anchor_size);
+  }
+
+  ConSanPatchInfo host;
+  host.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  host.anchor_offset = plan.host_offset;
+  host.original_size = static_cast<uint32_t>(host_bytes);
+  host.trampoline_offset = plan.host_body_offset;
+  host.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
+  host.owner_descriptor_file_offsets.assign(plan.owner_descriptors.begin(),
+                                            plan.owner_descriptors.end());
+  patches.push_back(std::move(host));
+  ConSanPatchInfo dispatcher;
+  dispatcher.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  dispatcher.anchor_offset = plan.routes.size() > 1u ? plan.routes[1].anchor : plan.host_offset;
+  dispatcher.trampoline_offset = plan.dispatcher_offset;
+  dispatcher.trampoline_size =
+      static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t));
+  if (plan.explicit_key)
+    dispatcher.moi_dense_entry_island_offset = plan.island_offset;
+  dispatcher.owner_descriptor_file_offsets.assign(plan.owner_descriptors.begin(),
+                                                  plan.owner_descriptors.end());
+  patches.push_back(std::move(dispatcher));
+  return true;
 }
 
 /// Emit the owner-local dense entry island, dispatcher, optional relocated

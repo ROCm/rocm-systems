@@ -1118,19 +1118,11 @@ void try_apply_shared_barrier_patch(
         return;
       }
       const MoiDenseBarrierRouterPlan &barrier_router = dense_router->barrier;
-      const uint16_t jump_pc_sgpr = barrier_router.indirect_jump.pc_sgpr;
       const uint16_t saved_scc_sgpr = barrier_router.indirect_jump.scc_save_sgpr;
       const uint16_t key_sgpr = barrier_router.dispatch_key_sgpr;
       const uint16_t call_return_sgpr = barrier_router.call_return_sgpr;
       const bool derive_key_at_entry = barrier_router.derive_key_at_entry;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
-      const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (target->direct_call_form == ConSanDirectCallForm::SCallI64)
-          return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (target->direct_call_form == ConSanDirectCallForm::SCallB64)
-          return build_s_call_b64(call_return_sgpr, simm16, arch);
-        return std::nullopt;
-      };
       const uint64_t island_words_count =
           moi_dense_entry_island_words(derive_key_at_entry, key_encodes_scc);
       const uint64_t host_words_count = island_words_count + 1u;
@@ -1213,90 +1205,45 @@ void try_apply_shared_barrier_patch(
       }
 
       const uint64_t host_body_offset = new_text.size();
-      std::vector<uint32_t> host_words = displaced_words;
-      if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
-                                                   host_offset + host_bytes, jump_pc_sgpr,
-                                                   saved_scc_sgpr, /*capture_scc=*/true, arch)) {
-        result.errors.emplace_back("ConSan MOI dense barrier relay could not return from its host");
-        return;
-      }
-      append_words_bytes(new_text, host_words);
-
       const uint64_t island_offset = host_offset + sizeof(uint32_t);
-      const auto island_words =
-          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
-                                               {.jump_pc_sgpr = jump_pc_sgpr,
-                                                .saved_scc_sgpr = saved_scc_sgpr,
-                                                .key_sgpr = key_sgpr,
-                                                .call_return_sgpr = call_return_sgpr},
-                                               derive_key_at_entry, arch);
-      if (!island_words || island_words->size() != island_words_count) {
-        result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its island");
-        return;
-      }
-      std::memcpy(new_text.data() + island_offset, island_words->data(),
-                  island_words->size() * sizeof(uint32_t));
-      const auto host_call = build_direct_call(/*next instruction=*/0);
-      if (!host_call) {
-        result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its host call");
-        return;
-      }
-      std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
-
       std::vector<MoiDenseRelayRoute> routes{
           {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
       routes.reserve(bodies.size() + 1u);
       for (const DenseBarrierBody &body : bodies) {
         const ConSanBarrierSite &site = planned_candidates[body.planned_index].candidate.site;
         routes.push_back({.identity = static_cast<uint32_t>(routes.size()),
+                          .anchor = site.text_offset,
+                          .anchor_size = site.size,
                           .caller_return = site.text_offset + sizeof(uint32_t),
                           .target = body.offset});
       }
-      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
-          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr,
-          derive_key_at_entry, key_encodes_scc,
-          /*match_call_return=*/target->direct_call_form == ConSanDirectCallForm::SCallI64 &&
-              !derive_key_at_entry,
-          /*clone_local_routes=*/false,
-          dispatcher_offset, island_offset, *target, arch);
-      if (!dispatcher_words ||
-          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
-        result.errors.emplace_back(
-            "ConSan MOI dense barrier relay could not encode its dispatcher");
+      if (!emit_moi_dense_relay(
+              {
+                  .call_form = target->direct_call_form,
+                  .indirect_jump = dense_router->indirect_jump,
+                  .key_sgpr = key_sgpr,
+                  .call_return_sgpr = call_return_sgpr,
+                  .derive_key_at_entry = derive_key_at_entry,
+                  .key_encodes_scc = key_encodes_scc,
+                  .match_call_return = target->direct_call_form ==
+                                           ConSanDirectCallForm::SCallI64 &&
+                                       !derive_key_at_entry,
+                  .host_offset = host_offset,
+                  .host_body_offset = host_body_offset,
+                  .island_offset = island_offset,
+                  .dispatcher_offset = dispatcher_offset,
+                  .dispatcher_capacity_bytes = dispatcher_reservation,
+                  .displaced_host_words = displaced_words,
+                  .routes = routes,
+                  .owner_descriptors = group_owner,
+              },
+              arch, "dense barrier relay", new_text, patches, result.errors)) {
         return;
       }
-      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
-                  dispatcher_words->size() * sizeof(uint32_t));
-
-      ConSanPatchInfo host_info;
-      host_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      host_info.anchor_offset = host_offset;
-      host_info.original_size = static_cast<uint32_t>(host_bytes);
-      host_info.trampoline_offset = host_body_offset;
-      host_info.trampoline_size = static_cast<uint32_t>(host_words.size() * sizeof(uint32_t));
-      host_info.owner_descriptor_file_offsets = group_owner;
-      patches.push_back(std::move(host_info));
-      ConSanPatchInfo dispatcher_info;
-      dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
-      dispatcher_info.anchor_offset =
-          planned_candidates[indices.front()].candidate.site.text_offset;
-      dispatcher_info.trampoline_offset = dispatcher_offset;
-      dispatcher_info.trampoline_size =
-          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t));
-      dispatcher_info.owner_descriptor_file_offsets = group_owner;
-      patches.push_back(std::move(dispatcher_info));
 
       for (const DenseBarrierBody &body : bodies) {
         const PlannedBarrierLowering &planned = planned_candidates[body.planned_index];
         const ConSanBarrierSite &site = planned.candidate.site;
-        const auto call_delta = compute_sopp_branch_simm16(site.text_offset, island_offset);
-        const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;
-        if (!call) {
-          result.errors.emplace_back(
-              "ConSan MOI dense barrier relay could not encode a barrier call");
-          return;
-        }
-        std::memcpy(new_text.data() + site.text_offset, &*call, sizeof(uint32_t));
         ConSanPatchInfo info;
         info.kind = barrier_patch_kind;
         info.anchor_offset = site.text_offset;
