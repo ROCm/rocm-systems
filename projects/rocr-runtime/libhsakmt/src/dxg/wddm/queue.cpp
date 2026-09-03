@@ -1147,24 +1147,110 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       thread_stop_(false),
       ib_size(0),
       ib_start_addr(0) {
+  // Native SDMA user queue: submit through the WDDM HwQueue path instead of the
+  // SWS translation thread when HWS is enabled and the KMD advertises support.
+  // Env override for A/B testing: HSA_ENABLE_SDMA_USER_QUEUE=0 forces the legacy
+  // SWS path even when the native HwQueue path is available (unset/1 = native).
+  // This single gate also drives HsaQueueResource::SdmaHwQueueEpilogueBytes and the
+  // producer's epilogue reservation, so both paths stay self-consistent.
+  bool env_native = true;
+  if (const char* e = getenv("HSA_ENABLE_SDMA_USER_QUEUE")) env_native = (atoi(e) != 0);
+  native_sdma_ = use_hws && device->IsSdmaSupported() && env_native;
   bool ret = device->CreateQueue(this);
   assert(ret);
 
-  thread_ = std::thread(SdmaThread, this);
+  if (!native_sdma_)
+    thread_ = std::thread(SdmaThread, this);
 }
 
 SDMAQueue::~SDMAQueue() {
-  thread_cond_lock_.lock();
-  thread_stop_ = true;
-  thread_cond_lock_.unlock();
-  thread_cond_.notify_one();
-  thread_.join();
+  if (!native_sdma_) {
+    thread_cond_lock_.lock();
+    thread_stop_ = true;
+    thread_cond_lock_.unlock();
+    thread_cond_.notify_one();
+    thread_.join();
+  }
 
   device->DestroyQueue(this);
 }
 
+// Write SDMA NOP fill to pad the ring to a boundary.
+static void SdmaNopFill(void* dst, size_t size_bytes) {
+  std::memset(dst, 0, size_bytes);
+  *reinterpret_cast<uint32_t*>(dst) = static_cast<uint32_t>((size_bytes / 4 - 1) << 16);
+}
+
+// Write a SDMA FENCE packet (16 bytes) at dst. Returns 16.
+static size_t SdmaFencePacket(void* dst, int gfx_major, uint64_t fence_va, uint32_t fence_id) {
+  uint32_t* dw = reinterpret_cast<uint32_t*>(dst);
+  // op=5 (FENCE), mtype=3 in bits[17:16], sys=1 in bit[20] for gfx12
+  if (gfx_major >= 12)
+    dw[0] = 5u | (3u << 16) | (1u << 20);
+  else
+    dw[0] = 5u | (3u << 16);  // mtype=3 for gfx10+
+  dw[1] = static_cast<uint32_t>(fence_va);
+  dw[2] = static_cast<uint32_t>(fence_va >> 32);
+  dw[3] = fence_id;
+  return 16;
+}
+
+// Write a SDMA TRAP packet (8 bytes) at dst. Returns 8.
+// int_context (dw[1]) must carry the SDMA queue's doorbell offset in dwords so the
+// KMD can route fence reporting to the right HW queue (WDDM fence-reporting sequence).
+static size_t SdmaTrapPacket(void* dst, uint32_t doorbell_offset_dw) {
+  uint32_t* dw = reinterpret_cast<uint32_t*>(dst);
+  dw[0] = 6u;  // op=6 (TRAP)
+  dw[1] = doorbell_offset_dw;
+  return 8;
+}
+
 void SDMAQueue::RingDoorbell(uint64_t value) {
-  pr_debug("ringdoorbell %#" PRIx64 " %#" PRIx64 "\n", wptr_pre_, wptr_next_);
+  if (native_sdma_) {
+    // BlitSdma writes the DMA payload into the ring, reserves kHwQueueEpilogueBytes of
+    // trailing headroom (advertised to it via HsaQueueResource::SdmaHwQueueEpilogueBytes),
+    // and lands here through hsaKmtQueueRingDoorbell with `value` already past that
+    // reserved region. We fill [value-epilogue, value) with the FENCE+FENCE+TRAP
+    // progress-fence epilogue and submit `value` UNCHANGED. The producer already
+    // accounted for these bytes, so we must NOT advance the wptr independently —
+    // doing so would drift the producer's write index and corrupt the ring.
+    const uint32_t epilogue = kHwQueueEpilogueBytes;
+    const uint64_t ring_size = cmdbuf_size;
+    char* ring_base = reinterpret_cast<char*>(cmdbuf_addr);
+    const uint64_t fence_va = hwqueue_progress_fence_va_;
+    const uint64_t fence_id = ++hwqueue_fence_id_;
+    const int gfx_major = device->Major();
+
+    // The producer reserves [.., value) contiguously (PadRingToEnd), so the epilogue
+    // region never straddles the ring end; write it directly, no NOP padding.
+    assert(value >= epilogue && "SDMA submit smaller than reserved epilogue");
+    const size_t base = static_cast<size_t>((value - epilogue) % ring_size);
+    assert(base + epilogue <= ring_size && "reserved SDMA epilogue straddles ring end");
+    char* ep = ring_base + base;
+    size_t n = 0;
+    // 64-bit progress fence: each SDMA FENCE writes one 32-bit dword. Write the high
+    // dword (fence_va+4) then the low dword (fence_va) so the OS never observes the low
+    // half advance ahead of its high half; keeps the ring fence in lockstep with the
+    // 64-bit HwQueueProgressFenceId and avoids drift past 2^32 submissions.
+    n += SdmaFencePacket(ep + n, gfx_major, fence_va + 4, static_cast<uint32_t>(fence_id >> 32));
+    n += SdmaFencePacket(ep + n, gfx_major, fence_va, static_cast<uint32_t>(fence_id));
+    n += SdmaTrapPacket(ep + n, aql_doorbell_offset_);
+
+    pr_err("[sdma] RingDoorbell native epilogue@0x%" PRIx64 " wptr=0x%" PRIx64
+           " fence_va=0x%" PRIx64 " fence_id=%" PRIu64 " gfx%d\n",
+           value - epilogue, value, fence_va, fence_id, gfx_major);
+
+    // Overrun is prevented at the producer: its AcquireWriteAddress free-space check
+    // now includes the reserved epilogue, so it never submits a span larger than the
+    // ring. wptr_next_ already equals `value` (aliases the producer's queue_wptr_).
+    wptr_next_ = value;
+
+    if (!device->SubmitToSdmaHwQueue(this, value))
+      assert(!"SDMA doorbell failed!");
+    return;
+  }
+
+  pr_err("[sdma] RingDoorbell SWS wptr_pre=0x%" PRIx64 " wptr_next=0x%" PRIx64 "\n", wptr_pre_, wptr_next_);
   thread_cond_lock_.lock();
 
   wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
@@ -1175,11 +1261,16 @@ void SDMAQueue::RingDoorbell(uint64_t value) {
 }
 
 hsa_status_t SDMAQueue::Init(void) {
-  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
-  if (ret) return ret;
+  if (native_sdma_)
+    pr_rocr_info("SDMA queue: native user queue (WDDM HwQueue submit)\n");
+  else
+    pr_rocr_info("SDMA queue: legacy SWS translation thread\n");
 
+  // Zero the ring before HwsInit so the init FENCE+TRAP written by CreateHwQueue
+  // is not overwritten.  For the SWS path the order doesn't matter.
   std::memset((char*)cmdbuf_addr, 0, cmdbuf_size);
 
+  hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
   return ret;
 }
 
@@ -1194,6 +1285,8 @@ int SDMAQueue::PreparePacket(uint32_t offset, uint64_t size) {
 }
 
 hsa_status_t SDMAQueue::Submit(void) {
+  pr_err("[sdma] Submit native=%d hws=%d ib_start=0x%" PRIx64 " ib_size=0x%" PRIx64 " rptr_next=0x%" PRIx64 "\n",
+         (int)native_sdma_, (int)use_hws, ib_start_addr, ib_size, rptr_next);
   if (!device->WaitPagingFence(this)) return HSA_STATUS_ERROR;
 
   int ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, rptr_next)
