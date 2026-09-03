@@ -537,11 +537,14 @@ rocp_reg_scan_for_tools()
     const auto _implicit_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr);
     const auto _attachment_enabled = is_attachment_enabled();
-    const auto _preloaded_tool     = has_preloaded_symbol("rocprofiler_configure");
-    const auto _explicit_tool      = _force_tool || _preloaded_tool;
-    const auto _tool_request = (_explicit_tool)   ? tool_request_kind::explicit_request
-                               : (_implicit_tool) ? tool_request_kind::implicit_symbol
-                                                  : tool_request_kind::none;
+    // An explicit environment request is already conclusive. Avoid probing preloaded
+    // libraries during their early initialization unless preload ownership is needed.
+    const auto _preloaded_tool =
+        (!_force_tool && has_preloaded_symbol("rocprofiler_configure"));
+    const auto _explicit_tool = _force_tool || _preloaded_tool;
+    const auto _tool_request  = (_explicit_tool)   ? tool_request_kind::explicit_request
+                                : (_implicit_tool) ? tool_request_kind::implicit_symbol
+                                                   : tool_request_kind::none;
 
     // An ambient rocprofiler_configure symbol is not sufficient to choose startup
     // profiling when attachment was explicitly requested. Framework libraries can export
