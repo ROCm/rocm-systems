@@ -1,81 +1,49 @@
 # RCCL paired A/B perf-regression gate.
 #
-# DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
-# This file belongs in that repo at
-#   .github/workflows/rccl_perf_regression.yml
-# It runs on self-hosted org runners (org: ROCm) registered on a GPU-less Slurm
-# submit host, one per role:
-#   rccl-build    tw-gfx950-ainic-ROCm-scale-rccl-build-1
-#   rccl-detect   tw-gfx950-ainic-ROCm-scale-rccl-detect-1
-# (the names retain a gfx950 prefix for consistency with the older GPU runner;
-# these hosts have no GPUs). They must NOT carry the
-# tw-gfx950-ainic-ROCm-scale-runner label, or they will be handed GPU jobs they
-# cannot run. The `report` job needs no Slurm access and runs on ubuntu-latest.
+# build submits a Slurm job that compiles librccl.so twice -- reference at the
+# merge-base, candidate at the PR head. detect runs the A/B detector on those
+# two libraries over a pinned 4-node allocation. report posts the verdict.
 #
-# Those runners were registered with --no-default-labels, so each carries ONLY
-# its role label -- no self-hosted, Linux or X64. That is why the runs-on lists
-# below name the role label alone; see the long note on the build job.
-# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
-# build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
+# build and detect run on self-hosted runners that are Slurm submit clients with
+# no GPUs of their own, one per role, labelled `rccl-build` and `rccl-detect`.
+# Those runners are registered with --no-default-labels, so each carries its
+# role label and NOTHING else -- no self-hosted, Linux or X64 -- which is why
+# every runs-on below names a single label. report needs no cluster access and
+# runs on ubuntu-latest.
 #
-# The Slurm submit/poll/report scripts these steps call
-# (rccl_build.sbatch, rccl_ab.sbatch, submit_and_poll.sh, format_report.py,
-# sbatch/lib/*.sh) are version-controlled in ROCm/cvs, on a branch with further
-# related changes landing before it merges to main:
-#   https://github.com/ROCm/cvs/tree/aimvt-196-rccl-regression-robustness/ci/rccl_perf_gate
+# The Slurm scripts these steps call (rccl_build.sbatch, rccl_ab.sbatch,
+# submit_and_poll.sh, format_report.py, sbatch/lib/*.sh) live in ROCm/cvs and
+# version independently of this file.
 #
-# Flow per PR:
-#   1. Check out PR head with full history (merge-base resolution needs it).
-#   2. [build job] rccl_build.sbatch: build librccl.so for reference (merge-base)
-#      and candidate (PR head) on a single build node, then template their lib
-#      dirs into this run's config. This is a single-node CPU compile with no
-#      RDMA/MPI involved, so it runs under its own concurrency lock instead of
-#      the detect lock below -- it no longer holds all 4 nodes idle for its
-#      duration. Rev-keyed build caching usually makes it seconds, not minutes.
-#   3. [detect job] rccl_ab.sbatch: pre-flight the A/B transport capabilities,
-#      then run the detector on the pinned 4-node set.
-#   4. format_report.py: render verdict to the job summary + PR comment.
-#   5. Advisory mode: job fails hard only on infra/polling errors, not on
-#      a detected regression yet (see PR description).
+# Advisory mode: the gate fails on infrastructure errors and on a run that could
+# not measure, but not yet on a regression it did measure.
 name: RCCL Perf Regression Gate
 
 on:
   pull_request:
-    # This matches the PR's BASE branch, not its head -- the gate runs on
-    # anything merging INTO main or develop, whatever the topic branch is
-    # called. Widening this list is not free: each entry multiplies the PRs
-    # eligible for a ~25min slot on a 4-node reservation the whole team shares.
+    # The PR's BASE branch, not its head. Widening this list is not free: each
+    # entry multiplies the PRs eligible for a ~25min slot on a 4-node
+    # reservation the whole team shares.
     branches: [main, develop]
     paths:
       - 'projects/rccl/**'
-      # Docs-only and test-only churn cannot move a collective's bandwidth, and
-      # every spurious trigger costs a ~25min slot on a 4-node reservation that
-      # the whole team shares. Exclude what cannot affect the measurement.
+      # Churn that cannot move a collective's bandwidth. Kept in sync by hand
+      # with the filter in `Detect changed paths` -- both must exclude the same
+      # set, or a docs PR buys a 4-node measurement.
       - '!projects/rccl/**/*.md'
       - '!projects/rccl/docs/**'
       - '!projects/rccl/LICENSE*'
       - '!projects/rccl/**/CODEOWNERS'
       - '.github/workflows/rccl_perf_regression.yml'
-  # Allow manual dispatch for exercising the pipeline without a PR.
+  # Manual dispatch, for exercising the pipeline without a PR.
   #
-  # DO NOT dispatch with the defaults expecting a verdict. ci_detect_prod.json
-  # is a detect-mode config whose reference and candidate both resolve to
-  # builds/_fixed/lib, so the detector's identical-sides guard correctly refuses
-  # it: the run would compare a build against itself and report a guaranteed,
-  # meaningless PASS. You get ~26min on four nodes and an untrustworthy report.
-  # (The note that used to sit here promised exactly that A=A run. It predates
-  # the guard.)
-  #
-  # To smoke the pipeline end to end, pass a control_mode=true config -- it is
-  # the supported way to ask for A==A, and it yields usable run-to-run noise
-  # data instead of a non-answer:
+  # DO NOT dispatch with the default config expecting a verdict: both its sides
+  # resolve to the same prebuilt library, and the detector's identical-sides
+  # guard refuses that -- ~26min on four nodes for an untrustworthy report. To
+  # smoke the pipeline, pass a control_mode=true config, which is the supported
+  # way to ask for A==A and yields usable run-to-run noise data:
   #
   #   config=$RCCL_CI_ROOT/configs/ci_control_prod8.json
-  #
-  # That file is ci_detect_prod.json with control_mode flipped and nothing else
-  # changed, so it exercises the production matrix rather than a drifted
-  # sibling. Verified by a control dispatch on 2026-08-27: 8/8 groups scored,
-  # trustworthy, 0 regressions, 184 comparison keys, ~26min.
   workflow_dispatch:
     inputs:
       config:
@@ -91,22 +59,16 @@ env:
   RCCL_CI_ROOT: /it-share/rccl-ci
   SLURM_RESERVATION: rccl_ci
   NODELIST: mia1-p01-g[22,26,28,32]
-  # The build deliberately does NOT run in SLURM_RESERVATION. It is a
-  # single-node CPU compile, but it takes its node --exclusive for up to an
-  # hour and is submitted with `sbatch --wait`, so running it inside the 4-node
-  # detect reservation held a quarter of the detect pool while detect was
-  # waiting for all four -- build and detect serialised against each other for
-  # no reason. rccl_dev is a separate pool, so a build and a detect run can now
-  # overlap. Set to an empty string to submit the build to the general
-  # partition instead.
+  # A separate pool, deliberately not SLURM_RESERVATION. The build is one CPU
+  # compile, but it holds its node --exclusive for up to an hour, so submitting
+  # it into the 4-node detect reservation serialised build against detect for no
+  # reason. Empty string submits to the general partition instead.
   SLURM_BUILD_RESERVATION: rccl_dev
-  # Per-run workspace isolation: every run gets its own cvs worktree, cvs-sbatch
-  # copy, build output, config, artifacts and logs under runs/<run_key>/.
-  # run_key is derived from GITHUB_RUN_ID, which is how the build job and the
-  # detect job below find the same workspace. This is the default in
-  # workspace.sh now; it is stated explicitly here because it is the single
-  # switch that makes concurrent runs safe, and a reader of this file should not
-  # have to go read a bash library to discover that.
+  # Per-run isolation: each run gets its own cvs worktree, build output, config,
+  # artifacts and logs under runs/<run_key>/, keyed on GITHUB_RUN_ID -- which is
+  # also how build and detect find the same workspace. Already the default in
+  # workspace.sh; stated here because it is the single switch that makes
+  # concurrent runs safe.
   RCCL_CI_WORKSPACE: '1'
 
 permissions:
@@ -115,61 +77,37 @@ permissions:
 
 jobs:
   build:
-    # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
-    # own source on a self-hosted runner, so arbitrary fork code would get
-    # arbitrary code execution on our infrastructure. Scope to same-repo PRs
-    # only; workflow_dispatch is unaffected (it already requires repo write
-    # access to trigger).
+    # Same-repo PRs only. This job builds and MPI-executes the PR's own source
+    # on a self-hosted runner, so a fork PR would be arbitrary code execution on
+    # our infrastructure. workflow_dispatch already requires repo write access.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # SCOPED PER PR -- this is the fix for the "1 active + 1 queued" starvation.
+    # Keyed per PR. A concurrency group holds at most ONE pending job, so a
+    # single global group meant a third run cancelled whoever was queued --
+    # cross-PR starvation, and the author saw no error, just a vanished run.
+    # Keying by PR keeps the useful half (a new push still evicts your own older
+    # queued run) and leaves hardware serialisation to Slurm, whose queue is
+    # unbounded and which owns the nodes.
     #
-    # A GitHub Actions concurrency group holds at most ONE pending job. When a
-    # third run arrives, the pending one is CANCELLED to make room. With a single
-    # global group that meant PR #3 silently killed PR #2's queued run: the team
-    # saw runs vanish with no explanation and had to re-push to get them back.
-    #
-    # Keying the group by PR removes cross-PR contention entirely, and keeps the
-    # useful half of the old behaviour within a PR: push three times in a row and
-    # the newest push still evicts the older queued one, because they share a key.
-    #
-    # Serialisation of the actual hardware now happens where it belongs -- in
-    # Slurm, whose queue is unbounded and which is the real owner of the pinned
-    # nodes. Slurm queues; it does not curbstomp.
-    #
-    # cancel-in-progress stays FALSE deliberately. Cancelling a GitHub job does
-    # not cancel the Slurm job it submitted, so a true here would orphan
-    # allocations that keep holding nodes. Enabling it needs the scancel trap
-    # tracked as part of the submit/--wait work.
+    # cancel-in-progress stays FALSE: cancelling a GitHub job does not cancel
+    # the Slurm job it submitted, so true here would orphan allocations that go
+    # on holding nodes.
     concurrency:
       group: rccl-perf-gate-build-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
-    # Own runner label. This job needs no GPUs and no RDMA -- it is a Slurm
-    # submit-and-poll client -- and it targets SLURM_BUILD_RESERVATION, a
-    # different node pool from detect's. Sharing one label with detect meant a
-    # ~9min build queued behind a ~37min detect, or behind a GIN run that can
-    # hold a runner for 5h, for no reason at all. One runner per role today;
-    # changing that count is a registration change on the runner host, not an
-    # edit here.
+    # Its own label, because this job targets a different node pool than detect
+    # and needs neither GPUs nor RDMA. Sharing one label made a ~9min build
+    # queue behind a ~37min detect for no reason.
     #
-    # Deliberately NOT [self-hosted, rccl-build]. runs-on is an AND across the
-    # list, and these runners were registered with --no-default-labels: they
-    # carry their role label and nothing else -- no self-hosted, no Linux, no
-    # X64. Asking for self-hosted as well matches no runner at all, and the
-    # failure is silent in the worst way: the job sits queued while the runner
-    # sits Idle, until timeout-minutes below kills it. Confirmed by dispatch on
-    # 2026-08-26: build sat queued 8min with runner_name empty, while all three
-    # role runners showed Idle and had never run a single job since they were
-    # registered on 2026-08-19.
-    #
-    # The role label is unique to these hosts, so it is sufficient by itself.
-    # If they are ever re-registered with default labels, self-hosted may be
-    # added back, but it buys nothing.
+    # Deliberately NOT [self-hosted, rccl-build]: runs-on is an AND across the
+    # list, and these runners carry only their role label. Asking for
+    # self-hosted too matches no runner, and it fails in the worst way -- the
+    # job sits queued against an Idle runner until timeout-minutes kills it,
+    # with no unmatched-label diagnostic anywhere.
     runs-on: [rccl-build]
-    # Was 60, the same as rccl_build.sbatch's own --time=01:00:00, which left no
-    # room for queue time: a build that waited 20min for a node and then
-    # compiled for 13 was killed here at 60 even though Slurm was happy. Sit
-    # above the Slurm wall clock so Slurm is the one that decides a build has
-    # run too long, and this job only fires if the queue itself is wedged.
+    # Above rccl_build.sbatch's own --time=01:00:00, so Slurm decides a build ran
+    # too long and this only fires if the queue itself is wedged. At 60 -- equal
+    # to the Slurm limit -- a build that queued and then compiled normally was
+    # killed here while the scheduler was still happy.
     timeout-minutes: 120
     outputs:
       config_json: ${{ steps.resolve.outputs.config_json }}
@@ -202,33 +140,25 @@ jobs:
       - name: Detect changed paths
         id: paths
         if: github.event_name == 'pull_request'
-        # FAIL CLOSED. The old form ended in `|| echo "rccl_changed=0"`, which
-        # swallowed every possible failure of the git command -- a shallow clone,
-        # a missing base ref, a fetch that didn't complete -- and reported "RCCL
-        # didn't change". BUILD_RCCL then stayed 0, so the detect job ran with
-        # reference and candidate both pointing at the fixed prebuilt lib, found
-        # zero regressions (it was comparing a library to itself), and posted a
-        # green check on a PR that had never been measured. A gate that reports
-        # PASS when its own inputs are broken is worse than no gate.
-        #
-        # So: distinguish "the diff succeeded and matched nothing" (0, skip the
-        # build, legitimately nothing to measure) from "the diff failed" (error
-        # out and let the job fail visibly).
+        # FAIL CLOSED. Distinguish "the diff ran and matched nothing" (0, skip
+        # the build) from "the diff failed" (error out visibly). Swallowing a
+        # git failure into rccl_changed=0 makes detect compare the prebuilt
+        # library against itself and post green on a PR it never measured -- a
+        # gate that reports PASS when its own inputs are broken is worse than no
+        # gate at all.
         run: |
           set -o pipefail
           if ! diff_out="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"; then
             echo "::error::Could not diff against origin/${{ github.base_ref }}. Refusing to guess whether RCCL changed — a wrong guess here produces a meaningless green gate."
             exit 1
           fi
-          # Mirror the `paths` exclusions above. Without this, a PR touching
-          # this workflow file (itself a trigger path) alongside a doc under
-          # projects/rccl/ matches ^projects/rccl/ and buys a full compile plus
-          # a ~25min 4-node detect on source that did not change.
+          # Mirror the `paths` exclusions above, or a PR touching this workflow
+          # file (itself a trigger path) alongside an RCCL doc buys a compile
+          # plus a ~25min 4-node detect on source that did not change.
           #
-          # `|| true` scopes only to the filter -- a grep matching nothing exits
-          # 1, which is not an error here. It must not extend to the git diff
-          # above, which is exactly the swallowed failure this step exists to
-          # prevent.
+          # `|| true` covers the filter only -- a grep matching nothing exits 1,
+          # which is fine here. It must not reach the git diff above; that is
+          # the swallowed failure this step exists to prevent.
           rccl_src="$(grep '^projects/rccl/' <<<"${diff_out}" \
             | grep -vE '(\.md$|^projects/rccl/docs/|^projects/rccl/LICENSE|/CODEOWNERS$)' || true)"
           if [[ -n "${rccl_src}" ]]; then
@@ -246,14 +176,11 @@ jobs:
           _CONFIG: ${{ inputs.config || format('{0}/configs/ci_detect_prod.json', env.RCCL_CI_ROOT) }}
         run: |
           if [[ "${BUILD_RCCL}" == "1" ]]; then
-            # Give every run its own copy of the config rather than templating
-            # the shared prod file in place: with the locks split, another PR's
-            # build can be running while this PR waits on detect, and in-place
-            # templating would let one clobber the other's lib paths.
-            #
-            # In workspace mode this copy is only the handoff vehicle -- the
-            # build stages it into runs/<run_key>/config.json and templates
-            # THAT, so the shared configs/ dir is never written by a run.
+            # Per-run copy, not in-place templating of the shared prod file:
+            # with the locks split, another PR's build can run while this one
+            # waits on detect, and each would clobber the other's lib paths.
+            # In workspace mode this copy is only the handoff vehicle; the build
+            # stages it into runs/<run_key>/config.json and templates that.
             RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
             # Set the output before sbatch runs (not after) so the cleanup-on-
@@ -266,19 +193,15 @@ jobs:
             if [[ -n "${SLURM_BUILD_RESERVATION:-}" ]]; then
               build_res=(--reservation="${SLURM_BUILD_RESERVATION}")
             fi
-            # `sbatch --wait` on its own leaks the allocation. Killing the
-            # sbatch client does not cancel the job it submitted, so when this
-            # step is stopped -- timeout-minutes, a cancelled run, a runner
-            # restart -- the build keeps going and keeps its node --exclusive
-            # until its 1h wall clock runs out, with nobody left to read the
-            # result. submit_and_poll.sh already learned this lesson for the
-            # detect job; the build needs the same trap.
+            # `sbatch --wait` alone leaks the allocation: killing the client
+            # does not cancel the job, so a timeout or a cancelled run leaves
+            # the build holding its node --exclusive for the rest of its wall
+            # clock with nobody left to read the result.
             #
-            # --parsable makes sbatch print the job id on submission and then
-            # block as usual, so run it in the background, read the id out of
-            # its output, and `wait` for the real exit status. That keeps
-            # --wait's exit-code mapping (which is the reason to use it) while
-            # giving the trap something to scancel.
+            # --parsable prints the job id on submission and then blocks as
+            # usual, so background it, scrape the id, and `wait` for the real
+            # status. That keeps --wait's exit-code mapping while giving the
+            # trap something to scancel.
             sb_out="$(mktemp)"
             build_job=""
             cleanup_build() {
@@ -299,9 +222,9 @@ jobs:
               "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/rccl_build.sbatch" >"${sb_out}" 2>&1 &
             sb_pid=$!
 
-            # The id lands in the first line within a second of submission. Give
-            # it 30s, but do not fail if it never shows -- an sbatch that could
-            # not submit has nothing to cancel, and `wait` below reports why.
+            # The id lands in the first line within a second. Give it 30s, but
+            # do not fail if it never shows: an sbatch that could not submit has
+            # nothing to cancel, and `wait` below reports why.
             for _ in $(seq 1 30); do
               build_job="$(grep -m1 -oE '^[0-9]+' "${sb_out}" 2>/dev/null || true)"
               [[ -n "${build_job}" ]] && break
@@ -327,10 +250,9 @@ jobs:
           fi
 
       - name: Clean up per-run config copy on build failure
-        # Covers the case the detect job's own cleanup step can't: if sbatch
-        # fails after the per-run config copy was made, `detect` never runs
-        # (needs: build), so nothing else removes this file from NFS.
-        # cancelled() is included because a cancelled run skips detect too.
+        # Only on the paths where detect never runs at all (needs: build), so
+        # there will be no re-run that still wants this file. Everything else is
+        # left to the janitor above -- see the note in `detect`, before its gate.
         if: failure() || cancelled()
         env:
           _CONFIG: ${{ steps.resolve.outputs.config_json }}
@@ -341,67 +263,45 @@ jobs:
 
   detect:
     needs: build
-    # Two conditions, and the second is the interesting one.
-    #
-    # Skip detect on a PR that changed nothing under projects/rccl (the workflow
-    # file itself is in the paths filter, so this happens). With BUILD_RCCL=0 both
-    # sides of the comparison point at the same prebuilt library, so the run would
-    # measure a build against itself and report a guaranteed, meaningless PASS
-    # after holding the 4-node reservation for ~25 minutes. A skipped job is an
-    # honest "not applicable"; a green check on an A=A run is a lie that costs
-    # hardware to tell. The detector now refuses such runs on its own too -- this
-    # just avoids queueing them in the first place.
+    # Same-repo guard as build, plus: skip a PR that changed no RCCL source
+    # (this workflow file is itself a trigger path, so that happens). With
+    # BUILD_RCCL=0 both sides point at the same prebuilt library, so the run
+    # would hold the 4-node reservation for ~25min to compare a build against
+    # itself and report a guaranteed PASS. A skipped job is an honest "not
+    # applicable"; a green check on an A=A run is a lie that costs hardware to
+    # tell. The detector refuses such runs too -- this avoids queueing them.
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       && (github.event_name != 'pull_request' || needs.build.outputs.rccl_changed == '1')
-    # Also scoped per PR -- see the long note on the build job's lock. The pinned
-    # 4-node set is still used by exactly one job at a time; that is enforced by
-    # Slurm (--nodelist + --exclusive), which queues rather than cancelling.
-    # Holding a global GitHub lock here as well bought nothing and cost every
-    # third PR its queued run.
-    #
-    # Never cancel-in-progress: a running allocation must finish cleanly to
-    # release the nodes, and a cancelled GitHub job leaves the Slurm job running.
+    # Per PR, and never cancel-in-progress -- same reasoning as build's lock.
+    # Slurm (--nodelist + --exclusive) already admits one detect at a time, so a
+    # global GitHub lock here bought nothing and cost every third PR its run.
     concurrency:
       group: rccl-perf-gate-detect-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
-    # Own runner label; see the note on the build job. Exactly one detect runner
-    # exists, which matches the hardware -- the pinned 4-node set admits one
-    # detect at a time regardless. A second runner would not add throughput; it
-    # would only move a waiting PR out of GitHub's runner queue (unbounded, and
-    # invisible to the timeout nest below, since timeout-minutes does not start
-    # until a runner is assigned) and into Slurm's, which is logged and bounded
-    # by MAX_QUEUE_SEC. Worth doing once there is queue data to justify it.
-    #
-    # Role label only, no self-hosted -- same reason as the build job above:
-    # these runners have no default labels, so an AND against self-hosted
-    # matches nothing and the job hangs until timeout instead of failing.
+    # Own role label, no self-hosted -- see the build job. One detect runner
+    # matches the hardware, since the pinned 4-node set admits one detect at a
+    # time regardless; a second would only move the wait from GitHub's runner
+    # queue into Slurm's, where at least it is logged and bounded.
     runs-on: [rccl-detect]
-    # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
-    # plus MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to
-    # cancel the Slurm job and report *why* rather than being killed here with
-    # a bare "exceeded the maximum execution time". See the table in
-    # submit_and_poll.sh; retune both together.
+    # Outermost layer of the timeout nest: above MAX_QUEUE_SEC (4h) plus
+    # MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to cancel
+    # the Slurm job and report *why* rather than being killed here with a bare
+    # "exceeded the maximum execution time". 8h10 of inner budget, 8h20 here.
+    # Retune both together; the table is in submit_and_poll.sh.
     #
-    # 560 -> 500 because MAX_WAIT_SEC went 5h10m -> 4h10m when broadcast_perf
-    # was dropped from the matrix: at 8 groups the circuit-breaker worst case
-    # is 3.2h, so the sbatch --time is a real bound again at 4h. 4h00 queue +
-    # 4h10 run = 8h10, and this is 8h20. The nest last held these two values
-    # at 510; 500 keeps the +10min of slack 560 carried rather than the +20.
-    #
-    # This bounds the wedged case only -- it is not a capacity number. It does
-    # not bound how long a PR waits for a runner, because timeout-minutes does
-    # not start counting until a runner is assigned, so time spent queueing for
-    # rccl-detect is invisible to every timeout in this file.
+    # Bounds the wedged case only. It is not a capacity number, and it does not
+    # bound how long a PR waits for a runner -- timeout-minutes does not start
+    # until a runner is assigned, so that wait is invisible to every timeout in
+    # this file.
     timeout-minutes: 500
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
-        # Don't fail here; we still want to post the report below -- the final
-        # "Gate" step enforces it based on the captured exit code below, not
-        # this step's outcome (continue-on-error reports "failure" the same
-        # way for a detected regression and for a polling error, so outcome
-        # alone can't tell them apart).
+        # Don't fail here -- the report below still needs to be rendered and
+        # uploaded. `Gate` enforces the verdict, branching on the captured exit
+        # code rather than this step's outcome, which reports "failure"
+        # identically for a detected regression and for a polling error.
         continue-on-error: true
         env:
           _CONFIG: ${{ needs.build.outputs.config_json }}
@@ -417,28 +317,22 @@ jobs:
         id: art
         if: always()
         # In workspace mode the detector writes to runs/<run_key>/artifacts, not
-        # to the shared ab_artifacts/. Reading the shared path would render a
-        # report left there by some earlier run and post it on this PR as if it
-        # were this run's verdict -- a stale green is the worst possible failure
-        # mode for a gate. Ask workspace.sh rather than re-deriving the run key
-        # here, so there is one source of truth for it; with the flag off it
-        # returns the legacy shared path and this line still holds.
+        # the shared ab_artifacts/. Ask workspace.sh rather than re-deriving the
+        # run key here, so there is one source of truth for it.
         run: |
           HELPER="${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/sbatch/lib/workspace.sh"
           ART=""
           if [[ -f "${HELPER}" ]]; then
-            # Last line only: this goes to GITHUB_OUTPUT as a bare key=value,
-            # which has no multi-line form, so a banner on the helper's stdout
-            # would truncate the path and leak the rest as further outputs.
+            # Last line only: GITHUB_OUTPUT takes a bare key=value with no
+            # multi-line form, so a banner on the helper's stdout would truncate
+            # the path and leak the remainder as further output entries.
             ART="$(bash "${HELPER}" --print-artifacts 2>/dev/null | tail -n1)" || ART=""
           fi
           if [[ -z "${ART}" ]]; then
             if [[ "${RCCL_CI_WORKSPACE}" == "1" ]]; then
-              # Fail rather than guess. In workspace mode the detector writes to
-              # runs/<run_key>/artifacts; the legacy shared dir holds whatever an
-              # earlier run left there, so falling back would render another
-              # run's report as this PR's verdict. A stale green is the worst
-              # failure mode a gate has.
+              # Fail rather than guess. The shared dir holds whatever an earlier
+              # run left there, so falling back would render another run's
+              # report as this PR's verdict -- the worst failure a gate has.
               echo "::error::workspace.sh --print-artifacts is unavailable and RCCL_CI_WORKSPACE=1. Refusing to fall back to the shared artifact dir, whose contents belong to a different run. Update the cvs checkout on the cluster."
               exit 1
             fi
@@ -522,12 +416,10 @@ jobs:
             echo "${_REASONS}" >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
-          # Render into the artifact dir, not RUNNER_TEMP: upload-artifact@v4
-          # roots the archive at the least-common-ancestor of its paths, so a
-          # file from RUNNER_TEMP alongside files from NFS would push the LCA up
-          # to / and bury every entry under its full absolute path. Keeping all
-          # four under the same dir puts them at the artifact root, which is what
-          # the report job expects to find.
+          # Into the artifact dir, not RUNNER_TEMP: upload-artifact@v4 roots the
+          # archive at the least-common-ancestor of its paths, so mixing the two
+          # would push the LCA to / and bury every entry under its absolute
+          # path. Same dir for all four keeps them at the artifact root.
           python3 "${RCCL_CI_ROOT}/cvs/ci/rccl_perf_gate/format_report.py" \
             "${REPORT}" \
             --no-exit-code \
@@ -538,30 +430,24 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # Namespaced per run -- with runs no longer serialised by a global
-          # lock, a fixed name would collide across concurrent runs.
-          #
-          # Deliberately NOT per attempt. "Re-run failed jobs" bumps run_attempt
-          # but does not re-run a `detect` that already succeeded, so an
-          # attempt-stamped name would leave `report` hunting for an artifact
-          # nobody uploaded and posting "not measured" over a good verdict.
-          # `overwrite` keeps the name resolving to the newest upload when
-          # detect itself is re-run; there is exactly one writer per run, so the
-          # parallel-writer hazard in the overwrite docs does not apply here.
+          # Per run, so concurrent runs cannot collide -- but deliberately NOT
+          # per attempt. "Re-run failed jobs" bumps run_attempt without re-running
+          # a `detect` that already succeeded, so an attempt-stamped name would
+          # leave `report` hunting for an artifact nobody uploaded and posting
+          # "not measured" over a good verdict. `overwrite` keeps the name
+          # resolving to the newest upload when detect itself is re-run; there is
+          # one writer per run, so the parallel-writer hazard does not apply.
           name: rccl-ab-report-${{ github.run_id }}
           overwrite: true
           if-no-files-found: warn
-          # Only paths under THIS run's artifact dir. rccl_runs.log used to be the
-          # shared /it-share/rccl-ci/ab_artifacts/rccl_runs.log, which every run
-          # appends to and never truncates -- a ~70MB cumulative file containing
-          # other PRs' command lines and output, re-uploaded in full on every run.
-          # In workspace mode steps.art.outputs.dir is per-run, so this is now
-          # only our own log.
-          # rccl_report.md is the rendered comment body. It is uploaded so the
-          # `report` job can post it without a self-hosted runner: rendering
-          # needs format_report.py and the report JSON, both of which live on
-          # NFS, and that dependency was the only reason the comment job held
-          # the tw-gfx950 label. See the note above `report`.
+          # Only paths under THIS run's artifact dir -- rccl_runs.log was
+          # previously the shared cumulative log, tens of MB of other PRs'
+          # output re-uploaded on every run.
+          #
+          # rccl_report.md is the rendered comment body, uploaded so `report` can
+          # post without a self-hosted runner: rendering needs format_report.py
+          # and the report JSON, both on the cluster filesystem, and that was the
+          # only thing tying the comment to a cluster runner.
           path: |
             ${{ steps.art.outputs.dir }}/ab_regression_report.json
             ${{ steps.art.outputs.dir }}/ab_derived_thresholds.json
@@ -622,36 +508,23 @@ jobs:
           echo "Verdict source: ${_PROVENANCE}"
           echo "::notice::${_REGRESSIONS} confirmed regression(s) (advisory mode: not failing the PR)"
 
-  # ---------------------------------------------------------------------------
-  # The PR comment lives in its own always() job.
+  # The PR comment gets its own always() job, for two reasons.
   #
-  # It used to be a step inside `detect`, which meant it only ran when detect ran.
-  # Every way the pipeline can fail EARLIER -- the build job failing, the runner
-  # dying, the concurrency lock cancelling the run, detect being skipped -- left
-  # the sticky comment showing the PREVIOUS attempt's verdict, with a timestamp
-  # nobody reads and no indication it was stale. Reviewers acted on a green
-  # comment for a run that had been dead for twenty minutes.
+  # As a step inside `detect` it only ran when detect ran, so every earlier
+  # failure -- build failing, the runner dying, the run being cancelled, detect
+  # being skipped -- left the sticky comment showing the PREVIOUS attempt's
+  # verdict with no indication it was stale. A sticky comment is a claim about
+  # the current state of the PR; if the pipeline cannot make that claim it has
+  # to say so, in the same place it would have said PASS.
   #
-  # A sticky comment is a claim about the current state of the PR. If the pipeline
-  # cannot make that claim, it has to say so, in the same place it would have said
-  # PASS. So: separate job, needs both, if: always(), and it renders SOMETHING for
-  # every terminal state of the two jobs above.
-  # ---------------------------------------------------------------------------
-  # It also runs on a GitHub-hosted runner, not the self-hosted one, and that is
-  # load-bearing rather than incidental. build, detect and arravikum's rccl-gin
-  # pipeline all contend for the single tw-gfx950 runner, and rccl-gin alone
-  # occupies roughly 21 minutes of every 24. Measured 2026-08-13: detect finished
-  # at 23:46 with a correct verdict and report was still queued 1h35m later,
-  # having never been assigned a runner. Two consequences, the second worse than
-  # the first: the comment lands hours after the answer is known, and a queued
-  # report is cancelled outright if anyone pushes to the PR -- discarding a
-  # completed 4-node measurement without posting anything.
-  #
-  # The only thing that ever tied this job to that runner was re-rendering the
-  # markdown, which needs format_report.py and the report JSON, both on NFS. But
-  # detect ALREADY renders exactly that file and now uploads it, so this job just
-  # downloads it. The "not measured" branches are pure string logic and never
-  # needed the cluster at all.
+  # And it runs on a GitHub-hosted runner, which is load-bearing rather than
+  # incidental. When it shared a label with the cluster jobs it could sit queued
+  # for hours behind them (measured once at 1h35m after detect had already
+  # produced a correct verdict), and a queued report is cancelled outright when
+  # anyone pushes -- discarding a completed 4-node measurement without posting
+  # anything. The only thing that ever tied it to a cluster runner was rendering
+  # the markdown; detect now renders and uploads that file, so this job just
+  # downloads it, and the "not measured" branches are pure string logic.
   report:
     needs: [build, detect]
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -669,10 +542,9 @@ jobs:
     steps:
       - name: Fetch the rendered report
         id: dl
-        # Absent whenever detect did not produce a verdict -- skipped, cancelled,
-        # or run but measured nothing. That is a normal outcome here, not an
-        # error, so never fail the job over it: the whole point of this job is to
-        # say something in exactly those cases.
+        # Absent whenever detect produced no verdict -- skipped, cancelled, or
+        # run but measured nothing. Normal here, not an error: saying something
+        # in exactly those cases is the point of this job.
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -705,10 +577,9 @@ jobs:
           elif [[ "${_DETECT}" == "cancelled" ]]; then
             emit ":warning: **Not measured.** The detector job was cancelled before it produced a verdict."
           else
-            # detect writes this file only when format_report.py rendered a real
-            # verdict, so presence is the signal. Do not substitute any other
-            # source: a comment on this PR must come from this run or say that it
-            # could not.
+            # detect writes this file only for a verdict it found trustworthy,
+            # so presence is the signal. Do not substitute any other source: a
+            # comment here comes from this run or says it could not.
             BODY="${RUNNER_TEMP}/dl/rccl_report.md"
             if [[ -s "${BODY}" ]]; then
               emit "$(cat "${BODY}")"
@@ -750,12 +621,3 @@ jobs:
           header: rccl-perf-gate
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/rccl_comment.md
-
-      # This job used to end with a `rm -f` on the per-run config as a last line
-      # of defence for the case where detect never ran to clean up after itself.
-      # It cannot do that from a GitHub-hosted runner -- no NFS -- so the
-      # backstop is now solely the `Reap orphaned per-run configs` step at the
-      # top of `build`, which sweeps ci_detect_run_*.json left behind by earlier
-      # runs. That step already covered this case; it is why the janitor exists.
-      # The consequence of the move is that an orphaned config now survives until
-      # the next run of the gate instead of being removed within the minute.
