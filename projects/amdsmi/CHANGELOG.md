@@ -87,7 +87,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   | Mixed device/field failures (differing codes) | — | `204` |
   | `amdsmi_init()` watchdog timeout | `2` | `205` |
   | Drivers not loaded | `1` | `206` |
-  | Interactive confirmation declined | `1` | `207` |
+  | Interactive confirmation declined (answering no, or closing stdin) | `1` | `207` |
   | Library (device) failure | `(1000 + status)` wrapped to a byte | underlying `AMDSMI_STATUS_*` (`0`-`56`) |
   | Unknown/unmapped library error | `100` | `255` (library `UNKNOWN_ERROR` folded to a byte) |
   | Library status too large to report as an exit code | — | `253` (not reachable with current library versions) |

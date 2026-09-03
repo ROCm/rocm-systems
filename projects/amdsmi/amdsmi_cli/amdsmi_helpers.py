@@ -1936,6 +1936,24 @@ class AMDSMIHelpers:
                 continue
         return None
 
+    def _read_confirmation(self, question, auto_respond=False):
+        """Read an answer to a confirmation prompt.
+
+        A closed stdin returns "", which matches no caller's accept-list and so
+        takes the same decline branch as answering "no" -- exiting USER_ABORTED
+        rather than raising EOFError at the prompt. Callers must abort in that
+        branch; this returns an answer, it does not exit.
+
+        @param question: Prompt to display when there is no automatic response
+        @param auto_respond: Response to automatically provide for all prompts
+        """
+        if auto_respond:
+            return auto_respond
+        try:
+            return input(question)
+        except EOFError:
+            return ""
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -1954,10 +1972,7 @@ class AMDSMIHelpers:
             MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S WARRANTY.
             Please use this utility with caution.
             """)
-        if not auto_respond:
-            user_input = input("Do you accept these terms? [y/n] ")
-        else:
-            user_input = auto_respond
+        user_input = self._read_confirmation("Do you accept these terms? [y/n] ", auto_respond)
         if user_input in ["y", "Y", "yes", "Yes", "YES"]:
             return
         else:
@@ -1993,10 +2008,7 @@ class AMDSMIHelpers:
             workloads across all devices.
             """)
 
-        if not auto_respond:
-            user_input = input("Do you accept these terms? [Y/N] ")
-        else:
-            user_input = auto_respond
+        user_input = self._read_confirmation("Do you accept these terms? [Y/N] ", auto_respond)
         if user_input in ["Yes", "yes", "y", "Y", "YES"]:
             print("")
             return
