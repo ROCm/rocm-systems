@@ -298,10 +298,17 @@ bool VfioUserClient::region_write(uint32_t region, uint64_t offset,
   return request(VFIO_USER_REGION_WRITE, payload, -1, reply);
 }
 
-bool VfioUserClient::dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset) {
+bool VfioUserClient::dma_map(uint64_t iova, uint64_t size, int fd, uint64_t fd_offset,
+                             DmaProtection protection) {
   vfio_user_dma_map request_body{};
   request_body.argsz = sizeof(request_body);
-  request_body.flags = VFIO_USER_F_DMA_REGION_READ | VFIO_USER_F_DMA_REGION_WRITE;
+  request_body.flags = 0;
+  if (protection == DmaProtection::ReadOnly || protection == DmaProtection::ReadWrite) {
+    request_body.flags |= VFIO_USER_F_DMA_REGION_READ;
+  }
+  if (protection == DmaProtection::WriteOnly || protection == DmaProtection::ReadWrite) {
+    request_body.flags |= VFIO_USER_F_DMA_REGION_WRITE;
+  }
   if (fd >= 0) {
     request_body.flags |= VFIO_USER_F_DMA_REGION_MMAP;
   }
