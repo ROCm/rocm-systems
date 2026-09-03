@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <random>
+#include <ratio>
 
 namespace rocprofsys
 {

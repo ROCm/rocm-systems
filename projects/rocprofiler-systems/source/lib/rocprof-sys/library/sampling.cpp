@@ -65,6 +65,7 @@
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <set>
@@ -544,12 +545,12 @@ start_duration_thread()
         // we may need to protect against recursion bc of pthread wrapper
         static bool _protect = false;
         if(_protect) return;
-        _protect  = true;
-        auto _now = std::chrono::steady_clock::now();
-        auto _end =
-            _now + std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       std::chrono::duration<double>{ config::get_sampling_duration() });
-        auto _func = [_end]() {
+        _protect       = true;
+        const auto now = std::chrono::steady_clock::now();
+        const auto end =
+            now + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::duration<double>{ config::get_sampling_duration() });
+        const auto func = [end]() {
             thread_info::init(true);
             threading::set_thread_name("omni.samp.dur");
             get_is_duration_thread() = true;
@@ -559,18 +560,19 @@ start_duration_thread()
                 _wait = false;
                 std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
                 if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, _end);
-                auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (state::process::get() >= state::process::Finalized);
-                if(_premature && !_finalized)
+                get_duration_cv().wait_until(_lk, end);
+                const auto premature = (std::chrono::steady_clock::now() < end);
+                const auto finalized =
+                    (state::process::get() >= state::process::Finalized);
+                if(premature && !finalized)
                 {
                     // protect against spurious wakeups
                     LOG_WARNING("Spurious wakeup of sampling duration thread...");
                     _wait = true;
                 }
-                else if(_finalized)
+                else if(finalized)
                 {
-                    if(_premature)
+                    if(premature)
                     {
                         LOG_INFO("Sampling duration of {:.6f} seconds was "
                                  "interrupted by finalization. Shutting down "
@@ -600,7 +602,7 @@ start_duration_thread()
                  config::get_sampling_duration());
 
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-        get_duration_thread() = std::make_unique<std::thread>(_func);
+        get_duration_thread() = std::make_unique<std::thread>(func);
         _protect              = false;
     }
 }

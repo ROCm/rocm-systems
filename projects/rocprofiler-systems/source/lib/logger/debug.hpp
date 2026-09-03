@@ -5,7 +5,9 @@
 
 #include "logger.hpp"
 
-#include <spdlog/fmt/chrono.h>
+// pulled in so the LOG_* macros below can format std::chrono types in
+// translation units that include this header
+#include <spdlog/fmt/chrono.h>  // NOLINT(misc-include-cleaner)
 
 #define LOG_CRITICAL(...)                                                                \
     do                                                                                   \

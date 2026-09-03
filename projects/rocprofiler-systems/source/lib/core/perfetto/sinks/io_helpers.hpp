@@ -9,6 +9,8 @@
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
+#include <timemory/backends/dmp.hpp>
+
 #include <cstdio>
 #include <exception>
 #include <filesystem>

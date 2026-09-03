@@ -64,11 +64,12 @@ template <typename ToRep, typename ToRatio, typename FromRep, typename FromRatio
 [[nodiscard]] constexpr ToRep
 quantity_cast_count(FromRep from_count) noexcept
 {
-    using factor      = std::ratio_divide<FromRatio, ToRatio>;
-    using calc        = std::common_type_t<ToRep, FromRep, std::intmax_t>;
-    const auto count_ = static_cast<calc>(from_count) * static_cast<calc>(factor::num) /
-                        static_cast<calc>(factor::den);
-    return static_cast<ToRep>(count_);
+    using factor_t     = std::ratio_divide<FromRatio, ToRatio>;
+    using calc_t       = std::common_type_t<ToRep, FromRep, std::intmax_t>;
+    const auto count_t = static_cast<calc_t>(from_count) *
+                         static_cast<calc_t>(factor_t::num) /
+                         static_cast<calc_t>(factor_t::den);
+    return static_cast<ToRep>(count_t);
 }
 
 }  // namespace rocprofsys::inline common::units::detail

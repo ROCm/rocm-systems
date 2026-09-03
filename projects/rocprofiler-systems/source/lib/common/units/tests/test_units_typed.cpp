@@ -3,7 +3,11 @@
 
 #include <gtest/gtest.h>
 
-#include <spdlog/fmt/chrono.h>
+#include <fmt/format.h>
+
+// provides fmt::formatter for std::chrono::duration, exercised by the
+// UnitsFmtChrono coexistence test
+#include <spdlog/fmt/chrono.h>  // NOLINT(misc-include-cleaner)
 
 #include <chrono>
 #include <type_traits>
