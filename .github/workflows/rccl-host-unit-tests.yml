@@ -29,6 +29,12 @@ jobs:
     name: Host unit tests (CPU-only)
     runs-on: ubuntu-24.04
     container:
+      # The `-full` variant ships the complete ROCm LLVM toolchain under
+      # /opt/rocm/llvm/bin. Ubuntu 22.04's apt llvm package is version 15, which
+      # is too old to consume the coverage data the AMD compilers emit; the
+      # `-full` image lets the coverage tooling (llvm-profdata/llvm-cov) match
+      # the compiler that built the tests. This is why `deps` no longer
+      # apt-installs llvm.
       image: rocm/dev-ubuntu-22.04:7.14.0-full
     env:
       ROCM_PATH: /opt/rocm
@@ -47,8 +53,10 @@ jobs:
         # Dependency list lives in run_host_tests.sh (single source of truth).
         run: bash projects/rccl/test/host/run_host_tests.sh deps
 
-      - name: Put ROCm LLVM on PATH
-        run: echo "/opt/rocm/llvm/bin" >> "$GITHUB_PATH"
+      - name: Put ROCm on PATH
+        run: |
+          echo "/opt/rocm/llvm/bin" >> "$GITHUB_PATH"
+          echo "/opt/rocm/bin" >> "$GITHUB_PATH"
 
       # Every pipeline command lives in run_host_tests.sh (single source of truth,
       # runnable identically in CI and locally). Each phase is its own step so a
@@ -71,19 +79,20 @@ jobs:
       # Assemble the coverage profiles the run phase produced into per-binary
       # reports plus an overall line/branch union (the CI coverage metric). Runs
       # even if the suite failed so partial coverage is still captured.
-      - name: Coverage
-        if: always()
+      - name: Assemble coverage reports
+        if: ${{ !cancelled() }}
         run: bash projects/rccl/test/host/run_host_tests.sh coverage
 
       - name: Upload results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-unit-test-results
           path: |
             projects/rccl/test/host/host_tests.log
-            projects/rccl/test/host/host_tests.xml
+            projects/rccl/test/host/host_tests*.xml
             projects/rccl/test/host/build/coverage/**/coverage.txt
+            projects/rccl/test/host/build/coverage/**/coverage.lcov
             projects/rccl/test/host/build/coverage/**/html/**
             projects/rccl/test/host/build/coverage/overall/combined.lcov
             projects/rccl/test/host/build/coverage/overall/summary.txt
