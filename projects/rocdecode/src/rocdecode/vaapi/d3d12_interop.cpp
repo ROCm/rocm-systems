@@ -211,10 +211,23 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
     }
     d3d12_shared_resources_.resize(num_surfaces, nullptr);
 
+    // vaon12/D3D12 video decode rounds the decode (DPB) height up to a multiple of 32 when the
+    // adapter reports HEIGHT_ALIGNMENT_MULTIPLE_32_REQUIRED (all current AMD GPUs do). The decode
+    // engine therefore writes up to align(height, 32) rows into these textures. If we allocate them
+    // at the raw coded height, non-32-aligned pictures (e.g. HEVC PICSIZE conformance streams like
+    // 528x4216) overflow the texture -> GPU page fault -> device removed -> flush assert. This must
+    // match the height handed to vaCreateSurfaces (see AlignedDecodeSurfaceHeight); the coded
+    // height_ is still used for the staging/output layout below.
+    const uint32_t decode_tex_height = AlignedDecodeSurfaceHeight(height_);
+    // Same rationale as height, for width (CTB/SB-aligned decode writes). Must match the width vaon12
+    // uses for the decode heap/recon and the width passed to vaCreateSurfaces. Coded width_ is still
+    // used for the staging/output layout below (GetSurfaceLayout), and the copy is bounded to width_.
+    const uint32_t decode_tex_width = AlignedDecodeSurfaceWidth(width_);
+
     D3D12_RESOURCE_DESC res_desc = {};
     res_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    res_desc.Width = width_;
-    res_desc.Height = height_;
+    res_desc.Width = decode_tex_width;
+    res_desc.Height = decode_tex_height;
     res_desc.DepthOrArraySize = 1;
     res_desc.MipLevels = 1;
     res_desc.Format = dxgi_format;
@@ -416,7 +429,24 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
         dst.PlacedFootprint.Offset = layout.plane_offset[sub];
         dst.PlacedFootprint.Footprint.RowPitch = layout.plane_pitch[sub];
 
-        d3d12_cmd_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        // The decode texture is over-allocated in height (rounded up to a multiple of 32 for the
+        // D3D12 decode engine), but the staging buffer's plane is only vstride = align(height, 16)
+        // rows tall. Copy exactly the staging plane height so a taller decode texture never writes
+        // past the luma plane into the chroma region. Bound the box by the source plane height too.
+        UINT copy_rows = layout.plane_height[sub];
+        if (copy_rows > src_footprints[sub].Footprint.Height)
+            copy_rows = src_footprints[sub].Footprint.Height;
+        dst.PlacedFootprint.Footprint.Height = copy_rows;
+
+        D3D12_BOX src_box = {};
+        src_box.left = 0;
+        src_box.top = 0;
+        src_box.front = 0;
+        src_box.right = src_footprints[sub].Footprint.Width;
+        src_box.bottom = copy_rows;
+        src_box.back = 1;
+
+        d3d12_cmd_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, &src_box);
     }
 
     CHECK_D3D12(d3d12_cmd_list_->Close());

@@ -90,11 +90,31 @@ public:
     D3D12Interop() = default;
     ~D3D12Interop();
 
+    // AMD D3D12 video decode requires the decode (DPB) height to be a multiple of 32
+    // (HEIGHT_ALIGNMENT_MULTIPLE_32_REQUIRED); vaon12 rounds DecodeHeight up to this and the
+    // decode engine writes that many rows. The shared decode texture AND the height handed to
+    // vaCreateSurfaces must both use this aligned value: the vaon12 VA frontend takes the
+    // VA-requested height as the expected resource height, so an over-tall texture whose height
+    // doesn't match the requested surface height is rejected ("resource allocation failed").
+    // Keep this the single source of truth so the two sites can never diverge. The coded height
+    // (height_) is still used for the linear staging/output layout, which must match
+    // GetSurfaceStrideInternal (align 16) rather than this decode alignment.
+    static uint32_t AlignedDecodeSurfaceHeight(uint32_t height) { return (height + 31u) & ~31u; }
+
+    // Companion to AlignedDecodeSurfaceHeight for WIDTH. The decode engine reconstructs whole
+    // CTBs/superblocks and writes a CTB-aligned width per row into the decode target (which, in the
+    // array-of-textures path, is this shared surface itself). A coded width that is not CTB/SB-aligned
+    // (e.g. HEVC PICSIZE 528 -> 9 CTB cols x 64 = 576) under-sizes the surface -> horizontal overrun ->
+    // GPU page fault. The API exposes no width-alignment flag, so pad to 128 (>= 64-CTB and 128-SB
+    // overhang). Must match the width vaon12 uses for the decode heap / recon resolution and the width
+    // handed to vaCreateSurfaces. The coded width_ is still used for the linear staging/output layout.
+    static uint32_t AlignedDecodeSurfaceWidth(uint32_t width) { return (width + 127u) & ~127u; }
+
     D3D12Interop(const D3D12Interop&) = delete;
     D3D12Interop& operator=(const D3D12Interop&) = delete;
 
-    // Phase 1 (before vaCreateSurfaces): create the LUID-matched D3D12 device and the
-    // shared decode textures. Caches format/width/height for later layout math.
+    // Phase 1 (before vaCreateSurfaces): set up the D3D12 device and the shared decode textures.
+    // Caches format/width/height for later layout math. Creates a LUID-matched D3D12 device.
     rocDecStatus CreateSharedResources(rocDecVideoSurfaceFormat format, uint32_t width,
                                        uint32_t height, uint32_t num_surfaces,
                                        int va_fourcc, const LUID &adapter_luid);

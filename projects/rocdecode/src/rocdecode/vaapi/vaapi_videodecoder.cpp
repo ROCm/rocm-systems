@@ -715,8 +715,13 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     ext_buf_attrib.value.value.p = const_cast<ID3D12Resource**>(d3d12_interop_->GetSharedResources());
     surf_attribs.push_back(ext_buf_attrib);
 
-    CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
-        decoder_create_info_.height, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
+    // The VA-requested surface width/height must match the shared D3D12 resource dimensions, which are
+    // aligned up for the decode engine (see AlignedDecodeSurfaceWidth/Height). vaon12 treats the
+    // requested dimensions as the expected resource dimensions and rejects a mismatch. The decode/crop
+    // dimensions come from the parsed bitstream, so an over-sized surface is harmless.
+    CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format,
+        D3D12Interop::AlignedDecodeSurfaceWidth(decoder_create_info_.width),
+        D3D12Interop::AlignedDecodeSurfaceHeight(decoder_create_info_.height), va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
 
     // Phase 2: create linear staging buffers + copy infrastructure (after vaCreateSurfaces).
     d3d12_status = d3d12_interop_->CreateStagingInfrastructure(decoder_create_info_.num_decode_surfaces);
