@@ -8,6 +8,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <optional>
@@ -39,6 +40,54 @@ enum class ProbeCallingConvention {
     return std::nullopt;
   }
 }
+
+/// @brief A link-pair base no calling convention can select.
+///
+/// @details A 64-bit scalar operand must name an even-aligned register pair, so
+/// an odd base is invalid by construction rather than by convention. Used as
+/// ProbeAbi's default so an ABI that never went through derive_probe_abi() is
+/// detectable instead of merely wrong.
+inline constexpr uint16_t kUnsetLinkPairBase = 1;
+
+/// @brief Where a verified convention places the values the framework, rather
+///        than the probe body, is responsible for producing.
+///
+/// @details Derived from the convention by derive_probe_abi(). A POD, so a
+/// caller can still build one by hand — the fail-closed tests rely on being
+/// able to — which is why consumers ask is_valid_probe_abi() rather than
+/// trusting the fields.
+struct ProbeAbi {
+  ProbeCallingConvention cc = ProbeCallingConvention::Unknown;
+  uint16_t link_pair_base = kUnsetLinkPairBase; ///< Base of the return-link SGPR pair.
+};
+
+/// @brief Could @p abi have come out of derive_probe_abi()?
+///
+/// @details Rejects both an unrecognized convention and a link pair that no
+/// convention could have chosen, so a default-constructed or hand-built ABI is
+/// caught alongside an unverified one.
+[[nodiscard]] inline constexpr bool is_valid_probe_abi(const ProbeAbi &abi) {
+  return abi.cc != ProbeCallingConvention::Unknown && abi.link_pair_base % 2 == 0;
+}
+
+/// @brief The ABI @p cc implies, or std::nullopt if it is unrecognized.
+[[nodiscard]] inline constexpr std::optional<ProbeAbi> derive_probe_abi(ProbeCallingConvention cc) {
+  const std::optional<uint16_t> link_pair = link_pair_for(cc);
+  if (!link_pair)
+    return std::nullopt;
+  return ProbeAbi{.cc = cc, .link_pair_base = *link_pair};
+}
+
+/// @brief The registers @p abi has the framework supply to the probe body.
+///
+/// @details A body that reads one of these is not depending on state that only
+/// exists at kernel entry, so a live-in analysis subtracts this set before
+/// concluding a probe cannot be called from an arbitrary site. Collecting the
+/// per-convention register knowledge behind one query keeps that analysis from
+/// having to enumerate the conventions itself.
+///
+/// An @p abi that fails is_valid_probe_abi() supplies nothing.
+[[nodiscard]] RegisterSet supplied_registers(const ProbeAbi &abi);
 
 /// @brief A probe body extracted from a code object and verified to be safe to
 ///        relocate verbatim into the instrumented code object.

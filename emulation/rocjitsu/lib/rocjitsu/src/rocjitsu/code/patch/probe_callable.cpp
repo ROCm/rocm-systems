@@ -113,6 +113,16 @@ template <typename T>
 
 } // namespace
 
+RegisterSet supplied_registers(const ProbeAbi &abi) {
+  RegisterSet regs;
+  // Report nothing rather than guess: a live-in subtraction that excused a pair
+  // this ABI never committed to writing would excuse the probe reading it cold.
+  if (!is_valid_probe_abi(abi))
+    return regs;
+  regs.expand(RegisterRef{RegClass::SGPR, abi.link_pair_base, 2});
+  return regs;
+}
+
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
                                                   rj_code_arch_t arch, std::string *error_out) {
