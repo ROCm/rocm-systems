@@ -944,6 +944,45 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
             self.assertIn(valid, message)
 
+    # ---- device-init failure reporting (drives amdsmi_commands._exit_on_init_error) ----
+    def test_init_error_reports_in_the_requested_format_without_a_traceback(self):
+        """Device init runs before argv is parsed, so it cannot reach the
+        top-level handler. It must still print the formatted library error and
+        exit with the status code -- not a raw log line plus a traceback.
+        """
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        import contextlib
+        import io
+        import json as json_mod
+
+        import amdsmi_commands
+
+        code = amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED
+
+        class _FakeLibErr(Exception):
+            err_code = code
+
+        for fmt in ("human_readable", "json", "csv"):
+            with self.subTest(output_format=fmt):
+                out = io.StringIO()
+                err = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    with self.assertRaises(SystemExit) as ctx:
+                        amdsmi_commands._exit_on_init_error(fmt, _FakeLibErr(), "GPU")
+
+                printed = out.getvalue().strip()
+                self.assertEqual(ctx.exception.code, cli_exc.library_code_to_exit_code(code))
+                self.assertIn("AMDSMI_STATUS_DRIVER_NOT_LOADED", printed)
+                self.assertNotIn("Traceback", printed + err.getvalue())
+                if fmt == "json":
+                    self.assertEqual(
+                        json_mod.loads(printed)["code"], cli_exc.library_code_to_exit_code(code)
+                    )
+                elif fmt == "csv":
+                    self.assertEqual(printed.splitlines()[0], "error,code")
+
+    # ---- --file overwrite prompt: both ways of declining -> USER_ABORTED ----
     def test_output_file_prompt_declined_exits_user_aborted(self):
         """Both exits from the --file overwrite prompt are user aborts: typing
         the advertised Cancel (or anything unrecognized), and EOF on stdin.
