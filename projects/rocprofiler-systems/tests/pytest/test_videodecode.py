@@ -67,6 +67,50 @@ def require_video_data(rocprof_config) -> None:
         )
 
 
+@pytest.fixture
+def require_rocdecode_support() -> None:
+    """Skip if the rocDecode VA-API driver cannot be initialized on this system.
+
+    rocDecode uses VA-API for hardware video decoding. On some GPUs (e.g.
+    gfx1250 with the current software stack) the VA driver is present but
+    exports no __vaDriverInit_* symbol, causing every decode attempt to abort
+    with a runtime error. Check for the symbol before running the test and
+    skip cleanly when absent. The exact symbol name varies by libva version
+    (__vaDriverInit_<major>_<minor>), so any match is accepted.
+    """
+    import subprocess
+    from pathlib import Path
+
+    candidate_dirs = sorted(Path("/opt").glob("rocm*/lib/rocm_sysdeps/lib"))
+    candidate_dirs = [Path("/opt/rocm/lib/rocm_sysdeps/lib")] + list(candidate_dirs)
+
+    drv_path = None
+    for d in candidate_dirs:
+        candidate = d / "radeonsi_drv_video.so"
+        if candidate.exists():
+            drv_path = candidate
+            break
+
+    if drv_path is None:
+        pytest.skip(
+            "rocDecode VA-API driver (radeonsi_drv_video.so) not found; "
+            "video decode tests require a ROCm build with VA-API support"
+        )
+
+    result = subprocess.run(
+        ["nm", "-D", str(drv_path)], capture_output=True, text=True
+    )
+    # Check for any __vaDriverInit_<major>_<minor> symbol; the exact name
+    # is constructed by libva from its compile-time VA_MAJOR/MINOR constants
+    # and therefore varies across libva versions.
+    has_va_init = any("__vaDriverInit" in line for line in result.stdout.splitlines())
+    if not has_va_init:
+        pytest.skip(
+            f"{drv_path.name} exports no __vaDriverInit_* symbol; "
+            "the VA-API driver is incompatible with the installed libva on this system"
+        )
+
+
 # =============================================================================
 # Video decode tests
 # =============================================================================
@@ -90,6 +134,7 @@ class TestVideoDecode(RocprofsysTest):
         video_decode_rules,
         get_run_args,
         require_video_data,
+        require_rocdecode_support,
     ):
         result = self.run_test(
             mode,
