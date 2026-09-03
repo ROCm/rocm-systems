@@ -12,6 +12,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     queue_controller.cpp
     queue_interposition.cpp
     queue.cpp
+    replay_window.cpp
     scratch_memory.cpp
     signal_pool.cpp)
 
@@ -29,6 +30,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     queue_interposition.hpp
     queue.hpp
     queue_info_session.hpp
+    replay_window.hpp
     rocprofiler_packet.hpp
     scratch_memory.hpp
     signal.hpp

@@ -62,6 +62,8 @@ subtrees:
       title: Streaming Performance Monitor (SPM)
     - file: api-reference/kernel_replay
       title: Kernel replay (experimental)
+    - file: api-reference/range_replay
+      title: Range replay (experimental)
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:
@@ -128,6 +130,14 @@ subtrees:
           title: Downstream tools
         - file: conceptual/kernel_replay/kernel_replay_callback_api_design
           title: Design history
+    - file: conceptual/range_replay/index
+      title: Range replay (experimental)
+      subtrees:
+      - entries:
+        - file: conceptual/range_replay/range_replay_callback_api
+          title: Callback API and tool configuration
+        - file: conceptual/range_replay/range_replay_soundness
+          title: Soundness and declining
   - caption: License
     entries:
     - file: license
