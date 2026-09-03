@@ -301,9 +301,11 @@ jobs:
           for example in amd_smi_drm_ex amd_smi_nodrm_ex; do
             rc=0
             "./$example" > "$RESULTS_DIR/$example.log" 2>&1 || rc=$?
-            # Exit codes above 128 are fatal signals (139 = SIGSEGV); those are always
-            # a defect. Ordinary non-zero codes can be an unsupported query on this ASIC.
-            if [ "$rc" -gt 128 ]; then
+            # 129-192 are fatal signals (139 = SIGSEGV); those are always a defect.
+            # Higher codes (e.g. 254/255) are AMDSMI_STATUS_* error values truncated
+            # to 8 bits, not crashes. Ordinary non-zero codes can be an unsupported
+            # query on this ASIC.
+            if [ "$rc" -gt 128 ] && [ "$rc" -le 192 ]; then
               echo "$example crashed with signal $((rc - 128)) (exit $rc)"
               example_status=1
             elif [ "$rc" -ne 0 ]; then
