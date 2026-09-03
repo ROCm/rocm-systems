@@ -27,11 +27,15 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "MFMA-F8",
         ]
 
+        self.matrix_kernel_selector = {
+            "F16": "mfma_f16",
+            "BF16": "mfma_bf16",
+            "F32": "mfma_f32",
+            "F64": "mfma_f64",
+            "I8": "mfma_i8",
+        }
+
         self.matrix_ops = {
-            "F4": 0,
-            "F6": 0,
-            "F6F4": 0,  # Mixed precision F6 x F4
-            "F8": 0,
             "F16": 16384,
             "F32": 4096,
             "BF16": 16384,
