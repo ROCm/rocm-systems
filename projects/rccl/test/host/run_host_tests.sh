@@ -14,9 +14,8 @@
 #   (default phase: all)
 #
 # Phases:
-#   deps            install the host-test build/runtime dependencies via apt
-#                   (cmake, toolchain, gtest/fmt, moreutils, python3-venv). CI
-#                   runs this as its own step; not part of `all`.
+#   deps            install the host-test build/runtime dependencies via apt.
+#                   CI runs this as its own step; not part of `all`.
 #   rccl-configure  configure the RCCL tree (root) -- pins GPU_TARGETS so CMake
 #                   never probes for a GPU; BUILD_TESTS=OFF (we only need hipify)
 #   hipify          build the hipify_all target -> stages build/hipify/src, the
@@ -238,8 +237,12 @@ do_coverage() {
 
   local exe name dir rc=0
   local tracefiles=()
+  local skipped=()
   # Each binary's profraw lives in its own $COVERAGE_DIR/<name>/ subdir, written
   # by the `run` phase. Iterate those so coverage tracks exactly what ran.
+  # nullglob so an empty/absent $COVERAGE_DIR yields zero iterations rather than
+  # one pass with `dir` set to the literal glob pattern.
+  shopt -s nullglob
   for dir in "$COVERAGE_DIR"/*/; do
     name="$(basename "$dir")"
     [ "$name" = overall ] && continue
@@ -251,21 +254,28 @@ do_coverage() {
     fi
     if ! compgen -G "$dir/*.profraw" >/dev/null; then
       echo "    skip $name -- no profraw (run the 'run' phase first)" >&2
+      skipped+=("$name")
       continue
     fi
 
     # Per-binary: merge its own profraw and report against its own object only.
-    llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata"
+    # Guard each llvm invocation: under `set -e` one bad binary would otherwise
+    # abort the whole phase mid-loop and discard the rc already accumulated.
+    # Degrade instead -- mark the phase failed and move on to the next binary.
+    llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
+      || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
 
     llvm-cov report "$exe" \
       -instr-profile="$dir/merged.profdata" \
       --show-branch-summary --show-region-summary \
-      > "$dir/coverage.txt"
+      > "$dir/coverage.txt" \
+      || { echo "    error: llvm-cov report failed for $name" >&2; rc=1; continue; }
 
     llvm-cov show "$exe" \
       -instr-profile="$dir/merged.profdata" \
       -format=html -output-dir="$dir/html" \
-      --show-branches=count
+      --show-branches=count \
+      || { echo "    error: llvm-cov show failed for $name" >&2; rc=1; continue; }
 
     # Per-binary lcov tracefile -- the hash-agnostic, line/branch-keyed form that
     # can be unioned across binaries. Tag it with the binary name so genhtml and
@@ -273,7 +283,8 @@ do_coverage() {
     llvm-cov export "$exe" \
       -instr-profile="$dir/merged.profdata" \
       --ignore-filename-regex='(/test/|nvtx)' \
-      -format=lcov > "$dir/coverage.lcov"
+      -format=lcov > "$dir/coverage.lcov" \
+      || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
 
     echo "    $name text report: $dir/coverage.txt"
     echo "    $name html report: $dir/html/index.html"
@@ -281,7 +292,10 @@ do_coverage() {
   done
 
   if [ "${#tracefiles[@]}" -eq 0 ]; then
-    echo "error: no .profraw files found under $COVERAGE_DIR -- run the 'run' phase first" >&2
+    echo "error: no .profraw files found under $COVERAGE_DIR --" >&2
+    echo "       run the 'run' phase first. If you did, the tests were built" >&2
+    echo "       with -DHOST_TEST_COVERAGE=OFF, which produces no profiles" >&2
+    echo "       (coverage is on by default; drop that flag to re-enable it)" >&2
     exit 1
   fi
 
@@ -321,6 +335,16 @@ do_coverage() {
   # Machine-readable-ish overall summary (line + branch %) and a browsable HTML.
   lcov "${lcov_args[@]}" --summary "$odir/combined.lcov" \
     2>&1 | tee "$odir/summary.txt"
+
+  # Record how many binaries actually contributed a tracefile vs. how many were
+  # skipped for missing profraw, so a partial-coverage run is auditable from the
+  # summary rather than silently reading as a source regression on a dashboard.
+  {
+    echo "tracefiles unioned: ${#tracefiles[@]}"
+    if [ "${#skipped[@]}" -gt 0 ]; then
+      echo "binaries skipped (no profraw): ${#skipped[@]} -- ${skipped[*]}"
+    fi
+  } | tee -a "$odir/summary.txt"
   if command -v genhtml >/dev/null 2>&1; then
     local genhtml_args=(--branch-coverage)
     [ "${lcov_major:-0}" -ge 2 ] && genhtml_args+=(--ignore-errors "inconsistent,unsupported,corrupt,format")
@@ -357,6 +381,15 @@ case "$PHASE" in
   guards)         do_guards ;;
   run)            do_run "$@" ;;
   coverage)       do_coverage ;;
-  all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@"; do_coverage ;;
+  all)
+    do_rccl_configure; do_hipify; do_configure; do_build
+    # Keep the run's exit status but still generate coverage: the profraw files
+    # are already on disk, and a failing suite is exactly the run that most
+    # wants a report. `set -e` would otherwise abort before do_coverage.
+    run_rc=0
+    do_run "$@" || run_rc=$?
+    do_coverage
+    exit "$run_rc"
+    ;;
   *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|coverage|all] [extra gtest args]" >&2; exit 2 ;;
 esac
