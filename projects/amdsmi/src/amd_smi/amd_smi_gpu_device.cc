@@ -734,8 +734,10 @@ auto flatten_v2_to_v1(const amdsmi_fabric_info_v2_t& source, amdsmi_fabric_info_
  *  selector keeps working
  *
  *  Match the version exactly; never rank the values and take the highest supported one at or
- *  below the request. The version 1 path stamps UINT32_MAX below, so a caller reusing the struct
- *  across calls would request UINT32_MAX and be handed the widest member
+ *  below the request. The version 1 path stamps AMDSMI_FABRIC_INFO_VERSION_1 below (per the
+ *  public header doc: "On output, info->fabric_version reports the member filled"), so a
+ *  caller that checks the output against AMDSMI_FABRIC_INFO_VERSION_1 sees a match rather
+ *  than a sentinel that never equals either documented constant
  */
 auto publish_fabric_info(const amdsmi_bdf_t& fabric_bdf, const amdsmi_fabric_info_v2_t& source,
                          std::uint32_t requested_version, amdsmi_fabric_info_t& destination)
@@ -748,7 +750,7 @@ auto publish_fabric_info(const amdsmi_bdf_t& fabric_bdf, const amdsmi_fabric_inf
     return;
   }
 
-  destination.fabric_version = std::numeric_limits<decltype(destination.fabric_version)>::max();
+  destination.fabric_version = static_cast<std::uint32_t>(AMDSMI_FABRIC_INFO_VERSION_1);
   flatten_v2_to_v1(source, destination.fabric_info.v1);
 }
 
