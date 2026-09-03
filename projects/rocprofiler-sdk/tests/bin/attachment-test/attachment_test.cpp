@@ -195,6 +195,7 @@ main(int argc, char** argv)
     size_t nthreads{8};
     int    ndevices{0};
     bool   fork_child{false};
+    bool   fork_child_after_init{false};
     int    positional{0};
     for(int i = 1; i < argc; ++i)
     {
@@ -203,13 +204,17 @@ main(int argc, char** argv)
         {
             fork_child = true;
         }
+        else if(_arg == "--fork-child-after-init")
+        {
+            fork_child_after_init = true;
+        }
         else if(_arg == "?" || _arg == "-h" || _arg == "--help")
         {
-            fprintf(
-                stderr,
-                "usage: attachment-test [--fork-child] [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
-                nthreads,
-                ndevices);
+            fprintf(stderr,
+                    "usage: attachment-test [--fork-child|--fork-child-after-init] "
+                    "[NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
+                    nthreads,
+                    ndevices);
             exit(EXIT_SUCCESS);
         }
         else if(positional == 0)
@@ -222,6 +227,12 @@ main(int argc, char** argv)
             ndevices = std::stoi(argv[i]);
             ++positional;
         }
+    }
+
+    if(fork_child && fork_child_after_init)
+    {
+        std::cerr << "--fork-child and --fork-child-after-init are mutually exclusive\n";
+        return 1;
     }
 
     // Fork a child process before HIP initialization so each process gets a
@@ -246,6 +257,26 @@ main(int argc, char** argv)
     {
         std::cerr << "No HIP devices found or error getting device count" << std::endl;
         return 1;
+    }
+
+    // Model Python DataLoader workers: fork after the runtime has initialized attachment
+    // support, then keep the child CPU-only. Threads are not inherited across fork, so this
+    // child intentionally has no rocp-bg-attach listener.
+    if(fork_child_after_init)
+    {
+        child_pid = fork();
+        if(child_pid < 0)
+        {
+            std::cerr << "fork after HIP initialization failed\n";
+            return 1;
+        }
+        if(child_pid == 0)
+        {
+            while(!sigint_received)
+                pause();
+            _exit(0);
+        }
+        std::cout << "Fork-only CPU child started with PID: " << child_pid << std::endl;
     }
 
     // Default ndevices to device_count. Ensure that we do not use more devices than are available

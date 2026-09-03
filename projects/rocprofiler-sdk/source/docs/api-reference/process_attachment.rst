@@ -30,6 +30,8 @@ By default, ``rocprof-attach`` attaches to the target process and all of its des
 
    $ rocprof-attach -p 12345 -t path/to/your-tool-library.so --attach-children=false
 
+The root process must have attachment support enabled. Descendants without an attachment listener, such as CPU-only workers created with ``fork()`` after the listener started, are skipped with a warning. A skipped descendant isn't profiled; a fork-only child that performs GPU work must initialize its own attachment support before it can be attached.
+
 More information can be found by invoking ``rocprof-attach -h``
 
 Python functions
@@ -89,7 +91,9 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 - **rocattach_attach_tree(int pid)**: Attaches to a process and all of its descendants.
    - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching.
    - Attachment proceeds in breadth-first order from the root.
-   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen.
+   - Attachment fails immediately if the root process has no attachment listener.
+   - A descendant without an attachment listener is skipped with a warning and doesn't affect the return status.
+   - Other descendant attachment failures are logged and attachment continues with the remaining processes; the return status reflects the last error seen.
    - The process tree is snapshotted at the time of the call; processes spawned after this point are not included.
 
 - **rocattach_attach(int pid)**: Attaches to a single process only.
@@ -157,6 +161,8 @@ The target process must have ``ROCP_TOOL_ATTACH=1`` set, or be using a version o
    export ROCP_TOOL_ATTACH=1
    OR
    cmake /path/to/rocprofiler-register -DROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON
+
+When attachment is enabled, it takes precedence over an implicitly discovered ``rocprofiler_configure`` symbol. This allows framework libraries to expose dormant profiler entry points without preventing the attachment listener from starting. An explicit startup profiling request through ``ROCP_TOOL_LIBRARIES``, ``ROCPROFILER_REGISTER_LIBRARY``, ``ROCPROFILER_REGISTER_FORCE_LOAD=1``, or an ``LD_PRELOAD`` library that directly exports ``rocprofiler_configure`` takes precedence and disables attachment initialization. A warning identifies which choice prevented the other mode from initializing.
 
 Tool library configuration
 ---------------------------

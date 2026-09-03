@@ -213,8 +213,21 @@ build_environment_buffer()
     return environment_buffer;
 }
 
-// Returns the TID of the 'rocp-bg-attach' thread if found, or -1 if not found
-pid_t
+struct attach_tid_result
+{
+    pid_t tid              = -1;
+    bool  listener_missing = false;
+};
+
+enum class setup_failure_reason : uint8_t
+{
+    none,
+    attach_thread_not_found,
+};
+
+// Returns the TID of the 'rocp-bg-attach' thread and whether a complete scan
+// confirmed that no listener exists.
+attach_tid_result
 resolve_attach_tid(pid_t pid)
 {
     auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
@@ -231,7 +244,7 @@ resolve_attach_tid(pid_t pid)
             pid_t tid = std::stoi(entry.path().filename().string());
             ROCP_INFO << "[rocprofiler-sdk-rocattach] Found background thread TID " << tid
                       << " for pid " << pid << " via /proc scan";
-            return tid;
+            return {tid, false};
         }
     }
 
@@ -240,13 +253,25 @@ resolve_attach_tid(pid_t pid)
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to scan " << task_dir
                    << " for 'rocp-bg-attach' thread: " << ec.message();
     }
-    else
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not find 'rocp-bg-attach' thread in "
-                   << task_dir;
-    }
+    return {-1, !ec};
+}
 
-    return -1;
+void
+log_missing_attach_thread(pid_t pid)
+{
+    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Cannot attach to process " << pid
+               << ": 'rocp-bg-attach' thread not found. The target process does not "
+                  "appear to have attach support enabled. Start the target with "
+                  "ROCP_TOOL_ATTACH=1, or use a rocprofiler-register build configured "
+                  "with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON.";
+}
+
+void
+log_skipped_missing_attach_thread(pid_t pid)
+{
+    ROCP_WARNING << "[rocprofiler-sdk-rocattach] Skipping descendant process " << pid
+                 << " because it has no 'rocp-bg-attach' thread. Fork-only descendants do "
+                    "not inherit the parent's attachment listener.";
 }
 
 rocattach_status_t
@@ -298,8 +323,10 @@ validate_target_absolute_tool_path(pid_t pid, const fs::path& tool_path)
 }
 
 rocattach_status_t
-setup(int pid)
+setup(int pid, setup_failure_reason* failure_reason = nullptr)
 {
+    if(failure_reason) *failure_reason = setup_failure_reason::none;
+
     // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
@@ -363,21 +390,18 @@ setup(int pid)
             return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
         }
 
-        auto target_tid = resolve_attach_tid(pid);
+        auto attach_tid = resolve_attach_tid(pid);
 
-        if(target_tid < 0)
+        if(attach_tid.tid < 0)
         {
-            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Cannot attach to process " << pid
-                       << ": 'rocp-bg-attach' thread not found. The target process does not "
-                          "appear to have attach support enabled. Start the target with "
-                          "ROCP_TOOL_ATTACH=1, or use a rocprofiler-register build configured "
-                          "with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON.";
+            if(attach_tid.listener_missing && failure_reason)
+                *failure_reason = setup_failure_reason::attach_thread_not_found;
             return ROCATTACH_STATUS_ERROR;
         }
 
         ROCP_INFO << "[rocprofiler-sdk-rocattach] Attaching to PID " << pid
-                  << " via background thread TID " << target_tid;
-        sessions->emplace(pid, target_tid);
+                  << " via background thread TID " << attach_tid.tid;
+        sessions->emplace(pid, attach_tid.tid);
         session = &(sessions->at(pid).session);
     }
 
@@ -579,12 +603,34 @@ rocattach_attach_tree(int root_pid)
               << " process(es) in tree rooted at pid " << root_pid;
 
     std::vector<pid_t> attached_pids;
-    auto               last_status = ROCATTACH_STATUS_SUCCESS;
-    for(pid_t pid : pids)
+    auto               failure_reason = rocprofiler::rocattach::setup_failure_reason::none;
+    auto               root_status    = rocprofiler::rocattach::setup(root_pid, &failure_reason);
+    if(root_status != ROCATTACH_STATUS_SUCCESS)
     {
-        auto status = rocprofiler::rocattach::setup(pid);
+        if(failure_reason == rocprofiler::rocattach::setup_failure_reason::attach_thread_not_found)
+            rocprofiler::rocattach::log_missing_attach_thread(root_pid);
+
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree failed for root pid "
+                   << root_pid << " with error code " << root_status;
+        return root_status;
+    }
+    attached_pids.push_back(root_pid);
+
+    auto last_status = ROCATTACH_STATUS_SUCCESS;
+    for(size_t i = 1; i < pids.size(); ++i)
+    {
+        auto pid       = pids.at(i);
+        failure_reason = rocprofiler::rocattach::setup_failure_reason::none;
+        auto status    = rocprofiler::rocattach::setup(pid, &failure_reason);
         if(status != ROCATTACH_STATUS_SUCCESS)
         {
+            if(failure_reason ==
+               rocprofiler::rocattach::setup_failure_reason::attach_thread_not_found)
+            {
+                rocprofiler::rocattach::log_skipped_missing_attach_thread(pid);
+                continue;
+            }
+
             ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree failed for pid " << pid
                        << " with error code " << status << ", continuing with remaining processes";
             last_status = status;
@@ -625,9 +671,13 @@ rocattach_attach(int pid)
         return ROCATTACH_STATUS_ERROR_NOT_SUPPORTED;
     }
 
-    auto status = rocprofiler::rocattach::setup(pid);
+    auto failure_reason = rocprofiler::rocattach::setup_failure_reason::none;
+    auto status         = rocprofiler::rocattach::setup(pid, &failure_reason);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
+        if(failure_reason == rocprofiler::rocattach::setup_failure_reason::attach_thread_not_found)
+            rocprofiler::rocattach::log_missing_attach_thread(pid);
+
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach failed with error code "
                    << status;
         return status;

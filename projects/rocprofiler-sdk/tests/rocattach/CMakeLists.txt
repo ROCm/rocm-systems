@@ -10,6 +10,36 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-rocattach REQUIRED)
+find_package(rocprofiler-register QUIET)
+find_package(Threads REQUIRED)
+
+if(TARGET rocprofiler-register::headers)
+    set(_ROCPROFILER_REGISTER_HEADERS_TARGET rocprofiler-register::headers)
+elseif(TARGET rocprofiler-register::rocprofiler-register-headers)
+    set(_ROCPROFILER_REGISTER_HEADERS_TARGET
+        rocprofiler-register::rocprofiler-register-headers)
+endif()
+if(_ROCPROFILER_REGISTER_HEADERS_TARGET)
+    include(CMakePushCheckState)
+    include(CheckCXXSourceCompiles)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_LIBRARIES ${_ROCPROFILER_REGISTER_HEADERS_TARGET})
+    unset(ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION)
+    unset(ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION CACHE)
+    check_cxx_source_compiles(
+        "
+        #include <rocprofiler-register/version.h>
+        #if !defined(ROCPROFILER_REGISTER_HAS_ATTACHMENT_CLIENT_SELECTION)
+        #    error attachment client selection is unavailable
+        #endif
+        int main() { return 0; }
+        "
+        ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION)
+    cmake_pop_check_state()
+endif()
+if(NOT DEFINED ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION)
+    set(ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION OFF)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -171,6 +201,31 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Verify ROCP_TOOL_ATTACH takes precedence over a framework-owned, implicitly discovered
+# rocprofiler_configure symbol so the listener is still created. Standalone SDK builds
+# skip this cross-component test when using an older rocprofiler-register package.
+if(ROCPROFILER_REGISTER_SUPPORTS_ATTACHMENT_CLIENT_SELECTION)
+    rocprofiler_add_integration_execute_test(
+        rocattach-implicit-configure-test-execute
+        COMMAND
+            $<TARGET_FILE:rocattach-parallel-attach-test>
+            $<TARGET_FILE:attachment-test-implicit-configure>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+        DEPENDS rocattach-parallel-attach-test
+        TIMEOUT 45
+        LABELS "attachment"
+        ENVIRONMENT "${rocattach-test-env}"
+        DISABLED ${IS_DISABLED}
+        PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+        PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+else()
+    message(
+        STATUS
+            "Skipping rocattach-implicit-configure-test: rocprofiler-register lacks attachment client selection"
+        )
+endif()
+
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
@@ -286,6 +341,30 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# A fork-only child created after attachment initialization does not inherit the parent's
+# listener. Tree attach should warn and skip that child while profiling the root normally.
+add_executable(rocattach-tree-listenerless-child-test)
+target_sources(rocattach-tree-listenerless-child-test
+               PRIVATE attach_tree_listenerless_child.cpp)
+target_link_libraries(
+    rocattach-tree-listenerless-child-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-tree-listenerless-child-test-execute
+    TARGET rocattach-tree-listenerless-child-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION
+        "Skipping descendant process [0-9]+ because it has no 'rocp-bg-attach' thread"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Test FAILED")
 
 # Test that attach fails gracefully when target process lacks ROCP_TOOL_ATTACH=1. Verifies
 # that rocattach returns an error status without crashing the target.
