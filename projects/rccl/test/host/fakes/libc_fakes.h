@@ -28,7 +28,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <getopt.h>
 
 #include <cstddef>
 #include <cstdio>
@@ -44,8 +43,10 @@ struct MicroExit {
 };
 
 // One scripted result for the read seam. `ret` < 0 makes the read fail with
-// `err` in errno; `ret` == 0 is EOF; otherwise `data` is copied to the caller
-// (truncated to the caller's buffer) and its length is returned.
+// `err` in errno; `ret` == 0 is EOF; a positive `ret` is the byte count the
+// step promises and must equal data.size(), which ScriptReadData derives for
+// you. The delivery is truncated to the caller's buffer, so a read asking for
+// fewer bytes than the step offers gets a short read, not an overrun.
 struct MicroReadStep {
   ssize_t ret;
   int err;

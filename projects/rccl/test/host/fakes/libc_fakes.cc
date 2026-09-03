@@ -15,7 +15,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <new>
 
 // LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
 // which this binary already links. A libc-only unit reports via plain
@@ -49,6 +48,9 @@ static ssize_t DefaultWrite(int, const void* buf, size_t count) {
 }
 
 static ssize_t DefaultRead(int, void* buf, size_t count) {
+  // A zero-length read returns 0 without consuming a step, as read(2) does and as RecordingReader does. rasRead asks
+  // for 0 once its buffer is full, so spending a step there would shift every later step onto the wrong call.
+  if (count == 0) return 0;
   if (g_readScriptPos >= g_readScript.size()) return 0;  // EOF past the end of the script
   const MicroReadStep& step = g_readScript[g_readScriptPos++];
   if (step.ret < 0) {

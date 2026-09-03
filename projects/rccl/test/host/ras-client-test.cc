@@ -735,6 +735,20 @@ TEST_F(RasClientMicrotest, RasRead_PayloadFillsBuffer_ReservesNulAndNeverWritesP
   EXPECT_EQ(kSentinel, buf[8]);
 }
 
+// Same arm through the DEFAULT read seam rather than RecordingReader: the zero-length request must read as EOF without
+// consuming a script step, or every later step would land on the wrong call. The second step below stays untouched.
+TEST_F(RasClientMicrotest, RasRead_PayloadFillsBuffer_ZeroLengthRequestSpendsNoScriptStep) {
+  char buf[4];
+  ScriptReadData("abc");
+  ScriptReadData("XYZ");
+
+  EXPECT_EQ(3, rasRead(9, buf, sizeof(buf)));
+
+  EXPECT_EQ("abc", std::string(buf, 3));
+  EXPECT_EQ('\0', buf[3]);
+  EXPECT_EQ(1u, g_readScriptPos);  // only the "abc" step was consumed
+}
+
 // Arm: count == 0 underflows `count - 1 - done` to SIZE_MAX. Unreachable from
 // client.cc (every caller passes sizeof of a real array); pinned so a future
 // caller that can pass 0 shows up as a changed expectation here.

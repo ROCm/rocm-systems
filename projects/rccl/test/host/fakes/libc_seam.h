@@ -26,10 +26,15 @@
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
 
-#include <cstdio>
+// The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
+// the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
 
 extern "C" {
 ssize_t micro_write(int, const void*, size_t);
