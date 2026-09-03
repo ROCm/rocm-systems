@@ -10,20 +10,6 @@
 #include "compiler.h"
 #include "p2p_resiliency.h"
 
-#ifdef ENABLE_FAULT_INJECTION
-#include <atomic>
-#include "net_ib_flush_fault_inject.h"
-// Test-only: when armed, ncclIbIflush re-issues the pre-fix scratchpad
-// RDMA_WRITE so a regression test can prove the write is what faults.
-// Atomic because the arm/disarm (test thread) and the read in ncclIbIflush
-// can run concurrently.
-static std::atomic<bool> ncclIbFlushForceScratchpadWrite{false};
-ncclResult_t ncclIbFlushFaultForceScratchpadWrite(void* /*recvComm*/, bool enable) {
-  ncclIbFlushForceScratchpadWrite.store(enable, std::memory_order_relaxed);
-  return ncclSuccess;
-}
-#endif
-
 NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t ncclIbArThreshold = 8192;
 
@@ -648,16 +634,15 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
-    // RO=0 scratchpad read fences the data (no RDMA_WRITE: a dma-buf scratchpad
-    // is not a valid amdgpu write target and faults the QP).
+    // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
+    // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
+    // on the flush QP.
     bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
                           comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
-#ifdef ENABLE_FAULT_INJECTION
-    // Test-only regression guard: re-issue the removed scratchpad RDMA_WRITE.
-    if (useGpuFlushMem && ncclIbFlushForceScratchpadWrite.load(std::memory_order_relaxed)) {
+    if (useGpuFlushMem) {
       struct ibv_send_wr writeWr;
       memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
@@ -670,7 +655,6 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       struct ibv_send_wr* badWriteWr;
       NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
     }
-#endif
     if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
