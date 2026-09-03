@@ -114,7 +114,7 @@ void Device::ReleaseFreedMemory() {
   std::vector<MemoryPool*> pools;
   {
     std::scoped_lock lock(lock_);
-    pools = mem_pools_;
+    pools.assign(mem_pools_.begin(), mem_pools_.end());
     for (auto* pool : pools) pool->retain();
   }
   for (auto* pool : pools) {
