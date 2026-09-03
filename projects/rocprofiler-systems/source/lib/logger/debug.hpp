@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/units/format.hpp"
 #include "logger.hpp"
 
 #define LOG_CRITICAL(...)                                                                \

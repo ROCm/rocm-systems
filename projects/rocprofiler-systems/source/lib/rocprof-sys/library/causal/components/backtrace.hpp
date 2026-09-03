@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/defines.h"
-#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/timemory.hpp"
@@ -72,8 +71,17 @@ struct backtrace : comp::empty_base
     auto get_index() const { return m_index; }
     auto get_stack() const { return m_stack; }
 
-    template <typename Tp = std::uint64_t>
-    static Tp get_period(std::uint64_t _units = units::nsec);
+    /// @tparam U  target std::chrono::duration type the fixed 1 msec causal
+    ///            sampling period is cast into (default: std::chrono::nanoseconds).
+    /// @tparam Tp return type holding the resulting count (default: std::uint64_t).
+    template <typename U = std::chrono::nanoseconds, typename Tp = std::uint64_t>
+    static Tp get_period()
+    {
+        using casting_type = std::chrono::duration<Tp, typename U::period>;
+        // fixed causal sampling period: 1 millisecond
+        return std::chrono::duration_cast<casting_type>(std::chrono::milliseconds{ 1 })
+            .count();
+    }
 
 private:
     bool                  m_selected = false;

@@ -13,6 +13,7 @@ add_library(
     test_remove_env.cpp
     test_synchronized.cpp
     test_to_bool.cpp
+    test_units_typed.cpp
     test_update_env.cpp
 )
 
