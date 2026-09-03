@@ -6148,6 +6148,10 @@ class CodeGenerator:
                     mode_sensitive_f16_dst=not cls.startswith('scalar_'),
                     mask_result_writer=result_writer,
                 )
+                inst_fields = getattr(self, '_current_inst_fields', set())
+                integer_clamp_dtype = profile.integer_clamp_dtypes.get(inst.name)
+                if is_vop3 and 'clamp' in inst_fields and integer_clamp_dtype:
+                    lctx.integer_saturation_dtype = integer_clamp_dtype
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.
@@ -6266,17 +6270,13 @@ class CodeGenerator:
                     ),
                     'V_MAD_I16': (
                         3,
-                        (
-                            'int32_t a = static_cast<int16_t>(s0);',
-                            'int32_t b = static_cast<int16_t>(s1);',
-                            'int32_t c = static_cast<int16_t>(s2);',
-                        ),
-                        'static_cast<uint32_t>(static_cast<uint16_t>(a * b + c))',
+                        (),
+                        'amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp)',
                     ),
                     'V_MAD_U16': (
                         3,
                         (),
-                        '(s0 * s1 + s2) & 0xffffu',
+                        'amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp)',
                     ),
                 }
                 if is_true16_vop3 and inst.name in true16_special_vop3_ops:

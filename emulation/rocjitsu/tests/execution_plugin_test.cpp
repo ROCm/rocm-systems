@@ -3347,11 +3347,11 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
                        0xFFFF'FFFFu);
 }
 
-static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 1));
-static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 4));
-static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 8));
-static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 16));
-static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 32));
+static_assert(!amdgpu::mma_f32_native_width_supported(16, 1));
+static_assert(amdgpu::mma_f32_native_width_supported(16, 4));
+static_assert(amdgpu::mma_f32_native_width_supported(16, 8));
+static_assert(amdgpu::mma_f32_native_width_supported(16, 16));
+static_assert(!amdgpu::mma_f32_native_width_supported(16, 32));
 
 TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   if constexpr (!util::has_stdx_simd) {
@@ -3359,7 +3359,7 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   } else {
     constexpr uint32_t M = 16, N = 16, K = 4;
     constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (!amdgpu::wmma_f32_f32_native_width_supported(N, width))
+    if (!amdgpu::mma_f32_native_width_supported(N, width))
       GTEST_SKIP() << "f32 WMMA shape is not divisible by the native SIMD width";
 
     ForceScalarOverride force_simd(false);
@@ -3424,7 +3424,7 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
   } else {
     constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
     constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (width <= 1 || N % width != 0)
+    if (!amdgpu::mma_f32_native_width_supported(N, width))
       GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
 
     ForceScalarOverride force_simd(false);
@@ -3454,8 +3454,9 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "stdx SIMD is unavailable";
   } else {
-    if (util::native<float>::size() != 16)
-      GTEST_SKIP() << "MFMA fast path requires 16-lane native<float>";
+    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+    if (!amdgpu::mma_f32_native_width_supported(16, width))
+      GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
 
     struct ForceScalarGuard {
       bool old = util::force_scalar();

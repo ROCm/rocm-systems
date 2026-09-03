@@ -1755,7 +1755,7 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
 
     assert 'uint64_t carry = 0;' in body
     assert 'uint64_t product = s0 * s1;' in body
-    assert 'if (result < product)' in body
+    assert 'bool overflow = result < product;' in body
     assert 'carry |= 1ULL << lane;' in body
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
     assert 'wf.set_vcc' not in body
@@ -1768,6 +1768,35 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     )
     assert 'commit_result(carry);' in callback_body
     assert 'write_wave_mask_scalar' not in callback_body
+
+
+def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
+    unsigned = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'u64',
+        integer_clamp=True,
+    )
+    signed = gen_vector_mad_64_32(
+        ['vdst', 'sdst'],
+        ['src0', 'src1', 'src2'],
+        'i64',
+        integer_clamp=True,
+    )
+
+    assert 'bool overflow = result < product;' in unsigned
+    assert 'inst_.clamp && overflow' in unsigned
+    assert unsigned.index('carry |= 1ULL << lane') < unsigned.index('inst_.clamp')
+    assert 'amdgpu::signed_add_overflows(product, s2)' in signed
+    assert 'inst_.clamp && overflow' in signed
+    assert '(product & (1ULL << 63))' in signed
+    assert signed.index('carry |= 1ULL << lane') < signed.index('inst_.clamp')
+    assert '__int128' not in unsigned
+    assert '__int128' not in signed
+
+    policy = Cdna4Profile().integer_clamp_dtypes
+    assert policy['V_MAD_U64_U32'] == 'u64'
+    assert policy['V_MAD_I64_I32'] == 'i64'
 
 
 def test_vector_cmp_class_writes_explicit_sdst_mask():
@@ -4075,6 +4104,135 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'dpp_src0_ ? &*dpp_src0_ : nullptr);' in body
     assert 'src0.set_delegate(' not in body
     assert 'src0.clear_delegate();' not in body
+
+
+def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_cdna5.xml'
+    parser = Parser(str(isa_xml), Cdna5Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+
+    def generated_body(name: str, enc_name: str, *, result_writer=None) -> str:
+        enc = next(enc for enc in spec.inst_encodings if enc.enc_name == enc_name)
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        generator._current_enc = enc
+        return generator._gen_execute_body(
+            inst,
+            semantics.instructions[name],
+            enc.enc_name,
+            result_writer=result_writer,
+        )
+
+    vop3 = generated_body('V_ADD_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint32_t>' in vop3
+    assert 'inst_.clamp' in vop3
+
+    subrev = generated_body('V_SUBREV_NC_U32', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint32_t>' in subrev
+    assert subrev.index('read_lane(src1, lane)') < subrev.index('read_lane(src0, lane)')
+    assert 'inst_.clamp' in subrev
+
+    add_u64 = generated_body('V_ADD_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_add<uint64_t>' in add_u64
+    assert 'inst_.clamp' in add_u64
+
+    sub_u64 = generated_body('V_SUB_NC_U64', 'ENC_VOP3')
+    assert 'vop3_integer_sub<uint64_t>' in sub_u64
+    assert 'inst_.clamp' in sub_u64
+
+    expected_helpers = {
+        'V_ADD_MAX_I32': 'vop3_integer_add_minmax<int32_t, true>',
+        'V_ADD_MAX_U32': 'vop3_integer_add_minmax<uint32_t, true>',
+        'V_ADD_MIN_I32': 'vop3_integer_add_minmax<int32_t, false>',
+        'V_ADD_MIN_U32': 'vop3_integer_add_minmax<uint32_t, false>',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name, 'ENC_VOP3')
+        assert helper in body
+        assert 'inst_.clamp' not in body
+
+    for name, enc_name, result_writer in (
+        ('V_MAD_NC_U64_U32', 'ENC_VOP3', None),
+        ('V_MAD_NC_I64_I32', 'ENC_VOP3', None),
+        ('V_MAD_CO_U64_U32', 'VOP3_SDST_ENC', 'commit_result'),
+        ('V_MAD_CO_I64_I32', 'VOP3_SDST_ENC', 'commit_result'),
+    ):
+        body = generated_body(name, enc_name, result_writer=result_writer)
+        assert 'bool overflow' in body
+        assert '__int128' not in body
+        assert 'inst_.clamp' in body
+
+    for name, helper in (
+        ('V_PK_MAD_I16', 'vop3_integer_mad<int16_t, 16>'),
+        ('V_PK_MAD_U16', 'vop3_integer_mad<uint16_t, 16>'),
+    ):
+        body = generated_body(name, 'ENC_VOP3P')
+        assert body.count(helper) == 2
+        assert body.count('inst_.clamp') == 2
+
+    for name in ('V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'):
+        body = generated_body(name, 'ENC_VOP3')
+        assert 'inst_.clamp' in body
+
+    vop2 = generated_body('V_ADD_NC_U32', 'ENC_VOP2')
+    assert 'vop3_integer_add' not in vop2
+    assert 'inst_.clamp' not in vop2
+
+    carry = generated_body(
+        'V_ADD_CO_U32', 'VOP3_SDST_ENC', result_writer='commit_result'
+    )
+    assert 'inst_.clamp && w > 0xFFFFFFFFULL ? UINT32_MAX' in carry
+    assert 'inst_.clamp' in carry
+    assert 'if (w > 0xFFFFFFFFULL) vcc |=' in carry
+
+
+def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
+    isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
+    parser = Parser(str(isa_xml), Rdna4Profile())
+    spec = parser.parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    enc = next(enc for enc in spec.inst_encodings if enc.enc_name == 'ENC_VOP3')
+    generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+    generator._current_enc = enc
+
+    def generated_body(name: str) -> str:
+        inst = next(inst for inst in enc.insts if inst.name == name)
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        return generator._gen_execute_body(
+            inst, semantics.instructions[name], enc.enc_name
+        )
+
+    add3 = generated_body('V_ADD3_U32')
+    assert 'vop3_integer_' not in add3
+    assert 'inst_.clamp' not in add3
+
+    expected_helpers = {
+        'V_MUL_I32_I24': 'vop3_integer_mul<int32_t, 24>',
+        'V_MUL_U32_U24': 'vop3_integer_mul<uint32_t, 24>',
+        'V_MAD_I32_I24': 'vop3_integer_mad<int32_t, 24>',
+        'V_MAD_U32_U24': 'vop3_integer_mad<uint32_t, 24>',
+        'V_MAD_I16': 'vop3_integer_mad<int16_t, 16>',
+        'V_MAD_U16': 'vop3_integer_mad<uint16_t, 16>',
+        'V_MAD_I32_I16': 'vop3_integer_mad<int32_t, 16>',
+        'V_MAD_U32_U16': 'vop3_integer_mad<uint32_t, 16>',
+        'V_SAD_HI_U8': 'vop3_integer_sad_hi_u8',
+        'V_SAD_U8': 'vop3_integer_sad_u8',
+        'V_SAD_U16': 'vop3_integer_sad_u16',
+        'V_SAD_U32': 'vop3_integer_sad_u32',
+        'V_MSAD_U8': 'vop3_integer_msad_u8',
+    }
+    for name, helper in expected_helpers.items():
+        body = generated_body(name)
+        assert helper in body
+        assert 'inst_.clamp' in body
+
+    or3 = generated_body('V_OR3_B32')
+    assert 'vop3_integer_add3' not in or3
+    assert 'inst_.clamp' not in or3
 
 
 def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):

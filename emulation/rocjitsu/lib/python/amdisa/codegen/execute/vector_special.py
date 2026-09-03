@@ -496,7 +496,11 @@ def gen_vector_perm_pk16(
 
 
 def gen_vector_qsad(
-    dst: list[str], src: list[str], op: str | None, uses_vgpr_msb_indexing: bool
+    dst: list[str],
+    src: list[str],
+    op: str | None,
+    uses_vgpr_msb_indexing: bool,
+    integer_clamp: bool = False,
 ) -> str:
     """Generate QSAD/MQSAD four-window sum-of-absolute-difference ops."""
     is_packed = op in ('sad_pk_u16', 'msad_pk_u16')
@@ -553,17 +557,27 @@ def gen_vector_qsad(
         L.append('        sum += a > b ? a - b : b - a;')
     L.extend(['      }'])
     if is_packed:
+        value_expr = (
+            'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)'
+            if integer_clamp
+            else 'value & 0xffffu'
+        )
         L.extend(
             [
                 '      uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);',
-                '      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);',
+                f'      packed_result |= static_cast<uint64_t>({value_expr}) << (window * 16);',
             ]
         )
     else:
+        value_expr = (
+            'amdgpu::vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)'
+            if integer_clamp
+            else 'accum[window] + sum'
+        )
         L.extend(
             [
                 f'      dst_word.encoding_value_ = {dst[0]}.encoding_value_ + static_cast<int>(window);',
-                '      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, accum[window] + sum);',
+                f'      amdgpu::RegisterAccess(wf).write_lane(dst_word, lane, {value_expr});',
             ]
         )
     L.append('    }')
@@ -696,6 +710,7 @@ def gen_vector_mad_64_32(
     src: list[str],
     dtype: str | None,
     result_writer: str | None = None,
+    integer_clamp: bool = False,
 ) -> str:
     """Generate V_MAD_U64_U32 / V_MAD_I64_I32 body.
 
@@ -723,16 +738,19 @@ def gen_vector_mad_64_32(
         L.append(
             f'    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);'
         )
-        L.append(
-            '    uint64_t product = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);'
-        )
+        L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
         L.append('    uint64_t result = product + s2;')
+        if writes_carry or integer_clamp:
+            L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append('    constexpr uint64_t sign_bit = 1ULL << 63;')
-            L.append(
-                '    if (((~(product ^ s2) & (product ^ result)) & sign_bit) != 0)'
-            )
+            L.append('    if (overflow)')
             L.append('      carry |= 1ULL << lane;')
+        if integer_clamp:
+            L.append('    if (inst_.clamp && overflow) {')
+            L.append(
+                '      result = (product & (1ULL << 63)) ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min()) : static_cast<uint64_t>(std::numeric_limits<int64_t>::max());'
+            )
+            L.append('    }')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, result);'
         )
@@ -748,9 +766,15 @@ def gen_vector_mad_64_32(
         )
         L.append('    uint64_t product = s0 * s1;')
         L.append('    uint64_t result = product + s2;')
+        if writes_carry or integer_clamp:
+            L.append('    bool overflow = result < product;')
         if writes_carry:
-            L.append('    if (result < product)')
+            L.append('    if (overflow)')
             L.append('      carry |= 1ULL << lane;')
+        if integer_clamp:
+            L.append(
+                '    if (inst_.clamp && overflow) result = std::numeric_limits<uint64_t>::max();'
+            )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, result);'
         )
@@ -803,8 +827,16 @@ def gen_vector_mad_32_16(
         L.append(
             f'    int32_t s2 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane));'
         )
+        result = (
+            'amdgpu::vop3_integer_mad<int32_t, 16>('
+            'static_cast<uint32_t>(s0), static_cast<uint32_t>(s1), '
+            'static_cast<uint32_t>(s2), inst_.clamp)'
+            if is_vop3
+            else 'static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) + '
+            'static_cast<uint32_t>(s2)'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) + static_cast<uint32_t>(s2));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});'
         )
     else:
         if is_vop3:
@@ -820,8 +852,13 @@ def gen_vector_mad_32_16(
         L.append(
             f'    uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
+        result = (
+            'amdgpu::vop3_integer_mad<uint32_t, 16>(s0, s1, s2, inst_.clamp)'
+            if is_vop3
+            else 's0 * s1 + s2'
+        )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, s0 * s1 + s2);'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, {result});'
         )
     L.append('  }')
     return '\n'.join(L)

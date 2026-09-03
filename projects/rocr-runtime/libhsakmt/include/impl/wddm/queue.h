@@ -141,6 +141,12 @@ public:
   std::atomic<uint64_t>* ring_rptr = nullptr;
 
   uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
+
+  bool needs_cwsr_ = true;                        //!< false for SDMA queues (mirrors Linux handle_concrete_asic() SDMA early-return)
+  GpuMemoryHandle cwsr_mem_ = nullptr;           //!< CWSR (Context Wave Save/Restore) memory allocation
+  D3DKMT_HANDLE cwsr_mem_handle_ = 0;           //!< KMT allocation handle of CWSR region (passed as CwsrMemHandle)
+  volatile int64_t* error_reason_ = nullptr;     //!< ErrorReason payload ptr (QueueResource::ErrorReason)
+  HSAuint32 error_event_id_ = 0;                 //!< ErrorEventId from HsaEvent::EventId (0 if no event)
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -153,7 +159,8 @@ public:
                volatile int64_t *error_addr,
                uint32_t cmdbuf_size,
                uint32_t engine,
-               bool use_hws = true);
+               bool use_hws = true,
+               HSAuint32 event_id = 0);
 
   ~ComputeQueue();
 
