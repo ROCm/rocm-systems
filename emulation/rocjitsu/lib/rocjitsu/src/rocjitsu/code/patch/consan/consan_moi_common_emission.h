@@ -15,6 +15,7 @@ struct MoiDenseRelayRoute {
   uint64_t anchor = 0;
   uint32_t anchor_size = 0;
   uint64_t caller_return = 0;
+  uint32_t call_return_adjustment = 0;
   uint64_t target = 0;
 };
 
@@ -28,6 +29,7 @@ struct MoiDenseRelayPlan {
   bool match_call_return = false;
   bool clone_local_routes = false;
   bool explicit_key = false;
+  bool restore_scc_before_route = false;
   bool normalize_encoded_scc = true;
   bool requires_indirect_pc_wait = false;
   uint64_t entry_island_words = 0;
@@ -62,9 +64,14 @@ struct MoiDenseRelayPlan {
     std::span<const MoiDenseRelayRoute> routes, uint16_t jump_pc_sgpr,
     uint16_t saved_scc_sgpr, uint16_t key_sgpr, uint16_t call_return_sgpr,
     bool derive_key_at_entry, bool key_encodes_scc, bool match_call_return,
-    bool clone_local_routes, bool explicit_key, bool normalize_encoded_scc,
-    uint64_t dispatcher_offset, uint64_t island_offset, const ConSanTargetProfile &target,
-    rj_code_arch_t arch);
+    bool clone_local_routes, bool explicit_key, bool restore_scc_before_route,
+    bool normalize_encoded_scc, uint64_t dispatcher_offset, uint64_t island_offset,
+    const ConSanTargetProfile &target, rj_code_arch_t arch);
+
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_dense_relay_anchor(
+    const MoiDenseRelayRoute &route, ConSanDirectCallForm call_form, uint16_t key_sgpr,
+    uint16_t call_return_sgpr, bool explicit_key, bool key_encodes_scc,
+    bool clone_local_routes, uint64_t island_offset, rj_code_arch_t arch);
 
 [[nodiscard]] bool emit_moi_dense_access_group(
     std::span<const MoiPlannedAccessPatch *const> group, uint64_t dispatcher_offset,
