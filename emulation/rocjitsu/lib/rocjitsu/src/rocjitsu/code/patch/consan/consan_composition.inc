@@ -275,6 +275,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                       ConSanPerturbationPlanningState *inspected_perturbation = nullptr,
                       const ConSanPreappliedMutationLayout &preapplied_mutation = {},
                       bool require_applicable_fault_plan = false,
+                      bool require_exactly_one_applied_fault = false,
                       ConSanLoweringExecution *execution = nullptr,
                       ConSanLoweringExtent extent = ConSanLoweringExtent::Complete,
                       const ConSanLoweringObservation *observation = nullptr) {
@@ -319,7 +320,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanPerturbationPlanningState pristine_perturbation;
     ConSanTransformArtifacts pristine_mutation_plan =
         try_patch_consan_impl(code_object_bytes, planning_options, initial_operating_point, {},
-                              &pristine_perturbation, {}, true, execution);
+                              &pristine_perturbation, {}, true,
+                              options.fault_require_exactly_one, execution);
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
@@ -333,40 +335,14 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
               : "ConSan mutation planning did not select an exact fault plan");
       return pristine_mutation_plan;
     }
-    // Apply corruption to a pristine image first, then inventory and instrument
-    // that image. This is essential for address/order faults: probes must model
-    // the instruction the GPU will actually execute.
-    ConSanOptions fault_options = options;
-    fault_options.flavor = ConSanFlavor::SuperCollider;
-    fault_options.probe_nop = false;
-    fault_options.probe_trampoline_nop = false;
-    fault_options.probe_endpgm = false;
-    fault_options.probe_lds_endpgm = false;
-    fault_options.probe_lds_check_trap = false;
-    fault_options.probe_flat_check_trap = false;
-    fault_options.probe_flat_trap = false;
-    // An explicitly authorized mutation must survive into the instrumentation
-    // stage. Do not turn a deliberately dropped barrier half into the
-    // ordinary-user malformed-wait abort.
-    fault_options.abort_unmatched_barrier_wait = false;
-    fault_options.sc_perturb_kind = ConSanPerturbationKind::None;
-    // Planning already built the complete pristine semantic inventory. Reuse
-    // it to apply the selected mutation instead of decoding and analyzing the
-    // code object a second time. This is equally valid when a perturbation was
-    // selected: its carried plan is retained separately and translated across
-    // the mutation below. Final validation still re-derives mutation semantics
-    // from pristine executable bytes, and the instrumentation stage
-    // independently analyzes the mutated image.
+    // The recursive pristine transaction both resolved and applied the fault.
+    // Its replacement must be instrumented so probes model the instruction
+    // that the GPU will actually execute.
     ConSanTransformArtifacts fault_result =
         has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
-    AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-    const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-    apply_consan_fault_mutations(code_object, arch, fault_options.patched_image_growth_limit,
-                                 fault_options.fault_require_exactly_one, fault_result.fault_plans,
-                                 fault_result);
     fault_result =
         finalize_consan_result(std::move(fault_result), code_object_bytes,
-                               fault_options.moi_report_dispatch_id, false, nullptr, execution);
+                               options.moi_report_dispatch_id, false, nullptr, execution);
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
@@ -426,7 +402,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanTransformArtifacts instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, initial_operating_point,
                               instrument_carried, &perturbation, instrument_preapplied, false,
-                              execution),
+                              false, execution),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
         /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation,
         execution);
@@ -583,6 +559,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                                             fault_planning_input(result),
                                                             require_applicable_fault_plan),
                                   result);
+    if (require_applicable_fault_plan && result.errors.empty()) {
+      apply_consan_fault_mutations(*code_object, arch, options.patched_image_growth_limit,
+                                   require_exactly_one_applied_fault, result.fault_plans, result);
+    }
     build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
                             carried_plans);
     return result;
