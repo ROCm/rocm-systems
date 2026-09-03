@@ -834,9 +834,9 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
     // Parameterized by MPIEnvironment::nThreads: the uneven-split ladder runs on
     // every worker's own fused connection simultaneously.
     if (MPIEnvironment::nThreads > 1) {
-        // Per-size registration, as the serial body does: on a fused device every
-        // regMr fans out across both members, and that churn is what this test is
-        // about.
+        // Per-size allocation and registration, as the serial body does: on a fused
+        // device every regMr fans out across both members, and that churn is what
+        // this test is about.
         RunThreadedSizeSweep(ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
                              {1, 3*1024*1024, 3, 5*1024*1024, 7, 7*1024*1024,
                               64, 16*1024*1024, 1, 11*1024*1024, 4*1024*1024, 1},
