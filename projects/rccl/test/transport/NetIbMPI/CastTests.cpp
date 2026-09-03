@@ -1493,9 +1493,11 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
 // communicator, and the new setup wrappers return before registration when setup
 // fails, so nothing else in the suite reaches these arms.
 //
-// A null communicator needs no connection: the guard is the first thing the entry
-// point does and the arguments never reach the device. The zero-size arm does need
-// a live communicator, since with a null one the null-comm check answers first.
+// A null communicator needs no connection: the guard runs before the arguments reach
+// the device. deregMr is the exception -- it answers a null handle with success
+// before it looks at the communicator -- so the null-comm arm there has to carry a
+// handle, and the documented shortcut is checked on its own. The zero-size arm does
+// need a live communicator, since with a null one the null-comm check answers first.
 // Both ranks run the same checks and reach the barrier from the same place.
 // =============================================================================
 TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
@@ -1519,8 +1521,15 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
                                    /*offset=*/0, /*fd=*/-1, &mhandle),
               ncclInvalidArgument)
         << "regMrDmaBuf must reject a null communicator";
-    EXPECT_EQ(DeregisterMemory(nullptr, mhandle), ncclInvalidArgument)
+    // Not the mhandle above: it is still null, since the two calls above return before
+    // assigning it, and a null handle takes deregMr's early success. The guard rejects
+    // the communicator before the handle is read, so a value that points at nothing
+    // usable reaches the arm under test safely.
+    void* const unusedMhandle = reinterpret_cast<void*>(0x1);
+    EXPECT_EQ(DeregisterMemory(nullptr, unusedMhandle), ncclInvalidArgument)
         << "deregMr must reject a null communicator";
+    EXPECT_EQ(DeregisterMemory(nullptr, nullptr), ncclSuccess)
+        << "deregMr must keep treating a null handle as a no-op, ahead of the comm check";
 
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
