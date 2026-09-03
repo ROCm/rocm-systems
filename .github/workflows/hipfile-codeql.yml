@@ -63,11 +63,32 @@ jobs:
           languages: c-cpp
           build-mode: manual
           queries: security-extended,security-and-quality
+          # Unless specified, CodeQL sets the maximum amount of memory it
+          # can use based on the following formula expressed in MB:
+          #
+          # CodeQL_memory = total - [1024 + (scale * max(total - 8192, 0))]
+          #
+          # Where scale is an internal value currently set to 5%, and total is
+          # the total amount of memory available on the system. In other words,
+          # CodeQL can use up to all of the memory minus a fixed 1 GB of RAM, and
+          # 5% of all memory above 8 GB. On a runner with 16 GB of RAM, CodeQL
+          # will reserve up to ~90% of the total memory on the system.
+          # This default may be leaving too little for building hipFile.
+          # 80% of 16 GB is 13.1 GB, which leaves  ~3.2 GB for hipFile.
+          ram: 13107
 
       - name: Configure and build hipFile
         # Plain build (no clang-tidy): we only want CodeQL to observe the
         # compiler. Debug build type keeps optimizations off so the extracted
         # database is closer to the source.
+        #
+        # We also restrict the parallelism here to try to avoid getting OOM
+        # killed by contending with CodeQL. Measured locally on a system
+        # constrained to 4 CPUs and 16 GB, an unbounded parallel build spawned
+        # 62 concurrent compilers and on average peaked at 6.1 GB of memory
+        # usage. This was leading to the runner's kernel OOM killing this job.
+        # When bounded to -j4, the average peak memory usage dropped to 1.8 GB
+        # (and actually finished slightly faster).
         shell: bash
         run: |
           cmake \
@@ -77,7 +98,33 @@ jobs:
             -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
             -DCMAKE_HIP_PLATFORM=amd \
             projects/hipfile
-          cmake --build /tmp/build --parallel
+          cmake --build /tmp/build --parallel "$(nproc)"
+
+      - name: Report memory usage
+        # Runs on failure too, which is when it matters most: exit code 137
+        # from the build step above means the kernel OOM killed it.
+        #
+        # memory.peak is a kernel-maintained high-water mark for the whole
+        # container (build, CodeQL extractor and runner agent alike), so it
+        # captures the true peak without having to sample. A non-zero oom_kill
+        # in memory.events confirms the kernel killed something in this cgroup.
+        # dmesg is not usable here: reading the kernel ring buffer needs
+        # CAP_SYSLOG, which this container does not have.
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          show() {
+            printf '  %-20s %s\n' "$1" "$(cat "/sys/fs/cgroup/$1" 2>/dev/null || echo '(unavailable)')"
+          }
+          echo "cgroup memory (bytes, 'max' means no limit set):"
+          show memory.max
+          show memory.peak
+          show memory.current
+          show memory.swap.max
+          show memory.swap.peak
+          show memory.swap.current
+          echo "memory.events (oom_kill > 0 means the kernel killed a process here):"
+          sed 's/^/  /' /sys/fs/cgroup/memory.events 2>/dev/null || echo "  (unavailable)"
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
