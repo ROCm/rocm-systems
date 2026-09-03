@@ -350,6 +350,15 @@ TEST(ProbeAbiTest, RejectsAnOddLinkPairBase) {
       ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 31}));
 }
 
+TEST(ProbeAbiTest, RejectsALinkPairBaseTheConventionDoesNotChoose) {
+  // Even and paired with a recognized convention, but not the pair that
+  // convention names. A screen that only checked alignment would admit it, and
+  // the trampoline would then call through s[40:41] while the body returns
+  // through s[30:31].
+  EXPECT_FALSE(is_valid_probe_abi(
+      ProbeAbi{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 40}));
+}
+
 TEST(ProbeAbiTest, RejectsAnEvenLinkPairBaseWithNoConvention) {
   EXPECT_FALSE(
       is_valid_probe_abi(ProbeAbi{.cc = ProbeCallingConvention::Unknown, .link_pair_base = 30}));

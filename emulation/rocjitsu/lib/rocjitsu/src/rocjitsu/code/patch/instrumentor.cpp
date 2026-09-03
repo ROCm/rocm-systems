@@ -175,6 +175,45 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   }
 }
 
+// How one kernel's VGPR allocation divides into an ordinary prefix and an
+// AccVGPR window.
+struct KernelVgprBounds {
+  uint32_t total = 0;          // Allocated VGPRs: ordinary prefix plus AccVGPR window.
+  uint32_t ordinary_bound = 0; // One past the last ordinary VGPR.
+  uint32_t acc_count = 0;      // AccVGPRs in the window; 0 when there is none.
+};
+
+// Decode @p desc's VGPR allocation for @p arch.
+KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+  // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+  // overcount the allocation and let the SGPR bridge scan pick an unallocated
+  // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
+  const uint32_t total = (granulated + 1) * descriptor_vgpr_granularity_for_wavefront(
+                                                arch, kernel_wavefront_size(arch, desc));
+  // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+  // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+  // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+  // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
+  const uint32_t accum_base =
+      arch_has_unified_vgpr_allocation(arch)
+          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+             1) *
+                4
+          : total;
+  return KernelVgprBounds{
+      .total = total,
+      // An ordinary VGPR is one below the accumulator window: an index inside it
+      // would alias an AGPR.
+      .ordinary_bound = std::min(total, accum_base),
+      .acc_count = total > accum_base ? total - accum_base : 0,
+  };
+}
+
 // Special machine state preserved across a probe call: SCC (via the trampoline
 // envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
 // plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
@@ -379,7 +418,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
   return true;
 }
 
-bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_anchor,
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
                       SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
@@ -408,14 +447,17 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &live_at_a
   }
 
   // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
-  // Prefer a dead VGPR; else reuse a spilled VGPR, whose value is already on scratch
-  // (build_spill_bracket orders its store/reload around the bridge use). A spilled
-  // VGPR is live at the anchor, so the dead scan never returns one.
+  // Prefer a VGPR the site is not already using; else reuse a spilled VGPR, whose
+  // own value is already on scratch and gets reloaded after the bridge's last use
+  // (build_spill_bracket orders the VGPR fills after the SGPR ones). Those are the
+  // only two safe choices: the prologue's writelane destroys whatever the bridge
+  // held, so anything live that is not spilled would be lost. bridge_unavailable
+  // covers the live set, so the first scan never returns one of those.
   const uint16_t vgpr_bound =
       static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
   std::optional<uint16_t> bridge;
   for (uint16_t v = 0; v < vgpr_bound; ++v) {
-    if (!live_at_anchor.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+    if (!bridge_unavailable.contains(RegisterRef{RegClass::VGPR, v, 1})) {
       bridge = v;
       break;
     }
@@ -834,6 +876,15 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // the descriptors already scanned above.
   const std::optional<uint32_t> kernel_sgpr_count =
       AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+
+  // The kernel's VGPR allocation, decoded once: it depends only on the
+  // descriptor and the arch, both loop-invariant. Absent unless exactly one
+  // kernel was discovered, since with several there is no single allocation to
+  // name.
+  const std::optional<KernelVgprBounds> vgpr_bounds =
+      kernels.size() == 1
+          ? std::optional<KernelVgprBounds>(kernel_vgpr_bounds(arch_, kernels.front().descriptor))
+          : std::nullopt;
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -937,8 +988,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       const RegisterSet spill = compute_spill_set(live, clobbers);
       if (!spill.none()) {
         // Single-kernel assumption: spilling needs exactly one kernel descriptor
-        // with non-zero fixed scratch to grow.
-        if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
+        // with non-zero fixed scratch to grow. vgpr_bounds is present on exactly
+        // that condition, so testing it here is what licenses the dereferences
+        // below.
+        if (!vgpr_bounds || kernels.front().descriptor.private_segment_fixed_size == 0) {
           result.errors.push_back(
               "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
               " must spill live registers, but the code object does not have a single kernel with "
@@ -969,45 +1022,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           result.errors.push_back(std::move(err));
           continue;
         }
-        const uint32_t granulated_vgpr_count =
-            AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
-                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-        // The descriptor encoding granule is wave-size dependent on RDNA (8 for
-        // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
-        // overcount the allocation and let the SGPR bridge scan pick an unallocated
-        // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
-        const uint32_t kernel_vgpr_count =
-            (granulated_vgpr_count + 1) *
-            descriptor_vgpr_granularity_for_wavefront(
-                arch_, kernel_wavefront_size(arch_, kernel.descriptor));
-        // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
-        // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
-        // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
-        // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
-        const uint32_t accum_base =
-            arch_has_unified_vgpr_allocation(arch_)
-                ? (AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
-                                   rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
-                   1) *
-                      4
-                : kernel_vgpr_count;
         // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
         // window would alias an AGPR that is not part of acc_spills.
-        const uint32_t ordinary_vgpr_bound = std::min(kernel_vgpr_count, accum_base);
         if (!sgpr_spill.none() &&
-            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, ordinary_vgpr_bound, *spills,
-                              arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
+            !plan_sgpr_spills(sgpr_spill, live, plan.vgpr_spills, vgpr_bounds->ordinary_bound,
+                              *spills, arch_, plan.sgpr_spills, plan.spill_bridge_vgpr, &err)) {
           result.errors.push_back(std::move(err));
           continue;
         }
         // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
-        if (!acc_spill.none()) {
-          const uint32_t acc_count =
-              kernel_vgpr_count > accum_base ? kernel_vgpr_count - accum_base : 0;
-          if (!plan_acc_spills(acc_spill, acc_count, *spills, arch_, plan.acc_spills, &err)) {
-            result.errors.push_back(std::move(err));
-            continue;
-          }
+        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds->acc_count, *spills, arch_,
+                                                  plan.acc_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
         }
       }
 

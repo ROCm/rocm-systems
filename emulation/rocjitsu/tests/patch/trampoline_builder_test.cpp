@@ -530,6 +530,19 @@ TEST(TrampolineBuilderPlan, OddLinkPairBaseFails) {
   EXPECT_FALSE(plan.is_probe_call);
 }
 
+// Well-formed in isolation -- recognized convention, even pair -- but not the
+// pair that convention names, so the call would return through a register the
+// body never reads.
+TEST(TrampolineBuilderPlan, LinkPairBaseTheConventionDoesNotChooseFails) {
+  TrampolinePlan plan;
+  std::string err;
+  const ProbeAbi wrong{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 40};
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, wrong, /*live_at_anchor=*/{},
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("probe ABI"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
 //==============================================================================
 // Probe-call emission (emit_probe_call)
 //
