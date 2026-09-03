@@ -152,8 +152,9 @@ void TestReverseSerialNumber::Run() {
         << "Serial number mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n", amdcuid_id_to_string(device_handles_[i]),
-             (unsigned long long)serial_number, (unsigned long long)extracted_serial);
+      printf("  Device [%s] serial: 0x%016llx (extracted: 0x%016llx)\n",
+             amdcuid_id_to_string(device_handles_[i]), (unsigned long long)serial_number,
+             (unsigned long long)extracted_serial);
     }
   }
 }
@@ -202,9 +203,13 @@ void TestReverseVendorId::Run() {
     status = amdcuid_query_device_property(device_handles_[i], AMDCUID_QUERY_VENDOR_ID,
                                            &queried_vendor, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_vendor, queried_vendor) << "Vendor ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
+    EXPECT_EQ(extracted_vendor, queried_vendor)
+        << "Vendor ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] vendor_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_vendor); }
+    IF_VERB(1) {
+      printf("  Device [%s] vendor_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_vendor);
+    }
   }
 }
 
@@ -258,7 +263,10 @@ void TestReverseDeviceId::Run() {
     EXPECT_EQ(extracted_device_id, queried_device_id)
         << "Device ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] device_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_device_id); }
+    IF_VERB(1) {
+      printf("  Device [%s] device_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_device_id);
+    }
   }
 }
 
@@ -312,7 +320,10 @@ void TestReverseRevisionId::Run() {
     EXPECT_EQ(extracted_revision, queried_revision)
         << "Revision ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] revision_id: 0x%02x\n", amdcuid_id_to_string(device_handles_[i]), queried_revision); }
+    IF_VERB(1) {
+      printf("  Device [%s] revision_id: 0x%02x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_revision);
+    }
   }
 }
 
@@ -365,9 +376,13 @@ void TestReverseUnitId::Run() {
       continue;
     }
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_EQ(extracted_unit_id, queried_unit_id) << "Unit ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
+    EXPECT_EQ(extracted_unit_id, queried_unit_id)
+        << "Unit ID mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
-    IF_VERB(1) { printf("  Device [%s] unit_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]), queried_unit_id); }
+    IF_VERB(1) {
+      printf("  Device [%s] unit_id: 0x%04x\n", amdcuid_id_to_string(device_handles_[i]),
+             queried_unit_id);
+    }
   }
 }
 
@@ -422,7 +437,8 @@ void TestReverseDeviceType::Run() {
         << "Device type mismatch for device " << amdcuid_id_to_string(device_handles_[i]);
 
     IF_VERB(1) {
-      printf("  Device [%s] device_type: %u\n", amdcuid_id_to_string(device_handles_[i]), static_cast<unsigned>(queried_type));
+      printf("  Device [%s] device_type: %u\n", amdcuid_id_to_string(device_handles_[i]),
+             static_cast<unsigned>(queried_type));
     }
   }
 }
