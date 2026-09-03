@@ -794,7 +794,7 @@ static struct tuningModel tuning_model_7{
     /*Reduce*/
     {{1, 4096, 1}, {4096, 32768, 2}, {32768, 65536, 4}, {65536, 1048576, 8}, {1048576, 134217728, 16}, {134217728, 34359738368, 32}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
     /*Broadcast*/
-    {{1, 1024, 1}, {1024, 65536, 2}, {65536, 2097152, 4}, {2097152, 4194304, 8}, {4194304, 8388608, 16}, {8388608, 34359738368, 32}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+    {{1, 1024, 1}, {1024, 16384, 2}, {16384, 1048576, 4}, {1048576, 2097152, 8}, {2097152, 8388608, 16}, {8388608, 34359738368, 32}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
   },
 };
 
@@ -1648,7 +1648,7 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
     {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1030", 0},
-    {"gfx1100", 7}, {"gfx1101", 7}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
+    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
