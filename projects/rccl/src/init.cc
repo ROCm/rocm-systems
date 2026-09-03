@@ -1724,9 +1724,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       * Recommended: Set nChannels via environment variable (e.g., 6 channels for
       * optimal 4-node load balancing). Missing channel data is backfilled
       * by repairMissingChannels() during Postset.
+      * 
+      * In isGfx_110x_120x ,defaultNumChannels = 56 is due to Minimum Edge disjoint Hamiltonian 
+      * cycles in graph K8 (8 GPU case) = 14 , and 56 is 14*4.
       * */
      int initChannels = (int)rcclParamInitChannels();
-     int defaultNumChannels = isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx_110x_120x && p2pDisabled) ? 16: ringGraph->nChannels);
+     int defaultNumChannels = isGfx1151 ? 6 /* 2 X (comm->nNodes - 1)  */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
      int numChannels =  initChannels > 0 ? initChannels : defaultNumChannels ;
      INFO(NCCL_ENV,
       "intraGraphGen : %d rcclParamInitChannels:%d numChannels : %d ringGraph->minChannels: %d ringGraph->maxChannels: %d", 

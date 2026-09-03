@@ -136,14 +136,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
-    int p2p_disabled = (ncclParamP2pDisable() != 0);
-    // const char* str = ncclGetEnv("NCCL_P2P_DISABLE");
-    // if (str) {
-    //   int disable = strtol(str, NULL, 0);
-    //   if (disable == 1) {
-    //     info->protocol = NCCL_PROTO_SIMPLE;
-    //   }
-    // }
+    bool p2p_disabled = ncclParamP2pDisable();
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;
     }
@@ -245,14 +238,16 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
   int minNChannels = ncclParamMinNchannels();
   int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
   size_t bytesPerRank = divUp(nBytes, comm->nRanks);
-
+  const int myRank = comm->rank;
   for (int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex) {
     size_t minByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][0];
     size_t maxByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][1];
+    if(myRank == 0) {
     INFO(NCCL_TUNING,
          "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
          "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
          nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    }
     if (minByteThreshold == CHAN_THRESHOLDS_UNDEFINED || maxByteThreshold == CHAN_THRESHOLDS_UNDEFINED) {
       INFO(NCCL_TUNING, "RCCL tuning model does not define threshold for coll:%i and nbytes:%lu", coll, nBytes);
       break; // Skip undefined thresholds
@@ -265,15 +260,19 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
       if (channelCount >= minNChannels && channelCount <= maxNChannels && channelCount >= minCTAs &&
           channelCount <= maxCTAs) {
         nc = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
+        if(myRank == 0) {
         INFO(NCCL_TUNING,
              "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
              "MinTrafficPerchannel thresholds",
              channelCount);
+        }
       } else {
+        if(myRank == 0) {
         INFO(NCCL_TUNING,
              "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
              "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
              channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        }
       }
 
       break;
