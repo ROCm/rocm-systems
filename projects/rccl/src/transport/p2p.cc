@@ -1454,9 +1454,11 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   }
   assert(sizeof(void*) == respSize);
 
-  INFO(NCCL_REG, "Proxy rank %d register reqBuff %p size %ld offset %ld legacyIpcCap %d sameProcess %d totalSize %zu numSegments %d",
-       proxyState->tpRank, reqBuff, ipcExpInfo->size, ipcExpInfo->offset, ipcExpInfo->legacyIpcCap,
-       connection->sameProcess, totalSize, numSegments);
+  INFO(
+    NCCL_REG,
+    "Proxy rank %d register reqBuff %p size %ld offset %ld legacyIpcCap %d sameProcess %d totalSize %zu numSegments %d",
+    proxyState->tpRank, reqBuff, ipcExpInfo->size, ipcExpInfo->offset, ipcExpInfo->legacyIpcCap,
+    connection->sameProcess, totalSize, numSegments);
 
   // request peer passes all necessary buffer info to import. The proxy thread would register
   // the buffer locally and return register addr back
@@ -1467,7 +1469,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo->offset);
   } else {
 #if ROCM_VERSION >= 70000
-    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&regAddr, totalSize, /* alignment */ 0, /* addr */ 0, /* flags */ 0), ret, fail);
+    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&regAddr, totalSize, /* alignment */ 0, /* addr */ 0, /* flags */ 0),
+                ret, fail);
     size_t offset = 0;
     for (int segment = 0; segment < numSegments; segment++) {
       // cuMem import
@@ -1476,14 +1479,20 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
         memcpy(&segmentHandles[segment], &ipcExpInfo[segment].ipcDesc.memHandle, sizeof(CUmemGenericAllocationHandle));
       } else {
         if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-          CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment], (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType), ret, fail);
+          CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
+                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
+                      ret, fail);
           SYSCHECKGOTO(close(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {
-          CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment], (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, ncclCuMemHandleType), ret, fail);
+          CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
+                                                     (void*)&ipcExpInfo[segment].ipcDesc.cuDesc, ncclCuMemHandleType),
+                      ret, fail);
         }
       }
       imported[segment] = true;
-      CUCHECKGOTO(cuMemMap((CUdeviceptr)((char*)regAddr + offset), ipcExpInfo[segment].size, /* offset */ 0, segmentHandles[segment], /* flags */ 0), ret, fail);
+      CUCHECKGOTO(cuMemMap((CUdeviceptr)((char*)regAddr + offset), ipcExpInfo[segment].size, /* offset */ 0,
+                           segmentHandles[segment], /* flags */ 0),
+                  ret, fail);
       offset += ipcExpInfo[segment].size;
       mapped[segment] = true;
     }
@@ -1496,8 +1505,11 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo[0].offset);
 #endif
   }
-  INFO(NCCL_REG, "Proxy rank %d register success regAddr %p totalSize %zu offset %ld legacyIpcCap %d sameProcess %d numSegments %d",
-       proxyState->tpRank, regAddr, totalSize, ipcExpInfo->offset, ipcExpInfo->legacyIpcCap, connection->sameProcess, numSegments);
+  INFO(
+    NCCL_REG,
+    "Proxy rank %d register success regAddr %p totalSize %zu offset %ld legacyIpcCap %d sameProcess %d numSegments %d",
+    proxyState->tpRank, regAddr, totalSize, ipcExpInfo->offset, ipcExpInfo->legacyIpcCap, connection->sameProcess,
+    numSegments);
 
 exit:
   if (regAddr) {

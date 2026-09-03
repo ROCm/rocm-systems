@@ -194,6 +194,7 @@ write_perfetto(
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
                                                      agent_data,
+    rocpd_version_triplet_t                          schema_version,
     const tool::generator<types::thread>&            thread_gen,
     const tool::generator<types::region>&            region_gen,
     const tool::generator<types::sample>&            sample_gen,
@@ -220,6 +221,8 @@ write_perfetto(
 
     auto uuid_pid       = common::fnv1a_hasher::combine(this_nid, this_pid_init_ns, this_pid);
     auto this_pid_track = ::perfetto::Track{uuid_pid, ::perfetto::Track{}};
+
+    common::consume_args(schema_version);
 
     {
         auto desc = orig_process_desc;
@@ -260,9 +263,13 @@ write_perfetto(
 
     auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
         if(!ocfg.annotate_pmc) return std::vector<types::pmc_event>{};
+        // Filter out SPM pmc_events (sample_id IS NOT NULL) - they carry hardware
+        // timestamps in a different clock domain and should not be associated with
+        // regions or kernel dispatches in the Perfetto timeline.
         return rocpd::read_sql_query<types::pmc_event>(
             conn,
-            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
+            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={} AND "
+                        "sample_id IS NULL",
                         process.guid,
                         event_id));
     };
@@ -372,6 +379,8 @@ write_perfetto(
                 _namess << "(CPU)";
             else if(_agent.type == "GPU")
                 _namess << "(GPU)";
+            else if(_agent.type == "NIC")
+                _namess << "(NIC)";
             else
                 _namess << "(UNK)";
 
@@ -630,13 +639,10 @@ write_perfetto(
                                   "stream_id",
                                   itr.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(itr.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", itr.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", itr.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", itr.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", itr.graph_node_id);
                                   });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
@@ -872,13 +878,10 @@ write_perfetto(
                                   "stream_id",
                                   current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(current.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", current.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", current.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", current.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", current.graph_node_id);
 
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {

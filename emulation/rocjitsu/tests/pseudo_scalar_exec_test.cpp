@@ -740,7 +740,7 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     const uint64_t expected = selector == kVccSelectors[0]
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
-    fixture.wavefront->set_vcc(source);
+    fixture.wavefront->set_vcc_raw(source);
     fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }

@@ -128,6 +128,50 @@
       "tests": [
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
       ]
+    },
+    "unit_tests_micro": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "P2pMicrotests", "description": "Host-only p2p.cc microtests (no GPU, no HIP/RCCL runtime); contributes p2p.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotests", "description": "Host-only init.cc microtests (no GPU, no HIP/RCCL runtime); contributes init.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init_uncached": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-uncached",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_enqueue": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroEnqueue",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -147,6 +191,30 @@
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - p2p.cc",
+      "description": "rccl-UnitTestsMicro (host-only p2p.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc",
+      "description": "rccl-UnitTestsMicroInit (host-only init.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_init",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (uncached)",
+      "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
+      "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue.cc",
+      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_enqueue",
       "enabled": true
     }
   ]

@@ -101,14 +101,6 @@ stop_service(const context::context* ctx)
 void
 post_hsa_init_start_active_service()
 {
-    // Called as part of the registration of the HSA table
-    if(is_hsa_initialized().load())
-    {
-        // If there is a guarantee that the `rocprofiler_set_api_table`
-        // can be called only once for the HSA, then this condition is redundant.
-        return;
-    }
-
     // Check if any PC sampling is configured
     {
         bool is_empty = get_global_pc_sampling_sessions().rlock(

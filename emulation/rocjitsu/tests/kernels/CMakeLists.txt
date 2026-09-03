@@ -43,6 +43,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel(scratch_spill_probe gfx950)
 rj_add_device_kernel(virtual_lds_smoke gfx950)
 rj_add_device_kernel(cvt_pk_bf16_f32 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch gfx950)
@@ -88,7 +89,7 @@ function(rj_add_asm_fixture name target)
             ${AMDCXX} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -c -o ${asm_obj}
             ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s ${AMDCXX}
         COMMENT "Assembling Triton fixture: ${name} (${target})"
     )
     add_custom_command(
@@ -96,7 +97,7 @@ function(rj_add_asm_fixture name target)
         COMMAND
             ${AMDCXX} -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -nostdlib -shared -o ${hsaco} ${asm_obj}
-        DEPENDS ${asm_obj}
+        DEPENDS ${asm_obj} ${AMDCXX}
         COMMENT "Linking Triton fixture: ${name} (${target})"
     )
     add_custom_target(kernel_${name} DEPENDS ${hsaco})
@@ -140,6 +141,7 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
+        ${KERNEL_OUTPUT_DIR}/scratch_spill_probe.o
         ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
         ${KERNEL_OUTPUT_DIR}/cvt_pk_bf16_f32.o
         ${KERNEL_OUTPUT_DIR}/hipkittens_bf16fp32_256_256_64_32_with16x32.hsaco
@@ -181,6 +183,11 @@ set(HAS_GFX1250_DBT_FIXTURE FALSE)
 set(RJ_GFX1250_DBT_FIXTURE_TARGET)
 if(CLANG_OFFLOAD_BUNDLER)
     rj_add_probe_object(rj_nop_probe gfx90a OUTPUT_NAME rj_nop_probe_gfx90a)
+    rj_add_probe_object(
+        callable_sgpr_probe
+        gfx950
+        OUTPUT_NAME callable_sgpr_probe_gfx950
+    )
     set(HAS_PROBE_FIXTURES TRUE)
 
     # The narrow gfx1250 DBT library accepts a raw AMDGPU code object rather
@@ -203,7 +210,9 @@ if(CLANG_OFFLOAD_BUNDLER)
     # only when the offload bundler is available.
     if(RJ_INSTALL_TESTS)
         install(
-            FILES ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+            FILES
+                ${KERNEL_OUTPUT_DIR}/rj_nop_probe_gfx90a.hsaco
+                ${KERNEL_OUTPUT_DIR}/callable_sgpr_probe_gfx950.hsaco
             DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/kernels
         )
         if(HAS_GFX1250_DBT_FIXTURE)
@@ -233,6 +242,7 @@ add_custom_target(
         kernel_vector_add_gfx90a
         kernel_vector_add_probe_gfx90a
         kernel_dynamic_copy_loop
+        kernel_scratch_spill_probe
         kernel_virtual_lds_smoke
         kernel_cvt_pk_bf16_f32
         kernel_multikernel_indirect_branch

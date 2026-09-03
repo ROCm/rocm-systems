@@ -95,6 +95,10 @@ struct ncclShmemData {
   uint64_t faults;
 #endif
   uint64_t barrier_pat;
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+  // A separate __shared__ should work better as it does not instantiate this for LL and LL128
+  alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
+#endif
 };
 
 #ifdef RCCL_DEVICE_LINKER
@@ -108,6 +112,12 @@ extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2
 extern __shared__ ulong2
   ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
 #endif
+#endif
+
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+__device__ inline void* ncclTdmStageForWarp(int warp) {
+  return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
+}
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -273,10 +283,13 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     // the nextExtends warp rotation stays correct. alignas(16) keeps bcastPacks >= 1.
     static_assert(sizeof(struct ncclDevWorkBcast) % 16 == 0 && sizeof(struct ncclDevWorkBcast) >= 16,
                   "ncclDevWorkBcast must be a non-zero multiple of the 16B pack size");
-    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
+    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast) / 16; // 3 packs/work
     bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
     for (int pk = tid; pk < nPacks; pk += tn) {
-      if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
+      if (isBcast) {
+        dstWork = pk / bcastPacks;
+        packInWork = pk - dstWork * bcastPacks;
+      }
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
       ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
@@ -315,7 +328,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      tid -= 2*WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
+      tid -= 2 * WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {

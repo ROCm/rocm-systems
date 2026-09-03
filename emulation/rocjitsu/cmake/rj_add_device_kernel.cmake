@@ -35,7 +35,7 @@ function(rj_add_device_kernel name offload_arch)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
             --rocm-path=${ROCM_PATH} -fPIC -c -O2 -o ${out} ${src}
-        DEPENDS ${src}
+        DEPENDS ${src} ${AMDCXX}
         COMMENT "Compiling device kernel: ${output_name} (${offload_arch})"
     )
 
@@ -48,9 +48,16 @@ endfunction()
 # Unlike rj_add_device_kernel above (which compiles a __global__ kernel into a
 # host object carrying a .hip_fatbin), this is for a lone __device__ function
 # with no kernel. The normal fatbin path drops such a function, so this:
-#   1. compiles device-only with -fgpu-rdc into a Clang offload bundle, then
+#   1. compiles device-only into a Clang offload bundle, then
 #   2. unbundles the device code object into a raw device ELF that Executable /
 #      AmdGpuCodeObject can load directly.
+#
+# NOTE: The source must keep the __device__ function alive on its own (see
+# tests/kernels/rj_nop_probe.hip). -fgpu-rdc would also do that, but it is
+# incompatible with step 2 once the toolchain defaults to --offload-new-driver:
+# `-fgpu-rdc --cuda-device-only` then emits raw LLVM bitcode rather than an
+# offload bundle, and the unbundle fails with "Can't find bundles for
+# hipv4-amdgcn-amd-amdhsa--<arch>". Observed with TheRock 10.1.0a nightlies.
 #
 # AMDCXX, ROCM_PATH, CLANG_OFFLOAD_BUNDLER, and KERNEL_OUTPUT_DIR must be set
 # before calling this function.
@@ -75,15 +82,13 @@ function(rj_add_probe_object name offload_arch)
     set(bundle ${KERNEL_OUTPUT_DIR}/${output_name}.bundle)
     set(hsaco ${KERNEL_OUTPUT_DIR}/${output_name}.hsaco)
 
-    # Step 1: device-only compile to a Clang offload bundle. -fgpu-rdc keeps the
-    # used/noinline device function from being internalized away.
+    # Step 1: device-only compile to a Clang offload bundle.
     add_custom_command(
         OUTPUT ${bundle}
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
-            --rocm-path=${ROCM_PATH} -fgpu-rdc --cuda-device-only -O2 -o
-            ${bundle} ${src}
-        DEPENDS ${src}
+            --rocm-path=${ROCM_PATH} --cuda-device-only -O2 -o ${bundle} ${src}
+        DEPENDS ${src} ${AMDCXX}
         COMMENT
             "Compiling probe object (device-only): ${output_name} (${offload_arch})"
     )
@@ -96,7 +101,7 @@ function(rj_add_probe_object name offload_arch)
             ${CLANG_OFFLOAD_BUNDLER} --type=o --unbundle
             --targets=hipv4-amdgcn-amd-amdhsa--${offload_arch} --input=${bundle}
             --output=${hsaco}
-        DEPENDS ${bundle}
+        DEPENDS ${bundle} ${CLANG_OFFLOAD_BUNDLER}
         COMMENT "Unbundling probe object: ${output_name} (${offload_arch})"
     )
 

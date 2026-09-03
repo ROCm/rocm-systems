@@ -23,13 +23,14 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -683,6 +684,9 @@ struct ncclComm {
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int cheapPostSendFenceOff; // RCCL: true if cheap post-send fence is disabled
+#if ENABLE_TDM_SIMPLE
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
   int localRank;
   int localRanks;
   int maxLocalRanks;
@@ -705,6 +709,9 @@ struct ncclComm {
 
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
+
+  // PAT ReduceScatter and AllGather share one connection set; must match on every rank
+  bool patSharedQps;
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
@@ -867,11 +874,15 @@ struct ncclComm {
   struct ncclIntruQueueMpsc<struct ncclCommCallback, &ncclCommCallback::next> callbackQueue;
 
   hipEvent_t doneEvent;
-  hipStream_t lastStream;
-  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
-  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
-  // can correctly detect a stream change in either case.
-  bool lastStreamValid;
+  // Opaque tag identifying the last launch stream, for stream-change detection only; 0 means
+  // no launch yet, which keeps "launched on the default stream" distinguishable. Not a
+  // hipStream_t: the app may destroy that stream while the comm lives on and HIP gives no
+  // notification, so this is compared, never passed to a HIP API.
+  //
+  // If the handle is recycled onto a new stream, tag equality deliberately skips the wait:
+  // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
+  // implies the prior kernel already finished.
+  uintptr_t lastStreamTag;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -935,6 +946,7 @@ struct ncclComm {
 
   struct ncclDevrState devrState; // The symmetric runtime state
   struct ncclSymkState symkState; // The symmetric kernels state (built on previous)
+  struct ncclGinA2AState ginA2AState; // GIN-SDMA alltoall state (private devComm)
 
   struct ncclMemManager* memManager; // Memory manager
   struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;

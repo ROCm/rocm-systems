@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
@@ -48,7 +49,9 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
@@ -71,6 +74,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
 
@@ -158,6 +162,23 @@ resolved_exists(std::string_view fname)
     return fs::exists(fname);
 }
 
+fs::path
+normalized_library_path(const fs::path& path)
+{
+    auto ec       = std::error_code{};
+    auto resolved = fs::weakly_canonical(path, ec);
+    return (ec) ? path.lexically_normal() : resolved;
+}
+
+bool
+same_library_path(const fs::path& lhs, const fs::path& rhs)
+{
+    auto ec = std::error_code{};
+    if(fs::equivalent(lhs, rhs, ec)) return true;
+
+    return normalized_library_path(lhs) == normalized_library_path(rhs);
+}
+
 auto
 get_this_library_path()
 {
@@ -227,16 +248,18 @@ set_rocprofiler_register_library()
             else
             {
                 // only report conflict if existing value differs from this library path
-                auto _existing_path = fs::path{_existing};
+                auto _existing_path     = fs::path{_existing};
+                auto _current_path      = fs::path{_this_library_path};
+                auto _existing_resolved = normalized_library_path(_existing_path);
                 ROCP_CI_LOG_IF(WARNING,
                                _existing_path.is_absolute() &&
-                                   fs::canonical(_existing_path).string() != _this_library_path)
+                                   !same_library_path(_existing_path, _current_path))
                     << fmt::format(
                            "ROCPROFILER_REGISTER_LIBRARY is already set to '{}' (resolves to "
                            "'{}'), not overriding with '{}'",
                            _existing,
-                           fs::canonical(_existing_path).string(),
-                           _this_library_path);
+                           _existing_resolved.string(),
+                           _current_path.string());
             }
         }
     });
@@ -285,10 +308,12 @@ get_invoked_configures()
     return _v;
 }
 
-auto&
-get_forced_configure()
+auto*
+get_forced_configures()
 {
-    static rocprofiler_configure_func_t _v = nullptr;
+    using configure_func_set_t = std::unordered_set<rocprofiler_configure_func_t>;
+    static auto*& _v =
+        common::static_object<common::Synchronized<configure_func_set_t>>::construct();
     return _v;
 }
 
@@ -325,8 +350,8 @@ struct client_library
         delete configure_attach_result;
     }
 
-    client_library(const client_library&)     = delete;
-    client_library(client_library&&) noexcept = default;
+    client_library(const client_library&)       = delete;
+    client_library(client_library&& v) noexcept = default;
 
     client_library& operator=(const client_library&) = delete;
     client_library& operator=(client_library&&) noexcept = delete;
@@ -339,15 +364,82 @@ struct client_library
     rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
     rocprofiler_client_id_t                     internal_client_id      = {};
     rocprofiler_client_id_t                     mutable_client_id       = {};
+
+    std::string_view get_name() const
+    {
+        if(mutable_client_id.name)
+            return mutable_client_id.name;
+        else if(internal_client_id.name)
+            return internal_client_id.name;
+        else
+            return name;
+    }
+
+    friend bool operator==(const client_library& lhs, const client_library& rhs)
+    {
+        auto _cfg_func_match = std::tie(lhs.configure_func, lhs.configure_attach_func) ==
+                               std::tie(rhs.configure_func, rhs.configure_attach_func);
+
+        auto _has_results = [](auto* result, auto* attach_result) {
+            return (result != nullptr) || (attach_result != nullptr);
+        };
+
+        auto _lhs_has_results = _has_results(lhs.configure_result, lhs.configure_attach_result);
+        auto _rhs_has_results = _has_results(rhs.configure_result, rhs.configure_attach_result);
+
+        // if either client does not have configure results yet, only compare the configure
+        // functions
+        if(!_lhs_has_results || !_rhs_has_results) return _cfg_func_match;
+
+        // if both clients have configure results, compare the configure results as well
+        auto _cfg_result_match = std::tie(lhs.configure_result, lhs.configure_attach_result) ==
+                                 std::tie(rhs.configure_result, rhs.configure_attach_result);
+
+        return (_cfg_func_match || _cfg_result_match);
+    }
 };
 
-using client_library_vec_t = std::vector<std::optional<client_library>>;
+using client_library_vec_t = common::container::stable_vector<std::optional<client_library>>;
+
+template <typename Tp>
+decltype(auto)
+emplace_client(Tp&                                 data,
+               std::string_view                    _name,
+               void*                               _dlhandle,
+               rocprofiler_configure_func_t        _cfg_func,
+               rocprofiler_configure_attach_func_t _attach_func)
+{
+    constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
+    uint32_t       _prio          = get_client_offset() + data.size();
+    auto           _client_v      = client_library{std::string{_name},
+                                    _dlhandle,
+                                    _cfg_func,
+                                    _attach_func,
+                                    nullptr,
+                                    nullptr,
+                                    rocprofiler_client_id_t{client_id_size, nullptr, _prio},
+                                    rocprofiler_client_id_t{client_id_size, nullptr, _prio}};
+
+    // return existing client if evaluates to equal
+    for(auto& itr : data)
+    {
+        if(itr && *itr == _client_v)
+        {
+            ROCP_WARNING << fmt::format(
+                "found matching client library for '{}' :: {}", _name, itr->get_name());
+            return itr;
+        }
+    }
+
+    ROCP_INFO << fmt::format("registering new client library '{}'", _name);
+    auto& client = data.emplace_back(std::move(_client_v));
+    return client;
+}
 
 client_library_vec_t
 find_clients()
 {
-    auto data            = client_library_vec_t{};
-    auto priority_offset = get_client_offset();
+    auto data = client_library_vec_t{};
 
     auto is_unique_configure_func = [&data](auto* _cfg_func) {
         for(const auto& itr : data)
@@ -355,25 +447,6 @@ find_clients()
             if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
         }
         return true;
-    };
-
-    auto emplace_client =
-        [&data, priority_offset](
-            std::string_view                    _name,
-            void*                               _dlhandle,
-            auto*                               _cfg_func,
-            rocprofiler_configure_attach_func_t _attach_func) -> std::optional<client_library>& {
-        constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
-        uint32_t       _prio          = priority_offset + data.size();
-        return data.emplace_back(
-            client_library{std::string{_name},
-                           _dlhandle,
-                           _cfg_func,
-                           _attach_func,
-                           nullptr,
-                           nullptr,
-                           rocprofiler_client_id_t{client_id_size, nullptr, _prio},
-                           rocprofiler_client_id_t{client_id_size, nullptr, _prio}});
     };
 
     auto rocprofiler_configure_dlsym = [](auto _handle) {
@@ -388,10 +461,19 @@ find_clients()
         return _sym;
     };
 
-    if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
+    if(get_forced_configures())
     {
-        ROCP_INFO << "adding forced configure";
-        emplace_client("(forced)", nullptr, get_forced_configure(), nullptr);
+        get_forced_configures()->rlock(
+            [&data, &is_unique_configure_func](const auto& _forced_configures) {
+                for(auto cfg : _forced_configures)
+                {
+                    if(is_unique_configure_func(cfg))
+                    {
+                        ROCP_INFO << "adding forced configure";
+                        emplace_client(data, "(forced)", nullptr, cfg, nullptr);
+                    }
+                }
+            });
     }
 
     auto get_env_libs = []() {
@@ -493,13 +575,13 @@ find_clients()
                     << "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '" << itr
                     << "' did not contain rocprofiler_configure symbol (search method: dlsym)";
                 if(_sym && is_unique_configure_func(_sym))
-                    emplace_client(itr, handle, _sym, _attach_sym);
+                    emplace_client(data, itr, handle, _sym, _attach_sym);
             }
         }
     }
 
     if(rocprofiler_configure && is_unique_configure_func(rocprofiler_configure))
-        emplace_client("unknown", nullptr, rocprofiler_configure, nullptr);
+        emplace_client(data, "unknown", nullptr, rocprofiler_configure, nullptr);
 
     auto _default_configure        = rocprofiler_configure_dlsym(RTLD_DEFAULT);
     auto _next_configure           = rocprofiler_configure_dlsym(RTLD_NEXT);
@@ -507,10 +589,11 @@ find_clients()
     auto _next_configure_attach    = rocprofiler_configure_attach_dlsym(RTLD_NEXT);
 
     if(_default_configure && is_unique_configure_func(_default_configure))
-        emplace_client("(RTLD_DEFAULT)", nullptr, _default_configure, _default_configure_attach);
+        emplace_client(
+            data, "(RTLD_DEFAULT)", nullptr, _default_configure, _default_configure_attach);
 
     if(_next_configure && is_unique_configure_func(_next_configure))
-        emplace_client("(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
+        emplace_client(data, "(RTLD_NEXT)", nullptr, _next_configure, _next_configure_attach);
 
     // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
     // libraries
@@ -557,12 +640,20 @@ find_clients()
             }
 
             // skip the configure function that was forced
-            if(_sym == get_forced_configure())
+            if(get_forced_configures())
             {
-                data.front()->name                    = itr;
-                data.front()->dlhandle                = handle;
-                data.front()->internal_client_id.name = "(forced)";
-                continue;
+                const bool _exists =
+                    get_forced_configures()->rlock([&_sym](const auto& _forced_configures) {
+                        return (_forced_configures.find(_sym) != _forced_configures.end());
+                    });
+
+                if(_exists)
+                {
+                    data.front()->name                    = itr;
+                    data.front()->dlhandle                = handle;
+                    data.front()->internal_client_id.name = "(forced)";
+                    continue;
+                }
             }
 
             if(_sym == &rocprofiler_configure && data.size() == 1)
@@ -573,7 +664,7 @@ find_clients()
             }
             else if(is_unique_configure_func(_sym))
             {
-                auto& entry                    = emplace_client(itr, handle, _sym, _attach_sym);
+                auto& entry = emplace_client(data, itr, handle, _sym, _attach_sym);
                 entry->internal_client_id.name = entry->name.c_str();
             }
         }
@@ -616,6 +707,77 @@ get_registration_mutex()
 }
 
 bool
+invoke_client_configure(std::optional<client_library>& itr)
+{
+    if(!itr->configure_func)
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() attempted to "
+                     "invoke configure function from "
+                  << itr->get_name() << " that had no configuration function";
+        return false;
+    }
+
+    if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() attempted to "
+                     "invoke configure function from "
+                  << itr->get_name() << " (addr="
+                  << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
+                  << ") more than once";
+        return false;
+    }
+    else
+    {
+        ROCP_INFO << "rocprofiler::registration::invoke_client_configure() invoking configure "
+                     "function from "
+                  << itr->get_name() << " (addr="
+                  << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
+                  << ")";
+    }
+
+    auto* _result = itr->configure_func(ROCPROFILER_VERSION,
+                                        ROCPROFILER_VERSION_STRING,
+                                        itr->internal_client_id.handle - get_client_offset(),
+                                        &itr->mutable_client_id);
+
+    if(_result)
+    {
+        itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
+
+        if(itr->configure_attach_func)
+        {
+            auto* _attach_result =
+                itr->configure_attach_func(ROCPROFILER_VERSION,
+                                           ROCPROFILER_VERSION_STRING,
+                                           itr->internal_client_id.handle - get_client_offset(),
+                                           &itr->mutable_client_id);
+
+            if(_attach_result)
+            {
+                itr->configure_attach_result =
+                    new rocprofiler_tool_configure_attach_result_t{*_attach_result};
+            }
+        }
+
+        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                    itr->get_name(),
+                                    sdk::utility::as_hex(itr->configure_func),
+                                    sdk::utility::as_hex(itr->configure_result),
+                                    sdk::utility::as_hex(itr->configure_result->initialize),
+                                    sdk::utility::as_hex(itr->configure_result->finalize));
+    }
+    else
+    {
+        context::deactivate_client_contexts(itr->internal_client_id);
+        context::deregister_client_contexts(itr->internal_client_id);
+    }
+
+    get_invoked_configures().emplace(itr->configure_func);
+
+    return true;
+}
+
+bool
 invoke_client_configures()
 {
     if(get_init_status() > 0) return false;
@@ -628,65 +790,36 @@ invoke_client_configures()
 
     for(auto& itr : *get_clients())
     {
-        if(!itr) continue;
+        if(itr) invoke_client_configure(itr);
+    }
 
-        if(!itr->configure_func)
-        {
-            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
-                          "invoke configure function from "
-                       << itr->name << " that had no configuration function";
-            continue;
-        }
+    return true;
+}
 
-        if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
-        {
-            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
-                          "invoke configure function from "
-                       << itr->name << " (addr="
-                       << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
-                       << ") more than once";
-            continue;
-        }
-        else
-        {
-            ROCP_INFO << "rocprofiler::registration::invoke_client_configures() invoking configure "
-                         "function from "
-                      << itr->name << " (addr="
-                      << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
-                      << ")";
-        }
+bool
+invoke_client_initializer(std::optional<client_library>& itr)
+{
+    if(itr && itr->configure_result && itr->configure_result->initialize)
+    {
+        rocprofiler_client_finalize_t client_fini_func = [](rocprofiler_client_id_t _id) -> void {
+            // if there is only one client, just fully finalize
+            if(get_clients()->size() == 1)
+                finalize();
+            else
+                invoke_client_finalizer(_id);
+        };
 
-        auto* _result = itr->configure_func(ROCPROFILER_VERSION,
-                                            ROCPROFILER_VERSION_STRING,
-                                            itr->internal_client_id.handle - get_client_offset(),
-                                            &itr->mutable_client_id);
-
-        if(_result)
-        {
-            itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
-
-            if(itr->configure_attach_func)
-            {
-                auto* _attach_result =
-                    itr->configure_attach_func(ROCPROFILER_VERSION,
-                                               ROCPROFILER_VERSION_STRING,
-                                               itr->internal_client_id.handle - get_client_offset(),
-                                               &itr->mutable_client_id);
-
-                if(_attach_result)
-                {
-                    itr->configure_attach_result =
-                        new rocprofiler_tool_configure_attach_result_t{*_attach_result};
-                }
-            }
-        }
-        else
-        {
-            context::deactivate_client_contexts(itr->internal_client_id);
-            context::deregister_client_contexts(itr->internal_client_id);
-        }
-
-        get_invoked_configures().emplace(itr->configure_func);
+        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                    itr->get_name(),
+                                    sdk::utility::as_hex(itr->configure_func),
+                                    sdk::utility::as_hex(itr->configure_result),
+                                    sdk::utility::as_hex(itr->configure_result->initialize),
+                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        context::push_client(itr->internal_client_id.handle);
+        itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
+        context::pop_client(itr->internal_client_id.handle);
+        // set to nullptr so initialize only gets called once
+        itr->configure_result->initialize = nullptr;
     }
 
     return true;
@@ -703,21 +836,9 @@ invoke_client_initializers()
 
     if(!get_clients()) return false;
 
-    // if there is only one client, just fully finalize
-    rocprofiler_client_finalize_t client_fini_func =
-        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
-                                     : &invoke_client_finalizer;
-
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->configure_result && itr->configure_result->initialize)
-        {
-            context::push_client(itr->internal_client_id.handle);
-            itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
-            context::pop_client(itr->internal_client_id.handle);
-            // set to nullptr so initialize only gets called once
-            itr->configure_result->initialize = nullptr;
-        }
+        invoke_client_initializer(itr);
     }
 
     return true;
@@ -804,6 +925,11 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
+            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // and buffer machinery next, so no callback-capable signal-less completion
+            // may survive. On timeout this abandons+disables signal-less process-wide
+            // (correct here -- the client is going away). No-op with the feature off.
+            kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
@@ -843,12 +969,24 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
+                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                            itr->get_name(),
+                                            sdk::utility::as_hex(itr->configure_func),
+                                            sdk::utility::as_hex(itr->configure_result),
+                                            sdk::utility::as_hex(itr->configure_result->initialize),
+                                            sdk::utility::as_hex(itr->configure_result->finalize));
+
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
+                // F23 terminal fail-closed fence: the client finalizer frees the
+                // tool's callback/buffer machinery next, so no callback-capable
+                // signal-less completion may survive. On timeout abandon+disable
+                // process-wide. No-op with the feature off.
+                kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
@@ -922,6 +1060,17 @@ void
 set_fini_status(int v)
 {
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
+}
+
+void
+client_initialize(std::optional<client_library>& client)
+{
+    set_init_status(-1);
+    invoke_client_configure(client);
+    invoke_client_initializer(client);
+    if(get_num_clients() > 0) internal_threading::initialize();
+    // initialization is no longer available
+    set_init_status(1);
 }
 
 void
@@ -1012,6 +1161,14 @@ finalize()
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+
+        // Signal-less teardown steps 1-6, in the one order that strands no
+        // EOP-proven completion. Must precede the sequence below:
+        // queue_controller_fini joins the task group, and correlation_id_finalize
+        // consults the loss ledger this populates. No-op unless signal-less is
+        // active.
+        kfd::signal_less_teardown();
+
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
@@ -1071,24 +1228,81 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
+    using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
+
     rocprofiler::registration::init_logging();
+
+    if(rocprofiler::registration::get_fini_status() != 0) return ROCPROFILER_STATUS_ERROR_FINALIZED;
 
     ROCP_INFO << "forcing rocprofiler configuration";
 
-    auto& forced_config = rocprofiler::registration::get_forced_configure();
+    auto* forced_configs = rocprofiler::registration::get_forced_configures();
+
+    struct forced_config_info
+    {
+        bool   exists             = false;
+        size_t num_forced_configs = 0;
+    };
+
+    auto _forced_cfg_info = forced_config_info{};
+    if(forced_configs)
+    {
+        auto _lk         = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
+        _forced_cfg_info = forced_configs->wlock(
+            [](auto& _forced_configures, auto _configure_func) {
+                if(_forced_configures.find(_configure_func) != _forced_configures.end())
+                {
+                    ROCP_INFO << "ignoring duplicate forced configure";
+                    return forced_config_info{true, _forced_configures.size()};
+                }
+                _forced_configures.emplace(_configure_func);
+                return forced_config_info{false, _forced_configures.size()};
+            },
+            configure_func);
+    }
+
+    if(_forced_cfg_info.exists)
+    {
+        ROCP_INFO << "ignoring duplicate forced configure";
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
+    if(_forced_cfg_info.num_forced_configs > 1 || rocprofiler::registration::get_init_status() > 0)
+    {
+        ROCP_INFO << "adding forced configure";
+        {
+            auto  _lk     = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
+            auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
+                                           "(forced...)",
+                                           nullptr,
+                                           configure_func,
+                                           nullptr);
+
+            rocprofiler::registration::client_initialize(_client);
+        }
+
+        auto status = rocprofiler::registration::late::invoke_register_propagation();
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format("Failed to invoke rocprofiler-register propagation "
+                                                "during anytime initialization :: {} :: {}",
+                                                rocprofiler_get_status_name(status),
+                                                rocprofiler_get_status_string(status));
+        }
+
+        return status;
+    }
 
     // init status may be -1 (currently initializing) or 1 (already initialized).
     // if either case, we want to ignore this function call but if this is
     if(rocprofiler::registration::get_init_status() != 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    // if another tool forced configure, the init status should be 1, but
-    // let's just make sure that the forced configure function is a nullptr
-    if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-
+    // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    // make sure this library is the one that rocprofiler-register uses
     rocprofiler::registration::set_rocprofiler_register_library();
-    forced_config = configure_func;
+    // full initialization
     rocprofiler::registration::initialize();
 
     // Trigger re-propagation of all registered API tables via rocprofiler-register.
@@ -1097,10 +1311,12 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     auto status = rocprofiler::registration::late::invoke_register_propagation();
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
-                     << "This is normal if runtimes have not initialized yet, or if "
-                     << "rocprofiler-register is not loaded. Runtimes that initialize "
-                     << "after this call will be automatically profiled.";
+        ROCP_INFO << fmt::format(
+            "Failed to invoke rocprofiler-register propagation. This is normal if runtimes have "
+            "not initialized yet, or if rocprofiler-register is not loaded. Runtimes that "
+            "initialize after this call will be automatically profiled :: {} :: {}",
+            rocprofiler_get_status_name(status),
+            rocprofiler_get_status_string(status));
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -1110,7 +1326,7 @@ rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
                                               void*                                      data)
 {
-    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations();
+    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations(nullptr);
 
     if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
 
@@ -1181,6 +1397,24 @@ rocprofiler_set_api_table(const char* name,
 
         auto* hip_runtime_api_table = static_cast<HipDispatchTable*>(*tables);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hip::restore_table(hip_runtime_api_table, lib_instance);
+
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
@@ -1212,6 +1446,24 @@ rocprofiler_set_api_table(const char* name,
                                       << name << ", not " << num_tables;
 
         auto* hip_compiler_api_table = static_cast<HipCompilerDispatchTable*>(*tables);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hip::restore_table(hip_compiler_api_table, lib_instance);
 
         // any internal modifications to the HipCompilerDispatchTable need to be done before we make
         // the copy or else those modifications will be lost when HIP API tracing is enabled because
@@ -1249,6 +1501,32 @@ rocprofiler_set_api_table(const char* name,
             (offsetof(::HsaApiTable, pc_sampling_ext_) < hsa_api_table_size);
 #endif
 
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hsa::restore_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->finalizer_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->tools_, lib_instance);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        if(runtime_pc_sampling_table)
+            rocprofiler::hsa::restore_table(hsa_api_table->pc_sampling_ext_, lib_instance);
+#endif
+
         // store a reference of the HsaApiTable implementations for invoking these functions
         // without going through tracing wrappers
         rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
@@ -1279,6 +1557,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->amd_ext_, lib_instance);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
@@ -1301,6 +1581,7 @@ rocprofiler_set_api_table(const char* name,
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
                             ctx->dispatch_spm != nullptr ||
                             ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) ||
                             (ctx->device_thread_trace != nullptr &&
                              ctx->device_thread_trace->requires_queue_intercept()));
                 });
@@ -1376,6 +1657,26 @@ rocprofiler_set_api_table(const char* name,
         auto* roctx_core = static_cast<roctxCoreApiTable_t*>(tables[0]);
         auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);
         auto* roctx_name = static_cast<roctxNameApiTable_t*>(tables[2]);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::marker::restore_table(roctx_core, lib_instance);
+        rocprofiler::marker::restore_table(roctx_ctrl, lib_instance);
+        rocprofiler::marker::restore_table(roctx_name, lib_instance);
 
         // any internal modifications to the roctxApiTable_t need to be done before we make
         // the copy or else those modifications will be lost when ROCTx tracing is enabled because
@@ -1461,6 +1762,25 @@ rocprofiler_set_api_table(const char* name,
 #endif
         if(is_valid_rccl_dispatch_table)
         {
+            // needed for anytime initialization. If this is the first time the dispatch table is
+            // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+            // tool has already initialized, this restores the dispatch table to the original
+            // function pointers so the ensuing modifications based one the new and existing
+            // contexts are made. In this late initialization scenario, after this function runs,
+            // any function calls to this API happening on a background thread will be lost. We
+            // expect this to be a very rare scenario but the alternatives are quite complex or
+            // problematic: (A) we always instrument every layer of the dispatch table even if there
+            // are no (current) tools requesting those services, (B) we allow the layering to be in
+            // different orders, or (C) we have a very complex system which maintains the consistent
+            // ordering of the layers but only does restoration on the functions which are layered.
+            // Solution A has overhead implications, especially at the HSA layer; Solution B has
+            // unknown side-effects and cannot be adequately tested due to the sheer number of
+            // possible permutations; and Solution C has complexity and maintainability
+            // implications. Given the expected rarity of late initialization while another tool is
+            // active and making API calls on a background thread, we chose to accept the potential
+            // loss of some API calls.
+            rocprofiler::rccl::restore_table(rccl_api, lib_instance);
+
             // any internal modifications to the rcclApiFuncTable need to be done before we make
             // the copy or else those modifications will be lost when RCCL API tracing is
             // enabled because the RCCL API tracing invokes the function pointers from the copy
@@ -1491,6 +1811,25 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocdecode_api = static_cast<RocDecodeDispatchTable*>(tables[0]);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::rocdecode::restore_table(rocdecode_api, lib_instance);
+
         // any internal modifications to the rocdecodeApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when ROCDecode API tracing is enabled
         // because the ROCDecode API tracing invokes the function pointers from the copy below
@@ -1513,6 +1852,25 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected rocJPEG library to pass 1 API table, not " << num_tables;
 
         auto* rocjpeg_api = static_cast<RocJpegDispatchTable*>(tables[0]);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::rocjpeg::restore_table(rocjpeg_api, lib_instance);
 
         // any internal modifications to the rocjpegApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when rocJPEG API tracing is enabled
@@ -1537,6 +1895,25 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocshmem_api = static_cast<rocshmemApiFuncTable*>(tables[0]);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::rocshmem::restore_table(rocshmem_api, lib_instance);
+
         // any internal modifications to the rocshmemApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when rocSHMEM API tracing is enabled
         // because the rocSHMEM API tracing invokes the function pointers from the copy below
@@ -1559,6 +1936,25 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected hipFILE library to pass 1 API table, not " << num_tables;
 
         auto* hipfile_api = static_cast<hipFileDispatchTable*>(tables[0]);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::hipfile::restore_table(hipfile_api, lib_instance);
 
         // Save the original table before installing wrappers; wrappers call through the copy.
         rocprofiler::hipfile::copy_table(hipfile_api, lib_instance);

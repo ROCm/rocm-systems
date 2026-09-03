@@ -6,8 +6,224 @@
 
 #include "PtrUnion.hpp"
 #include "api_trace.h"
+#include "DeviceDataOps.hpp"
 namespace RcclUnitTesting
 {
+  // Threads per block for the device data-op kernels.
+  static constexpr size_t kDeviceKernelBlockSize = 256;
+  // Default Ut device-data element-count threshold (1Mi) when UT_DEVICE_DATA_MIN_ELEMS is unset.
+  static constexpr long long kDefaultDeviceDataMinElems = (1LL << 20);
+
+  // Dispatch a device data-op over the concrete element type for a dtype.
+  // ACTION is a statement using template type `T`.
+  #define RCCL_UT_DTYPE_DISPATCH(dt, ACTION)                                   \
+    switch (dt) {                                                              \
+      case ncclInt8:      { using T = int8_t;       ACTION; break; }           \
+      case ncclUint8:     { using T = uint8_t;      ACTION; break; }           \
+      case ncclInt32:     { using T = int32_t;      ACTION; break; }           \
+      case ncclUint32:    { using T = uint32_t;     ACTION; break; }           \
+      case ncclInt64:     { using T = int64_t;      ACTION; break; }           \
+      case ncclUint64:    { using T = uint64_t;     ACTION; break; }           \
+      case ncclFloat16:   { using T = __half;       ACTION; break; }           \
+      case ncclFloat32:   { using T = float;        ACTION; break; }           \
+      case ncclFloat64:   { using T = double;       ACTION; break; }           \
+      case ncclBfloat16:  { using T = hip_bfloat16; ACTION; break; }           \
+      /* fp8 is never dispatched here: callers route it to the dedicated byte-based    */ \
+      /* kernels (rccl_float8/rccl_bfloat8 alias different types in the host vs device */ \
+      /* compile pass, so a templated kernel would be instantiated with a mismatched  */ \
+      /* mangling). Fail loudly rather than instantiate the templated form for fp8.   */ \
+      case ncclFloat8e4m3:                                                     \
+      case ncclFloat8e5m2:                                                     \
+        TEST_ERROR("fp8 must use the byte-based kernel path (%d)", dt);        \
+        return TEST_FAIL;                                                      \
+      default: TEST_ERROR("Unsupported datatype (%d)", dt); return TEST_FAIL;  \
+    }
+
+  ErrCode PtrUnion::FillPatternDevice(ncclDataType_t const dataType,
+                                      size_t         const numElements,
+                                      int            const globalRank,
+                                      size_t         const startIdx)
+  {
+    // Wiring telltale: fire once per process so runs visibly confirm the device
+    // data path is actually exercised (guards against a silent host fallback).
+    static bool s_fillLogged = false;
+    if (!s_fillLogged)
+    {
+      s_fillLogged = true;
+      fprintf(stdout, "[UT][device-data] FillPatternDevice ACTIVE (first call: dtype=%d, n=%lu)\n",
+              (int)dataType, (unsigned long)numElements);
+      fflush(stdout);
+    }
+    if (numElements == 0) return TEST_SUCCESS;
+    bool const fp8 = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
+    if (fp8)
+    {
+      hipLaunchKernelGGL(FillKernelFp8, dim3(blocks), dim3(threads), 0, 0,
+                         (uint8_t*)this->ptr, numElements, globalRank, startIdx,
+                         dataType == ncclFloat8e5m2);
+    }
+    else
+    {
+      RCCL_UT_DTYPE_DISPATCH(dataType,
+        hipLaunchKernelGGL(FillKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                           (T*)this->ptr, numElements, globalRank, startIdx, fp8));
+    }
+    CHECK_HIP(hipGetLastError());
+    CHECK_HIP(hipDeviceSynchronize());
+    return TEST_SUCCESS;
+  }
+
+  ErrCode PtrUnion::IsEqualDevice(ncclDataType_t const dataType,
+                                  size_t         const numElements,
+                                  void*          const actualGpu,
+                                  void*          const expectedGpu,
+                                  size_t&              mismatches)
+  {
+    // Wiring telltale: fire once per process so runs visibly confirm the device
+    // validate path is actually exercised (guards against a silent host fallback).
+    static bool s_cmpLogged = false;
+    if (!s_cmpLogged)
+    {
+      s_cmpLogged = true;
+      fprintf(stdout, "[UT][device-data] IsEqualDevice ACTIVE (first call: dtype=%d, n=%lu)\n",
+              (int)dataType, (unsigned long)numElements);
+      fflush(stdout);
+    }
+    mismatches = 0;
+    if (numElements == 0) return TEST_SUCCESS;
+
+    // Scope-guarded device frees: every early return below (CHECK_HIP failures and the
+    // dispatch default) runs these destructors, so nothing leaks on the error path.
+    struct DevFree
+    {
+      void* p = nullptr;
+      ~DevFree()
+      {
+        if (p) { (void)hipFree(p); }
+      }
+    } gScratch, gVals, gBits;
+
+    // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
+    unsigned long long* dScratch = nullptr;
+    double*             dVals    = nullptr;   // [expected, actual] float view at first divergent index
+    unsigned long long* dBits    = nullptr;   // [expected, actual] exact raw bits (integer dtypes)
+    CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
+    CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
+    CHECK_HIP(hipMalloc(&dBits,    2 * sizeof(unsigned long long))); gBits.p    = dBits;
+    unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
+    CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
+
+    bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
+    bool const isE5m2 = (dataType == ncclFloat8e5m2);
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
+    if (fp8)
+    {
+      hipLaunchKernelGGL(MismatchReduceFp8, dim3(blocks), dim3(threads), 0, 0,
+                         (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, numElements,
+                         dScratch, dScratch + 1, isE5m2);
+    }
+    else
+    {
+      RCCL_UT_DTYPE_DISPATCH(dataType,
+        hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                           (const T*)actualGpu, (const T*)expectedGpu, numElements,
+                           dScratch, dScratch + 1));
+    }
+    CHECK_HIP(hipGetLastError());
+    unsigned long long hOut[2] = { 0ULL, 0ULL };
+    CHECK_HIP(hipMemcpy(hOut, dScratch, sizeof(hOut), hipMemcpyDeviceToHost));
+    mismatches = (size_t)hOut[0];
+
+    // Diagnostic: with the host buffering path retired this is the only value dump, so
+    // report the first divergent index with its expected/actual (dtype-aware). The test
+    // pattern's values are small, so a double captures every dtype exactly.
+    if (hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
+    {
+      size_t const fi = (size_t)hOut[1];
+      if (fp8)
+      {
+        hipLaunchKernelGGL(CaptureElemFp8, dim3(1), dim3(1), 0, 0,
+                           (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, fi, dVals, isE5m2);
+      }
+      else
+      {
+        RCCL_UT_DTYPE_DISPATCH(dataType,
+          hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
+                             (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
+      }
+      CHECK_HIP(hipGetLastError());
+      double             hVals[2] = { 0.0, 0.0 };    // float view [expected, actual]
+      unsigned long long hBits[2] = { 0ULL, 0ULL };  // exact raw bits [expected, actual]
+      CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
+      CHECK_HIP(hipMemcpy(hBits, dBits, sizeof(hBits), hipMemcpyDeviceToHost));
+      // Mirror the host IsEqual verbose format exactly, per dtype: integers print from the
+      // exact bits (no double rounding), floats from the double view. fp8's dBits are unused
+      // (it fills only dVals via CaptureElemFp8) and prints through the float default.
+      switch (dataType)
+      {
+      case ncclInt8:
+        TEST_ERROR("Expected output: %d.  Actual output: %d at index %zu",
+                   (int)(int8_t)hBits[0], (int)(int8_t)hBits[1], fi); break;
+      case ncclUint8:
+        TEST_ERROR("Expected output: %u.  Actual output: %u at index %zu",
+                   (unsigned)(uint8_t)hBits[0], (unsigned)(uint8_t)hBits[1], fi); break;
+      case ncclInt32:
+        TEST_ERROR("Expected output: %d.  Actual output: %d at index %zu",
+                   (int32_t)hBits[0], (int32_t)hBits[1], fi); break;
+      case ncclUint32:
+        TEST_ERROR("Expected output: %u.  Actual output: %u at index %zu",
+                   (uint32_t)hBits[0], (uint32_t)hBits[1], fi); break;
+      case ncclInt64:
+        TEST_ERROR("Expected output: %lld.  Actual output: %lld at index %zu",
+                   (long long)(int64_t)hBits[0], (long long)(int64_t)hBits[1], fi); break;
+      case ncclUint64:
+        TEST_ERROR("Expected output: %llu.  Actual output: %llu at index %zu",
+                   (unsigned long long)hBits[0], (unsigned long long)hBits[1], fi); break;
+      default:  // floating-point dtypes (fp16/fp32/fp64/bf16/fp8) — exact via double
+        TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
+                   hVals[0], hVals[1], fi); break;
+      }
+    }
+    return TEST_SUCCESS;
+  }
+
+  ErrCode PtrUnion::FillReducedPatternDevice(ncclDataType_t const dataType,
+                                             size_t         const numElements,
+                                             int            const totalRanks,
+                                             ncclRedOp_t    const op,
+                                             size_t         const startIdx)
+  {
+    static bool s_redLogged = false;
+    if (!s_redLogged)
+    {
+      s_redLogged = true;
+      fprintf(stdout, "[UT][device-data] FillReducedPatternDevice ACTIVE (first call: dtype=%d, ranks=%d, op=%d)\n",
+              (int)dataType, totalRanks, (int)op);
+      fflush(stdout);
+    }
+    if (numElements == 0) return TEST_SUCCESS;
+    bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
+    bool const isAvg  = (op == ncclAvg);
+    int  const tempOp = (op >= ncclAvg ? (int)ncclSum : (int)op);  // avg/custom reduce as sum
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
+    if (fp8)
+    {
+      hipLaunchKernelGGL(ExpectedReduceFp8, dim3(blocks), dim3(threads), 0, 0,
+                         (uint8_t*)this->ptr, numElements, totalRanks, tempOp, isAvg,
+                         dataType == ncclFloat8e5m2, startIdx);
+    }
+    else
+    {
+      RCCL_UT_DTYPE_DISPATCH(dataType,
+        hipLaunchKernelGGL(ExpectedReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                           (T*)this->ptr, numElements, totalRanks, fp8, tempOp, isAvg, startIdx));
+    }
+    CHECK_HIP(hipGetLastError());
+    CHECK_HIP(hipDeviceSynchronize());
+    return TEST_SUCCESS;
+  }
+
   size_t DataTypeToBytes(ncclDataType_t const dataType)
   {
     switch (dataType)
@@ -120,11 +336,48 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  // Device-data mode (ON by default; UT_DEVICE_DATA=0 to disable). Per-collective prep
+  // funcs consult this to build input/expected on the GPU and validate device-side, but
+  // ONLY where that yields a measured speedup. Cached once for the process.
+  bool UtDeviceDataEnabled()
+  {
+    // ON by default; set UT_DEVICE_DATA=0 to force the host reference path.
+    static int cached = -1;
+    if (cached < 0)
+    {
+      char const* e = getenv("UT_DEVICE_DATA");
+      cached = (e && e[0] == '0') ? 0 : 1;
+    }
+    return cached == 1;
+  }
+
+  bool UtDeviceDtypeSupported(ncclDataType_t const /*dataType*/)
+  {
+    // All host-supported dtypes now have device kernels (fp8 via dedicated byte-based
+    // kernels that dodge the host/device typedef-mangling mismatch). Kept as a hook.
+    return true;
+  }
+
+  size_t UtDeviceDataMinElements()
+  {
+    static long long cached = -1;
+    if (cached < 0)
+    {
+      char const* e = getenv("UT_DEVICE_DATA_MIN_ELEMS");
+      long long v = e ? atoll(e) : 0;
+      cached = (v > 0) ? v : kDefaultDeviceDataMinElems;
+    }
+    return (size_t)cached;
+  }
+
   ErrCode PtrUnion::FillPattern(ncclDataType_t const dataType,
                                 size_t         const numElements,
                                 int            const globalRank,
                                 bool           const isGpuMem)
   {
+    // NOTE: device-data mode is opt-in PER COLLECTIVE (a prep func calls
+    // FillPatternDevice / builds expectedGpu directly) so that only collectives with a
+    // measured speedup change behavior. FillPattern itself stays on the host path.
     PtrUnion temp;
     size_t const numBytes = numElements * DataTypeToBytes(dataType);
 

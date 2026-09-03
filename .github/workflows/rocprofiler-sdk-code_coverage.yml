@@ -167,6 +167,8 @@ jobs:
           submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
@@ -208,7 +210,7 @@ jobs:
         apt-get update
         apt-get install -y build-essential ccache cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
         python3 -m pip install -U --user -r requirements.txt
-        python3 -m pip install -U --user cmake==3.25.0
+        python3 -m pip install -U --user cmake==4.4.3
 
     - name: Sync gcov with compilers
       timeout-minutes: 10

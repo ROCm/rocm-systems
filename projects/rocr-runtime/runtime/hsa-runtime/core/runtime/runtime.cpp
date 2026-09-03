@@ -979,7 +979,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -2182,6 +2182,31 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 }
 
 void Runtime::AsyncEventsPool::clear() {
+  // The same lock alloc() and free() take. Without it this walks and releases
+  // block_list_, and empties free_list_, while another thread is still handing
+  // items out of them: ConcurrentAsyncEvents::Clear() runs on the async-event
+  // monitor thread, and application threads can be inside
+  // hsa_amd_signal_async_handler() -> PushBack() -> alloc() at the same moment.
+  // Not recursive, so this cannot self-deadlock: neither caller (the destructor,
+  // and ConcurrentAsyncEvents::Clear()) holds the lock.
+  //
+  // What this lock does not cover is an item alloc() already returned. That
+  // caller releases the lock before it runs item->init() and enqueues, so a
+  // clear() landing in between frees the block out from under that write. No
+  // lock here can close that window: the item outlives the critical section it
+  // came from. What closes it is the API contract. Both callers run only from
+  // teardown, reached from Runtime::Unload() under bootstrap_lock(), and the
+  // HSA specification leaves it undefined to call into the runtime concurrently
+  // with the hsa_shut_down() releasing the last reference, so in a conforming
+  // program no PushBack() is in flight by the time either runs. The runtime
+  // does not enforce that, though: IS_OPEN() reads ref_count_ once and holds
+  // nothing for the rest of the call, so a thread can pass it and then be
+  // descheduled while another tears the runtime down. Holding the lock here is
+  // what keeps that program from corrupting the pool's vectors outright, a far
+  // likelier and less debuggable failure than the item-lifetime window it
+  // leaves; it is not a substitute for callers quiescing before shutdown.
+  std::lock_guard<HybridMutex> lock(lock_);
+
   ifdebug {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
@@ -2667,8 +2692,16 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  // Probe aqlprofile availability once and cache the result. Prefer the
+  // version-suffixed file name (libhsa-amd-aqlprofile64.so.<major>) that matches
+  // the aqlprofile ABI this runtime is built against; the unversioned dev
+  // symlink may point at an incompatible major version. Fall back to the
+  // unversioned name only if the expected versioned file is absent.
+  aqlprofile_lib_ = os::LoadLib(std::string(kAqlProfileLib) + "." +
+                                std::to_string(hsa_ven_amd_aqlprofile_VERSION_MAJOR));
+  if (aqlprofile_lib_ == nullptr) {
+    aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+  }
 
   // Load extensions
   LoadExtensions();
@@ -3108,7 +3141,9 @@ hsa_status_t Runtime::LoadHotswapTool() {
     char name[64] = {};
     hsa_status_t status = agent->GetInfo(HSA_AGENT_INFO_NAME, name);
     if (status != HSA_STATUS_SUCCESS) return status;
-    if (std::strcmp(name, "gfx1250") != 0) continue;
+    // A0 agents report the strict target name, so match both spellings; the ASIC
+    // revision below is the actual A0 discriminator.
+    if (std::strcmp(name, "gfx1250") != 0 && std::strcmp(name, "gfx1250-strict") != 0) continue;
 
     uint32_t asic_revision = 0;
     status = agent->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
@@ -3213,7 +3248,7 @@ void Runtime::CloseTools() {
 
 void Runtime::AsyncEventsControl::Shutdown() {
   exit.store(true, std::memory_order_release);
-  hsa_signal_handle(wake)->StoreRelaxed(1);
+  hsa_signal_handle(wake)->StoreReleaseAndNotify(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
@@ -3937,7 +3972,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
   };
 
   /* Each pending dep signal calls this handler when it reaches 0.
-  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  The last one to decrement remaining_deps to 0 will trigger the discard. */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
 
@@ -3957,6 +3992,127 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     }
   } else {
     // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
+      return errors in the future, we need to handle the possibility of use-after-free and double
+      deletion of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
+    }
+  }
+
+  OpGuard.Dismiss();
+  return HSA_STATUS_SUCCESS;
+#endif
+}
+
+hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                                 const hsa_agent_t* dst_agents,
+                                                 uint32_t num_dst_agents,
+                                                 uint32_t num_dep_signals,
+                                                 const hsa_signal_t* dep_signals,
+                                                 hsa_signal_t completion_signal) {
+#if !defined(__linux__)
+  return HSA_STATUS_ERROR;
+#else
+  const size_t kPageSize = os::PageSize();
+
+  // Resolve and validate all unique destination agents up front
+  std::vector<uint32_t> gpu_nodes(num_dst_agents);
+  for (uint32_t i = 0; i < num_dst_agents; i++) {
+    core::Agent* agent = Agent::Convert(dst_agents[i]);
+    if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice)
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    gpu_nodes[i] = agent->node_id();
+  }
+
+  // Validate the pointers; only vmem-reserved addresses supported
+  for (uint32_t i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Operation context
+  struct DiscardAndPrefetchOp {
+    std::vector<uint32_t> target_gpus;    // per-region dest gpu node for prefetch
+    std::vector<std::pair<void*, size_t>> regions;
+    std::atomic<uint32_t> remaining_deps;
+    hsa_signal_t completion;
+  };
+
+  DiscardAndPrefetchOp* op = new DiscardAndPrefetchOp();
+  MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
+
+  op->completion = completion_signal;
+  op->regions.reserve(count);
+  op->target_gpus.reserve(count);
+
+  // Build page-aligned region list, resolve gpus for every region
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
+    size_t len = end - base;
+
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
+    op->target_gpus.push_back(gpu_nodes[i]);
+  }
+
+  // Filter out dependency signals already at 0
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (uint32_t i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0)
+      pending_deps.push_back(dep_signals[i]);
+  }
+
+  static auto discard_and_prefetch_all = [](DiscardAndPrefetchOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_gpu = op->target_gpus[i];
+
+      int res = madvise(base, size, MADV_DONTNEED);
+      if (res != 0)
+        debug_warning(false && "madvise MADV_DONTNEED failed in SvmDiscardAndPrefetchBatch");
+
+      // prefetch to dest gpu
+      HSA_SVM_ATTRIBUTE gpu_attr;
+      gpu_attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+      gpu_attr.value = target_gpu;
+      HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &gpu_attr));
+      if (err != HSAKMT_STATUS_SUCCESS)
+        debug_warning(false && "hsaKmtSVMSetAttr gpu prefetch failed in SvmDiscardAndPrefetchBatch");
+    }
+
+    if (op->completion.handle != 0)
+      Signal::Convert(op->completion)->SubRelaxed(1);
+    delete op;
+  };
+
+  /* Every dep signal calls this handler when it reaches 0. The last one to decrement 
+  remaining_deps to 0 triggers the discard-and-prefetch op on all memory ranges */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardAndPrefetchOp* op = reinterpret_cast<DiscardAndPrefetchOp*>(arg);
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      discard_and_prefetch_all(op);
+    return false;
+  };
+
+  // Dispatch directly if there are no pending deps, otherwise register signal handlers
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(err, "Failed to schedule async discard-and-prefetch operation");
+  } else {
     op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()), std::memory_order_release);
     for (size_t i = 0; i < pending_deps.size(); i++) {
       /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to
@@ -4107,17 +4263,19 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
-Agent* Runtime::LowestDrmMinorGpu() {
-  auto drm_minor = [](const core::Agent* a) {
-    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
-  };
-  core::Agent* selected = nullptr;
-  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
-    for (auto* candidate : *pool) {
-      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
-    }
+Agent* Runtime::KfdGttAnchorGpu() {
+  HSAuint32 node_id = 0;
+  HSAuint32 gpu_id = 0;
+  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+    return nullptr;
   }
-  return selected;
+
+  auto it = agents_by_node_.find(node_id);
+  if (it == agents_by_node_.end() || it->second.empty()) {
+    return nullptr;
+  }
+
+  return it->second[0];
 }
 
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
@@ -4138,13 +4296,12 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* For CPU-owned memory, DRM operations require a GPU agent. Select
-    the first available GPU agent before calling CreateShareableHandle.
-    For device memory, use owner agent. */
+    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
+     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      agent_for_drm = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
       if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -4355,7 +4512,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->KfdGttAnchorGpu();
       if (drm_agent != nullptr) {
         agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);

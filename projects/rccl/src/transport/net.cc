@@ -1326,8 +1326,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,
@@ -1578,8 +1578,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       } else // FALL-THROUGH to the HSA DMA-BUF export path
 #endif
 #if defined(__HIP_PLATFORM_AMD__)
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
-          pfn_hsa_amd_portable_export_dmabuf) {
+        if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
+            pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd,

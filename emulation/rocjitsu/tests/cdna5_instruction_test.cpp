@@ -27,6 +27,69 @@ public:
   std::vector<std::vector<uint32_t>> workgroup_ids;
 };
 
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
+
+private:
+  bool original_;
+};
+
+TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
+  struct Case {
+    uint32_t input;
+    uint32_t expected;
+  };
+  constexpr std::array cases{
+      Case{0x00000000u, 0xFFFFFFFFu}, Case{0xFFFFFFFFu, 0xFFFFFFFFu}, Case{0x00000001u, 31u},
+      Case{0x00000002u, 30u},         Case{0x00000003u, 30u},         Case{0x00000007u, 29u},
+      Case{0x0000FFFFu, 16u},         Case{0x40000000u, 1u},          Case{0x7FFFFFFFu, 1u},
+      Case{0x80000000u, 1u},          Case{0xFFFFFFFEu, 31u},         Case{0xFFFFFC00u, 22u},
+  };
+  constexpr uint32_t kSrc = 0;
+  constexpr uint32_t kDst = 2;
+  const auto vop1 = cdna5::build_vop1(cdna5::kVClsI32Vop1, {.src0 = 256 + kSrc, .vdst = kDst});
+  const auto vop3 = cdna5::build_vop3(cdna5::kVClsI32Vop3, {.vdst = kDst, .src0 = 256 + kSrc});
+
+  ForceScalarGuard force_scalar_guard;
+  for (const bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+
+    Gfx1250Sim sim;
+    auto *wf = sim.dispatch_scratch_wf();
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec((uint64_t{1} << cases.size()) - 1);
+
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < cases.size(); ++lane)
+      sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(decoder, nullptr);
+    auto check_encoding = [&](const auto &words, std::string_view expected_mnemonic) {
+      SCOPED_TRACE(expected_mnemonic);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic);
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane)
+        sim.cu()->write_vgpr(vgpr_base + kDst, lane, 0xDEADBEEFu);
+      sim.cu()->execute_instruction(inst.get(), *wf);
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
+        EXPECT_EQ(sim.cu()->read_vgpr(vgpr_base + kDst, lane), cases[lane].expected)
+            << "lane " << lane << ", input 0x" << std::hex << cases[lane].input;
+      }
+    };
+
+    check_encoding(vop1, "v_cls_i32_e32");
+    check_encoding(vop3, "v_cls_i32");
+  }
+}
+
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   const uint32_t code[] = {
@@ -917,7 +980,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE; // row-select lane 0
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -930,8 +993,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
         static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst, lane)) |
         (static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst + 1, lane)) << 32);
     const uint64_t expected =
-        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase + (lane ^ 1u)))
-                  : kOldDstBase + lane;
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstLoBase + lane) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, lane), kLowDstHiBase + lane) << "lane " << lane;
@@ -1230,6 +1292,90 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
                              (static_cast<uint64_t>(cu.read_vgpr(vb + kDst + 3, 0)) << 32);
   EXPECT_EQ(returned0, kOld0);
   EXPECT_EQ(returned1, kOld1);
+}
+
+TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kUnusedVdst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kInitial = 0x1020'3040u;
+  constexpr uint32_t kAddend = 0x0102'0304u;
+  constexpr uint32_t kVgprSentinel = 0xA1A2'A3A4u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData, 0, kAddend);
+  cu.write_vgpr(vb + kUnusedVdst, 0, kVgprSentinel);
+  cu.lds().write32(wf->lds_base() + kAddress, kInitial);
+
+  cdna5::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kUnusedVdst;
+  auto *inst = new cdna5::DsAddU32Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_FALSE(state->is_load);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read32(wf->lds_base() + kAddress), kInitial + kAddend);
+  EXPECT_EQ(cu.read_vgpr(vb + kUnusedVdst, 0), kVgprSentinel);
+}
+
+TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kUnusedVdst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint64_t kInitial = 0x0102'0304'0506'0708ULL;
+  constexpr uint64_t kAddend = 0x1011'1213'1415'1617ULL;
+  constexpr uint64_t kVgprSentinel = 0xA1A2'A3A4'B1B2'B3B4ULL;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData, 0, static_cast<uint32_t>(kAddend));
+  cu.write_vgpr(vb + kData + 1, 0, static_cast<uint32_t>(kAddend >> 32));
+  cu.write_vgpr(vb + kUnusedVdst, 0, static_cast<uint32_t>(kVgprSentinel));
+  cu.write_vgpr(vb + kUnusedVdst + 1, 0, static_cast<uint32_t>(kVgprSentinel >> 32));
+  cu.lds().write64(wf->lds_base() + kAddress, kInitial);
+
+  cdna5::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kUnusedVdst;
+  auto *inst = new cdna5::DsAddU64Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_FALSE(state->is_load);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read64(wf->lds_base() + kAddress), kInitial + kAddend);
+  const uint64_t vgpr_value = cu.read_vgpr(vb + kUnusedVdst, 0) |
+                              (static_cast<uint64_t>(cu.read_vgpr(vb + kUnusedVdst + 1, 0)) << 32);
+  EXPECT_EQ(vgpr_value, kVgprSentinel);
 }
 
 TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiveLanes) {

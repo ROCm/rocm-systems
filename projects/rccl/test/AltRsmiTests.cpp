@@ -1753,4 +1753,50 @@ TEST(AltRsmiTest, FabricInfo_AddrModeUnknown) {
   );
 }
 
+TEST(AltRsmiTest, FabricInfo_FakePciFunctionFallsBackToFn0) {
+  RUN_ISOLATED_TEST(
+    "FabricInfo_FakePciFunctionFallsBackToFn0",
+    []() {
+      setupTestEnvironment();
+      // KFD location_id 23553 = 0x5C01 → bus 0x5c, device 0, function 1.
+      // DPX/XCP HIP names this as a GPU BDF, but the only DRM PCI slot is .0.
+      createDirectory("2");
+      createFile("2/gpu_id", "8192\n");
+      createFile("2/properties",
+                 "unique_id 99\n"
+                 "location_id 23553\n"
+                 "domain 0\n"
+                 "vendor_id 4098\n");
+      createDirectory("2/io_links");
+      AltRsmiTestUtils::ResetState();
+      removeDrmSandbox();
+      AltRsmiTestUtils::SetDrmRoot(kTestDrmBasePath);
+      ASSERT_EQ(ARSMI_init(), 0);
+      setupDrmCard(0, "0000:5c:00.0");
+      setupUalink(0, "UALoE", "active", 3, 1000, 10, 1, 0, 2, "source-aliasing", "");
+
+      uint32_t n = 0;
+      ASSERT_EQ(ARSMI_get_num_devices(&n), 0);
+      uint32_t fakeFn = n;
+      for (uint32_t i = 0; i < n; i++) {
+        uint64_t bdf = 0;
+        ASSERT_EQ(ARSMI_dev_pci_id_get(i, &bdf), 0);
+        if ((bdf & 0x7) == 1) {
+          fakeFn = i;
+          break;
+        }
+      }
+      ASSERT_LT(fakeFn, n);
+
+      ARSMI_fabricInfo info;
+      int result = ARSMI_get_fabric_info(fakeFn, &info);
+      ASSERT_EQ(result, 0);
+      ASSERT_EQ(info.supported, 1);
+      ASSERT_EQ(info.fabric_type, ARSMI_FABRIC_TYPE_UALOE);
+      removeDrmSandbox();
+      cleanupTestEnvironment();
+    }
+  );
+}
+
 } // namespace RcclUnitTesting

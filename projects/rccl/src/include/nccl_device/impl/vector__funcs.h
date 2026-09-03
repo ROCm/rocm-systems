@@ -768,8 +768,7 @@ NCCL_DEVICE_INLINE EltPack<int8_t, 4> reducePack(OpSum<int8_t> const& /* red */,
   bb.pack = b;
 #if defined(NCCL_HIP_PLATFORM) || defined(__HIP_PLATFORM_AMD__)
 #pragma unroll
-  for (int i = 0; i < 4; ++i)
-    out.pack.elts()[i] = static_cast<int8_t>(aa.pack.elts()[i] + bb.pack.elts()[i]);
+  for (int i = 0; i < 4; ++i) out.pack.elts()[i] = static_cast<int8_t>(aa.pack.elts()[i] + bb.pack.elts()[i]);
 #else
   out.word = __vadd4(aa.word, bb.word);
 #endif

@@ -39,10 +39,23 @@ enum class WfState : uint8_t {
   ENDING,  ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
+/// @brief Simulator execution failures that are not architectural wave state.
+enum class InstructionExecutionError : uint8_t {
+  None,
+  UnsupportedOperandValue,
+};
+
 /// @brief Allocation slice within a register file.
 struct RegAllocation {
   uint32_t base = 0;  ///< First register index in the physical file.
   uint32_t count = 0; ///< Number of registers allocated.
+
+  [[nodiscard]] constexpr bool contains(uint32_t physical_base, uint32_t physical_count = 1) const {
+    if (physical_count == 0 || physical_base < base)
+      return false;
+    const uint32_t offset = physical_base - base;
+    return offset < count && physical_count <= count - offset;
+  }
 };
 
 /// @brief AMDGPU wavefront execution state.
@@ -75,8 +88,11 @@ public:
   ~Wavefront() override = default;
 
   /// @brief Return the number of lanes per wavefront.
-  /// @returns Lanes per wavefront (ISA-fixed).
+  /// @returns Lanes in this dispatched architectural wavefront.
   uint32_t wf_size() const { return wf_size_; }
+
+  /// @brief Return the descriptor-selected architectural wave width.
+  uint32_t kernel_wave_size() const { return wf_size_; }
 
   /// @brief Return the ISA maximum SGPRs per wavefront.
   /// @returns Maximum scalar registers.
@@ -128,6 +144,33 @@ public:
 
   /// @brief Reserved raw WAVE_SCHED_MODE state for future WGP scheduling model.
   void set_wave_sched_mode_raw(uint32_t val) { wave_sched_mode_raw_ = val; }
+
+  /// @brief Raw GFX12 exception flags that have no legacy TRAPSTS slot.
+  uint32_t gfx12_excp_flag_user_extra_raw() const { return gfx12_excp_flag_user_extra_raw_; }
+
+  /// @brief Set GFX12 exception flags that have no legacy TRAPSTS slot.
+  void set_gfx12_excp_flag_user_extra_raw(uint32_t val) { gfx12_excp_flag_user_extra_raw_ = val; }
+
+  /// @brief Whether this wave uses GFX12's dedicated TRAP_CTRL register.
+  bool uses_separate_trap_ctrl() const;
+
+  /// @brief Raw GFX12 trap enables, architecturally separate from MODE.
+  uint32_t gfx12_trap_ctrl_raw() const { return gfx12_trap_ctrl_raw_; }
+
+  /// @brief Set the raw GFX12 trap enables without changing MODE.VGPR_MSB.
+  void set_gfx12_trap_ctrl_raw(uint32_t val) { gfx12_trap_ctrl_raw_ = val; }
+
+  /// @brief Raw gfx12.5 XNACK replay state preserved by the trap handler.
+  uint32_t gfx1250_xnack_state_priv_raw() const { return gfx1250_xnack_state_priv_raw_; }
+
+  /// @brief Set the raw gfx12.5 XNACK replay state.
+  void set_gfx1250_xnack_state_priv_raw(uint32_t val) { gfx1250_xnack_state_priv_raw_ = val; }
+
+  /// @brief Raw gfx12.5 XNACK lane mask.
+  uint32_t gfx1250_xnack_mask_raw() const { return gfx1250_xnack_mask_raw_; }
+
+  /// @brief Set the raw gfx12.5 XNACK lane mask.
+  void set_gfx1250_xnack_mask_raw(uint32_t val) { gfx1250_xnack_mask_raw_ = val; }
 
   /// @brief Return the two-bit VGPR high-bank selector for an operand role.
   uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
@@ -293,6 +336,16 @@ public:
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
+  /// @brief Return the execution-local mask applied to VGPR write effects.
+  /// @details DPP semantic helpers still evaluate every active lane so scalar
+  /// side results see the complete operation. This mask suppresses both the
+  /// architectural VGPR commit and its plugin observation for row/bank-masked
+  /// or invalid-source lanes.
+  uint64_t vgpr_write_mask() const { return vgpr_write_mask_ & lane_mask(); }
+
+  /// @brief Set the execution-local VGPR write-effect mask.
+  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val & lane_mask(); }
+
   /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
@@ -301,19 +354,23 @@ public:
   /// @returns VCC mask with non-lane bits cleared.
   uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
 
-  /// @brief Set the raw architectural VCC register pair.
-  /// @param val New raw VCC value.
-  ///
-  /// Scalar operand writes may update either half directly. Vector predicate
-  /// and carry producers must use set_vcc_mask() to preserve wave32 VCC_HI.
-  void set_vcc(uint64_t val) { vcc_ = val; }
-
   /// @brief Set the active-lane portion of the VCC register pair.
-  /// @param val New lane-mask value.
+  /// @param val New VCC mask value.
   ///
-  /// Wave32 leaves VCC_HI available as scalar scratch. Vector instructions
-  /// that produce a predicate or carry mask must preserve those non-lane bits.
-  void set_vcc_mask(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+  /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
+  /// must therefore preserve the non-lane bits, matching set_exec().
+  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+
+  /// @brief Set the raw architectural VCC register pair.
+  void set_vcc_raw(uint64_t val) { vcc_ = val; }
+
+  /// @brief Commit a wave-sized implicit VCC result.
+  /// @details Vector mask-producing instructions write only the lanes present
+  /// in the current wave. In Wave32, VCC_HI remains separately addressable
+  /// scalar state and must not be clobbered by a low-half compare or carry
+  /// result.
+  /// @param val New per-lane VCC result.
+  void set_vcc_mask(uint64_t val) { set_vcc(val); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -364,6 +421,12 @@ public:
 
   /// @brief Set this wave's scratch scoreboard id (set at dispatch by the CP).
   void set_scratch_scoreboard_id(uint32_t val) { scratch_scoreboard_id_ = val; }
+
+  /// @brief Return the physical shader engine containing this wave.
+  uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Set the physical shader engine containing this wave.
+  void set_shader_engine_id(uint32_t val) { shader_engine_id_ = val; }
 
   uint64_t shared_aperture_base() const { return shared_aperture_base_; }
   uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
@@ -552,6 +615,25 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Record a fail-closed instruction execution error.
+  /// @details Execution callbacks use this for inputs whose architectural
+  /// behavior is not implemented. Callers must not treat it as a hardware trap.
+  void report_instruction_execution_error(InstructionExecutionError error) {
+    instruction_execution_error_ = error;
+  }
+
+  InstructionExecutionError instruction_execution_error() const {
+    return instruction_execution_error_;
+  }
+
+  bool instruction_execution_failed() const {
+    return instruction_execution_error_ != InstructionExecutionError::None;
+  }
+
+  void clear_instruction_execution_error() {
+    instruction_execution_error_ = InstructionExecutionError::None;
+  }
+
   // -- KFD debugger (trap) state --
   //
   // These model the wave-level state the AMD trap handler maintains for
@@ -707,6 +789,7 @@ public:
   struct DebugStopState {
     uint32_t trapsts = 0;
     uint32_t mode_raw = 0;
+    uint32_t gfx12_trap_ctrl_raw = 0;
     uint32_t trap_id = 0;
     bool debug_halted = false;
     bool single_step = false;
@@ -715,7 +798,7 @@ public:
 
   /// @brief Capture the fields @ref restore_debug_stop_state puts back.
   DebugStopState debug_stop_state() const {
-    return DebugStopState{trapsts_,      mode_raw_,    trap_id_,
+    return DebugStopState{trapsts_,      mode_raw_,    gfx12_trap_ctrl_raw_,    trap_id_,
                           debug_halted_, single_step_, fatal_exception_pending_};
   }
 
@@ -723,6 +806,7 @@ public:
   void restore_debug_stop_state(const DebugStopState &saved) {
     trapsts_ = saved.trapsts;
     set_mode_raw(saved.mode_raw);
+    gfx12_trap_ctrl_raw_ = saved.gfx12_trap_ctrl_raw;
     trap_id_ = saved.trap_id;
     debug_halted_ = saved.debug_halted;
     single_step_ = saved.single_step;
@@ -783,14 +867,21 @@ public:
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
+    wf_size_ = default_wf_size_;
     exec_ = lane_mask();
+    vgpr_write_mask_ = lane_mask();
     vcc_ = 0;
     m0_ = 0;
     set_mode_raw(0);
     set_wave_sched_mode_raw(0);
+    gfx12_excp_flag_user_extra_raw_ = 0;
+    gfx12_trap_ctrl_raw_ = 0;
+    gfx1250_xnack_state_priv_raw_ = 0;
+    gfx1250_xnack_mask_raw_ = 0;
     scratch_base_ = 0;
     scratch_lane_size_ = 0;
     scratch_scoreboard_id_ = 0;
+    shader_engine_id_ = 0;
     shared_aperture_base_ = 0;
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
@@ -806,6 +897,7 @@ public:
       t = 0;
     trapsts_ = 0;
     pending_alu_causes_ = 0;
+    instruction_execution_error_ = InstructionExecutionError::None;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -830,9 +922,10 @@ protected:
   /// @param max_sgprs Maximum SGPRs per wavefront (ISA-fixed).
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
-  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
-            uint32_t max_vgprs, bool mode_has_gpr_idx_en)
-      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
+  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
+            uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en)
+      : cu_(cu), cu_view_(cu, *this), wf_id_(wf_id), wf_size_(default_wf_size),
+        default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
         max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
@@ -846,17 +939,20 @@ protected:
   uint32_t wave_in_group_ = 0;  ///< Position of this wave within its workgroup (debugger).
   uint32_t process_id_ = 0;     ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t queue_id_ = 0;       ///< KFD queue ID that launched this wave (debugger correlation).
-  uint32_t lds_base_ = 0;       ///< Per-WG LDS base offset (set per dispatch).
-  uint32_t lds_size_ = 0;       ///< Aligned per-WG LDS allocation size.
-  Lds *lds_ = nullptr;          ///< Placement-selected LDS backing; nullptr means CU-local LDS.
-  uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
-  uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.
+  InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
+  Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
+  uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
-  uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
-  uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
-  uint32_t num_vgprs_ = 0; ///< Allocated vector registers (set at dispatch).
-  uint32_t max_sgprs_ = 0; ///< ISA maximum SGPRs per wavefront.
-  uint32_t max_vgprs_ = 0; ///< ISA maximum VGPRs per wavefront.
+  uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
+  uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
+  uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
+  uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
+  uint32_t num_vgprs_ = 0;       ///< Allocated vector registers (set at dispatch).
+  uint32_t max_sgprs_ = 0;       ///< ISA maximum SGPRs per wavefront.
+  uint32_t max_vgprs_ = 0;       ///< ISA maximum VGPRs per wavefront.
 
   RegAllocation sgpr_alloc_; ///< Slice in CU's SGPR file.
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
@@ -867,16 +963,23 @@ private:
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
-  uint64_t exec_ = ~0ULL;              ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                   ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                    ///< M0 special register (misc addressing).
-  uint32_t mode_raw_ = 0;              ///< MODE register state.
-  bool mode_has_gpr_idx_en_ = false;   ///< True when MODE[27] is GPR_IDX_EN.
-  uint8_t vgpr_msb_mode_ = 0;          ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
-  uint32_t wave_sched_mode_raw_ = 0;   ///< WAVE_SCHED_MODE register state.
-  uint64_t scratch_base_ = 0;          ///< Per-wavefront scratch (private segment) base address.
-  uint32_t scratch_lane_size_ = 0;     ///< Per-lane private scratch allocation size in bytes.
-  uint32_t scratch_scoreboard_id_ = 0; ///< Scratch slot index (debugger private-memory mapping).
+  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vgpr_write_mask_ = ~0ULL; ///< Execution-local architectural and plugin write mask.
+  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint32_t mode_raw_ = 0;            ///< MODE register state.
+  bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
+  uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
+  uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
+  uint32_t gfx12_excp_flag_user_extra_raw_ = 0;
+  uint32_t gfx12_trap_ctrl_raw_ = 0;
+  uint32_t gfx1250_xnack_state_priv_raw_ = 0;
+  uint32_t gfx1250_xnack_mask_raw_ = 0;
+  uint64_t scratch_base_ = 0;      ///< Per-wavefront scratch (private segment) base address.
+  uint32_t scratch_lane_size_ = 0; ///< Per-lane private scratch allocation size in bytes.
+  /// Scratch slot within @ref shader_engine_id_ (debugger private-memory mapping).
+  uint32_t scratch_scoreboard_id_ = 0;
+  uint32_t shader_engine_id_ = 0; ///< Physical shader engine used by the scratch mapping.
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
@@ -971,8 +1074,8 @@ public:
   /// @param cu Parent compute unit.
   /// @param wf_id Slot index within the CU.
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
-      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::MAX_SGPRS_PER_WF, Isa::MAX_VGPRS_PER_WF,
-                  Isa::MODE_HAS_GPR_IDX_EN) {}
+      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
+                  Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
   /// @brief Return the raw status register value.
   /// @returns Raw status register value.

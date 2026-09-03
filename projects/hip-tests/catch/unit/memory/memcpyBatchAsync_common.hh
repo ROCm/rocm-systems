@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,20 @@
 #include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+
+#if HT_AMD
+inline void skipMemcpyBatchAsyncIfAnyGfx1250() {
+  const int device_count = HipTest::getDeviceCount();
+  for (int dev = 0; dev < device_count; ++dev) {
+    hipDeviceProp_t props{};
+    HIP_CHECK(hipGetDeviceProperties(&props, dev));
+    const std::string arch(props.gcnArchName);
+    if (arch.find("gfx1250") != std::string::npos) {
+      HIP_SKIP_TEST("ROCM-29275: not supported on gfx1250");
+    }
+  }
+}
+#endif
 
 // Copy `data` from the host into `buffer`, picking the copy kind from the buffer's allocation type
 // so device and host buffers can be filled through one call.

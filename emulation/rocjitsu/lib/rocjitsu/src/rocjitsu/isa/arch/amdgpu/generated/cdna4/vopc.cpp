@@ -171,7 +171,8 @@ DecodeResult decodeVCmpClassF64Vopc(const MachineInst *opcode,
       "v_cmp_class_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_CLASS_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_CLASS_F64 does not support SDWA";
@@ -212,7 +213,8 @@ DecodeResult decodeVCmpxClassF64Vopc(const MachineInst *opcode,
       "v_cmpx_class_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_CLASS_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_CLASS_F64 does not support SDWA";
@@ -4516,7 +4518,8 @@ DecodeResult decodeVCmpFF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_F64 does not support SDWA";
@@ -4552,7 +4555,8 @@ DecodeResult decodeVCmpLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_F64 does not support SDWA";
@@ -4588,7 +4592,8 @@ DecodeResult decodeVCmpEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_F64 does not support SDWA";
@@ -4624,7 +4629,8 @@ DecodeResult decodeVCmpLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_F64 does not support SDWA";
@@ -4660,7 +4666,8 @@ DecodeResult decodeVCmpGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_F64 does not support SDWA";
@@ -4696,7 +4703,8 @@ DecodeResult decodeVCmpLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LG_F64 does not support SDWA";
@@ -4732,7 +4740,8 @@ DecodeResult decodeVCmpGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_F64 does not support SDWA";
@@ -4768,7 +4777,8 @@ DecodeResult decodeVCmpOF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_o_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_O_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_O_F64 does not support SDWA";
@@ -4804,7 +4814,8 @@ DecodeResult decodeVCmpUF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_u_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_U_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_U_F64 does not support SDWA";
@@ -4840,7 +4851,8 @@ DecodeResult decodeVCmpNgeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGE_F64 does not support SDWA";
@@ -4876,7 +4888,8 @@ DecodeResult decodeVCmpNlgF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nlg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLG_F64 does not support SDWA";
@@ -4912,7 +4925,8 @@ DecodeResult decodeVCmpNgtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_ngt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGT_F64 does not support SDWA";
@@ -4948,7 +4962,8 @@ DecodeResult decodeVCmpNleF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nle_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLE_F64 does not support SDWA";
@@ -4984,7 +4999,8 @@ DecodeResult decodeVCmpNeqF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_neq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NEQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NEQ_F64 does not support SDWA";
@@ -5020,7 +5036,8 @@ DecodeResult decodeVCmpNltF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nlt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLT_F64 does not support SDWA";
@@ -5056,7 +5073,8 @@ DecodeResult decodeVCmpTruF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_tru_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_TRU_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_TRU_F64 does not support SDWA";
@@ -5096,7 +5114,8 @@ DecodeResult decodeVCmpxFF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_F64 does not support SDWA";
@@ -5136,7 +5155,8 @@ DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_F64 does not support SDWA";
@@ -5176,7 +5196,8 @@ DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_F64 does not support SDWA";
@@ -5216,7 +5237,8 @@ DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_F64 does not support SDWA";
@@ -5256,7 +5278,8 @@ DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_F64 does not support SDWA";
@@ -5296,7 +5319,8 @@ DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LG_F64 does not support SDWA";
@@ -5336,7 +5360,8 @@ DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_F64 does not support SDWA";
@@ -5376,7 +5401,8 @@ DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_o_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_O_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_O_F64 does not support SDWA";
@@ -5416,7 +5442,8 @@ DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_u_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_U_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_U_F64 does not support SDWA";
@@ -5457,7 +5484,8 @@ DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode,
       "v_cmpx_nge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGE_F64 does not support SDWA";
@@ -5498,7 +5526,8 @@ DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode,
       "v_cmpx_nlg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLG_F64 does not support SDWA";
@@ -5539,7 +5568,8 @@ DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode,
       "v_cmpx_ngt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGT_F64 does not support SDWA";
@@ -5580,7 +5610,8 @@ DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode,
       "v_cmpx_nle_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLE_F64 does not support SDWA";
@@ -5621,7 +5652,8 @@ DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode,
       "v_cmpx_neq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NEQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NEQ_F64 does not support SDWA";
@@ -5662,7 +5694,8 @@ DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode,
       "v_cmpx_nlt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLT_F64 does not support SDWA";
@@ -5703,7 +5736,8 @@ DecodeResult decodeVCmpxTruF64Vopc(const MachineInst *opcode,
       "v_cmpx_tru_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_TRU_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_TRU_F64 does not support SDWA";
@@ -9859,7 +9893,8 @@ DecodeResult decodeVCmpFI64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_I64 does not support SDWA";
@@ -9895,7 +9930,8 @@ DecodeResult decodeVCmpLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_I64 does not support SDWA";
@@ -9931,7 +9967,8 @@ DecodeResult decodeVCmpEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_I64 does not support SDWA";
@@ -9967,7 +10004,8 @@ DecodeResult decodeVCmpLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_I64 does not support SDWA";
@@ -10003,7 +10041,8 @@ DecodeResult decodeVCmpGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_I64 does not support SDWA";
@@ -10039,7 +10078,8 @@ DecodeResult decodeVCmpNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ne_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_I64 does not support SDWA";
@@ -10075,7 +10115,8 @@ DecodeResult decodeVCmpGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_I64 does not support SDWA";
@@ -10111,7 +10152,8 @@ DecodeResult decodeVCmpTI64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_t_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_I64 does not support SDWA";
@@ -10147,7 +10189,8 @@ DecodeResult decodeVCmpFU64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_U64 does not support SDWA";
@@ -10183,7 +10226,8 @@ DecodeResult decodeVCmpLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_U64 does not support SDWA";
@@ -10219,7 +10263,8 @@ DecodeResult decodeVCmpEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_U64 does not support SDWA";
@@ -10255,7 +10300,8 @@ DecodeResult decodeVCmpLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_U64 does not support SDWA";
@@ -10291,7 +10337,8 @@ DecodeResult decodeVCmpGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_U64 does not support SDWA";
@@ -10327,7 +10374,8 @@ DecodeResult decodeVCmpNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ne_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_U64 does not support SDWA";
@@ -10363,7 +10411,8 @@ DecodeResult decodeVCmpGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_U64 does not support SDWA";
@@ -10399,7 +10448,8 @@ DecodeResult decodeVCmpTU64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_t_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_U64 does not support SDWA";
@@ -10439,7 +10489,8 @@ DecodeResult decodeVCmpxFI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_I64 does not support SDWA";
@@ -10479,7 +10530,8 @@ DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_I64 does not support SDWA";
@@ -10519,7 +10571,8 @@ DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_I64 does not support SDWA";
@@ -10559,7 +10612,8 @@ DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_I64 does not support SDWA";
@@ -10599,7 +10653,8 @@ DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_I64 does not support SDWA";
@@ -10639,7 +10694,8 @@ DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ne_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_I64 does not support SDWA";
@@ -10679,7 +10735,8 @@ DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_I64 does not support SDWA";
@@ -10719,7 +10776,8 @@ DecodeResult decodeVCmpxTI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_t_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_I64 does not support SDWA";
@@ -10759,7 +10817,8 @@ DecodeResult decodeVCmpxFU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_U64 does not support SDWA";
@@ -10799,7 +10858,8 @@ DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_U64 does not support SDWA";
@@ -10839,7 +10899,8 @@ DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_U64 does not support SDWA";
@@ -10879,7 +10940,8 @@ DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_U64 does not support SDWA";
@@ -10919,7 +10981,8 @@ DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_U64 does not support SDWA";
@@ -10959,7 +11022,8 @@ DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ne_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_U64 does not support SDWA";
@@ -10999,7 +11063,8 @@ DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_U64 does not support SDWA";
@@ -11039,7 +11104,8 @@ DecodeResult decodeVCmpxTU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_t_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_U64 does not support SDWA";

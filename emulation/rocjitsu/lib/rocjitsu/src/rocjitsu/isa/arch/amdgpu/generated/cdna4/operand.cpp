@@ -222,7 +222,7 @@ std::string Operand::name() const {
   }
   case OperandType::OPR_FLAT_SCRATCH: {
     if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH_ALL)
-      return "FLAT_SCRATCH_ALL";
+      return "flat_scratch_all";
     break;
   }
   case OperandType::OPR_GPUMEM: {
@@ -232,7 +232,7 @@ std::string Operand::name() const {
   }
   case OperandType::OPR_PC: {
     if (encoding_value_ == OpSelPc::OPR_PC_PC_ALL)
-      return "PC_ALL";
+      return "pc_all";
     break;
   }
   case OperandType::OPR_SDST: {
@@ -240,67 +240,38 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSdst::OPR_SDST_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSdst::OPR_SDST_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     break;
   }
   case OperandType::OPR_SDST_EXEC: {
     if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSdstExec::OPR_SDST_EXEC_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     break;
   }
   case OperandType::OPR_SDST_M0: {
     if (encoding_value_ == OpSelSdstM0::OPR_SDST_M0_M0)
-      return "M0";
+      return "m0";
     break;
   }
   case OperandType::OPR_SMEM_OFFSET: {
@@ -308,51 +279,23 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN,
+                      size_bits_);
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSmemOffset::OPR_SMEM_OFFSET_M0)
-      return "M0";
+      return "m0";
     break;
   }
   case OperandType::OPR_SRC: {
@@ -360,55 +303,26 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSrc::OPR_SRC_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSrc::OPR_SRC_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSrc::OPR_SRC_POS_INT_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSrc::OPR_SRC_POS_INT_MIN);
@@ -434,21 +348,21 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSrc::OPR_SRC_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     if (encoding_value_ >= OpSelSrc::OPR_SRC_VGPR_MIN &&
         encoding_value_ <= OpSelSrc::OPR_SRC_VGPR_MAX)
       return reg_name("v", encoding_value_ - OpSelSrc::OPR_SRC_VGPR_MIN, size_bits_);
@@ -468,55 +382,26 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_POS_INT_MIN &&
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_POS_INT_MIN);
@@ -542,21 +427,21 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MAX)
       return reg_name("v", encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_VGPR_MIN, size_bits_);
@@ -569,55 +454,26 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_POS_INT_MIN &&
         encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_POS_INT_MIN);
@@ -643,21 +499,21 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MIN &&
         encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MAX)
       return reg_name("v", encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_VGPR_MIN, size_bits_);
@@ -668,55 +524,27 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN,
+                      size_bits_);
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN);
@@ -742,21 +570,21 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
         encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX)
       return reg_name("v", encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN, size_bits_);
@@ -841,49 +669,20 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSreg::OPR_SREG_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSreg::OPR_SREG_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     break;
   }
   case OperandType::OPR_SREG_NOVCC: {
@@ -891,45 +690,17 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN &&
+        encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN,
+                      size_bits_);
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -937,55 +708,26 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSsrc::OPR_SSRC_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSsrc::OPR_SSRC_POS_INT_MIN &&
         encoding_value_ <= OpSelSsrc::OPR_SSRC_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSsrc::OPR_SSRC_POS_INT_MIN);
@@ -1011,21 +753,21 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_SRC_LITERAL)
       return "literal";
     break;
@@ -1036,51 +778,23 @@ std::string Operand::name() const {
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
                       size_bits_);
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN,
+                      size_bits_);
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSsrcLanesel::OPR_SSRC_LANESEL_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_POS_INT_MIN);
@@ -1091,55 +805,27 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MIN, size_bits_);
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_LO)
-      return "XNACK_MASK_LO";
+      return "xnack_mask_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_XNACK_MASK_HI)
-      return "XNACK_MASK_HI";
+      return "xnack_mask_hi";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_LO)
-      return "FLAT_SCRATCH_LO";
+      return "flat_scratch_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLAT_SCRATCH_HI)
-      return "FLAT_SCRATCH_HI";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP0)
-      return "TTMP0";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP1)
-      return "TTMP1";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP2)
-      return "TTMP2";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP3)
-      return "TTMP3";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP4)
-      return "TTMP4";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP5)
-      return "TTMP5";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP6)
-      return "TTMP6";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP7)
-      return "TTMP7";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP8)
-      return "TTMP8";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP9)
-      return "TTMP9";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP10)
-      return "TTMP10";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP11)
-      return "TTMP11";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP12)
-      return "TTMP12";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP13)
-      return "TTMP13";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP14)
-      return "TTMP14";
-    if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP15)
-      return "TTMP15";
+      return "flat_scratch_hi";
+    if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MAX)
+      return reg_name("ttmp", encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN,
+                      size_bits_);
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_LO)
-      return "VCC_LO";
+      return "vcc_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_VCC_HI)
-      return "VCC_HI";
+      return "vcc_hi";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_M0)
-      return "M0";
+      return "m0";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_LO)
-      return "EXEC_LO";
+      return "exec_lo";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_HI)
-      return "EXEC_HI";
+      return "exec_hi";
     if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_POS_INT_MIN &&
         encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_POS_INT_MAX)
       return std::to_string(encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_POS_INT_MIN);
@@ -1165,26 +851,26 @@ std::string Operand::name() const {
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_FLOAT_ONE_OVER_TWO_PI)
       return "0.15915494";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_VCCZ)
-      return "SRC_VCCZ";
+      return "src_vccz";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_EXECZ)
-      return "SRC_EXECZ";
+      return "src_execz";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SHARED_BASE)
-      return "SRC_SHARED_BASE";
+      return "src_shared_base";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_SHARED_LIMIT)
-      return "SRC_SHARED_LIMIT";
+      return "src_shared_limit";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_PRIVATE_BASE)
-      return "SRC_PRIVATE_BASE";
+      return "src_private_base";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_PRIVATE_LIMIT)
-      return "SRC_PRIVATE_LIMIT";
+      return "src_private_limit";
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_SRC_POPS_EXITING_WAVE_ID)
-      return "SRC_POPS_EXITING_WAVE_ID";
+      return "src_pops_exiting_wave_id";
     break;
   }
   case OperandType::OPR_SSRC_SPECIAL_SCC: {
     if (encoding_value_ == OpSelSsrcSpecialScc::OPR_SSRC_SPECIAL_SCC_SRC_SCC)
-      return "SRC_SCC";
+      return "src_scc";
     break;
   }
   case OperandType::OPR_VCC: {
@@ -1281,6 +967,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
+                         reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -1304,6 +995,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -1311,6 +1008,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -1339,6 +1041,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSrcNolds::OPR_SRC_NOLDS_TTMP_MIN),
+          reg_width};
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcNolds::OPR_SRC_NOLDS_EXEC_HI)
@@ -1358,6 +1066,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSrcNolit::OPR_SRC_NOLIT_TTMP_MIN),
+          reg_width};
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSrcNolit::OPR_SRC_NOLIT_EXEC_HI)
@@ -1376,6 +1090,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN &&
+        encoding_value_ <= OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSrcSimple::OPR_SRC_SIMPLE_TTMP_MIN),
           reg_width};
     if (encoding_value_ == OpSelSrcSimple::OPR_SRC_SIMPLE_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -1440,6 +1160,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SREG_NOVCC: {
@@ -1449,6 +1174,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN &&
+        encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -1456,6 +1187,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -1470,6 +1206,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SSRC_NOLIT: {
@@ -1478,6 +1220,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcNolit::OPR_SSRC_NOLIT_TTMP_MIN),
           reg_width};
     if (encoding_value_ == OpSelSsrcNolit::OPR_SSRC_NOLIT_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -1629,29 +1377,29 @@ std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) 
   return callback ? (this->*callback)(wf) : std::nullopt;
 }
 
-const amdgpu::VgprStorage *Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
+amdgpu::ConstVgprStorage Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStorage{};
 }
 
-amdgpu::VgprStorage *Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
+amdgpu::VgprStorage Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStorage{};
 }
 
 amdgpu::ConstVgprStoragePair64
 Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{};
 }
 
 amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{};
 }
 
 void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,

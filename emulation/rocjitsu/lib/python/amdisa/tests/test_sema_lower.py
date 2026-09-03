@@ -288,6 +288,16 @@ class TestLowerVectorAdd:
 
         assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in result
 
+        callback_ctx = LoweringContext(
+            exec_model=ExecModel.VECTOR,
+            operand_map=omap,
+            vcc_dst='sdst',
+            mask_result_writer='commit_result',
+        )
+        callback_result = lower_sema_block(block, callback_ctx)
+        assert 'commit_result(vcc);' in callback_result
+        assert 'write_wave_mask_scalar' not in callback_result
+
     def test_vector_block_can_write_scalar_destination(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,

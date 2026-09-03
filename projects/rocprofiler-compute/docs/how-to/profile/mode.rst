@@ -1185,6 +1185,45 @@ The output is identical to enabling each framework's trace flag individually.
 Captured kernels are attributed in the ``Backend`` column and analyzed with the
 corresponding per-framework operator options (see :doc:`../analyze/cli`).
 
+.. _profile-vllm-workloads:
+
+Profile vLLM workloads
+======================
+
+vLLM V1 runs GPU kernels in a worker process separate from the vLLM entry
+process. ROCm Compute Profiler profiles that worker process and records its
+kernel dispatches, but vLLM terminates the worker with a signal on shutdown,
+and counter data is only written when a process exits normally. The profiling
+run therefore reports success while leaving no GPU kernel dispatch or
+performance counter data.
+
+To profile vLLM V1 workloads on a single GPU, set
+``VLLM_ENABLE_V1_MULTIPROCESSING=0`` before launching ROCm Compute Profiler.
+The vLLM workload then inherits the setting and runs the model in the profiled
+process, which exits normally and writes its counter data. For example:
+
+.. code-block:: shell-session
+
+   $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+       rocprof-compute profile \
+       --iteration-multiplexing \
+       --no-roof \
+       --name vllm-offline -- \
+       python offline_inference.py
+
+.. important::
+
+   This workaround applies to single-GPU runs. When the model is split across
+   several GPUs, vLLM starts a separate worker process for each GPU, and a
+   profiling run still completes without performance counter data.
+
+.. note::
+
+   Disabling vLLM V1 multiprocessing does not change the model or the kernels
+   it runs, so the collected counter data remains representative. It does
+   affect end-to-end throughput, because work that normally overlaps across two
+   processes is serialized into one.
+
 .. _iteration-multiplexing:
 
 Iteration multiplexing

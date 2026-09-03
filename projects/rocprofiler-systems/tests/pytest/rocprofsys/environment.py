@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .config import RocprofsysConfig
@@ -77,8 +77,13 @@ class TestEnvironment:
         self,
         config: "RocprofsysConfig",
         test_type: TestEnvKind = TestEnvKind.BASE,
+        python_version: Optional[str] = None,
     ) -> None:
-        """Set the base layer to the preset for ``test_type`` (default: BASE)."""
+        """Set the base layer to the preset for ``test_type`` (default: BASE).
+
+        ``python_version`` is the interpreter the run targets, when it targets
+        one; only the PYTHON preset uses it.
+        """
         try:
             kind = TestEnvKind(test_type)
         except ValueError as exc:
@@ -94,7 +99,7 @@ class TestEnvironment:
         elif kind is TestEnvKind.BINARY:
             self.base = base_binary_environment()
         elif kind is TestEnvKind.PYTHON:
-            self.base = base_python_environment(config)
+            self.base = base_python_environment(config, python_version)
         elif kind is TestEnvKind.CAUSAL:
             self.base = base_causal_environment()
 
@@ -245,10 +250,27 @@ def base_binary_environment() -> dict[str, str]:
     }
 
 
-def base_python_environment(config: "RocprofsysConfig") -> dict[str, str]:
-    """Framework default environment for Python test execution."""
+def base_python_environment(
+    config: "RocprofsysConfig", python_version: Optional[str] = None
+) -> dict[str, str]:
+    """Framework default environment for Python test execution.
+
+    ``PYTHONPATH`` carries rocprofsys's own (ABI-agnostic) site-packages plus,
+    when ``python_version`` is given and ROCm ships them for it, the roctx
+    bindings - those live in a version-specific directory outside rocprofsys's
+    tree, so they cannot be picked up from the same entry.
+    """
+    python_paths: list[str] = []
+    if config.rocprofsys_site_packages:
+        python_paths.append(str(config.rocprofsys_site_packages))
+    if python_version:
+        roctx_site_packages = config.capabilities.roctx_site_packages(python_version)
+        if roctx_site_packages:
+            python_paths.append(str(roctx_site_packages))
+
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
@@ -256,11 +278,7 @@ def base_python_environment(config: "RocprofsysConfig") -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TREE_OUTPUT": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "PYTHONPATH": (
-            str(config.rocprofsys_site_packages)
-            if config.rocprofsys_site_packages
-            else ""
-        ),
+        "PYTHONPATH": os.pathsep.join(python_paths),
     }
 
 
@@ -268,6 +286,7 @@ def base_causal_environment() -> dict[str, str]:
     """Framework default environment for causal profiling test execution."""
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_THREAD_POOL_SIZE": "0",
         "ROCPROFSYS_VERBOSE": "1",
         "ROCPROFSYS_LOG_LEVEL": "info",
