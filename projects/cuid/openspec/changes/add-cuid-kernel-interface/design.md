@@ -21,8 +21,9 @@ See `proposal.md`. The design-relevant constraints:
 
 **Goals:** one implementation of the packing, framing and derivation with no
 driver-specific types in it, so AINIC and NPU can adopt it unchanged; a
-resolution of every ambiguity that affects an emitted byte; an infallible read
-path; a privilege split enforced per-read, not only by file mode.
+resolution of every ambiguity that affects an emitted byte; read handlers that
+serve a value computed at probe time, so a read cannot fail for a device that
+has one; a privilege split enforced per-read, not only by file mode.
 
 **Non-Goals:** seed persistence, node-wide seed scope, IOCTL access,
 per-partition UnitID and the auxiliary construction, all deferred; a standalone
