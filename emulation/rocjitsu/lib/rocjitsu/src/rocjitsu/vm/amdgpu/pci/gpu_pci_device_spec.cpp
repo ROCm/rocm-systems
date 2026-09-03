@@ -3,7 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 
-#include "rocjitsu/vm/amdgpu/pci/ip_discovery_profile.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -35,28 +35,58 @@ uint64_t largest_power_of_two_within(uint64_t limit) {
 /// window reaches whatever the aperture does not.
 constexpr uint64_t kDefaultVramApertureBytes = 256 * 1024 * 1024;
 
-/// @brief KFD target version of the one part a discovery profile exists for.
-constexpr uint32_t kGfx1250TargetVersion = 120500;
-
 /// @brief Choose the IP blocks to describe for @p device.
 ///
-/// @details gfx1250 is the only part modelled well enough to publish. Any other
-/// target, including one left unset, gets no blocks: publishing gfx1250's table
-/// for a configuration that models a different part would have the guest driver
-/// bind support for hardware the rest of the simulation is not, which fails
-/// later and further away than refusing here. An empty profile makes the device
-/// refuse to become usable, and says why.
+/// @details Resolved through the generation registry rather than compared
+/// against one modelled part, so the question asked is "which part is this"
+/// rather than "is this the part". A target no generation answers for gets no
+/// blocks: publishing one part's table for a configuration that models another
+/// would have the guest driver bind support for hardware the rest of the
+/// simulation is not, which fails later and further away than refusing here. An
+/// empty profile makes the device refuse to become usable, and says why.
 /// @param[in] device The configured device.
 /// @returns The blocks to describe, empty if this part has no profile.
 [[nodiscard]] IpDiscoverySpec discovery_spec_for(const config::KfdDeviceConfig &device) {
-  if (device.gfx_target_version != kGfx1250TargetVersion) {
-    util::Logger::warn(std::format(
-        "gfx target {} has no IP discovery profile, so this device cannot describe itself to a "
-        "guest driver; only gfx{} is modelled",
-        device.gfx_target_version, kGfx1250TargetVersion));
+  const GpuGenerationRegistry &generations = gpu_generations();
+  // A registry that did not compose is a build-time mistake rather than a
+  // configuration one, and it would otherwise present as every part being
+  // unknown.
+  if (!generations.ok()) {
+    util::Logger::warn(std::format("the GPU generations this build offers are inconsistent: {}",
+                                   *generations.error()));
     return {};
   }
-  return gfx1250_discovery_spec();
+  const GpuGenerationDescriptor *generation = generations.find(device.gfx_target_version);
+  if (generation == nullptr) {
+    util::Logger::warn(std::format(
+        "gfx target {} has no IP discovery profile, so this device cannot describe itself to a "
+        "guest driver; modelled generations are {}",
+        device.gfx_target_version, generations.known_ids()));
+    return {};
+  }
+  GpuDiscoveryTopology topology;
+  if (device.num_shader_engines != 0) {
+    topology.shader_engines = device.num_shader_engines;
+  }
+  if (device.num_shader_arrays_per_engine != 0) {
+    topology.shader_arrays_per_engine = device.num_shader_arrays_per_engine;
+  }
+  if (device.num_cu_per_sh != 0) {
+    topology.compute_units_per_shader_array = device.num_cu_per_sh;
+  }
+  if (device.wave_front_size != 0) {
+    topology.wavefront_size = device.wave_front_size;
+  }
+  if (device.max_waves_per_simd != 0) {
+    topology.max_waves_per_simd = device.max_waves_per_simd;
+  }
+  if (device.max_slots_scratch_cu != 0) {
+    topology.max_scratch_slots_per_cu = device.max_slots_scratch_cu;
+  }
+  if (device.lds_size_kb != 0) {
+    topology.lds_size_kb = device.lds_size_kb;
+  }
+  return generation->discovery_factory(topology);
 }
 
 } // namespace

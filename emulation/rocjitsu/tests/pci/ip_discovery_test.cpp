@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
 
+#include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery_profile.h"
 
 #include <gtest/gtest.h>
@@ -13,6 +14,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -38,6 +40,11 @@ std::vector<std::byte> build(const rocjitsu::IpDiscoverySpec &spec) {
 uint16_t read16(const std::vector<std::byte> &table, std::size_t at) {
   return static_cast<uint16_t>(std::to_integer<uint8_t>(table[at]) |
                                (std::to_integer<uint8_t>(table[at + 1]) << 8));
+}
+
+uint32_t read32(const std::vector<std::byte> &table, std::size_t at) {
+  return static_cast<uint32_t>(read16(table, at)) |
+         (static_cast<uint32_t>(read16(table, at + 2)) << 16);
 }
 
 void write16(std::vector<std::byte> &table, std::size_t at, uint16_t value) {
@@ -76,6 +83,25 @@ TEST(IpDiscoveryTable, BuildsATableTheDriverWouldAccept) {
 
   const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
   EXPECT_TRUE(checked.valid) << checked.problem;
+}
+
+TEST(IpDiscoveryTable, PublishesConfiguredGraphicsTopology) {
+  const std::vector<std::byte> table = build(gfx1250_spec());
+  const std::size_t graphics = read16(table, 12 + 8);
+
+  ASSERT_NE(graphics, 0u);
+  EXPECT_EQ(read32(table, graphics), 0x4347u);
+  EXPECT_EQ(read16(table, graphics + 4), 2u);
+  EXPECT_EQ(read16(table, graphics + 6), 0u);
+  EXPECT_EQ(read32(table, graphics + 12), 2u);
+  EXPECT_EQ(read32(table, graphics + 16), 8u);
+  EXPECT_EQ(read32(table, graphics + 20), 2u);
+  EXPECT_EQ(read32(table, graphics + 24), 2u);
+  EXPECT_EQ(read32(table, graphics + 56), 32u);
+  EXPECT_EQ(read32(table, graphics + 60), 16u);
+  EXPECT_EQ(read32(table, graphics + 64), 32u);
+  EXPECT_EQ(read32(table, graphics + 68), 320u);
+  EXPECT_EQ(read32(table, graphics + 72), 2u);
 }
 
 // Register bases are segments, and the driver picks between them with each
@@ -283,6 +309,7 @@ TEST(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
 
 TEST(IpDiscoveryTable, RejectsATableWithNoGraphicsBlock) {
   rocjitsu::IpDiscoverySpec spec;
+  spec.graphics = gfx1250_spec().graphics;
   spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Mp0,
                          .instance = 0,
                          .major = 15,
@@ -295,6 +322,18 @@ TEST(IpDiscoveryTable, RejectsATableWithNoGraphicsBlock) {
 
   EXPECT_FALSE(checked.valid);
   EXPECT_NE(checked.problem.find("graphics"), std::string::npos);
+}
+
+TEST(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
+  std::vector<std::byte> table = build(gfx1250_spec());
+  write16(table, 12 + 8, 0);
+  write16(table, 12 + 8 + 2, 0);
+  write16(table, 12 + 8 + 4, 0);
+  reseal_binary(table);
+
+  const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
+  EXPECT_FALSE(checked.valid);
+  EXPECT_NE(checked.problem.find("graphics-topology"), std::string::npos);
 }
 
 TEST(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
@@ -377,4 +416,129 @@ TEST(IpDiscoveryProfile, AdvertisesTheRequestedGraphicsInstances) {
   EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(build(spec)).valid);
 }
 
+TEST(IpDiscoveryProfile, AdvertisesNoMediaBlocks) {
+  const rocjitsu::IpDiscoverySpec spec = rocjitsu::gfx1250_discovery_spec();
+
+  for (const rocjitsu::IpBlock &block : spec.blocks) {
+    EXPECT_NE(static_cast<uint16_t>(block.hardware_id), 12u);
+  }
+  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(build(spec)).valid);
+}
+
 } // namespace
+
+// Nothing forces a consumer to check that the registry composed, and a lookup
+// on one that did not simply misses -- so a duplicated target or a null factory
+// would present as "every part is unknown" rather than as the build mistake it
+// is. This is the check that makes composition a build-time failure.
+TEST(GpuGenerations, ComposeConsistently) {
+  const rocjitsu::GpuGenerationRegistry &generations = rocjitsu::gpu_generations();
+  ASSERT_TRUE(generations.ok()) << *generations.error();
+  EXPECT_FALSE(generations.generations().empty()) << "a build that presents no GPU is not useful";
+  EXPECT_FALSE(generations.known_ids().empty());
+}
+
+// The registry answers the question a config asks -- "which part is this" -- and
+// both the device and the offline table writer must get the same answer, since
+// a guest that saw different hardware depending on which path delivered its
+// table would be worse off than with either alone.
+TEST(GpuGenerations, ResolveTheSameGenerationByTargetAndByName) {
+  const rocjitsu::GpuGenerationRegistry &generations = rocjitsu::gpu_generations();
+  ASSERT_TRUE(generations.ok());
+
+  const rocjitsu::GpuGenerationDescriptor *by_target = generations.find(uint32_t{120500});
+  ASSERT_NE(by_target, nullptr) << "gfx1250 is the part every current config names";
+  EXPECT_EQ(by_target, generations.find(std::string_view("gfx1250")))
+      << "the device and the table writer resolved different generations";
+  EXPECT_FALSE(by_target->discovery_factory({}).blocks.empty());
+}
+
+// An unset target reads as zero, and a generation answering for it would supply
+// blocks to every configuration that forgot to say which part it models.
+TEST(GpuGenerations, RefuseAnUnsetOrUnknownTarget) {
+  const rocjitsu::GpuGenerationRegistry &generations = rocjitsu::gpu_generations();
+  ASSERT_TRUE(generations.ok());
+
+  EXPECT_EQ(generations.find(uint32_t{0}), nullptr) << "an unset target was answered for";
+  EXPECT_EQ(generations.find(uint32_t{90400}), nullptr);
+  EXPECT_EQ(generations.find(std::string_view("")), nullptr);
+  EXPECT_EQ(generations.find(std::string_view("gfx999")), nullptr);
+}
+
+// The validation itself, driven directly, because the shipped array is expected
+// to be consistent -- so nothing else would ever exercise the arm that catches
+// two generations claiming one target, which is the mistake adding a part makes.
+TEST(GpuGenerations, RefuseDescriptorsThatClaimOneTargetTwice) {
+  static constexpr uint32_t kShared[] = {120500};
+  static const rocjitsu::GpuGenerationDescriptor kClashing[] = {
+      {.id = "first",
+       .gfx_target_versions = kShared,
+       .discovery_factory = &rocjitsu::gfx1250_discovery_spec},
+      {.id = "second",
+       .gfx_target_versions = kShared,
+       .discovery_factory = &rocjitsu::gfx1250_discovery_spec},
+  };
+  const rocjitsu::GpuGenerationRegistry clashing(kClashing);
+  EXPECT_FALSE(clashing.ok()) << "two generations were allowed to answer for one gfx target";
+  EXPECT_EQ(clashing.find(uint32_t{120500}), nullptr)
+      << "a registry that did not compose still answered a lookup";
+
+  static constexpr uint32_t kUnset[] = {0};
+  static const rocjitsu::GpuGenerationDescriptor kClaimsUnset[] = {
+      {.id = "unset",
+       .gfx_target_versions = kUnset,
+       .discovery_factory = &rocjitsu::gfx1250_discovery_spec},
+  };
+  EXPECT_FALSE(rocjitsu::GpuGenerationRegistry(kClaimsUnset).ok());
+
+  static const rocjitsu::GpuGenerationDescriptor kNoFactory[] = {
+      {.id = "empty", .gfx_target_versions = kShared, .discovery_factory = nullptr},
+  };
+  EXPECT_FALSE(rocjitsu::GpuGenerationRegistry(kNoFactory).ok());
+}
+
+// published_block() answered instance 0 by scanning every record on each call,
+// which put a linear walk of the whole table on the interrupt-ring read path --
+// once per delivery, with a guest waiting at the end of it. The index is built
+// once, and unlike the scan it can be asked about a copy other than the first:
+// a table naming several graphics instances describes several blocks, and a
+// lookup that could only ever return one of them is not a lookup.
+TEST(IpBlockIndex, AnswersForEachInstanceAndNotForBlocksWithNoRegisters) {
+  rocjitsu::IpDiscoverySpec spec;
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Gc,
+                         .instance = 0,
+                         .major = 12,
+                         .minor = 1,
+                         .revision = 0,
+                         .register_bases = {0x1260}});
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Gc,
+                         .instance = 1,
+                         .major = 12,
+                         .minor = 1,
+                         .revision = 0,
+                         .register_bases = {0x2260}});
+  // Named but given no registers, which is how a table says the driver will
+  // instantiate a block it can never address.
+  spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Hdp,
+                         .instance = 0,
+                         .major = 7,
+                         .minor = 0,
+                         .revision = 0,
+                         .register_bases = {}});
+
+  const rocjitsu::IpBlockIndex index(spec);
+
+  const rocjitsu::IpBlock *first = index.find(rocjitsu::IpHardwareId::Gc, 0);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->register_bases.front(), 0x1260u);
+
+  const rocjitsu::IpBlock *second = index.find(rocjitsu::IpHardwareId::Gc, 1);
+  ASSERT_NE(second, nullptr) << "the second graphics instance was not addressable";
+  EXPECT_EQ(second->register_bases.front(), 0x2260u)
+      << "instance 1 was answered with instance 0's segments";
+
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::Gc, 2), nullptr) << "a copy the table never named";
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::Hdp, 0), nullptr)
+      << "a block with no register bases has nothing to answer for";
+  EXPECT_EQ(index.find(rocjitsu::IpHardwareId::MmHub, 0), nullptr);
+}

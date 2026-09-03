@@ -55,6 +55,21 @@ template <std::size_t N> std::vector<uint64_t> bases(const uint64_t (&list)[N]) 
 
 IpDiscoverySpec gfx1250_discovery_spec(const GpuDiscoveryTopology &topology) {
   IpDiscoverySpec spec;
+  spec.graphics = {
+      .shader_engines = topology.shader_engines,
+      .compute_units_per_shader_array = topology.compute_units_per_shader_array,
+      .shader_arrays_per_engine = topology.shader_arrays_per_engine,
+      // One compatibility backend and shader complex per advertised array is
+      // sufficient for compute and keeps the two driver divisors coherent.
+      .render_backends_per_engine = topology.shader_arrays_per_engine,
+      .texture_channel_caches = 1,
+      .wavefront_size = topology.wavefront_size,
+      .max_waves_per_simd = topology.max_waves_per_simd,
+      .max_scratch_slots_per_cu = topology.max_scratch_slots_per_cu,
+      .lds_size_kb = topology.lds_size_kb,
+      .shader_complexes_per_engine = topology.shader_arrays_per_engine,
+      .packers_per_shader_complex = 1,
+  };
 
   // Graphics and compute. Its instance count is what the driver turns into the
   // XCC mask, and a table with no graphics block at all is refused outright.

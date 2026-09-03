@@ -59,9 +59,61 @@ struct IpBlock {
   std::vector<uint64_t> register_bases; ///< Where its registers start.
 };
 
+/// @brief Compute topology consumed from the discovery binary's GC-info table.
+///
+/// @details These are the fields the stock driver copies into its graphics
+/// configuration before GFX hardware initialization. They describe one
+/// graphics instance: the discovery profile may publish several identical GC
+/// block records while this table supplies the topology shared by each one.
+struct GraphicsDiscoveryInfo {
+  uint32_t shader_engines = 0;                 ///< Shader engines per graphics instance.
+  uint32_t compute_units_per_shader_array = 0; ///< Compute units in one shader array.
+  uint32_t shader_arrays_per_engine = 0;       ///< Shader arrays in one engine.
+  uint32_t render_backends_per_engine = 0;     ///< Render backends in one engine.
+  uint32_t texture_channel_caches = 0;         ///< Texture-channel caches in one instance.
+  uint32_t wavefront_size = 0;                 ///< Lanes in one wavefront.
+  uint32_t max_waves_per_simd = 0;             ///< Resident waves supported by one SIMD.
+  uint32_t max_scratch_slots_per_cu = 0;       ///< Scratch waves addressable by one CU.
+  uint32_t lds_size_kb = 0;                    ///< LDS capacity per CU, in KiB.
+  uint32_t shader_complexes_per_engine = 0;    ///< Shader complexes in one engine.
+  uint32_t packers_per_shader_complex = 0;     ///< Packers in one shader complex.
+};
+
 /// @brief Everything a generated table describes.
 struct IpDiscoverySpec {
-  std::vector<IpBlock> blocks; ///< The device's blocks, in any order.
+  std::vector<IpBlock> blocks;    ///< The device's blocks, in any order.
+  GraphicsDiscoveryInfo graphics; ///< Topology the driver consumes before GFX startup.
+};
+
+/// @brief The published blocks, looked up by what they are rather than scanned.
+///
+/// @details Built once, because the table does not change while a device is
+/// alive. What it replaces was a linear scan of every record, run on each
+/// lookup -- including once per interrupt-ring read, which is once per delivery
+/// on a path that has a guest waiting at the end of it.
+///
+/// Records with no register bases are left out. A block the table names but
+/// gives no registers is one the driver will instantiate and never address, so
+/// there is nothing here to answer for it, and returning it would hand every
+/// caller an empty segment list to guard against.
+///
+/// Holds pointers into the spec, so the spec must outlive the index and must
+/// not have its block list resized afterwards.
+class IpBlockIndex final {
+public:
+  /// @brief Index @p spec.
+  /// @param[in] spec Blocks to index; must outlive this index.
+  explicit IpBlockIndex(const IpDiscoverySpec &spec);
+
+  /// @brief The record for one copy of one block.
+  /// @param[in] id Which block.
+  /// @param[in] instance Which copy of it.
+  /// @returns The record, or nullptr when the table names no such copy or
+  ///          gives it no registers.
+  [[nodiscard]] const IpBlock *find(IpHardwareId id, uint8_t instance) const;
+
+private:
+  std::vector<const IpBlock *> blocks_;
 };
 
 /// @brief A serialized table, or the reason there is not one.
