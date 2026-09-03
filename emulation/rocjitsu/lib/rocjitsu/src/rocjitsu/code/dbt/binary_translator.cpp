@@ -3153,7 +3153,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   }
 
   std::vector<uint8_t> translated_text;
-  translated_text.reserve(text.size());
+  translated_text.reserve(options_.preserve_source_text_prefix ? 2u * text.size() : text.size());
+  if (options_.preserve_source_text_prefix)
+    translated_text.insert(translated_text.end(), text.begin(), text.end());
   const bool continue_after_failure = options_.debug_continue_after_failure;
 
   auto queue_trace = [&](std::vector<PendingTrace> &pending, const Instruction &inst,

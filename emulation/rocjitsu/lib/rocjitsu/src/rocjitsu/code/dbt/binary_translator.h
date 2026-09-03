@@ -163,6 +163,16 @@ struct BinaryTranslatorOptions {
   /// operand-level residual checks. Requesting it for any other profile produces an error
   /// diagnostic. Runtime translation does not enable this development check by default.
   bool verify_rewrite_discharge = false;
+
+  /// @brief Keep the source `.text` bytes as an unreachable output prefix.
+  ///
+  /// @details Normal DBT replaces `.text` with the relocated executable
+  /// bodies. Instrumentation clients can instead retain the source text and
+  /// append those bodies, while descriptors, symbols, branches, and code
+  /// addresses still resolve to the relocated copies. This preserves stable
+  /// source coordinates for an independent patch inventory at the deliberate
+  /// cost of a larger output image.
+  bool preserve_source_text_prefix = false;
 };
 
 /// @brief Result of translating a code object.

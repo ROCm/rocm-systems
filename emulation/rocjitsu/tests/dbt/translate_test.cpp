@@ -3646,6 +3646,62 @@ TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
   EXPECT_EQ(endpgm->target_offset, 2 * sizeof(uint32_t));
 }
 
+TEST(BinaryTranslator, ClientRewriteCanPreserveAnUnreachableSourceTextPrefix) {
+  const uint32_t source_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t inserted_nop = build_s_nop(2, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> words = {source_nop, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.text_sections().size(), 1u);
+  const std::vector<uint8_t> source_text(source.text_sections().front()->data(),
+                                         source.text_sections().front()->data() +
+                                             source.text_sections().front()->size());
+
+  BinaryTranslatorOptions options;
+  options.preserve_source_text_prefix = true;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4, 0, options);
+  translator.set_instruction_rewrite_callback(
+      [&](const Instruction &, uint64_t source_offset)
+          -> std::optional<std::vector<uint32_t>> {
+        if (source_offset != 0)
+          return std::nullopt;
+        return std::vector<uint32_t>{inserted_nop, source_nop};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  ASSERT_GT(text.size(), source_text.size());
+  EXPECT_TRUE(std::ranges::equal(
+      source_text,
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text.data()),
+                               source_text.size())));
+
+  const auto rewritten = std::ranges::find_if(result.text_placements, [](const auto &placement) {
+    return placement.source_offset == 0;
+  });
+  ASSERT_NE(rewritten, result.text_placements.end());
+  EXPECT_GE(rewritten->target_offset, source_text.size());
+  ASSERT_LT(rewritten->target_offset + 2 * sizeof(uint32_t), text.size() + 1u);
+  const auto *translated_words = reinterpret_cast<const uint32_t *>(text.data());
+  EXPECT_EQ(translated_words[rewritten->target_offset / sizeof(uint32_t)], inserted_nop);
+  EXPECT_EQ(translated_words[rewritten->target_offset / sizeof(uint32_t) + 1u], source_nop);
+
+  const Section *rodata = find_section(translated, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+  const uint64_t entry = static_cast<uint64_t>(static_cast<int64_t>(rodata->vaddr()) +
+                                               descriptor.kernel_code_entry_byte_offset -
+                                               static_cast<int64_t>(text.vaddr()));
+  EXPECT_EQ(entry, rewritten->target_offset)
+      << "the retained source prefix must be unreachable from the kernel descriptor";
+}
+
 TEST(BinaryTranslator, InlineExpansionIgnoresUnreachableTextTail) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject source_layout(image.data(), image.size());
