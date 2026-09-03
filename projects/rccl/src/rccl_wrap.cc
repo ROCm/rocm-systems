@@ -90,6 +90,10 @@ static inline bool rcclIsGfx120x(char const* arch) {
   return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
 }
 
+static inline bool rcclIsGfx110x(char const* arch) {
+  return IsArchMatch(arch, "gfx1100") || IsArchMatch(arch, "gfx1101");
+}
+
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -97,6 +101,22 @@ int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
                                /*ncclFuncAllGather*/ 98304,
                                /*ncclFuncReduceScatter*/ 98304,
                                /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncSendRecv*/ 0,
+                               /*ncclFuncSend*/ 0,
+                               /*ncclFuncRecv*/ 0};
+  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
+
+int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
+                               /*ncclFuncReduce*/ 8192,
+                               /*ncclFuncAllGather*/ 98304,
+                               /*ncclFuncReduceScatter*/ 98304,
+                               /*ncclFuncAllReduce*/ 32768,
                                /*ncclFuncSendRecv*/ 0,
                                /*ncclFuncSend*/ 0,
                                /*ncclFuncRecv*/ 0};
@@ -139,6 +159,10 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     bool p2p_disabled = ncclParamP2pDisable();
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;
+    }
+  } else if (!userProtocolInput && rcclIsGfx110x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+    if (comm->nNodes == 1) {
+      info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
     }
   } else if (!userProtocolInput && comm->nNodes >= 2 &&
              (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
