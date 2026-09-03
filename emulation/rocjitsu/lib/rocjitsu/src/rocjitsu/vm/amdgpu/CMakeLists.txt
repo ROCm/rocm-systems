@@ -8,6 +8,9 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     hwreg.cpp
     memory_pipeline.cpp
     command_processor.cpp
+    pm4_bootstrap_executor.cpp
+    sdma_executor.cpp
+    sdma_queue_runner.cpp
     gpu_vm.cpp
     queue_service.cpp
     completion_tracker.cpp
