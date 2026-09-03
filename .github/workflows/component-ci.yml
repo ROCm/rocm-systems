@@ -2,6 +2,11 @@ name: Component CI
 
 on:
   workflow_dispatch:
+    inputs:
+      jobs:
+        type: string
+        description: "Space-separated list of jobs to run, or 'all'. ex: 'nvidia wsl hip-contract-tests'"
+        default: "all"
   pull_request:
     types:
       - opened
@@ -39,6 +44,7 @@ jobs:
         id: configure
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_DISPATCH_JOBS: ${{ inputs.jobs }}
         run: python .github/scripts/configure_component_ci.py
 
   nvidia-build:

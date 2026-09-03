@@ -3,9 +3,9 @@ Determines which component CI jobs to run based on the GitHub event type
 and the files changed in the pull request or push.
 """
 
+import fnmatch
 import logging
 import os
-import re
 import subprocess
 from typing import Mapping
 
@@ -27,6 +27,38 @@ def set_github_output(d: Mapping[str, str]):
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
 
+NVIDIA_PATTERNS = [
+    "projects/clr/*",
+    "projects/hip/*",
+    "projects/hip-tests/*",
+    "projects/hipother/*",
+    ".github/workflows/component-ci.yml",
+    ".github/workflows/hip-nvidia-ci.yml",
+]
+
+WSL_PATTERNS = [
+    "projects/rocr-runtime/*",
+    "projects/clr/*",
+    "projects/hip/*",
+    "projects/hip-tests/*",
+    "shared/amdgpu-windows-interop/wkmi*",
+    ".github/workflows/component-ci.yml",
+    ".github/workflows/rocr-runtime-wsl.yml",
+]
+
+HIP_CONTRACT_TESTS_PATTERNS = [
+    "projects/hip/include/hip/*",
+    "projects/hip-tests/catch/contract/*",
+    "projects/hip-tests/catch/tools/*",
+    "projects/hip-tests/catch/config/configs/contract.yaml",
+    "projects/hip-tests/catch/TEST_PLAN.md",
+    ".github/workflows/component-ci.yml",
+    ".github/workflows/hip-contract-coverage.yml",
+]
+
+ALL_JOBS = {"nvidia", "wsl", "hip-contract-tests"}
+
+
 def get_changed_files(base_ref: str) -> list[str]:
     result = subprocess.run(
         ["git", "diff", "--name-only", base_ref],
@@ -37,9 +69,8 @@ def get_changed_files(base_ref: str) -> list[str]:
     return result.stdout.splitlines()
 
 
-def matches_any(files: list[str], pattern: str) -> bool:
-    regex = re.compile(pattern)
-    return any(regex.search(f) for f in files)
+def matches_any(files: list[str], patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(f, pattern) for f in files for pattern in patterns)
 
 
 def main():
@@ -51,30 +82,18 @@ def main():
     hip_contract_tests = False
 
     if event_name == "workflow_dispatch":
-        nvidia = True
-        wsl = True
-        hip_contract_tests = True
+        dispatch_jobs = os.environ.get("WORKFLOW_DISPATCH_JOBS", "all").strip()
+        requested = ALL_JOBS if dispatch_jobs == "all" else set(dispatch_jobs.split())
+        nvidia = "nvidia" in requested
+        wsl = "wsl" in requested
+        hip_contract_tests = "hip-contract-tests" in requested
     else:
         changed_files = get_changed_files(base_ref)
         logging.info("Changed files:\n" + "\n".join(changed_files))
 
-        if matches_any(
-            changed_files,
-            r"^projects/(clr|hip|hip-tests|hipother)/|^\.github/workflows/(component-ci|hip-nvidia-ci)\.yml",
-        ):
-            nvidia = True
-
-        if matches_any(
-            changed_files,
-            r"^projects/(rocr-runtime|clr|hip|hip-tests)/|^\.github/workflows/(component-ci|rocr-runtime-wsl)\.yml|^shared/amdgpu-windows-interop/wkmi",
-        ):
-            wsl = True
-
-        if matches_any(
-            changed_files,
-            r"^projects/hip/include/hip/|^projects/hip-tests/catch/(contract|tools)/|^projects/hip-tests/catch/config/configs/contract\.yaml|^projects/hip-tests/catch/TEST_PLAN\.md|^\.github/workflows/(component-ci|hip-contract-coverage)\.yml",
-        ):
-            hip_contract_tests = True
+        nvidia = matches_any(changed_files, NVIDIA_PATTERNS)
+        wsl = matches_any(changed_files, WSL_PATTERNS)
+        hip_contract_tests = matches_any(changed_files, HIP_CONTRACT_TESTS_PATTERNS)
 
     set_github_output(
         {
