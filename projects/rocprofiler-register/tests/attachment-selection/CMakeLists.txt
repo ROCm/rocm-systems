@@ -83,7 +83,7 @@ endif()
 list(JOIN _PRELOAD_COLLISION_LIBS ":" _PRELOAD_COLLISION)
 
 add_executable(test-implicit-configure-attachment)
-target_sources(test-implicit-configure-attachment PRIVATE test-attachment-selection.cpp)
+target_sources(test-implicit-configure-attachment PRIVATE test_attachment_selection.cpp)
 target_link_libraries(
     test-implicit-configure-attachment
     PRIVATE ${ATTACHMENT_SELECTION_HEADERS_TARGET} rocprofiler-register::tests-common
@@ -94,7 +94,7 @@ add_dependencies(
     rocprofiler-register-tests-preload-collision-wrapper generic-tool rocprofiler)
 
 add_executable(test-preload-dependency-attachment)
-target_sources(test-preload-dependency-attachment PRIVATE test-attachment-selection.cpp)
+target_sources(test-preload-dependency-attachment PRIVATE test_attachment_selection.cpp)
 target_compile_definitions(test-preload-dependency-attachment
                            PRIVATE ROCPROFILER_REGISTER_TEST_NO_AMBIENT_CONFIGURE=1)
 target_link_libraries(
