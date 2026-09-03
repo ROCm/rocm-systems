@@ -1244,3 +1244,39 @@ for register aliases and EXEC-mask ownership. This fails both the 750-line
 economics floor and the rule against a union-shaped protocol. The colocated
 files are now truthful ownership boundaries, but locality alone is not evidence
 that their distinct correctness protocols should be merged.
+
+### 14.14 Rejected caller-owned/automatic report-layout collapse
+
+The next report-lifetime trace tested whether caller-owned raw report buffers
+and automatically allocated reports were parallel implementations of one
+layout policy. They are not. A caller-owned raw buffer is a public
+code-object- or executable-lifetime contract. It has no persisted layout
+object, admits buffers as small as the common header plus the selected direct
+records, and preserves the historical fixed-record behavior. An automatic
+allocation carries its exact validated layout for the executable lifetime and,
+for Record/Replay, provides a report-wide dispatch directory plus a bounded
+owner/site/address-group identity table.
+
+The distinction is observable all the way through lowering. Direct
+Record/Replay elects one representative lane, assigns a fixed record per
+static range, coalesces waves within a dispatch/workgroup, and fails closed
+when its sole publication slot is incomplete. Automatic Record/Replay
+serializes distinct address groups, retains exact wave identity and lane
+masks, probes collision chains, retries incomplete or mismatched identities,
+and records independent dispatch-directory and owner-bank saturation. These
+paths consequently require different persistent state and different scratch
+and EXEC-save resources. Sampled and InlineShadow likewise construct
+mode-specific direct layouts for raw buffers while automatic sizing is driven
+by durable evidence requirements.
+
+Synthesizing an automatic layout for every raw buffer would reject currently
+valid small buffers, change their lifetime requirement, and change which
+executions are represented. Treating the direct layout as a degenerate bank
+would retain nearly every direct-versus-banked branch in the 1,420-line
+Record/Replay access emitter: identity construction, lane selection,
+collision qualification, retry, saturation, and restoration remain genuinely
+different. The common report header, indexed-address, atomic, wait, store, and
+layout-validation mechanics are already shared. This candidate therefore
+offers only a few hundred lines of possible mechanical extraction and cannot
+meet the macro floor without reducing the public evidence contract. No
+production scaffold was added.
