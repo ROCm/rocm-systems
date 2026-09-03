@@ -579,6 +579,158 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotRejectsUnevenShard)
 }
 
 // ---------------------------------------------------------------------------
+// AllReduce LL128
+//
+// Two more tiers behind the same gate, tested through their per-variant
+// predicates so neither masks the other. They differ from the LL tiers in where
+// the size cap comes from: a slot is carved out of the scratch at run time
+// (half the scratch per bank, split across ranks, floored to whole slices)
+// rather than fixed by a constant. So unlike the LL bounds, this one is
+// reachable from a unit test by shrinking comm.ddaScratchBytes, and the helpers
+// below size the scratch to hold an exact number of slices.
+//
+// Sizes are derived from kDdaLL128DataBytesPerSlice / kDdaLL128WireBytesPerSlice
+// rather than written out, so these keep testing the same boundary if the
+// per-thread register width (and with it the slice size) is retuned.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Scratch that gives each rank a slot of exactly `slices` slices. Two banks, so
+// the scratch is twice a bank; ddaBankSize halves it back.
+size_t scratchForOneShotSlices(int nRanks, size_t slices)
+{
+    return 2 * static_cast<size_t>(nRanks) * slices *
+           static_cast<size_t>(dda::common::kDdaLL128WireBytesPerSlice);
+}
+
+// Same, for two-shot: a bank carries two staging areas, so it takes twice the
+// scratch to give each rank a slot of `slices`.
+size_t scratchForTwoShotSlices(int nRanks, size_t slices)
+{
+    return 2 * scratchForOneShotSlices(nRanks, slices);
+}
+
+size_t payloadBytesForSlices(size_t slices)
+{
+    return slices * static_cast<size_t>(dda::common::kDdaLL128DataBytesPerSlice);
+}
+} // namespace
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_EligibleFloat32)
+{
+    EXPECT_TRUE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// The wire moves whole 16-byte chunks with no chunk straddling a line, so a
+// message that is not a multiple of 16 bytes has nowhere to put the remainder.
+// One float is 4 bytes.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBytes)
+{
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 1, ncclFloat32, ncclSum));
+}
+
+// The 16-byte wire accesses need both user buffers 16-byte aligned, which the LL
+// tiers do not require. 0x1008 is 8-byte aligned but not 16.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_UnalignedBuffers)
+{
+    void* misaligned = reinterpret_cast<void*>(0x1008);
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, misaligned, 4, ncclFloat32, ncclSum));
+}
+
+// A scratch too small to give each rank even one slice floors the slot stride to
+// zero, which takes the tier out rather than dividing by it.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_ScratchTooSmallForOneSlice)
+{
+    mockComm_.comm.ddaScratchBytes = 8;
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// The whole message has to fit one slot, so a scratch sized for four slices per
+// rank accepts exactly four slices of payload.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_AtSlotCapacityEligible)
+{
+    constexpr size_t kSlices    = 4;
+    const int        nRanks     = mockComm_.comm.nRanks;
+    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+
+    const size_t count = payloadBytesForSlices(kSlices) / sizeof(float);
+    EXPECT_TRUE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
+}
+
+// One 16-byte chunk past that capacity spills into a fifth slice, which the slot
+// cannot hold. The pair differs only in that chunk, so the rejection is
+// attributable to the slot bound and not to the threshold or the shape rules.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128OneShot_OverSlotCapacityRejected)
+{
+    constexpr size_t kSlices    = 4;
+    const int        nRanks     = mockComm_.comm.nRanks;
+    mockComm_.comm.ddaScratchBytes = scratchForOneShotSlices(nRanks, kSlices);
+
+    const size_t count = (payloadBytesForSlices(kSlices) + 16) / sizeof(float);
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
+}
+
+// Two-shot carves one shard per rank out of the byte count, so the count has to
+// divide across the ranks before anything else is checked. 20 bytes does not
+// divide across 8.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_ShardNotDivisibleByRanks)
+{
+    mockComm_.comm.nRanks = 8;
+    EXPECT_FALSE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 5, ncclFloat32, ncclSum));
+}
+
+// The 16-byte rule applies to the shard, not the message: 32 floats divide evenly
+// across 8 ranks but leave a 16-byte shard, while 8 floats leave 4 bytes.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_ShardUnaligned)
+{
+    mockComm_.comm.nRanks = 8;
+    EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 32, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_EligibleBfloat16)
+{
+    mockComm_.comm.nRanks = 8;
+    // 128 bytes over 8 ranks is a 16-byte shard, the smallest legal one.
+    EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 64, ncclBfloat16, ncclSum));
+}
+
+// A two-shot slot holds half what a one-shot slot does, because a bank has to
+// carry two staging areas instead of one. Only the shard has to fit, though, so
+// on the same scratch the tier still reaches nRanks/2 times further overall:
+// here one-shot tops out at four slices of message and two-shot takes four
+// slices per rank.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFurther)
+{
+    constexpr size_t kShardSlices = 4;
+    const int        nRanks       = mockComm_.comm.nRanks;
+    mockComm_.comm.ddaScratchBytes = scratchForTwoShotSlices(nRanks, kShardSlices);
+
+    const size_t shardBytes = payloadBytesForSlices(kShardSlices);
+    const size_t count      = shardBytes * static_cast<size_t>(nRanks) / sizeof(float);
+
+    EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
+    // The same scratch gives one-shot a slot of 2 * kShardSlices, so the whole
+    // message is well past what it can stage.
+    EXPECT_FALSE(ddaLL128ArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
+}
+
+// ---------------------------------------------------------------------------
 // AllToAll
 // ---------------------------------------------------------------------------
 
