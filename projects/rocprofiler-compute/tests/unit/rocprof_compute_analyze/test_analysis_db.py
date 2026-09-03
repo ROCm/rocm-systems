@@ -643,7 +643,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
     arch_config = schema.ArchConfig()
-    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # Table 1 has no Metric column and is skipped; table 701 maps to
     # panel 700 (table_name) and sub-table 701 (sub_table_name).
     arch_config.dfs = {
         1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
@@ -683,6 +683,83 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+LONG_FORM_PMC_PERF = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
+)
+
+
+def test_calc_pmc_df_data_reads_the_compressed_merge(tmp_path):
+    """The merged intermediate is discovered through the compression interface."""
+    common.write_pmc_perf(tmp_path, LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+
+    assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+
+
+def test_calc_pmc_df_data_skips_workload_without_a_merge(tmp_path):
+    """A workload with no merged intermediate is skipped, not read as plain CSV."""
+    (tmp_path / f"{schema.PMC_PERF_FILE_PREFIX}.csv").write_text(LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    assert analyzer.calc_pmc_df_data() == {}
+
+
+def test_calc_metrics_data_exports_qualified_per_channel_names():
+    """
+    Panel 18's per-channel rows reach the database as "Channel N", not as a
+    bare index.
+    """
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Channel 0", "Channel 1"],
+            "Min": [" 33.29 ", " 33.33 "],
+            "Max": [" 33.51 ", " 33.33 "],
+        },
+        index=pd.Index(["18.2.0", "18.2.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {1802: metric_df}
+    arch_config.panel_configs = {
+        1800: {
+            "id": 1800,
+            "title": "L2 Cache (per Channel)",
+            "data source": [
+                {"metric_table": {"id": 1802, "title": "L2 Cache Hit Rate (Percent)"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert list(info["name"]) == ["Channel 0", "Channel 1"]
+    assert list(info["table_name"]) == ["L2 Cache (per Channel)"] * 2
+    assert list(info["sub_table_name"]) == ["L2 Cache Hit Rate (Percent)"] * 2
+
+    # The label column is non-expression, so only Min/Max become expressions.
+    exprs = expressions[workload_path]
+    assert set(exprs["value_name"]) == {"Min", "Max"}
 
 
 # =============================================================================

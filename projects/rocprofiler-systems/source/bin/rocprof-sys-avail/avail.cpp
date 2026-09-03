@@ -20,7 +20,6 @@
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 
 #include <timemory/components.hpp>

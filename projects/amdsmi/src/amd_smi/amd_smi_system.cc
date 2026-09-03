@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "amd_smi/impl/amd_smi_system.h"
 
@@ -309,7 +290,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
     // - GPU and NIC functionality must remain usable. Skip CPU population and
     // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
-    std::cout << "\tESMI Not initialized, drivers not found " << std::endl;
+    std::cerr << "\tESMI not initialized; skipping CPU discovery "
+              << "(load amd_hsmp with HSMP enabled in BIOS for AMD CPU support)." << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
 

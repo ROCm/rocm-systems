@@ -4,6 +4,11 @@
 #pragma once
 
 #include "backends/rocprofiler_sdk/types.hpp"
+#include "common/version.hpp"
+
+#include <rocprofiler-sdk/version.h>
+
+#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
 
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -72,12 +78,104 @@ struct backend
     using timestamp_t                    = Wrapper::timestamp_t;
     using dispatch_counting_service_cb_t = Wrapper::dispatch_counting_service_cb;
     using dispatch_counting_record_cb_t  = Wrapper::dispatch_counting_record_cb;
+    using callback_name_info_t           = Wrapper::callback_name_info_t;
+    using buffer_name_info_t             = Wrapper::buffer_name_info_t;
 
-    static constexpr counter_flag_t flag_none      = Wrapper::COUNTER_FLAG_NONE;
-    static constexpr status_t       status_success = Wrapper::STATUS_SUCCESS;
-    static constexpr status_t       status_error   = Wrapper::STATUS_ERROR;
+    static constexpr auto           compile_time_version = Wrapper::compile_time_version;
+    static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
+    static constexpr status_t       status_success       = Wrapper::STATUS_SUCCESS;
+    static constexpr status_t       status_error         = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
+
+    // ─── Callback tracing kind constants ─────────────────────────────────────────
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
+        Wrapper::CALLBACK_TRACING_HSA_CORE_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_AMD_EXT_API =
+        Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_IMAGE_EXT_API =
+        Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_FINALIZE_EXT_API =
+        Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_RUNTIME_API =
+        Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_COMPILER_API =
+        Wrapper::CALLBACK_TRACING_HIP_COMPILER_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_CODE_OBJECT =
+        Wrapper::CALLBACK_TRACING_CODE_OBJECT;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_MARKER_CORE_API =
+        Wrapper::CALLBACK_TRACING_MARKER_CORE_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
+        Wrapper::CALLBACK_TRACING_RCCL_API;
+
+#if ROCPROFILER_VERSION >= 600
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =
+        Wrapper::CALLBACK_TRACING_ROCDECODE_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_OMPT =
+        Wrapper::CALLBACK_TRACING_OMPT;
+#endif
+
+#if ROCPROFILER_VERSION >= 700
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCJPEG_API =
+        Wrapper::CALLBACK_TRACING_ROCJPEG_API;
+#endif
+
+#if ROCPROFILER_VERSION >= 10304
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCSHMEM_API =
+        Wrapper::CALLBACK_TRACING_ROCSHMEM_API;
+#endif
+
+#if ROCPROFILER_VERSION >= 10305
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIPFILE_API =
+        Wrapper::CALLBACK_TRACING_HIPFILE_API;
+#endif
+
+    // ─── Buffer tracing kind constants ───────────────────────────────────────────
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HSA_CORE_API =
+        Wrapper::BUFFER_TRACING_HSA_CORE_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HSA_AMD_EXT_API =
+        Wrapper::BUFFER_TRACING_HSA_AMD_EXT_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HSA_IMAGE_EXT_API =
+        Wrapper::BUFFER_TRACING_HSA_IMAGE_EXT_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HSA_FINALIZE_EXT_API =
+        Wrapper::BUFFER_TRACING_HSA_FINALIZE_EXT_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HIP_RUNTIME_API =
+        Wrapper::BUFFER_TRACING_HIP_RUNTIME_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_HIP_COMPILER_API =
+        Wrapper::BUFFER_TRACING_HIP_COMPILER_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_MARKER_CORE_API =
+        Wrapper::BUFFER_TRACING_MARKER_CORE_API;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KERNEL_DISPATCH =
+        Wrapper::BUFFER_TRACING_KERNEL_DISPATCH;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_MEMORY_COPY =
+        Wrapper::BUFFER_TRACING_MEMORY_COPY;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_SCRATCH_MEMORY =
+        Wrapper::BUFFER_TRACING_SCRATCH_MEMORY;
+
+#if ROCPROFILER_VERSION < 10000
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_PAGE_MIGRATION =
+        Wrapper::BUFFER_TRACING_PAGE_MIGRATION;
+#endif
+
+#if ROCPROFILER_VERSION >= 600
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_MEMORY_ALLOCATION =
+        Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION;
+#endif
+
+#if ROCPROFILER_VERSION >= 10202
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_PAGE_FAULT =
+        Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_PAGE_MIGRATE =
+        Wrapper::BUFFER_TRACING_KFD_PAGE_MIGRATE;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_QUEUE =
+        Wrapper::BUFFER_TRACING_KFD_QUEUE;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_QUEUE =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_QUEUE;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU;
+    static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS =
+        Wrapper::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS;
+#endif
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
@@ -333,15 +431,61 @@ public:
     static status_t get_version(std::uint32_t* major, std::uint32_t* minor,
                                 std::uint32_t* patch)
     {
-        return Wrapper::get_version(major, minor, patch);
+        static const auto cached_version = [] {
+            std::uint32_t maj    = 0;
+            std::uint32_t min    = 0;
+            std::uint32_t pat    = 0;
+            auto          status = Wrapper::get_version(&maj, &min, &pat);
+            return std::tuple{ status, maj, min, pat };
+        }();
+
+        const auto& [status, maj, min, pat] = cached_version;
+        *major                              = maj;
+        *minor                              = min;
+        *patch                              = pat;
+        return status;
+    }
+
+    /// Verifies that the rocprofiler-sdk library loaded at runtime is the same
+    /// version this code was compiled against.
+    /// @throws std::runtime_error if the runtime and compile-time versions differ.
+    static void check_version_compatibility()
+    {
+        static constexpr auto compile_time_ver =
+            common::version::from_formatted(compile_time_version);
+
+        auto runtime_ver = common::version{};
+        get_version(&runtime_ver.major, &runtime_ver.minor, &runtime_ver.patch);
+
+        if(runtime_ver == compile_time_ver)
+        {
+            return;
+        }
+
+        throw std::runtime_error{ fmt::format(
+            "rocprofiler-sdk version mismatch: compiled against {}.{}.{}, but runtime "
+            "library reports {}.{}.{}",
+            compile_time_ver.major, compile_time_ver.minor, compile_time_ver.patch,
+            runtime_ver.major, runtime_ver.minor, runtime_ver.patch) };
+    }
+
+    [[nodiscard]] static const callback_name_info_t& get_callback_tracing_names()
+    {
+        static const auto cached_names = Wrapper::get_callback_tracing_names();
+        return cached_names;
+    }
+
+    [[nodiscard]] static const buffer_name_info_t& get_buffer_tracing_names()
+    {
+        static const auto cached_names = Wrapper::get_buffer_tracing_names();
+        return cached_names;
     }
 
     static timestamp_t get_timestamp() noexcept
     {
-        timestamp_t ts{};
-        // Return code is always Wrapper::STATUS_SUCCESS.
-        (void) Wrapper::get_timestamp(&ts);
-        return ts;
+        timestamp_t timestamp{};
+        (void) Wrapper::get_timestamp(&timestamp);
+        return timestamp;
     }
 
     static const char* get_status_string(status_t status) noexcept
@@ -357,6 +501,7 @@ struct backend_factory
 
     static std::shared_ptr<backend_t> create_backend()
     {
+        backend_t::check_version_compatibility();
         return std::make_shared<backend_t>();
     }
 };

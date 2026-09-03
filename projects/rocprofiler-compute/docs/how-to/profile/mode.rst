@@ -236,7 +236,7 @@ an Instinct MI210 vs an Instinct MI250.
    total 408
    -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
    drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
-   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   15017 Mar 21 23:48 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup    1119 Mar 21 23:47 profiling_config.yaml
    -rw-r--r-- 1 auser agroup    1684 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup     899 Mar 21 23:47 sysinfo.csv
@@ -330,7 +330,7 @@ Examples:
     └── sysinfo.csv
 
 The output files use ``rocpd`` format. See :ref:`profiling-output-format` for
-details on when the final ``pmc_perf.csv`` is created.
+details on when the final ``pmc_perf.csv.gz`` is created.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -387,7 +387,7 @@ Raw performance counter data produced by the underlying
 (SQLite) format:
 
 * The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
-* These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
+* These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
@@ -810,7 +810,7 @@ successfully.
    $ ls workloads/occupancy/MI325X
    total 48
    drwxr-xr-x 1 auser agroup     0 Mar 21 23:49 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Mar 21 23:49 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   412 Mar 21 23:49 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup  1715 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Mar 21 23:49 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
@@ -900,9 +900,22 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* Valid PyTorch installation in the profiling environment.
+* PyTorch 2.13 or 2.14 in the profiling environment.
 * PyTorch application must be run as a Python script or a Python command.
-* Workload’s Python version must match roctx’s Python version.
+
+.. important::
+
+   PyTorch must be installed together with ROCm from the TheRock package index.
+   Torch trace is built against the PyTorch that ships alongside ROCm, so a
+   PyTorch installed separately, for example from the default PyPI index, is not
+   supported.
+
+   Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
+   ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
+   packages
+   <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-pytorch-python-packages>`_
+   for the index URL, the supported ``device-*`` extras, and the PyTorch version
+   compatibility matrix.
 
 Usage
 -----
@@ -952,6 +965,15 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 .. code-block:: shell-session
 
    $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
+
+Torch trace collector
+---------------------
+
+``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
+the workload PyTorch version. If this installation has no collector at all,
+profiling stops and says so. If a collector exists but none matches the workload
+PyTorch version, profiling stops with an error listing the supported versions and
+the workload version.
 
 Output
 ------
@@ -1027,7 +1049,7 @@ Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist mode
 Performance counter data file
 -----------------------------
 
-The ``pmc_perf.csv`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
+The ``pmc_perf.csv.gz`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
 
 * Identifying which PyTorch operators executed which GPU kernels
 * Aggregating performance counter values by operator
@@ -1044,8 +1066,6 @@ The Torch trace feature currently has the following limitations:
 * Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --torch-trace`` and ``rocprof-compute analyze ... --experimental`` with ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
-
-* A valid PyTorch installation must be available in the environment where the workload runs.
 
 * The workload’s Python version must match the Python version used by ``roctx``.
 

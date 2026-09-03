@@ -319,7 +319,7 @@ jobs:
           export PATH=/opt/conda/envs/py3.8/bin:${PATH}
           ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
-      - name: Test User API
+      - name: Test find_package (Causal API)
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-systems/

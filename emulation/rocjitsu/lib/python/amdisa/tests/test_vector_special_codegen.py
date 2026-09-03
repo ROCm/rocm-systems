@@ -28,6 +28,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_swaprel,
     gen_vector_trig_preop,
 )
+from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
@@ -279,6 +280,7 @@ def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
 
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
+    codegen.config = CodegenConfig()
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),
@@ -343,6 +345,7 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
 
 def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
     codegen = object.__new__(CodeGenerator)
+    codegen.config = CodegenConfig()
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),

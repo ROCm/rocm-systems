@@ -2,11 +2,12 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.9.0
+## (Unreleased) rocDecode 1.10.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
+* Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
 
 ### Resolved issues
 

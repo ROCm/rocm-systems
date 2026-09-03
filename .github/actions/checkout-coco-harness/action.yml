@@ -1,0 +1,45 @@
+name: 'Checkout coco harness'
+description: >-
+  Mint a short-lived GitHub App token scoped to the coco harness repository
+  (ROCm/tRCCL) and check it out at the given ref. Shared by the nightly
+  caller's setup job and the reusable run launcher so the token's scope and
+  the checkout out App version can't drift apart between them.
+
+inputs:
+  ref:
+    description: 'Git ref (commit, tag, or branch) to check out.'
+    required: true
+  path:
+    description: 'Checkout path, relative to the workspace.'
+    required: true
+  app-id:
+    description: 'GitHub App ID used to mint the checkout token.'
+    required: true
+  app-private-key:
+    description: 'Private key for app-id.'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    # github.token is scoped to this repository, so it cannot read another org
+    # repo. This cross-org-repo checkout pattern is also used elsewhere in
+    # this repo (e.g. docs-pr-preview.yml, rocm_ci_caller.yml) to mint a
+    # short-lived App token; here it's scoped down to just the harness repo.
+    # The App must be installed there with contents:read.
+    - name: Generate a token for the coco harness repository
+      id: coco_token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: tRCCL
+
+    - name: Checkout the coco harness
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        repository: ROCm/tRCCL
+        ref: ${{ inputs.ref }}
+        path: ${{ inputs.path }}
+        token: ${{ steps.coco_token.outputs.token }}

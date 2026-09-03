@@ -57,7 +57,7 @@ class tui_analysis(OmniAnalyze_Base):
             )
             return
 
-        # Join results_*.csv source files into pmc_perf.csv if needed (Phase 2)
+        # Join results_*.csv.gz source files into pmc_perf.csv.gz if needed
         self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(

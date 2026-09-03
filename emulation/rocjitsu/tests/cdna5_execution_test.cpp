@@ -1183,7 +1183,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
 
     auto base = cdna5::build_vop3p(test_case.opcode, fields);
     if (test_case.operation == Operation::Fma)
-      base[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+      base[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
     const std::array words{base[0], base[1], kLiteral};
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
@@ -1470,7 +1470,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
     auto words = cdna5::build_vop3p(
         cdna5::kVPkFmaF32Vop3p,
         {.vdst = 6, .neg_hi = 4, .src0 = 256, .src1 = 258, .src2 = 260, .opsel_hi = 3, .neg = 2});
-    words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+    words[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));

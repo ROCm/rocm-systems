@@ -147,6 +147,71 @@ in the following table.
         | Write logs to a file rather than ``stdout``.
       - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
+    * - | ``NCCL_CHECK_MODE``
+        | Selects how thoroughly RCCL validates the arguments of every
+          collective call. Checking costs latency, so it is disabled by default
+          and intended for development and bring-up. See
+          :ref:`check-mode` for what each mode detects.
+      - | ``DEFAULT``: No argument validation (default).
+        | ``DEBUG_LOCAL``: Validate the buffer pointers locally on each rank.
+          Replaces the deprecated ``NCCL_CHECK_POINTERS``.
+        | ``DEBUG_GLOBAL``: Also validate arguments across ranks, including
+          symmetric buffer registration.
+        | Values other than ``DEBUG_LOCAL`` and ``DEBUG_GLOBAL`` leave the mode
+          unchanged, so writing ``DEFAULT`` does not switch checking off again.
+
+    * - | ``NCCL_CHECK_POINTERS``
+        | Deprecated. Enables local validation of the buffer pointers passed to
+          each collective.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, equivalent to ``NCCL_CHECK_MODE=DEBUG_LOCAL``.
+        | Use ``NCCL_CHECK_MODE`` instead. When both are set, ``DEBUG_LOCAL`` or
+          ``DEBUG_GLOBAL`` wins; any other ``NCCL_CHECK_MODE`` value keeps the
+          mode selected by ``NCCL_CHECK_POINTERS=1``.
+
+.. _check-mode:
+
+Validating collective arguments
+-------------------------------
+
+``NCCL_CHECK_MODE=DEBUG_LOCAL`` inspects only what a rank can see by itself: it
+verifies that the ``sendbuff`` and ``recvbuff`` arguments are valid device
+pointers that belong to the device the communicator was created on. Passing a
+host pointer or a pointer from another device makes the collective return
+``ncclInvalidArgument`` instead of faulting inside the kernel.
+
+``NCCL_CHECK_MODE=DEBUG_GLOBAL`` adds cross-rank validation of symmetric buffer
+registration. The symmetric kernels require every rank to describe its buffers
+identically, because a rank addresses a peer's buffer by applying its own offsets
+to the peer's symmetric window. RCCL cannot verify that from a single rank, so at
+group launch the ranks exchange the identity of the windows backing their buffers
+and compare against rank 0. A collective is rejected with
+``ncclInvalidArgument`` when:
+
+* Some ranks pass buffers registered with ``NCCL_WIN_COLL_SYMMETRIC`` while
+  others pass unregistered buffers.
+* The ranks pass buffers from windows registered at different positions in the
+  symmetric address space.
+* The ranks pass buffers at different offsets inside their windows.
+
+Each rejection is reported by rank 0 with a ``WARN`` message naming the
+collective, the message size, and the first rank that disagrees, so set
+``NCCL_DEBUG=WARN`` when using this mode. Setting ``NCCL_DEBUG=INFO`` with
+``NCCL_DEBUG_SUBSYS=COLL`` additionally prints a ``SymCheck`` line per rank with
+the window and user offsets that were compared.
+
+Without this mode such a mismatch is not diagnosed: RCCL silently falls back to
+the general kernels for calls it cannot serve symmetrically, so the collective
+still produces correct results but loses the performance of the symmetric path.
+Enable ``DEBUG_GLOBAL`` when a workload registers symmetric windows yet does not
+reach the expected symmetric performance.
+
+.. note::
+
+   ``DEBUG_GLOBAL`` adds a bootstrap all-gather to every group launch, which is
+   far more expensive than the collective itself for small messages. Use it to
+   diagnose a configuration, not in production.
+
 Algorithm and protocol control
 ==============================
 

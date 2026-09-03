@@ -8900,7 +8900,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
     EXPECT_EQ(prefix.src1, 128u);
     EXPECT_EQ(prefix.src2, 256u);
     EXPECT_EQ(prefix.opsel, 0u) << "clear source matrix-A reuse in the new encoding";
-    EXPECT_EQ(prefix.pad_14, 0u) << "clear source matrix-B reuse in the new encoding";
+    EXPECT_EQ(prefix.opsel_hi_2, 0u) << "clear source matrix-B reuse in the new encoding";
     EXPECT_EQ(prefix.opsel_hi, 0u);
 
     EXPECT_EQ(matrix.op, cdna5::kVWmmaF3216x16x128F8f6f4Vop3p);
@@ -8909,7 +8909,7 @@ TEST(BinaryTranslatorE2E, Gfx1250UsesNeutralScaledK128Fp8Bf8Wmma) {
     EXPECT_EQ(matrix.src1, fields.src1);
     EXPECT_EQ(matrix.src2, fields.src2);
     EXPECT_EQ(matrix.opsel, test_case.matrix_a_fmt);
-    EXPECT_EQ((matrix.pad_14 << 2) | matrix.opsel_hi, test_case.matrix_b_fmt);
+    EXPECT_EQ((matrix.opsel_hi_2 << 2) | matrix.opsel_hi, test_case.matrix_b_fmt);
     EXPECT_EQ(matrix.neg_hi, 4u) << "preserve only C absolute";
     EXPECT_EQ(matrix.neg, 4u) << "preserve only C negate";
     EXPECT_EQ(words[4], completion_wait[0]);
@@ -10536,7 +10536,7 @@ TEST(BinaryTranslatorE2E, Gfx1250WrapsBareF8f6f4WmmaInNeutralScaleForA0) {
   EXPECT_EQ(prefix.neg_hi, 0u);
   EXPECT_EQ(prefix.opsel, 0u);
   EXPECT_EQ(prefix.opsel_hi, 0u);
-  EXPECT_EQ(prefix.pad_14, 0u);
+  EXPECT_EQ(prefix.opsel_hi_2, 0u);
   EXPECT_EQ(target_words[2], wmma[0]);
   EXPECT_EQ(target_words[3], wmma[1]);
   EXPECT_EQ(target_words[kPrefixAndMatrixWords], completion_wait[0]);
@@ -12012,7 +12012,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsRegularScaleFp4AcrossMForA0) {
     EXPECT_EQ(replacement.src1, 256u + 32u);
     EXPECT_EQ(replacement.src2, 256u + 48u + half * 8u);
     EXPECT_EQ(replacement.opsel, 4u);
-    EXPECT_EQ(replacement.pad_14, 1u);
+    EXPECT_EQ(replacement.opsel_hi_2, 1u);
     EXPECT_EQ(replacement.opsel_hi, 0u);
     EXPECT_EQ(replacement.neg_hi, 4u);
     EXPECT_EQ(replacement.clamp, 0u);
@@ -12293,7 +12293,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMOnlyForA0) {
     EXPECT_EQ(prefix.src2, 256u);
     EXPECT_EQ(prefix.opsel, half);
     EXPECT_EQ(prefix.opsel_hi, 1u);
-    EXPECT_EQ(prefix.pad_14, 0u);
+    EXPECT_EQ(prefix.opsel_hi_2, 0u);
     EXPECT_EQ(prefix.neg_hi, 2u);
     EXPECT_EQ(prefix.neg, 2u);
     EXPECT_EQ(words[offset] & ((1u << 13) | (1u << 14)), 0u);
@@ -12307,7 +12307,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsScale16Fp4AcrossMOnlyForA0) {
     EXPECT_EQ(replacement.src1, 256u + 32u);
     EXPECT_EQ(replacement.src2, 256u + 48u + half * 8u);
     EXPECT_EQ(replacement.opsel, 4u);
-    EXPECT_EQ(replacement.pad_14, 1u);
+    EXPECT_EQ(replacement.opsel_hi_2, 1u);
     EXPECT_EQ(replacement.opsel_hi, 0u);
     EXPECT_EQ(replacement.neg_hi, 4u);
     EXPECT_EQ(replacement.neg, 4u);
@@ -12790,7 +12790,7 @@ TEST(BinaryTranslatorE2E, Gfx1250SplitsStandalone32x16Fp4IntoScaledHalvesForA0) 
     std::memcpy(&body, &target_words[prefix + 2], sizeof(body));
     EXPECT_EQ(body.op, cdna5::kVWmmaF3216x16x128F8f6f4Vop3p);
     EXPECT_EQ(body.opsel, 4u) << "matrix A format must be FP4";
-    EXPECT_EQ(body.pad_14, 1u) << "matrix B format must be FP4";
+    EXPECT_EQ(body.opsel_hi_2, 1u) << "matrix B format must be FP4";
     EXPECT_EQ(body.opsel_hi, 0u) << "matrix B format must be exactly FP4";
 
     const uint16_t delta = static_cast<uint16_t>(half * kHalfDwords);
@@ -13793,6 +13793,46 @@ TEST(KernelDescriptorTranslator, Gfx1250UsesWave32SixteenVgprGranularity) {
   EXPECT_EQ(translations[0].guest_vgpr_count, 1024u);
   EXPECT_EQ(translations[0].target_vgpr_count, 1024u);
   EXPECT_EQ(translations[0].target_vgpr_granulated, 63u);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250PreservesSixBitUserSgprCount) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kUserSgprCount = 32;
+  auto image =
+      rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text({kGfx1250SEndpgm});
+  rocjitsu::test_support::write_value_for_test<uint32_t>(
+      image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *rodata = rocjitsu::test_support::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  auto descriptor = rocjitsu::test_support::read_kernel_descriptor_for_test(rodata->data());
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, kUserSgprCount);
+  rocjitsu::test_support::write_kernel_descriptor_for_test(image.data() + rodata->sectionOffset(),
+                                                           descriptor);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto *target_rodata = rocjitsu::test_support::find_section(translated, ".rodata");
+  ASSERT_NE(target_rodata, nullptr);
+  const auto target =
+      rocjitsu::test_support::read_kernel_descriptor_for_test(target_rodata->data());
+  EXPECT_EQ(AMDHSA_BITS_GET(target.compute_pgm_rsrc2,
+                            rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT),
+            kUserSgprCount);
 }
 
 TEST(KernelDescriptorTranslator, Gfx1250AcceptsLdsAboveTcpPartitionSize) {

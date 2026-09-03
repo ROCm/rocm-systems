@@ -37,8 +37,11 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
                                        arch, memory, l2_cache_, exec_mode);
     // Register all CUs in this SE with the XCD's command processor.
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
-    for (uint32_t c = 0; c < se->num_compute_units(); ++c)
-      cp_->add_compute_unit(se->compute_unit(c));
+    for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
+      auto *cu = se->compute_unit(c);
+      cu->set_shader_engine_location(i, c);
+      cp_->add_compute_unit(cu);
+    }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the
     // interleaved SPI path for cross-workgroup spin-wait resolution.
     cp_->add_spi(&se->spi());

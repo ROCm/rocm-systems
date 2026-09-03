@@ -174,6 +174,7 @@ def _collapse_register_ranges(
     pairs: list,
     opnd_type_name: str,
     flt_name_map: dict,
+    lowercase_symbolic_names: bool = False,
 ) -> tuple[list[tuple[str, str]], list[OperandNamePattern]]:
     """Process predefined value pairs into (enum_name, value) list and name patterns.
 
@@ -209,6 +210,11 @@ def _collapse_register_ranges(
 
     for pair_idx, predef_val_pair in enumerate(pairs):
         predef_name = xs.get_node_text(predef_val_pair.find(xs.NAME))
+        if lowercase_symbolic_names:
+            # Schema 1.1.1 uppercases predefined symbolic names.  Operand
+            # disassembly and register-range recognition use the established
+            # lowercase spelling, while generated enum names remain uppercase.
+            predef_name = predef_name.lower()
         predef_val = xs.get_node_text(predef_val_pair.find(xs.VALUE))
         original_name = predef_name
         reg_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', predef_name)
@@ -236,6 +242,8 @@ def _collapse_register_ranges(
                 next_pair = None
                 if pair_idx + 1 < len(pairs):
                     next_name = xs.get_node_text(pairs[pair_idx + 1].find(xs.NAME))
+                    if lowercase_symbolic_names:
+                        next_name = next_name.lower()
                     next_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', next_name)
                     if next_match:
                         next_pair = next_match.group(1)
@@ -371,8 +379,8 @@ class Parser:
         """
         self.parse_encodings()
         self.parse_insts()
-        self._inject_compat_insts()
         self.parse_operand_types()
+        self._inject_compat_insts()
         self._collect_fieldless_operand_types()
         validate_fieldless_taxonomy(self.isa_spec)
         return self.isa_spec
@@ -470,10 +478,28 @@ class Parser:
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
-        if dt_ptr == -1:
-            raise ValueError(
-                'RDNA4 S_WAITCNT opcode 9 has no ENC_SOPP primary decode route'
-            )
+        patch_route = dt_ptr == -1
+        if patch_route:
+            # Schema 1.1.1 omits the reserved opcode-9 identifier from
+            # RDNA4 ENC_SOPP. LLVM still accepts that compatibility opcode,
+            # so bind it to the same primary entry as the other SOPP slots.
+            matching_dt_ptrs = {
+                ptr
+                for ptr in enc.primary_dt_ptrs
+                if 0 <= ptr < len(self.isa_spec.primary_decode_table)
+                and self.isa_spec.primary_decode_table[ptr].enc is enc
+            }
+            if not matching_dt_ptrs:
+                raise ValueError(
+                    'RDNA4 S_WAITCNT opcode 9 has no ENC_SOPP primary decode route'
+                )
+            if len(matching_dt_ptrs) != 1:
+                raise ValueError(
+                    'RDNA4 S_WAITCNT opcode 9 requires exactly one unique '
+                    'ENC_SOPP primary decode route, found '
+                    f'{sorted(matching_dt_ptrs)}'
+                )
+            dt_ptr = matching_dt_ptrs.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
                 'RDNA4 S_WAITCNT opcode 9 resolves to invalid primary '
@@ -516,6 +542,7 @@ class Parser:
                     1,
                 )
             ],
+            available_encodings=frozenset({'ENC_SOPP'}),
         )
         insert_idx = next(
             (
@@ -526,7 +553,18 @@ class Parser:
             len(enc.insts),
         )
         enc.insts.insert(insert_idx, inst)
+        if patch_route:
+            enc.primary_dt_ptrs[opcode] = dt_ptr
 
+        # The 2026-08-06 RDNA4 and CDNA5 specifications omit the operand type
+        # definition along with S_WAITCNT itself.  Keep the synthetic
+        # instruction's operand taxonomy self-contained so generated code can
+        # name and format the compatibility immediate.
+        if 'OPR_WAITCNT' not in self.isa_spec.operand_types:
+            self.isa_spec.operand_types.append('OPR_WAITCNT')
+
+        dte = self.isa_spec.primary_decode_table[dt_ptr]
+        decode_func = f'decode{inst.fmt_name}'
         if dte.sub_decode_funcs is not None:
             dte.sub_decode_funcs[opcode] = decode_func
         else:
@@ -834,21 +872,36 @@ class Parser:
         for field in enc_node.findall(f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'):
             field_name = xs.get_node_text(field.find(xs.FIELD_NAME)).lower()
             field_name = renames.get(field_name, field_name)
-            field_bit_cnt = int(
-                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_CNT}'))
+            ranges = sorted(
+                field.findall(f'{xs.BIT_LAYOUT}/{xs.RANGE}'),
+                key=lambda node: int(node.attrib.get('Order', 0)),
             )
-            field_bit_offset = int(
-                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_OFF}'))
-            )
-            ucode_fields.append(
-                MicrocodeField(field_name, field_bit_cnt, field_bit_offset)
-            )
-            if field_name == 'encoding':
-                enc_field_bit_cnt = field_bit_cnt
-            elif field_name == 'op':
-                op_field_bit_cnt = field_bit_cnt
-            elif field_name == 'opm':
-                opm_field_bit_cnt = field_bit_cnt
+            logical_bit_offset = 0
+            for range_index, range_node in enumerate(ranges):
+                field_bit_cnt = int(xs.get_node_text(range_node.find(xs.BIT_CNT)))
+                field_bit_offset = int(xs.get_node_text(range_node.find(xs.BIT_OFF)))
+                range_name = field_name
+                if range_index > 0:
+                    # Schema 1.1.1 represents the former OPM field as a
+                    # second, non-contiguous OP range. Retain the normalized
+                    # names consumed by decode and generated C++ code. Other
+                    # partitioned fields use their logical bit offset as a
+                    # stable suffix (for example OP_SEL_HI bit 2).
+                    range_name = (
+                        'opm'
+                        if field_name == 'op' and range_index == 1
+                        else f'{field_name}_{logical_bit_offset}'
+                    )
+                ucode_fields.append(
+                    MicrocodeField(range_name, field_bit_cnt, field_bit_offset)
+                )
+                if range_name == 'encoding':
+                    enc_field_bit_cnt = field_bit_cnt
+                elif range_name == 'op':
+                    op_field_bit_cnt = field_bit_cnt
+                elif range_name == 'opm':
+                    opm_field_bit_cnt = field_bit_cnt
+                logical_bit_offset += field_bit_cnt
         ucode_fields.sort(key=lambda x: x.bit_offset)
 
         # XML bug: versions 1.0.0 and 1.1.0 omit reserved/padding fields
@@ -1162,7 +1215,14 @@ class Parser:
                     # Fieldless operands have no <FieldName> in the MR ISA, so
                     # synthesize a name; make them unique below.
                     if field_name_node is not None:
-                        opnd_name = xs.get_node_text(field_name_node).lower()
+                        field_name = xs.get_node_text(field_name_node).lower()
+                        opnd_name = self.profile.normalize_operand_field_name(
+                            enc_name,
+                            field_name,
+                        )
+                        opnd_type = self.profile.normalize_operand_type(
+                            enc_name, field_name, opnd_type
+                        )
                         data_format_name = (
                             xs.get_node_text(data_format_name_node)
                             if data_format_name_node is not None
@@ -1252,7 +1312,10 @@ class Parser:
             if opnd_predefined_val is not None:
                 pairs = list(opnd_predefined_val)
                 predef_vals_list, name_patterns = _collapse_register_ranges(
-                    pairs, opnd_type_name, self.profile.flt_name_map
+                    pairs,
+                    opnd_type_name,
+                    self.profile.flt_name_map,
+                    self.profile.lowercase_operand_selector_names,
                 )
                 self.isa_spec.opnd_selectors.append(
                     OperandSelector(opnd_type_name, predef_vals_list, name_patterns)

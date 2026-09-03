@@ -179,7 +179,7 @@ target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
   find_package(hsa-runtime64)
-  find_package(amd_comgr)
+  find_package(amd_comgr 3.2 REQUIRED)
   target_link_libraries(amdhip64 PRIVATE
     pthread numa rt c amd_comgr hsa-runtime64::hsa-runtime64)
 endif()

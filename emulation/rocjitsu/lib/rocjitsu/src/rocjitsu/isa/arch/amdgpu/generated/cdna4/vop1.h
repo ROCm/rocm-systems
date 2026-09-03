@@ -772,28 +772,6 @@ private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
-class VExpLegacyF32Vop1 : public Vop1 {
-public:
-  VExpLegacyF32Vop1(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-
-private:
-  void execute_modifier_impl(amdgpu::Wavefront &wf);
-};
-
-class VLogLegacyF32Vop1 : public Vop1 {
-public:
-  VLogLegacyF32Vop1(const MachineInst *inst);
-  void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
-  Operand src0;
-
-private:
-  void execute_modifier_impl(amdgpu::Wavefront &wf);
-};
-
 class VCvtNormI16F16Vop1 : public Vop1 {
 public:
   VCvtNormI16F16Vop1(const MachineInst *inst);

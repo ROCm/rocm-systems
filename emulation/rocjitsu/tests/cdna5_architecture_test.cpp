@@ -229,6 +229,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
+  EXPECT_EQ(loaded.device.device_id, 30145u);
   EXPECT_EQ(loaded.device.marketing_name, "AMD Instinct MI455X");
   EXPECT_EQ(loaded.device.simd_count, 1024u);
   EXPECT_EQ(loaded.device.max_waves_per_simd, kGfx1250MaxWavesPerSimd);

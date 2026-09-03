@@ -234,7 +234,7 @@ def gen_vector_unary(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(lo));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+            f'    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op == 'cvt_pk_f32_bf8':
         conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
@@ -247,7 +247,7 @@ def gen_vector_unary(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(lo));'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
+            f'    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op in (
         'not',

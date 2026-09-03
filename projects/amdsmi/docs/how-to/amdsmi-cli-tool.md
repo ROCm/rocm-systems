@@ -25,6 +25,13 @@ library](./amdsmi-cpp-lib) is recommended as a robust data source.
 
 Refer to the [installation instructions](../install/install.md).
 
+```{note}
+CPU commands (`amd-smi static --smu`, `amd-smi metric --cpu-*`, etc.) require
+the `amd_hsmp` kernel module (with HSMP enabled in BIOS). Without it, CPU
+discovery is skipped (non-fatal). GPU and NIC functionality is unaffected. See
+{ref}`install_amdgpu_driver` for more information.
+```
+
 ## Get started
 
 The `amd-smi` command provides system management and monitoring capabilities for
