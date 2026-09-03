@@ -87,6 +87,12 @@ def _register_framework_root() -> None:
         triton_file = getattr(triton, "__file__", None)
         if triton_file:
             core.add_framework_root(str(Path(triton_file).parent))
+        else:
+            console_warning(
+                "ml api trace",
+                "triton.__file__ is not set. Launch marker locations may "
+                "refer to Triton source files.",
+            )
     except Exception as exc:
         console_warning(
             "ml api trace",
@@ -135,11 +141,26 @@ _LAUNCH_META_KWARGS = frozenset({
 })
 
 
+def _format_dtype_shape(obj: object) -> Optional[str]:
+    shape = getattr(obj, "shape", None)
+    dtype = getattr(obj, "dtype", None)
+    if shape is None or dtype is None:
+        return None
+    try:
+        dims = "x".join(str(int(d)) for d in shape)
+    except (TypeError, ValueError):
+        return None
+    return f"{str(dtype).replace('torch.', '')}[{dims}]"
+
+
 def _format_triton_arg(obj: object) -> str:
     """Render one Triton launch arg as a shape/type summary or scalar value."""
     if isinstance(obj, (list, tuple)):
         inner = ", ".join(_format_triton_arg(o) for o in obj[:8])
         return f"[{inner}]"
+    dtype_shape = _format_dtype_shape(obj)
+    if dtype_shape is not None:
+        return dtype_shape
     if core.args_values_enabled():
         if isinstance(obj, (int, float)):
             return repr(obj)
@@ -148,22 +169,51 @@ def _format_triton_arg(obj: object) -> str:
     return type(obj).__name__
 
 
+def _is_kernel_operand(obj: object) -> bool:
+    if obj is None or isinstance(obj, (list, tuple, int, float, str)):
+        return True
+    return _format_dtype_shape(obj) is not None
+
+
+def _collect_arg_names(params: object) -> list[str]:
+    if not params:
+        return []
+    names: list[str] = []
+    try:
+        for param in params:
+            if isinstance(param, str):
+                if param:
+                    names.append(param)
+                continue
+            name = getattr(param, "name", None)
+            if isinstance(name, str) and name:
+                names.append(name)
+    except Exception:
+        return []
+    return names
+
+
 def _kernel_arg_names(self_obj: object) -> list[str]:
     """Return ordered kernel parameter names when available."""
-    fn = getattr(self_obj, "fn", None)
-    if fn is None:
-        return []
-    try:
-        params = getattr(fn, "params", None)
-        if params:
-            return [getattr(p, "name", str(p)) for p in params]
-    except Exception:
-        pass
-    try:
-        sig = inspect.signature(fn)
-        return list(sig.parameters.keys())
-    except Exception:
-        return []
+    src = getattr(self_obj, "src", None)
+    fn = getattr(self_obj, "fn", None) or getattr(src, "fn", None)
+    for owner in (self_obj, fn):
+        if owner is None:
+            continue
+        for attr in ("params", "arg_names"):
+            names = _collect_arg_names(getattr(owner, attr, None))
+            if names:
+                return names
+    for candidate in (getattr(self_obj, "fn", None), fn):
+        if candidate is None or not (
+            inspect.isfunction(candidate) or inspect.ismethod(candidate)
+        ):
+            continue
+        try:
+            return list(inspect.signature(candidate).parameters.keys())
+        except Exception:
+            continue
+    return []
 
 
 def _build_triton_args(
@@ -182,6 +232,8 @@ def _build_triton_args(
         parts: list[str] = []
         for i, value in enumerate(selected[: marker_format.MAX_ARG_ITEMS]):
             label = names[i] if names and i < len(names) and names[i] else None
+            if not label and not _is_kernel_operand(value):
+                continue
             rendered = _format_triton_arg(value)
             parts.append(f"{label}={rendered}" if label else rendered)
         remaining = marker_format.MAX_ARG_ITEMS - len(parts)
