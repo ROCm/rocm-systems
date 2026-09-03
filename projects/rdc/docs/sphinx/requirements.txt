@@ -202,7 +202,7 @@ requests==2.33.1
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.33.1
+rocm-docs-core[api-reference]==1.40.2
     # via -r requirements.in
 rpds-py==0.30.0
     # via
