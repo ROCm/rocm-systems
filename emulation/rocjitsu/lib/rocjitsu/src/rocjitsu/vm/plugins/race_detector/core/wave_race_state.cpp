@@ -60,6 +60,8 @@ void WaveRaceState::registerScalarLoad(uint64_t pc, RegisterRef destination, uin
   if (destination.index >= limit || destination.width > limit - destination.index)
     return;
 
+  checkScalarWrite(destination);
+
   std::vector<uint32_t> registers(destination.width);
   for (uint32_t i = 0; i < destination.width; ++i)
     registers[i] = destination.index + i;
@@ -297,7 +299,7 @@ bool WaveRaceState::isOutstandingFromVgpr(int lane, int reg) const {
   return false;
 }
 
-void WaveRaceState::checkScalarRead(RegisterRef ref) const {
+void WaveRaceState::checkScalarAccess(RegisterRef ref, bool isWrite) const {
   const std::vector<std::vector<EventId>> *events = nullptr;
   const std::vector<int> *counts = nullptr;
   RaceViolation::Space space;
@@ -318,16 +320,28 @@ void WaveRaceState::checkScalarRead(RegisterRef ref) const {
 
   if (ref.width == 0 || ref.index >= events->size() || ref.width > events->size() - ref.index)
     return;
+  std::vector<EventId> reportedEvents;
   for (uint32_t offset = 0; offset < ref.width; ++offset) {
     const uint32_t index = ref.index + offset;
     if ((*counts)[index] == 0)
       continue;
     for (EventId eid : (*events)[index]) {
-      if (detector->events().type(eid) == type)
-        detector->getRaceHandler()({space, static_cast<int>(index), waveId.value, -1, false,
-                                    detector->getWorkgroupId(), eid});
+      if (detector->events().type(eid) != type ||
+          std::find(reportedEvents.begin(), reportedEvents.end(), eid) != reportedEvents.end())
+        continue;
+      reportedEvents.push_back(eid);
+      detector->getRaceHandler()({space, static_cast<int>(index), waveId.value, -1, isWrite,
+                                  detector->getWorkgroupId(), eid});
     }
   }
+}
+
+void WaveRaceState::checkScalarRead(RegisterRef ref) const {
+  checkScalarAccess(ref, /*isWrite=*/false);
+}
+
+void WaveRaceState::checkScalarWrite(RegisterRef ref) const {
+  checkScalarAccess(ref, /*isWrite=*/true);
 }
 
 } // namespace rocjitsu::plugins::race_detector

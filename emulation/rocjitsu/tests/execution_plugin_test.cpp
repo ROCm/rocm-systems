@@ -3037,6 +3037,35 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
 }
 
+TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  auto state = std::make_unique<ScalarMemState>();
+  state->dst_register = {ScalarRegisterStorage::TTMP, 0, 1};
+  state->is_load = true;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+
+  RegisterAccess(*wf).write_ttmp(0, 0x12345678u);
+  EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
+  EXPECT_NE(sink.str().find("access=write"), std::string::npos);
+}
+
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
   PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
                   /*sgprs_per_wf=*/128);
