@@ -17,6 +17,7 @@
 # build_configuration:STRING=<> Build configuration. Defaults to Debug.
 # generated_file:STRING=<>      File to generate. Mandatory argument.
 
+# Temporary no-op change on hip to exercise TheRock Multi-Arch CI.
 if(NOT build_configuration)
     set(build_configuration Debug)
 endif()
