@@ -360,6 +360,16 @@ foreach(_file IN LISTS _consan_sources)
         "descriptor resource mutation must cross its declared owner boundary"
     )
 endforeach()
+foreach(_file IN ITEMS
+    "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_lds.inc"
+)
+    _consan_assert_no_match(
+        "${_file}"
+        "apply_consan_descriptor_mutations_to_bytes"
+        "SuperCollider access lowering must use one text-and-descriptor transaction"
+    )
+endforeach()
 set(
     _descriptor_primitive_owners
     "${_consan_dir}/consan_descriptor.h"

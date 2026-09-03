@@ -655,3 +655,22 @@ ConSan matrix passes. It is useful protocol groundwork but is far below the
 macro-slice threshold. It must therefore feed a larger replacement of the
 parallel mode-local access planners rather than be counted as an
 Eighth-refactoring result in its own right.
+
+### 12.6 SuperCollider mutation-transaction checkpoint
+
+The SuperCollider LDS and FLAT lowerers no longer choose between a raw ELF-byte
+mutation path and a `CodeObjectPatcher` path according to whether a selected
+site needs appended text. Inline, local-cave, and appended-cave patches now all
+submit descriptor effects and tentative `.text` through the same transaction.
+The FLAT transaction also consumes a replacement already published by the LDS
+pass, so composed access lowering has one active-image lifetime instead of
+silently restarting from the pristine object. A focused composition test
+caught that requirement during the cutover, and the architecture-boundary
+test now prevents either SuperCollider lowerer from restoring its raw-byte
+descriptor path.
+
+The focused LDS, FLAT, combined-access, dense-route, target-conformance, and
+architecture-boundary tests pass. This deletes 72 governing production lines
+net. As with Section 12.5, the result is accepted groundwork rather than the
+required macro-slice: it collapses one duplicated application lifecycle but
+does not yet remove the large specialized placement planners that feed it.

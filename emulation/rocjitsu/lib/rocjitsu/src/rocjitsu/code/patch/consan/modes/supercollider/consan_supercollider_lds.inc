@@ -2799,11 +2799,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                (offset - generated_relay_bank_offset) / sizeof(uint32_t) <
                    generated_relay_bank_word_count;
       });
-  const bool uses_appended_cave = std::ranges::any_of(planned_patches,
-                                                      [](const PlannedLdsCheckTrapPatch &patch) {
-                                                        return patch.use_appended_cave;
-                                                      }) ||
-                                  !direct_relay_reservoirs.reservoirs.empty();
   ConSanDescriptorRegisterRequirements descriptor_growths;
   for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
     if (planned.required_vgpr_allocation_count) {
@@ -2843,7 +2838,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     lowering_commits.push_back(std::move(*commit));
   }
   std::vector<uint8_t> replacement;
-  if (uses_appended_cave) {
+  {
     CodeObjectPatcher patcher(code_object);
     if (!apply_consan_descriptor_mutations_to_patcher(
             patcher, result.program_inventory, code_object,
@@ -3191,33 +3186,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
     replacement = std::move(patcher).emit();
-  } else {
-    replacement.assign(original_bytes.begin(), original_bytes.end());
-    if (!apply_consan_descriptor_mutations_to_bytes(
-            replacement, result.program_inventory,
-            {descriptor_growths, descriptor_sgpr_growths, descriptor_private_requirements,
-             no_group_segment_requirements},
-            {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-             .inventory_proves_empty_accumulator_bank = false,
-             .maximum_group_segment_bytes = std::nullopt},
-            arch, "ConSan LDS check/trap proof", result.errors))
-      return;
-    for (const PlannedLdsCheckTrapPatch &planned : planned_patches) {
-      const ConSanAccessInventorySite &site = *planned.site;
-      if (planned.use_local_cave) {
-        const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
-        const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);
-        std::memcpy(replacement.data() + site.file_offset, planned.anchor_words.data(),
-                    static_cast<size_t>(anchor_bytes));
-        std::memcpy(replacement.data() + planned.local_cave->file_offset, planned.cave_words.data(),
-                    static_cast<size_t>(cave_bytes));
-      } else {
-        const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
-        std::memcpy(replacement.data() + site.file_offset, planned.words.data(),
-                    static_cast<size_t>(patch_bytes));
-      }
-      patch_infos.push_back(planned.info);
-    }
   }
   if (!result.publish_access_lowering(std::move(replacement), "ConSan LDS check/trap proof",
                                       std::move(lowering_commits), std::move(patch_infos))) {

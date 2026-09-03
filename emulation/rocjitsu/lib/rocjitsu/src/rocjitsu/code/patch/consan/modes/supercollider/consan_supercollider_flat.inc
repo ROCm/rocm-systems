@@ -1628,46 +1628,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
   }
 
-  std::vector<uint8_t> patched_bytes;
-  if (result.replacement.empty())
-    patched_bytes.assign(original_bytes.begin(), original_bytes.end());
-  else
-    patched_bytes = result.replacement;
-
   std::vector<ConSanPatchInfo> new_patch_infos;
   new_patch_infos.reserve(planned_patches.size());
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    const ConSanAccessInventorySite &site = *planned.site;
-    if (planned.use_local_cave) {
-      if (planned.local_cave == nullptr) {
-        result.errors.emplace_back("ConSan flat check/trap proof selected missing local cave");
-        return;
-      }
-      const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
-      const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);
-      if (site.file_offset > patched_bytes.size() ||
-          anchor_bytes > patched_bytes.size() - site.file_offset ||
-          planned.local_cave->file_offset > patched_bytes.size() ||
-          cave_bytes > patched_bytes.size() - planned.local_cave->file_offset) {
-        result.errors.emplace_back("ConSan flat check/trap proof exceeds ELF bytes");
-        return;
-      }
-
-      std::memcpy(patched_bytes.data() + site.file_offset, planned.anchor_words.data(),
-                  static_cast<size_t>(anchor_bytes));
-      std::memcpy(patched_bytes.data() + planned.local_cave->file_offset, planned.cave_words.data(),
-                  static_cast<size_t>(cave_bytes));
-    } else if (!planned.use_appended_cave) {
-      const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
-      if (site.file_offset > patched_bytes.size() ||
-          patch_bytes > patched_bytes.size() - site.file_offset) {
-        result.errors.emplace_back("ConSan flat check/trap proof exceeds ELF bytes");
-        return;
-      }
-      std::memcpy(patched_bytes.data() + site.file_offset, planned.words.data(),
-                  static_cast<size_t>(patch_bytes));
-    }
-
     new_patch_infos.push_back(planned.info);
     if (planned.entry_island != nullptr && !planned.entry_island_at_anchor) {
       ConSanPatchInfo island_info;
@@ -1680,9 +1643,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       new_patch_infos.push_back(std::move(island_info));
     }
   }
-  const bool has_appended_patch =
-      std::ranges::any_of(planned_patches, &PlannedFlatCheckTrapPatch::use_appended_cave);
-  std::vector<uint8_t> replacement;
   ConSanDescriptorRegisterRequirements descriptor_sgpr_growths;
   const ConSanDescriptorRegisterRequirements no_vgpr_requirements;
   const ConSanDescriptorMemoryRequirements no_group_segment_requirements;
@@ -1697,93 +1657,90 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  if (has_appended_patch) {
-    CodeObjectPatcher patcher(code_object);
-    if (!apply_consan_descriptor_mutations_to_patcher(
-            patcher, result.program_inventory, code_object,
-            {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
-             no_group_segment_requirements},
-            {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-             .inventory_proves_empty_accumulator_bank = false,
-             .maximum_group_segment_bytes = std::nullopt},
-            arch, "ConSan flat check/trap proof", result.errors))
+  std::optional<AmdGpuCodeObject> composed_code_object;
+  const AmdGpuCodeObject *active_code_object = &code_object;
+  if (!result.replacement.empty()) {
+    composed_code_object.emplace(result.replacement.data(), result.replacement.size());
+    if (!composed_code_object->is_valid()) {
+      result.errors.emplace_back(
+          "ConSan flat check/trap proof cannot parse the composed code object");
       return;
-    std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
-    for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
+    }
+    active_code_object = &*composed_code_object;
+  }
+  CodeObjectPatcher patcher(*active_code_object);
+  if (!apply_consan_descriptor_mutations_to_patcher(
+          patcher, result.program_inventory, *active_code_object,
+          {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
+           no_group_segment_requirements},
+          {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
+           .inventory_proves_empty_accumulator_bank = false,
+           .maximum_group_segment_bytes = std::nullopt},
+          arch, "ConSan flat check/trap proof", result.errors))
+    return;
+  std::vector<uint8_t> new_text(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  for (const BranchOnlyDirectRelayReservoir &reservoir : direct_branch_reservoirs.reservoirs) {
+    std::string relay_error;
+    if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, new_patch_infos,
+                                                      &relay_error)) {
+      result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
+      return;
+    }
+  }
+  for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
+    const ConSanAccessInventorySite &site = *planned.site;
+    const uint64_t anchor_bytes = planned.entry_island_at_anchor
+                                      ? planned.entry_island_words.size() * sizeof(uint32_t)
+                                      : planned.anchor_words.size() * sizeof(uint32_t);
+    if (planned.use_appended_cave) {
+      if (!planned.placement) {
+        result.errors.emplace_back("ConSan flat check/trap proof lost appended placement");
+        return;
+      }
+      const uint64_t body_offset = planned.placement->body_offset;
+      const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
+      if (body_offset > std::numeric_limits<size_t>::max() - body_bytes) {
+        result.errors.emplace_back("ConSan flat check/trap proof appended body overflows text");
+        return;
+      }
+      new_text.resize(std::max<uint64_t>(new_text.size(), body_offset + body_bytes), 0);
+      const uint32_t *anchor_data = planned.entry_island_at_anchor
+                                        ? planned.entry_island_words.data()
+                                        : planned.anchor_words.data();
+      std::memcpy(new_text.data() + site.physical_id.original_text_offset, anchor_data,
+                  anchor_bytes);
+      std::memcpy(new_text.data() + body_offset, planned.cave_words.data(), body_bytes);
+      if (planned.entry_island != nullptr) {
+        std::memcpy(new_text.data() + planned.entry_island->text_offset,
+                    planned.entry_island_words.data(),
+                    planned.entry_island_words.size() * sizeof(uint32_t));
+      }
+    } else if (planned.use_local_cave) {
+      const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
+      std::memcpy(new_text.data() + site.physical_id.original_text_offset,
+                  planned.anchor_words.data(), anchor_bytes);
+      std::memcpy(new_text.data() + planned.local_cave->text_offset, planned.cave_words.data(),
+                  body_bytes);
+    } else {
+      std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),
+                  planned.words.size() * sizeof(uint32_t));
+    }
+    if (planned.branch_only_route) {
       std::string relay_error;
-      if (!BranchOnlyRelayRouter::emit_direct_reservoir(new_text, reservoir, arch, new_patch_infos,
-                                                        &relay_error)) {
+      if (!BranchOnlyRelayRouter::emit_and_record(
+              new_text, *planned.branch_only_route, planned.info.trampoline_offset,
+              planned.info.anchor_offset + planned.info.original_size, arch, new_patch_infos,
+              &relay_error)) {
         result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
         return;
       }
     }
-    for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
-      const ConSanAccessInventorySite &site = *planned.site;
-      const uint64_t anchor_bytes = planned.entry_island_at_anchor
-                                        ? planned.entry_island_words.size() * sizeof(uint32_t)
-                                        : planned.anchor_words.size() * sizeof(uint32_t);
-      if (planned.use_appended_cave) {
-        if (!planned.placement) {
-          result.errors.emplace_back("ConSan flat check/trap proof lost appended placement");
-          return;
-        }
-        const uint64_t body_offset = planned.placement->body_offset;
-        const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
-        if (body_offset > std::numeric_limits<size_t>::max() - body_bytes) {
-          result.errors.emplace_back("ConSan flat check/trap proof appended body overflows text");
-          return;
-        }
-        new_text.resize(std::max<uint64_t>(new_text.size(), body_offset + body_bytes), 0);
-        const uint32_t *anchor_data = planned.entry_island_at_anchor
-                                          ? planned.entry_island_words.data()
-                                          : planned.anchor_words.data();
-        std::memcpy(new_text.data() + site.physical_id.original_text_offset, anchor_data,
-                    anchor_bytes);
-        std::memcpy(new_text.data() + body_offset, planned.cave_words.data(), body_bytes);
-        if (planned.entry_island != nullptr) {
-          std::memcpy(new_text.data() + planned.entry_island->text_offset,
-                      planned.entry_island_words.data(),
-                      planned.entry_island_words.size() * sizeof(uint32_t));
-        }
-      } else if (planned.use_local_cave) {
-        const uint64_t body_bytes = planned.cave_words.size() * sizeof(uint32_t);
-        std::memcpy(new_text.data() + site.physical_id.original_text_offset,
-                    planned.anchor_words.data(), anchor_bytes);
-        std::memcpy(new_text.data() + planned.local_cave->text_offset, planned.cave_words.data(),
-                    body_bytes);
-      } else {
-        std::memcpy(new_text.data() + site.physical_id.original_text_offset, planned.words.data(),
-                    planned.words.size() * sizeof(uint32_t));
-      }
-      if (planned.branch_only_route) {
-        std::string relay_error;
-        if (!BranchOnlyRelayRouter::emit_and_record(
-                new_text, *planned.branch_only_route, planned.info.trampoline_offset,
-                planned.info.anchor_offset + planned.info.original_size, arch, new_patch_infos,
-                &relay_error)) {
-          result.errors.emplace_back("ConSan flat check/trap proof " + relay_error);
-          return;
-        }
-      }
-    }
-    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "flat check/trap proof", result.program_inventory.code_object_id(),
-                             result.errors, &result.transform_failure_cause)) {
-      return;
-    }
-    replacement = std::move(patcher).emit();
-  } else {
-    if (!apply_consan_descriptor_mutations_to_bytes(
-            patched_bytes, result.program_inventory,
-            {no_vgpr_requirements, descriptor_sgpr_growths, descriptor_private_requirements,
-             no_group_segment_requirements},
-            {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
-             .inventory_proves_empty_accumulator_bank = false,
-             .maximum_group_segment_bytes = std::nullopt},
-            arch, "ConSan flat check/trap proof", result.errors))
-      return;
-    replacement = std::move(patched_bytes);
   }
+  if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                           "flat check/trap proof", result.program_inventory.code_object_id(),
+                           result.errors, &result.transform_failure_cause))
+    return;
+  std::vector<uint8_t> replacement = std::move(patcher).emit();
   std::vector<ConSanCommittedLowering> lowering_commits;
   lowering_commits.reserve(planned_patches.size());
   for (const PlannedFlatCheckTrapPatch &planned : planned_patches) {
