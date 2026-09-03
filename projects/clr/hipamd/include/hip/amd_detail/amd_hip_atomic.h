@@ -20,14 +20,13 @@
 #define __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY
 #endif
 
-template <bool B, typename T, typename F> struct Cond_t;
-
-template <typename T, typename F> struct Cond_t<true, T, F> {
-  using type = T;
-};
-template <typename T, typename F> struct Cond_t<false, T, F> {
-  using type = F;
-};
+// Annoyingly, unrecognized attributes are a warning and the scoped
+// atomic builtins predate clang_atomic_attributes.
+#if defined(__has_extension) && __has_extension(clang_atomic_attributes)
+#define __HIP_ATOMIC_ATTR(...) [[clang::atomic(__VA_ARGS__)]]
+#else
+#define __HIP_ATOMIC_ATTR(...)
+#endif
 
 #if !__HIP_DEVICE_COMPILE__
 // TODO: Remove this after compiler pre-defines the following Macros.
@@ -41,54 +40,6 @@ template <typename T, typename F> struct Cond_t<false, T, F> {
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_unsafe_atomics.h"
 #endif
-
-// Atomic expanders
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Op, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_expander(T* p, T x, Op op, F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp0{__hip_atomic_load(q, mem_order, mem_scope)};
-  U tmp1;
-  do {
-    tmp1 = tmp0;
-
-    op(reinterpret_cast<T&>(tmp1), x);
-  } while (!__hip_atomic_compare_exchange_strong(q, &tmp0, tmp1, mem_order, mem_order, mem_scope));
-
-  return reinterpret_cast<const T&>(tmp0);
-}
-
-template <int mem_order = __ATOMIC_SEQ_CST, int mem_scope = __HIP_MEMORY_SCOPE_SYSTEM, typename T,
-          typename Cmp, typename F>
-inline __attribute__((always_inline, device)) T hip_cas_extrema_expander(T* p, T x, Cmp cmp,
-                                                                         F f) noexcept {
-  using FP = __attribute__((address_space(0))) const void*;
-
-  __device__ extern bool is_shared_workaround(FP) asm("llvm.amdgcn.is.shared");
-
-  if (is_shared_workaround((FP)p)) return f();
-
-  using U =
-      typename Cond_t<sizeof(T) == sizeof(unsigned int), unsigned int, unsigned long long>::type;
-
-  auto q = reinterpret_cast<U*>(p);
-
-  U tmp{__hip_atomic_load(q, mem_order, mem_scope)};
-  while (cmp(x, reinterpret_cast<const T&>(tmp)) &&
-         !__hip_atomic_compare_exchange_strong(q, &tmp, x, mem_order, mem_order, mem_scope));
-
-  return reinterpret_cast<const T&>(tmp);
-}
 
 __device__ inline unsigned short int atomicCAS(unsigned short int* address,
                                                unsigned short int compare, unsigned short int val) {
@@ -597,15 +548,15 @@ __device__ inline double atomicMax_system(double* addr, double val) {
 }
 
 __device__ inline unsigned int atomicInc(unsigned int* address, unsigned int val) {
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_inc32))
-    return __builtin_amdgcn_atomic_inc32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+  __HIP_ATOMIC_ATTR(remote_memory, no_fine_grained_memory) {
+    return __scoped_atomic_fetch_uinc(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 }
 
 __device__ inline unsigned int atomicDec(unsigned int* address, unsigned int val) {
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_dec32))
-    return __builtin_amdgcn_atomic_dec32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+  __HIP_ATOMIC_ATTR(remote_memory, no_fine_grained_memory) {
+    return __scoped_atomic_fetch_udec(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 }
 
 __device__ inline int atomicAnd(int* address, int val) {

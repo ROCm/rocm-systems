@@ -103,8 +103,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"AllGather",    "AllReduce", "AlltoAllPivot", "AlltoAllGda",
-                                                   "AlltoAllvGda", "Broadcast", "Reduce",        "ReduceScatter",
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
@@ -202,6 +202,11 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 // RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
+
+#if ENABLE_TDM_SIMPLE
+// Off by default; the mover path is still under evaluation.
+RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
+#endif
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
@@ -484,6 +489,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
   }
+  // Self-guarded no-op if the GIN-SDMA path was never used. Must precede ncclDevrFinalize.
+  NCCLCHECK(ncclGinA2AFinalize(comm));
   // RCCL: !symmetricSupport comms still init devrState via the non-sym window-register path (dev_runtime.cc), so finalize unconditionally to free lsaRankList.
   NCCLCHECK(ncclDevrFinalize(comm));
   NCCLCHECK(ncclRasCommFini(comm));
@@ -893,6 +900,9 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
+#if ENABLE_TDM_SIMPLE
+  tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
+#endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
@@ -1274,6 +1284,19 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
   }
 
+#if ENABLE_TDM_SIMPLE
+  // FIFO slot k sits at k*(buffSizes/NCCL_STEPS), so the step must be a RCCL_TDM_ALIGN
+  // multiple for every slot to hit TDM's direct path. No-op at the 4MiB default.
+  if (comm->tdmSimpleEnable) {
+    int64_t simple = comm->buffSizes[NCCL_PROTO_SIMPLE];
+    int64_t aligned = ROUNDUP(simple, (int64_t)(NCCL_STEPS * RCCL_TDM_ALIGN));
+    if (simple > 0 && aligned != simple && aligned <= INT_MAX) {
+      INFO(NCCL_INIT, "Rounded SIMPLE buffer %ld -> %ld so every FIFO slot is %d-byte aligned", simple, aligned,
+           RCCL_TDM_ALIGN);
+      comm->buffSizes[NCCL_PROTO_SIMPLE] = (int)aligned;
+    }
+  }
+#endif
   if (comm->nNodes > 1) {
     rcclSetP2pNetChunkSize(comm, comm->p2pChunkSize);
     comm->p2pChunkSize = (comm->p2pChunkSize > RCCL_VALUE_INVALID) ? comm->p2pChunkSize : ncclParamP2pNetChunkSize();
@@ -1866,6 +1889,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                                                                  false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+#if ENABLE_TDM_SIMPLE
+  // gfx1250 only; the mover entry points are deleted elsewhere.
+  comm->tdmSimpleEnable =
+    rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+#endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
       IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {

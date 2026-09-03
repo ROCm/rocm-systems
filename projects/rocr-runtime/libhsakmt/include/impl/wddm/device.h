@@ -64,6 +64,7 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/cmd_util.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace wsl {
 namespace thunk {
@@ -252,6 +253,10 @@ public:
 private:
   bool Escape(void* priv_data, uint32_t priv_size, bool hw_access) const;
   NTSTATUS ParseDeviceInfo(void);
+  uint64_t AllocateCwsrSize(uint64_t* out_ctx_size = nullptr, uint64_t* out_debug_size = nullptr) const;
+  void FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
+                      uint64_t debug_memory_size, uint32_t num_xcc,
+                      volatile HSAint64* error_reason, HSAuint32 error_event_id);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
   bool DestroyDevice(void);
