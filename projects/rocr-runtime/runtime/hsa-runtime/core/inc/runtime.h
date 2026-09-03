@@ -430,6 +430,13 @@ class Runtime {
   hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count, uint32_t num_dep_signals,
                                const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uint32_t count,
+                                          const hsa_agent_t* dst_agents,
+                                          uint32_t num_dst_agents,
+                                          uint32_t num_dep_signals,
+                                          const hsa_signal_t* dep_signals,
+                                          hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                             uint64_t flags);
 
@@ -882,8 +889,8 @@ class Runtime {
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
 
-  // Returns the GPU agent from enabled and disabled gpu agents list
-  Agent* LowestDrmMinorGpu();
+  // GPU matching libhsakmt first_gpu_mem (KFD GTT anchor for host memory).
+  Agent* KfdGttAnchorGpu();
 
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking

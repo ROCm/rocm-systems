@@ -49,7 +49,7 @@ on:
         description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
+        default: '648a501e56a1e0919976d6f540b7853e63d44998'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -80,6 +80,7 @@ on:
         options:
           - device-api
           - gin
+          - ext-plugins
       runs_on:
         description: 'Runner label(s) as a JSON array string.'
         type: string
@@ -114,7 +115,7 @@ on:
         description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
+        default: '648a501e56a1e0919976d6f540b7853e63d44998'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -161,6 +162,8 @@ jobs:
       # rocm-systems goes in CI_SUBDIR; TheRock is checked out at the workspace root.
       CI_SUBDIR: _ci/${{ inputs.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
       VENV_DIR: ${{ github.workspace }}/.venv-${{ inputs.suite }}
+      # Separate from VENV_DIR: this one has to exist before provisioning runs.
+      RESOLVER_VENV: ${{ github.workspace }}/.venv-resolver-${{ inputs.suite }}
     steps:
       # At the workspace root: setup_test_environment resolves build_tools/ relative
       # to github.workspace. Skipped when rocm_path is set (no fetch needed).
@@ -181,6 +184,34 @@ jobs:
             projects/rccl-tests
             projects/rocshmem
 
+      # find_latest_artifacts.py imports boto3, which the compute-node runners do
+      # not provide system-wide. TheRock's setup_test_environment populates
+      # VENV_DIR, but that step runs after resolution, so stand up a dedicated
+      # venv here rather than reordering provisioning. TheRock's requirements.txt
+      # is used as a constraint file so we land inside the botocore window its
+      # build_tools expect instead of whatever boto3 is newest.
+      - name: Ensure artifact resolver dependencies
+        if: ${{ inputs.rocm_path == '' && inputs.artifact_run_id == '' }}
+        run: |
+          set -euo pipefail
+          if python3 -c 'import boto3' 2>/dev/null; then
+            echo "System python3 already provides boto3"
+            echo "RESOLVER_PY=python3" >> "${GITHUB_ENV}"
+            exit 0
+          fi
+          constraints=("--constraint" "${GITHUB_WORKSPACE}/requirements.txt")
+          [[ -f "${GITHUB_WORKSPACE}/requirements.txt" ]] || constraints=()
+          echo "boto3 unavailable to system python3; creating ${RESOLVER_VENV}"
+          rm -rf "${RESOLVER_VENV:?}"
+          if ! python3 -m venv "${RESOLVER_VENV}"; then
+            echo "python3 -m venv failed; falling back to a user-site install"
+            python3 -m pip install --quiet --user "${constraints[@]}" boto3
+            echo "RESOLVER_PY=python3" >> "${GITHUB_ENV}"
+            exit 0
+          fi
+          "${RESOLVER_VENV}/bin/python" -m pip install --quiet "${constraints[@]}" boto3
+          echo "RESOLVER_PY=${RESOLVER_VENV}/bin/python" >> "${GITHUB_ENV}"
+
       # Pick the TheRock run: explicit artifact_run_id, else the newest main run
       # with artifacts for this family (find_latest_artifacts.py).
       - name: Resolve TheRock artifact run
@@ -199,7 +230,7 @@ jobs:
             echo "run_id=${ARTIFACT_RUN_ID}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          run_id="$(python3 - <<'PY'
+          run_id="$("${RESOLVER_PY:-python3}" - <<'PY'
           import os, sys, contextlib
           sys.path.insert(0, "build_tools")
           import find_latest_artifacts as fla
@@ -381,3 +412,4 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/${CI_SUBDIR:?}"
           rm -rf "${VENV_DIR:?}"
+          rm -rf "${RESOLVER_VENV:?}"

@@ -13,7 +13,6 @@
 /// with any ISA family whose encoding struct exposes the required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -22,6 +21,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -41,26 +41,33 @@ constexpr bool smem_is_scratch_op(uint32_t op) {
 ///
 /// Requires: inst.op, inst.sbase, inst.soffset_en, inst.soffset, inst.imm, inst.offset.
 template <typename SmemInst>
-uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
+std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
   constexpr uint64_t kDwordMask = ~0x3ULL;
-  constexpr int kM0Selector = 124;
-  const uint64_t base = amdgpu::resolve_src_scalar64(wf, inst.sbase * 2, kM0Selector) & kDwordMask;
+  auto base = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
+  if (!base)
+    return std::nullopt;
+  *base &= kDwordMask;
+
   int64_t inst_offset = 0;
   if (inst.imm)
     inst_offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11) & ~0x3LL;
+
   uint64_t reg_offset = 0;
-  if (inst.soffset_en)
-    reg_offset = amdgpu::resolve_src_scalar(wf, inst.soffset, kM0Selector);
-  else if (!inst.imm)
-    reg_offset = amdgpu::resolve_src_scalar(wf, inst.offset & 0x7F, kM0Selector);
+  if (inst.soffset_en || !inst.imm) {
+    const uint32_t selector = inst.soffset_en ? inst.soffset : inst.offset & 0x7F;
+    auto value = amdgpu::try_read_scalar_selector(wf, selector);
+    if (!value)
+      return std::nullopt;
+    reg_offset = *value;
+  }
   reg_offset = smem_is_scratch_op(inst.op) ? reg_offset * 64 : reg_offset & kDwordMask;
-  const uint64_t addr = base + inst_offset + reg_offset;
+  const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
     if (++smem_count <= 12 || (smem_count % 240) == 0)
       os << std::format("SMEM #{} op={} base={:#x} inst_off={:#x} reg_off={:#x} imm={} soff_en={} "
                         "addr={:#x} raw_off={}",
-                        smem_count, inst.op, base, inst_offset, reg_offset, inst.imm,
+                        smem_count, inst.op, *base, inst_offset, reg_offset, inst.imm,
                         inst.soffset_en, addr, inst.offset);
   });
   return addr;

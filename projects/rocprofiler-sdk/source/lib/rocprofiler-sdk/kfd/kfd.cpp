@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/defines.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/utils.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -306,7 +307,6 @@ parse_event<KFD_EVENT_PAGE_MIGRATE_END>(const agent_id_map_t& agents, std::strin
         return {};
     }
 
-    // e.operation = static_cast<rocprofiler_kfd_event_page_migrate_operation_t>(operation);
     e.operation           = ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_END;
     e.start_address.value = page_to_bytes(_start_address);
     e.end_address.value   = page_to_bytes(_start_address + _size);
@@ -1676,6 +1676,7 @@ init()
 void
 finalize()
 {
+    shutdown_kfd_profiler();
     config::reset();
 }
 

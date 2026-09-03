@@ -16,10 +16,13 @@
 #include <cstring>
 #include <functional>
 
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "fail_loud.h"   // FailLoud: the one abort-on-unreachable spelling
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
+#include "hip_profile_interceptor_fakes.h"  // X-list of the profile-runtime HIP entry points
 
 // ===========================================================================
 // Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
@@ -463,3 +466,22 @@ hipError_t hipMemPoolCreate(hipMemPool_t* p, const hipMemPoolProps*) {
 }
 hipError_t hipMemPoolDestroy(hipMemPool_t) { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipMemPoolSetAttribute(hipMemPool_t, hipMemPoolAttr, void*) { return g_hipMemPoolResult; }
+
+// ---- HIP entry points ROCm's profile runtime also defines -------------------
+// These MUST stay defined even though no microtest calls them. Left undefined,
+// -fprofile-instr-generate lets the linker satisfy them from the INTERCEPTOR in
+// libclang_rt.profile, which drags in __interception/__sanitizer deps that ship
+// in no archive. See hip_profile_interceptor_fakes.h for the full chain.
+//
+// Aborting rather than returning hipErrorInvalidValue: a host-only microtest
+// that reaches a kernel launch or module load is broken, not merely unexercised.
+
+// extern "C" is stated rather than inherited from the HIP declaration: if a
+// future SDK drops one of these, the definition still emits the C symbol the
+// linker needs instead of silently emitting a mangled one.
+extern "C" {
+#define RCCL_DEFINE_HIP_STUB(name, params) \
+  hipError_t name params { FailLoudUnfaked("hip_fakes", #name); }
+RCCL_HIP_PROFILE_INTERCEPTORS(RCCL_DEFINE_HIP_STUB)
+#undef RCCL_DEFINE_HIP_STUB
+}  // extern "C"
