@@ -26,31 +26,15 @@
 
 namespace dda::common {
 
-// Warp-sized work units this message needs. A slice is the quantum: the tail one
-// ships whole even when only partly filled, because the reader polls a slice's
-// flags as a unit.
-constexpr size_t ddaLL128ArSlices(size_t bytes) {
-  return (bytes + (size_t)kDdaLL128DataBytesPerSlice - 1) / (size_t)kDdaLL128DataBytesPerSlice;
+// Slot geometry, derived from the scratch bank the host picked. The bank splits
+// evenly across ranks and the per-rank stride is floored to a whole number of
+// slices, so a slot always begins on a slice boundary and the 16B wire accesses
+// stay aligned however nRanks divides the bank
+constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
+  size_t slotWords = (bankSize / sizeof(uint64_t)) / (size_t)nRanks;
+  return slotWords / (size_t)kDdaLL128WireWordsPerSlice * (size_t)kDdaLL128WireWordsPerSlice;
 }
 
-// Words per slot, fixed for the comm rather than derived from a call's slice
-// count, so consecutive epochs always occupy disjoint banks whatever the message
-// size. With a size-dependent stride a small call's bank can land inside a large
-// call's region, and because a rank may run a whole epoch ahead of a peer, its
-// stores then overwrite flag words that peer is still polling, wedging it.
-//
-// The value is kDdaLLMaxBytes worth of words on purpose: this tier shares one
-// scratch and one epoch counter with the LL all-reduce tiers, so bank 1 has to
-// start at the same byte offset (nRanks * kDdaLLMaxBytes) for all of them.
-constexpr size_t kDdaLL128ArSlotWords = kDdaLLMaxBytes / sizeof(uint64_t);
-
-// Slices one slot can hold, and hence the largest message this tier can stage.
-constexpr size_t ddaLL128ArMaxSlices() {
-  return kDdaLL128ArSlotWords / (size_t)kDdaLL128WireWordsPerSlice;
-}
-
-// DIAGNOSTIC: bf16 add done through __uint_as_float / __float_as_uint instead of
-// vecElementAdd's reinterpret_cast punning of a temporary.
 // LL128 flat all-reduce kernel. One warp owns one slice at a time; the grid is
 // 1D over slices and each block fans out to every remote peer.
 //
@@ -75,7 +59,7 @@ __launch_bounds__(1024)
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
-                                        size_t slotWords) { // fixed per-slot stride, from host
+                                        size_t bankSize) { // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -88,7 +72,10 @@ __launch_bounds__(1024)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)nRanks * (uint64_t)slotWords;
+  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // number of 8B words and the slot stride below is a whole number of slices.
+  const size_t slotWords = ddaLL128ArSlotWords(bankSize, nRanks);
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
   // Slices stride by warp across the whole grid. The bound has to be the slice
   // count, not the warp count: the grid is capped at ddaFabricMaxBlocks, so a

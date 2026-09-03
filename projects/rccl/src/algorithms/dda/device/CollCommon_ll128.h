@@ -231,9 +231,14 @@ __device__ __forceinline__ void ddaLL128StoreRegs(
   }
 }
 
-// Slices needed to carry perRankBytes of payload.
-constexpr size_t ddaLL128AGSlices(size_t perRankBytes) {
-  return (perRankBytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
+// Slices needed to carry bytes of payload.
+constexpr size_t ddaLL128Slices(size_t bytes) {
+  return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
+}
+
+// divide scratch into two banks and make it 16 byte aligned
+constexpr size_t ddaBankSize(size_t bytes) {
+  return (bytes / 2) / 16 * 16;
 }
 
 } // namespace dda::common
