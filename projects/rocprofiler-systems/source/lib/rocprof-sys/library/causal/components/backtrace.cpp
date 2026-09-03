@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/components/backtrace.hpp"
-#include "common/units.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -28,15 +27,12 @@
 #include "logger/debug.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <ctime>
 #include <execinfo.h>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace causal
-{
-namespace component
+namespace rocprofsys::causal::component
 {
 namespace
 {
@@ -207,26 +203,4 @@ backtrace::sample(int _sig)
     ++_protect_flag;
 }
 
-template <typename Tp>
-Tp
-backtrace::get_period(std::uint64_t _units)
-{
-    using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
-
-    const double       _period = 1.0 / 1000.0;
-    const std::int64_t _period_nsec =
-        static_cast<std::int64_t>(_period * units::sec) % units::sec;
-    return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
-}
-}  // namespace component
-}  // namespace causal
-}  // namespace rocprofsys
-
-#define INSTANTIATE_BT_CAUSAL_PERIOD(TYPE)                                               \
-    template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(            \
-        std::uint64_t);
-
-INSTANTIATE_BT_CAUSAL_PERIOD(float)
-INSTANTIATE_BT_CAUSAL_PERIOD(double)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::int64_t)
-INSTANTIATE_BT_CAUSAL_PERIOD(std::uint64_t)
+}  // namespace rocprofsys::causal::component

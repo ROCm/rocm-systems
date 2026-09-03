@@ -5,6 +5,8 @@
 
 #include "logger.hpp"
 
+#include <spdlog/fmt/chrono.h>
+
 #define LOG_CRITICAL(...)                                                                \
     do                                                                                   \
     {                                                                                    \

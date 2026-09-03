@@ -3,7 +3,6 @@
 
 #include "constraint.hpp"
 #include "common/env_vars.hpp"
-#include "common/units.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
@@ -14,6 +13,7 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <ratio>
@@ -21,14 +21,16 @@
 #include <thread>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace constraint
+using namespace std::chrono_literals;
+
+namespace rocprofsys::constraint
 {
 namespace
 {
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
+
+constexpr auto k_max_poll_interval = 100ms;
 
 #define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     clock_identifier { #VAL, VAL }
@@ -93,12 +95,6 @@ find_clock_identifier(const Tp& _v)
                                          _descript, _v, fmt::join(_choices, "")));
 }
 
-void
-sleep(std::uint64_t _n)
-{
-    std::this_thread::sleep_for(std::chrono::nanoseconds{ _n });
-}
-
 timespec
 get_timespec(clockid_t clock_id) noexcept
 {
@@ -128,12 +124,14 @@ get_clock_now(clockid_t clock_id) noexcept
 stages::stages()
 : init{ [](const spec&) { return state::process::get() < state::process::Finalized; } }
 , wait{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
+    std::this_thread::sleep_for(std::min<std::chrono::duration<double>>(
+        k_max_poll_interval, std::chrono::duration<double>{ _spec.delay }));
     return state::process::get() < state::process::Finalized;
 } }
 , start{ [](const spec&) { return state::process::get() < state::process::Finalized; } }
 , collect{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
+    std::this_thread::sleep_for(std::min<std::chrono::duration<double>>(
+        k_max_poll_interval, std::chrono::duration<double>{ _spec.duration }));
     return state::process::get() < state::process::Finalized;
 } }
 , stop{ [](const spec&) { return state::process::get() < state::process::Finalized; } }
@@ -243,7 +241,9 @@ spec::operator()(const stages& _stages) const
     if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
 
     while(state::process::get() < state::process::Active)
-        sleep(1 * units::usec);
+    {
+        std::this_thread::sleep_for(1us);
+    }
 
     for(std::uint64_t i = 0; i < _n; ++i)
     {
@@ -251,7 +251,7 @@ spec::operator()(const stages& _stages) const
         auto _wait = [_spec](const auto& _func, auto _dur) {
             auto _ret = true;
             auto _now = get_clock_now(_spec.clock_id.value);
-            auto _del = (_dur * units::sec);
+            auto _del = _dur * std::nano::den;
             auto _end = _now + _del;
             while(get_clock_now(_spec.clock_id.value) < _end && (_ret = _func(_spec)))
             {
@@ -333,14 +333,16 @@ get_trace_stages()
         return state::process::get() < state::process::Finalized;
     };
     _v.wait = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.delay * units::sec));
+        std::this_thread::sleep_for(std::min<std::chrono::duration<double>>(
+            k_max_poll_interval, std::chrono::duration<double>{ _spec.delay }));
         return state::process::get() < state::process::Finalized;
     };
     _v.start = [](const spec&) {
         return state::process::get() < state::process::Finalized;
     };
     _v.collect = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * units::msec, _spec.duration * units::sec));
+        std::this_thread::sleep_for(std::min<std::chrono::duration<double>>(
+            k_max_poll_interval, std::chrono::duration<double>{ _spec.duration }));
         return state::process::get() < state::process::Finalized;
     };
     _v.stop = [](const spec&) {
@@ -349,5 +351,4 @@ get_trace_stages()
 
     return _v;
 }
-}  // namespace constraint
-}  // namespace rocprofsys
+}  // namespace rocprofsys::constraint
