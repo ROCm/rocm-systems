@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
-#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter_types.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -240,103 +239,6 @@ is_pc_sampling_supported()
 }
 
 /**
- * @brief Check if PC sampling method is supported on the agent.
- *
- * The function complements the @ref is_pc_sampling_supported function.
- * It introduces a strict check against the PC sampling IOCTL version
- * that tells us whether a certain PC sampling method is safe to be used
- * on the specific device architecture.
- *
- * @param method - PC sampling method to be checked
- * @param agent - The agent to be checked
- * @param pcs_ioctl_version - The PC sampling IOCTL version
- * @return ::rocprofiler_status_t
- * @retval ::ROCPROFILER_STATUS_SUCCESS - The method is supported
- * Other values informs users about the reason why the method is not supported.
- */
-rocprofiler_status_t
-is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
-                                const rocprofiler_agent_t*       agent,
-                                pcs_ioctl_version_t              pcs_ioctl_version)
-{
-    std::string_view agent_name = agent->name;
-    if(method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
-    {
-        if(agent_name == "gfx90a")
-        {
-            // 0.1 version enables host-trap PC sampling on gfx90a
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 1))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-        else if(agent_name.find("gfx94") == 0)
-        {
-            // 0.3 version enables host-trap PC sampling on gfx940, gfx941, gfx942, etc.
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 3))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-        else if(agent_name.find("gfx95") == 0)
-        {
-            // 1.2 version enables host-trap PC sampling on gfx950
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 2))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-        else if(agent_name.find("gfx12") == 0)
-        {
-            // 1.5 version enables host-trap PC sampling on gfx12
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 5))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-    }
-    else if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
-    {
-        if(agent_name == "gfx90a")
-        {
-            // gfx90a doesn't support stochastic PC sampling
-            return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-        }
-        else if(agent_name.find("gfx94") == 0)
-        {
-            // 1.3 version enables stochastic PC sampling on gfx940, gfx941, gfx942, etc.
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 3))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-        else if(agent_name.find("gfx95") == 0)
-        {
-            // 1.4 version enables stochastic PC sampling on gfx950
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 4))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-        else if(agent_name.find("gfx1250") == 0)
-        {
-            // 1.7 version enables stochastic PC sampling on gfx1250
-            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 7))
-                return ROCPROFILER_STATUS_SUCCESS;
-            else
-                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-        }
-    }
-    else
-    {
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    // Other architecture do not support the PC sampling method.
-    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-}
-
-/**
  * @brief Returns the PC sampling IOCTL version if the PC sampling feature is supported in the
  * driver.
  *
@@ -357,18 +259,6 @@ get_pcs_ioctl_version_if_kfd_supports(uint32_t kfd_gpu_id, pcs_ioctl_version_t* 
     // Get the PC sampling IOCTL version
     status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
     return status;
-}
-
-/**
- * @brief Same as @ref is_pc_sampling_method_supported.
- */
-rocprofiler_status_t
-is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioctl_method,
-                                const rocprofiler_agent_t*                  agent,
-                                pcs_ioctl_version_t                         pcs_ioctl_version)
-{
-    auto rocp_method = get_rocp_pcs_method_from_kfd(ioctl_method);
-    return is_pc_sampling_method_supported(rocp_method, agent, pcs_ioctl_version);
 }
 
 /**
@@ -471,6 +361,98 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }  // namespace
+
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
+                                const rocprofiler_agent_t*       agent,
+                                uint32_t                         pcs_ioctl_version)
+{
+    std::string_view agent_name = agent->name;
+    if(method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+    {
+        if(agent_name == "gfx90a")
+        {
+            // 0.1 version enables host-trap PC sampling on gfx90a
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 1))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx94") == 0)
+        {
+            // 0.3 version enables host-trap PC sampling on gfx940, gfx941, gfx942, etc.
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 3))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx95") == 0)
+        {
+            // 1.2 version enables host-trap PC sampling on gfx950
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 2))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx12") == 0)
+        {
+            // 1.5 version enables host-trap PC sampling on gfx12
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 5))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+    }
+    else if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+    {
+        if(agent_name == "gfx90a")
+        {
+            // gfx90a doesn't support stochastic PC sampling
+            return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        }
+        else if(agent_name.find("gfx94") == 0)
+        {
+            // 1.3 version enables stochastic PC sampling on gfx940, gfx941, gfx942, etc.
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 3))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx95") == 0)
+        {
+            // 1.4 version enables stochastic PC sampling on gfx950
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 4))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name == "gfx1250")
+        {
+            // 1.7 version enables stochastic PC sampling on gfx1250.
+            // Exact match is intentional.
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 7))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+    }
+    else
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Other architecture do not support the PC sampling method.
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioctl_method,
+                                const rocprofiler_agent_t*                  agent,
+                                uint32_t                                    pcs_ioctl_version)
+{
+    auto rocp_method = get_rocp_pcs_method_from_kfd(ioctl_method);
+    return is_pc_sampling_method_supported(rocp_method, agent, pcs_ioctl_version);
+}
 
 int
 get_kfd_fd()
