@@ -3234,8 +3234,15 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_key;
     std::optional<uint16_t> spill_visible;
+    std::optional<uint16_t> inline_dead_fallback;
     bool branch_only_scalar_spill = false;
     std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
+    const bool all_owners_use_dynamic_stack =
+        !owners.empty() && component_contexts->all_use_dynamic_stack;
+    const bool all_owners_use_fixed_stack =
+        !owners.empty() && component_contexts->all_use_fixed_stack;
+    const bool rdna_branch_only = inline_layout && consan_uses_gfx12_encoding(arch) &&
+                                  (all_owners_use_dynamic_stack || all_owners_use_fixed_stack);
     if (!selected && compact_layout) {
       MoiScalarPlacementDomain domain(arch, limit, component_contexts->summaries, &unavailable);
       domain.occupy(options.moi_owner_sgpr.base(), 1u);
@@ -3310,58 +3317,19 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       // while establishing their private frame. Every choice stays inside
       // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
-      const bool all_owners_use_dynamic_stack = consan_uses_gfx12_encoding(arch) &&
-                                                !owners.empty() &&
-                                                component_contexts->all_use_dynamic_stack;
-      const bool all_owners_use_fixed_stack = consan_uses_gfx12_encoding(arch) && !owners.empty() &&
-                                              component_contexts->all_use_fixed_stack;
       // Fixed-stack RDNA4-family owners can return through direct SOPP relay
       // hops without borrowing any live-through router SGPR. Prefer that
       // stronger contract even when a compact indirect router happens to fit:
       // an empty EXEC cannot use per-lane private storage to preserve the
       // latter's call/PC state. The branch-only prologue backup remains valid
       // for both empty and partially active waves.
-      if (all_owners_use_fixed_stack) {
+      if (consan_uses_gfx12_encoding(arch) && all_owners_use_fixed_stack) {
         selected.reset();
         spill_pc.reset();
         spill_call_return.reset();
         spill_scc.reset();
         spill_key.reset();
         spill_visible.reset();
-      }
-      if (!selected && (all_owners_use_dynamic_stack || all_owners_use_fixed_stack)) {
-        uint16_t allocated_limit = limit;
-        for (const auto &summary : component_contexts->summaries)
-          allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
-        MoiScalarPlacementDomain branch_domain(arch, allocated_limit,
-                                               component_contexts->summaries);
-        branch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
-        branch_domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
-        branch_domain.occupy_dynamic_stack_state();
-        branch_domain.occupy(options.moi_scalar_router
-                                 ? options.moi_scalar_router->visible_evidence_sgpr
-                                 : std::nullopt,
-                             1u);
-        options.moi_persistent_sgprs.for_each_range(
-            [&](std::optional<uint16_t> reg, uint16_t width) { branch_domain.occupy(reg, width); });
-
-        std::optional<uint16_t> spill_window;
-        for (uint32_t base = 0u; base + count <= allocated_limit; base += 2u) {
-          MoiScalarPlacementDomain attempt = branch_domain;
-          if (!attempt.select(static_cast<uint16_t>(base), count, /*require_dead=*/false))
-            continue;
-          if (all_owners_use_dynamic_stack) {
-            dynamic_stack_borrowed_sgpr = attempt.select_first(0u, 2u, 2u, /*require_dead=*/false);
-            if (!dynamic_stack_borrowed_sgpr)
-              continue;
-          }
-          spill_window = static_cast<uint16_t>(base);
-          break;
-        }
-        if (spill_window) {
-          selected = spill_window;
-          branch_only_scalar_spill = true;
-        }
       }
       // If no complete spill router exists, an owner-local window that is
       // dead at every instrumentation site remains useful for external-shadow
@@ -3370,7 +3338,9 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       if (!selected) {
         const auto candidate = component_domain.select_first(
             std::max(initialized_end, liveness_search_floor), count, 2u);
-        if (candidate)
+        if (rdna_branch_only)
+          inline_dead_fallback = candidate;
+        else if (candidate)
           selected = candidate;
       }
     }
@@ -3404,50 +3374,54 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
           selected = spill_window;
       }
     }
-    // A fixed-stack CDNA owner needs no scalar bootstrap to establish its
-    // address-free private frame. When every ordinary SGPR is live at an
-    // instrumentation site, preserve a complete borrowed window through the
-    // VGPR spill reservoir and reach the appended body using only direct SOPP
-    // branch relays. Unlike the compact scalar-spill path above, this remains
-    // valid without a dead indirect-PC pair or SCC slot.
-    if (!selected && supports_compact_scalar_spill && consan_arch_is_cdna(arch) &&
-        consan_address_free_private_limit(arch)) {
-      const bool all_owners_use_fixed_stack =
-          !owners.empty() && component_contexts->all_use_fixed_stack;
+    // Fixed-stack Inline/compact owners can preserve the complete borrowed
+    // window in private state and reach the body with direct branch relays.
+    // RDNA dynamic-stack owners additionally reserve one bootstrap pair.
+    const bool cdna_branch_only =
+        supports_compact_scalar_spill && consan_arch_is_cdna(arch) && all_owners_use_fixed_stack;
+    if (!selected && consan_address_free_private_limit(arch) &&
+        (rdna_branch_only || cdna_branch_only)) {
       uint16_t allocated_limit = limit;
       for (const auto &summary : component_contexts->summaries)
         allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
       MoiScalarPlacementDomain branch_domain(arch, allocated_limit, component_contexts->summaries);
+      if (rdna_branch_only) {
+        branch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
+        branch_domain.occupy(options.moi_scalar_router
+                                 ? options.moi_scalar_router->visible_evidence_sgpr
+                                 : std::nullopt,
+                             1u);
+      }
       branch_domain.occupy_dynamic_stack_state();
       branch_domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
       options.moi_persistent_sgprs.for_each_range(
           [&](std::optional<uint16_t> reg, uint16_t width) { branch_domain.occupy(reg, width); });
-      const auto spill_window = all_owners_use_fixed_stack
-                                    ? branch_domain.select_first(0u, count, 2u,
-                                                                 /*require_dead=*/false)
-                                    : std::nullopt;
-      if (spill_window) {
-        selected = spill_window;
-        branch_only_scalar_spill = true;
-        // Record/Replay can back up a borrowed entry-only PC/SCC tuple in the
-        // site scratch VGPR, then restore the complete guest window before its
-        // private scalar spill. Use slots already covered by that four-SGPR
-        // spill: +2:+3 are the entry PC pair and +0 is its SCC snapshot. The
-        // appended body returns through branch-only relays, so no key or call
-        // return survives the entry island. Other engines retain the fully
-        // branch-only ABI.
-        if (placement.branch_only_spill_preserves_indirect_state && count >= 4u) {
-          spill_pc = static_cast<uint16_t>(*selected + 2u);
-          spill_scc = selected;
-        } else {
-          spill_pc.reset();
-          spill_scc.reset();
+      for (uint32_t base = 0u; !selected && base + count <= allocated_limit; base += 2u) {
+        MoiScalarPlacementDomain attempt = branch_domain;
+        if (!attempt.select(static_cast<uint16_t>(base), count, /*require_dead=*/false))
+          continue;
+        if (rdna_branch_only && all_owners_use_dynamic_stack) {
+          dynamic_stack_borrowed_sgpr = attempt.select_first(0u, 2u, 2u, /*require_dead=*/false);
+          if (!dynamic_stack_borrowed_sgpr)
+            continue;
         }
-        spill_call_return.reset();
-        spill_key.reset();
-        spill_visible.reset();
+        selected = static_cast<uint16_t>(base);
       }
+      branch_only_scalar_spill = selected.has_value();
+      if (cdna_branch_only && selected && placement.branch_only_spill_preserves_indirect_state &&
+          count >= 4u) {
+        spill_pc = static_cast<uint16_t>(*selected + 2u);
+        spill_scc = selected;
+      } else {
+        spill_pc.reset();
+        spill_scc.reset();
+      }
+      spill_call_return.reset();
+      spill_key.reset();
+      spill_visible.reset();
     }
+    if (!selected)
+      selected = inline_dead_fallback;
     if (!selected) {
       missed_required_assignment = true;
       continue;
