@@ -792,3 +792,58 @@ summary mechanics are already factored below the two mode-specific policies.
 These regions should not be reopened on field similarity alone. A later
 candidate must show that an entire trust or lifecycle transition disappears,
 not merely that two products contain comparable IDs or counters.
+
+### 14.5 Macro-slice 1: one fail-fast MOI emission transaction
+
+The post-pressure whole-tree read rejected two more apparent opportunities.
+Successive mutation stages must continue to reparse and publish the current
+replacement image: every stage grows `.text`, and the next stage's cave and
+branch placement is defined relative to that new end. A mutable image-session
+wrapper would remove boilerplate but not a planning or emission lifecycle.
+Automatic scalar placement likewise cannot be collapsed into component-local
+fallback. The sixth-refactoring differential tests proved that owner-wide
+partial placement and RDNA4 object-wide spill coordination are observable
+solver semantics.
+
+Failure propagation, however, exposes a wider duplicated lifecycle. There are
+1,065 production sites where a transformer helper appends exactly one fatal
+diagnostic and immediately returns failure. Hundreds of their callers then do
+nothing except return the same failure, and 175 declarations or definitions
+carry an error-vector output parameter. This population is distinct from
+planning and final validation, which intentionally aggregate independent
+diagnostics, and from warnings that select a supported fallback.
+
+The bounded replacement is one typed, fail-fast abort for the MOI mutation
+transaction. An emitter raises the exact existing diagnostic; the owner that
+still holds the partially mutated `ConSanTransformArtifacts` catches it once,
+publishes it to `errors`, and follows the existing invalid-result finalization
+path. RAII continues to retire patchers and temporary images. Unsupported
+resource decisions, best-effort inventory rejection publication, warnings,
+and independent final validation retain their current non-throwing contracts.
+
+The hard prototype is the owner/private prologue builder because it has the
+deepest nested propagation and mixes SGPR, VGPR, private-memory, dynamic-stack,
+paired-entry, and branch-only paths. It must prove that exact diagnostics and
+the surviving artifact are preserved before access and synchronization
+emitters migrate. Complete convergence is expected to delete at least 700
+direct append-and-return statements, several hundred propagation branches,
+and the corresponding error-parameter plumbing, while adding only the typed
+failure and two narrow catches. The conservative target is **at least 1,000
+net implementation lines removed**. Abort and revert if the catch must carry a
+union of stage state, if ordinary unsupported fallbacks must become
+exceptions, if exact diagnostic behavior changes, or if the converged MOI
+domain cannot clear the 750-line macro floor.
+
+The hard prototype rejected the thesis. It introduced the typed failure and
+narrow catches, converted the prologue's 128 direct fatal publications,
+removed error parameters from the complete internal builder chain, changed
+success-or-abort helpers to `void`, and deleted their caller-side propagation
+branches. The result built successfully across the whole RocJitsu tree, but
+reduced the governing count from 83,481 to only 83,433 lines: **48 net lines**.
+Most of the apparent volume was the diagnostic text itself, which the new path
+must retain, rather than duplicated control or representation. Extrapolating
+the remaining MOI emitters no longer credibly clears the 1,000-line thesis and
+would spread exception semantics through dozens of interfaces. All production
+scaffold was therefore removed. The exact prototype source was preserved
+outside the repository only as temporary forensic material; no exception
+contract or parallel failure path survives in ConSan.
