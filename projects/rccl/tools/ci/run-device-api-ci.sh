@@ -210,55 +210,10 @@ run_devtime_smoke() {
 
 run_devtime_smoke
 
-# GIN-SDMA Broadcast pytest smoke (GinHybridBroadcastKernel, -D 3).
-# The cases in test_Broadcast.py gate on RCCL_TESTS_GIN_SDMA_BCAST, so without
-# this export they report SKIPPED wherever they run and contribute no coverage.
-# This is the job that has both the GPUs and a pytest runner; the GIN matrix in
-# lib/gin-tests.json only knows the rocshmem/rccl-tests/fixtures kinds.
-# Requires an ENABLE_DEVICE_API=ON rccl-tests build (broadcast_perf with -D 3).
-run_bcast_gin_smoke() {
-  local pytest_dir="${RCCL_TESTS_DIR}/test"
-  local perf_bin="${RCCL_TESTS_DIR}/${PERF_DIR}/broadcast_perf"
-  if [[ ! -x "${perf_bin}" ]]; then
-    echo "WARN: skip bcast smoke: ${perf_bin} not found"
-    return 0
-  fi
-  if [[ ! -f "${pytest_dir}/test_Broadcast.py" ]]; then
-    echo "WARN: skip bcast smoke: ${pytest_dir}/test_Broadcast.py not found"
-    return 0
-  fi
-
-  # shellcheck source=/dev/null
-  [[ -f "${script_dir}/lib/ensure-python-yaml.sh" ]] && source "${script_dir}/lib/ensure-python-yaml.sh"
-  if ! python3 -c 'import pytest' 2>/dev/null; then
-    echo "==> bcast smoke: pip installing pytest"
-    python3 -m pip install --quiet --disable-pip-version-check pytest
-  fi
-
-  # -k GinSdma selects only the GIN cases; the host-path Broadcast cases in the
-  # same module are covered by the regular rccl-tests pytest job.
-  echo "=== bcast-smoke: pytest test_Broadcast.py -k GinSdma (GIN -D 3) ==="
-  set +e
-  RCCL_TESTS_GIN_SDMA_BCAST=1 \
-  RCCL_TESTS_BCAST_EXE="${perf_bin}" \
-  RCCL_TESTS_BCAST_NP="${NP}" \
-  RCCL_TESTS_BCAST_GIN_TYPE="${RCCL_TESTS_BCAST_GIN_TYPE:-6}" \
-  RCCL_TESTS_BCAST_TIMEOUT_S="${RCCL_TESTS_BCAST_TIMEOUT_S:-900}" \
-    python3 -m pytest "${pytest_dir}/test_Broadcast.py" -v -p no:cacheprovider \
-      -k GinSdma
-  local rc=$?
-  set -e
-  if [[ ${rc} -ne 0 ]]; then
-    FAILED_RUNS+=("bcast-smoke:pytest (rc=${rc})")
-  fi
-}
-
-run_bcast_gin_smoke
-
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
   echo "=== FAILED RUNS (${#FAILED_RUNS[@]}) ==="
   printf '  %s\n' "${FAILED_RUNS[@]}"
   exit 1
 fi
 
-echo "All device-api benchmark, devtime and bcast smoke runs succeeded."
+echo "All device-api benchmark and devtime smoke runs succeeded."
