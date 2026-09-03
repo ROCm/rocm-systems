@@ -340,6 +340,133 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   EXPECT_EQ(sim.snapshot->snapshots().front().sgpr(4), kExpected);
 }
 
+TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  constexpr uint32_t kVccLo = 0x12345678u;
+  constexpr uint32_t kVccHi = 0xA5B6C7D8u;
+
+  std::vector<uint32_t> code;
+  append_instruction(
+      code, cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0,
+                                                     .sdata = amdgpu::kVccSelectorLast,
+                                                     .ioffset = 4,
+                                                     .scale_offset = 1,
+                                                     .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(
+      code, cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0,
+                                                     .sdata = amdgpu::kVccSelectorFirst,
+                                                     .scale_offset = 1,
+                                                     .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(code, S_ENDPGM_GFX12);
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  write_global_u32(*sim.memory, kKernargAddr, kVccLo);
+  write_global_u32(*sim.memory, kKernargAddr + 4, kVccHi);
+  uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
+                                            false, false, false, kernel_code_properties, 8);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(sim.snapshot->snapshots().front().vcc, (static_cast<uint64_t>(kVccHi) << 32) | kVccLo);
+}
+
+TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  constexpr uint64_t kExpected = 0xA5B6C7D812345678ull;
+
+  std::vector<uint32_t> code;
+  append_instruction(
+      code, cdna5::build_smem(cdna5::kSLoadB64Smem, {.sbase = 0,
+                                                     .sdata = amdgpu::kVccSelectorFirst,
+                                                     .scale_offset = 1,
+                                                     .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(code, S_ENDPGM_GFX12);
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  sim.memory->load_image(reinterpret_cast<const uint8_t *>(&kExpected), sizeof(kExpected),
+                         kKernargAddr);
+  uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
+                                            false, false, false, kernel_code_properties, 8);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(sim.snapshot->snapshots().front().vcc, kExpected);
+}
+
+TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  constexpr uint32_t kSgprValue = 0x12345678u;
+  constexpr uint32_t kTtmpValue = 0xAABBCCDDu;
+  constexpr uint32_t kDiscardedValue = 0xDEADBEEFu;
+
+  std::vector<uint32_t> code;
+  append_instruction(
+      code,
+      cdna5::build_smem(
+          cdna5::kSLoadB32Smem,
+          {.sbase = 0, .sdata = 4, .scale_offset = 1, .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(
+      code, cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0,
+                                                     .sdata = amdgpu::kTtmpSelectorFirst,
+                                                     .ioffset = 4,
+                                                     .scale_offset = 1,
+                                                     .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(
+      code, cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0,
+                                                     .sdata = amdgpu::kModernNullSelector,
+                                                     .ioffset = 8,
+                                                     .scale_offset = 1,
+                                                     .soffset = amdgpu::kModernNullSelector}));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(code, S_ENDPGM_GFX12);
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  write_global_u32(*sim.memory, kKernargAddr, kSgprValue);
+  write_global_u32(*sim.memory, kKernargAddr + 4, kTtmpValue);
+  write_global_u32(*sim.memory, kKernargAddr + 8, kDiscardedValue);
+  uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
+                                            false, false, false, kernel_code_properties, 12);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+  const auto &wf = sim.snapshot->snapshots().front();
+  EXPECT_EQ(wf.sgpr(4), kSgprValue);
+  EXPECT_EQ(wf.ttmp(0), kTtmpValue);
+  EXPECT_EQ(wf.sgpr(amdgpu::kModernNullSelector), 0u);
+}
+
 TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};

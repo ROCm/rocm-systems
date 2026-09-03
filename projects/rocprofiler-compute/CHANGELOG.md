@@ -24,6 +24,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   modes on partition-capable accelerators, noting that analysis derives logical
   XCD, L2 channel, and HBM channel counts from them.
 
+* Added a guide for profiling vLLM workloads and its caveats.
+
 ### Changed
 
 * Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.

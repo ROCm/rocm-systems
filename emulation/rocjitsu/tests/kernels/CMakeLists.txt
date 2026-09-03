@@ -89,7 +89,7 @@ function(rj_add_asm_fixture name target)
             ${AMDCXX} -x assembler -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -c -o ${asm_obj}
             ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s ${AMDCXX}
         COMMENT "Assembling Triton fixture: ${name} (${target})"
     )
     add_custom_command(
@@ -97,7 +97,7 @@ function(rj_add_asm_fixture name target)
         COMMAND
             ${AMDCXX} -target amdgcn-amd-amdhsa -mcpu=${target}
             --rocm-path=${ROCM_PATH} -nostdlib -shared -o ${hsaco} ${asm_obj}
-        DEPENDS ${asm_obj}
+        DEPENDS ${asm_obj} ${AMDCXX}
         COMMENT "Linking Triton fixture: ${name} (${target})"
     )
     add_custom_target(kernel_${name} DEPENDS ${hsaco})

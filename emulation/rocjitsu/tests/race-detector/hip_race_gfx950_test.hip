@@ -128,6 +128,103 @@ TEST_F(Gfx950RaceTest, sgpr_waitcnt_race) {
   ExpectRace(kSgprWaitcntRaceExpectation);
 }
 
+// --- SGPR write-after-write ---
+
+__global__ void sgpr_waw_load_then_mov_kernel(const int *src, int *dst) {
+  int val;
+  asm volatile(
+      "s_load_dword %0, %1, 0x0\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      "s_mov_b32 %0, 7\n"
+      : "=&s"(val) : "s"(src) : "memory"
+  );
+  dst[threadIdx.x] = val;
+}
+
+static constexpr RaceExpectation kSgprWawLoadThenMovExpectation{
+    .kernel = "sgpr_waw_load_then_mov_race_kernel",
+    .type = "SGPR",
+    .access = "write",
+    .wave = 0,
+    .producer = "s_load_dword",
+    .consumer = "s_mov_b32",
+};
+
+__global__ void sgpr_waw_load_then_mov_race_kernel(const int *src, int *dst) {
+  int val;
+  asm volatile(
+      "s_load_dword %0, %1, 0x0\n"
+      // BUG: no wait before a scalar instruction overwrites the load destination.
+      "s_mov_b32 %0, 7\n"
+      : "=&s"(val) : "s"(src)
+  );
+  asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
+  dst[threadIdx.x] = val;
+}
+
+static constexpr RaceExpectation kSgprWawLoadThenLoadExpectation{
+    .kernel = "sgpr_waw_load_then_load_race_kernel",
+    .type = "SGPR",
+    .access = "write",
+    .wave = 0,
+    .producer = "s_load_dword",
+    .consumer = "s_load_dword",
+};
+
+__global__ void sgpr_waw_load_then_load_kernel(const int *src0, const int *src1, int *dst) {
+  int val;
+  asm volatile(
+      "s_load_dword %0, %1, 0x0\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      "s_load_dword %0, %2, 0x0\n"
+      : "=&s"(val) : "s"(src0), "s"(src1) : "memory"
+  );
+  asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
+  dst[threadIdx.x] = val;
+}
+
+__global__ void sgpr_waw_load_then_load_race_kernel(const int *src0, const int *src1, int *dst) {
+  int val;
+  asm volatile(
+      "s_load_dword %0, %1, 0x0\n"
+      // BUG: scalar-memory reads can return out of order.
+      "s_load_dword %0, %2, 0x0\n"
+      : "=&s"(val) : "s"(src0), "s"(src1)
+  );
+  asm volatile("s_waitcnt lgkmcnt(0)\n" ::: "memory");
+  dst[threadIdx.x] = val;
+}
+
+TEST_F(Gfx950RaceTest, sgpr_waw_load_then_mov) {
+  auto *src = allocWithData<int>(64), *dst = alloc<int>(64);
+  sgpr_waw_load_then_mov_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, sgpr_waw_load_then_mov_race) {
+  auto *src = allocWithData<int>(64), *dst = alloc<int>(64);
+  sgpr_waw_load_then_mov_race_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kSgprWawLoadThenMovExpectation);
+}
+
+TEST_F(Gfx950RaceTest, sgpr_waw_load_then_load) {
+  auto *src0 = allocWithData<int>(64), *src1 = allocWithData<int>(64);
+  auto *dst = alloc<int>(64);
+  sgpr_waw_load_then_load_kernel<<<1, 64>>>(src0, src1, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, sgpr_waw_load_then_load_race) {
+  auto *src0 = allocWithData<int>(64), *src1 = allocWithData<int>(64);
+  auto *dst = alloc<int>(64);
+  sgpr_waw_load_then_load_race_kernel<<<1, 64>>>(src0, src1, dst);
+  sync();
+  ExpectRace(kSgprWawLoadThenLoadExpectation);
+}
+
 // --- LDS cross-wave ---
 
 __attribute__((amdgpu_flat_work_group_size(128, 128)))

@@ -1,6 +1,6 @@
 // MIT License
 //
-/* Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -264,6 +265,16 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     auto& queue_info_session = *_session;
 
+    // Emitted before the loop below, which returns pooled signals to the pool. Deferred
+    // waits are keyed by this submission's completion signal, and once that signal is
+    // released the pool can hand the same handle to another submission.
+    if(!queue_info_session.packet_data.empty())
+    {
+        hip::event::submission_complete(queue_info_session.queue,
+                                        queue_info_session.packet_data.back().completion_signal,
+                                        queue_info_session.enqueue_ts);
+    }
+
     for(auto& packet : queue_info_session.packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
@@ -423,7 +434,8 @@ WriteInterceptor(const void* packets,
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
 
-    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay))
+    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
+                          !hip::event::is_active()))
     {
         writer(packets, pkt_count);
         return;
@@ -453,7 +465,7 @@ WriteInterceptor(const void* packets,
 #endif
     }
 
-    if(num_dispatch_packets == 0)
+    if(num_dispatch_packets == 0 && !hip::event::is_active())
     {
         writer(packets, pkt_count);
         return;
@@ -489,7 +501,7 @@ WriteInterceptor(const void* packets,
     // it out of the snapshot window and registers it with async_started() so the agent-wide drain
     // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
     // graph summary is unaffected by which path runs.
-    if(graph_launch_active && no_real_consumers && !has_kernel_replay)
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
@@ -507,6 +519,14 @@ WriteInterceptor(const void* packets,
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
+
+    auto hip_event_tracing_data_v = tracing::tracing_data{};
+    if(hip::event::is_active())
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                   hip_event_tracing_data_v);
+    }
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
@@ -546,7 +566,11 @@ WriteInterceptor(const void* packets,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, has_kernel_replay](
+    auto process_packet_batch = [&queue,
+                                 &corr_id,
+                                 tracing_data_v,
+                                 hip_event_tracing_data_v,
+                                 has_kernel_replay](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer,
@@ -565,11 +589,6 @@ WriteInterceptor(const void* packets,
                                                   .enqueue_ts     = common::timestamp_ns(),
                                                   .correlation_id = corr_id,
                                                   .packet_data    = packet_data_array_t{}};
-
-        // mark the queue as having at least one packet which will be assigned a callback to
-        // AsyncSignalHandler. This is used to determine whether we need to wait for the signal
-        // handler to complete during finalization.
-        queue.async_started();
 
         // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
@@ -595,7 +614,33 @@ WriteInterceptor(const void* packets,
 
             if(!is_kernel_dispatch && !is_ext_kernel_dispatch)
             {
-                transformed_packets.emplace_back(_packets[i]);
+                // CLR uses BARRIER_AND or vendor-specific BARRIER_VALUE for event
+                // barriers depending on device settings. BARRIER_OR is never used
+                // by CLR's event path and is not intercepted here.
+                bool is_barrier = (packet_type == HSA_PACKET_TYPE_BARRIER_AND);
+                if(!is_barrier && packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+                {
+                    const auto& vendor_hdr =
+                        reinterpret_cast<const hsa_amd_vendor_packet_header_t&>(
+                            _packets[i].ext_amd_aql_pm4.header);
+                    is_barrier = (vendor_hdr.AmdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
+                }
+
+                auto plan = hip::event::plan_barrier(
+                    queue, _packets[i], is_barrier, hip_event_tracing_data_v, corr_id);
+
+                if(plan.intercepted)
+                {
+                    transformed_packets.emplace_back(plan.barrier);
+                    if(plan.has_forwarding) transformed_packets.emplace_back(plan.forwarding);
+                }
+                else
+                {
+                    transformed_packets.emplace_back(_packets[i]);
+                }
+
+                hip::event::claim_deferred_waits(_packets[i], packet_type, is_barrier);
+
                 continue;
             }
 
@@ -881,24 +926,50 @@ WriteInterceptor(const void* packets,
                     tracer_data);
             }
 
+            // gfx12.5 cluster-dispatch packets carry a single dep_signal directly on
+            // the kernel dispatch packet rather than on a preceding BARRIER_AND. Scan
+            // it here so that deferred hipStreamWaitEvent dependencies are captured.
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            if(is_ext_kernel_dispatch)
+            {
+                const auto dep = _packets[i].ext_kernel_dispatch.dep_signal;
+                if(dep.handle != 0)
+                {
+                    hip::event::claim_deferred_wait(dep.handle);
+                }
+            }
+#endif
+
             _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
         using info_session_t = queue_info_session_t;
 
+        // A batch can contain both kernel dispatch packets and barrier packets carrying
+        // event dep_signals. When there are kernel packets, deferred waits ride on the
+        // last one's completion signal and are emitted after it retires. When there are
+        // none, event tracing supplies its own barrier so the waits still get a
+        // completion to hang off of.
         if(!_info_session.packet_data.empty())
         {
             auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
             auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
 
+            hip::event::bind_staged_waits(last_completion_signal);
+
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
-            // Enqueue the signal into the handler. Will call completed_cb when signal completes.
+            // async_started is called here (rather than per-packet) because signal_async_handler
+            // fires when the LAST kernel completes; deferred waits are emitted at the same time.
+            queue.async_started();
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
         }
-
+        else if(auto barrier = hip::event::flush_staged_waits(queue, _info_session.enqueue_ts))
+        {
+            transformed_packets.emplace_back(*barrier);
+        }
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",
                                   queue.get_id().handle,

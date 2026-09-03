@@ -469,6 +469,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
     barrier();
 
+    sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
     nelem -= DataEltPerSlice * warp;
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
@@ -499,6 +500,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
 
     barrier();
+
+    sqtt_marker_exit("PRIM_LL128_DATA_PROCESS");
 
     if (SEND)
       for (int i = 0; i < MaxSend; i++) sendStep[i] += 1;

@@ -1368,7 +1368,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t clk;            //!< In MHz
+  uint32_t clk;            //!< In MHz. UINT32_MAX when the clock is unavailable
   uint32_t min_clk;        //!< In MHz
   uint32_t max_clk;        //!< In MHz
   uint8_t clk_locked;      //!< True/False
@@ -2227,9 +2227,9 @@ typedef struct {
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
-  uint16_t average_dram_writes;                             //!< v3_0
-  uint16_t average_ipu_reads;                               //!< v3_0
-  uint16_t average_ipu_writes;                              //!< v3_0
+  uint16_t average_dram_writes;                             //!< v3_0 [MB/s]
+  uint16_t average_ipu_reads;                               //!< v3_0 [MB/s]
+  uint16_t average_ipu_writes;                              //!< v3_0 [MB/s]
 
   /**
    * @brief Power [mW]
@@ -6138,7 +6138,16 @@ typedef struct {
  *  if enough memory had been provided. It is suggest to pass AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD
  * for all AF Ids.
  *
+ *  @note A section whose offset or register count falls outside the record is skipped and the
+ *  remaining sections still decode, so a partial AF ID list returns ::AMDSMI_STATUS_SUCCESS.
+ *  The caller cannot tell an empty list from a malformed record.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_INVAL @p cper_buffer, @p afids, or @p num_afids is NULL, or @p buf_size
+ *  or @p *num_afids is zero
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE @p buf_size is smaller than a CPER header, or the
+ *  record's own length field is smaller than a CPER header or larger than @p buf_size
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA @p cper_buffer does not start with a CPER signature
  */
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
                                            uint32_t* num_afids);
@@ -6181,6 +6190,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  *
  * An empty CPER ring (no records) also returns AMDSMI_STATUS_SUCCESS with
  * entry_count == 0 and buf_size == 0.
+ *
+ * A record the library cannot parse is dropped and the scan continues, so a short entry_count
+ * does not distinguish "the ring held fewer records" from "some records were malformed". The
+ * dropped records are named in the debug log.
  *
  * @ingroup tagRasInfo
  *

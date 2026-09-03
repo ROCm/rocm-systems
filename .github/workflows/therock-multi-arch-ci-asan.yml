@@ -60,6 +60,10 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "asan"
+      # Python/PyTorch/JAX builds are not supported with ASAN yet
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}

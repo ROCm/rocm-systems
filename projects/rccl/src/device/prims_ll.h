@@ -479,6 +479,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     nelem = nelem < 0 ? 0 : nelem;
     if (SEND) waitSend(divUp(nelem, EltPerLine) * sizeof(ncclLLFifoLine));
 
+    sqtt_marker_enter("PRIM_LL_DATA_PROCESS");
     nelem -= tid * EltPerLine;
     srcElts += tid * EltPerLine;
     dstElts += tid * EltPerLine;
@@ -538,6 +539,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       offset += nthreads;
     }
 
+    sqtt_marker_exit("PRIM_LL_DATA_PROCESS");
     if (RECV) {
       for (int i = 0; i < MaxRecv; i++) incRecv(i);
       postRecv();

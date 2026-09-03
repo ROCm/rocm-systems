@@ -286,6 +286,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     # other device compile step in this file already passes -fPIC; this
     # brings the per-kernel OBJECT build in line with the rest.
     -fPIC
+    ${DL_INHERITED_FLAGS}
   )
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
@@ -739,6 +740,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
@@ -758,6 +760,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
@@ -827,6 +830,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
@@ -846,6 +850,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
@@ -885,6 +890,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
@@ -904,6 +910,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
@@ -923,6 +930,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
@@ -942,6 +950,7 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
+    ${DL_INHERITED_FLAGS}
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
@@ -980,6 +989,7 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       ${DL_OPT_FLAGS}
       -std=c++17
       -fPIC
+      ${DL_INHERITED_FLAGS}
       -w
       -c -o ${_ce_reduce_obj}
       ${_ce_reduce_src}

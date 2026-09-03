@@ -51,6 +51,10 @@ class VersionCommands:
         self.logger.output["version"] = f"{__version__}"
         self.logger.output["amdsmi_library_version"] = f"{amdsmi_lib_version_str}"
         self.logger.output["rocm_version"] = f"{rocm_version_str}"
+        # Initialize conditional version keys to N/A so CSV/JSON export can rely on them
+        self.logger.output["amdgpu_version"] = "N/A"
+        self.logger.output["amd_hsmp_driver_version"] = "N/A"
+        self.logger.output["nic_driver_version"] = "N/A"
 
         if args.gpu_version:
             try:

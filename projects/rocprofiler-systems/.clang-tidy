@@ -305,4 +305,4 @@ CheckOptions:
 
   # include ignore
   - key: misc-include-cleaner.IgnoreHeaders
-    value: "compare$;string_view$;concepts$"
+    value: "compare$;string_view$;concepts$;bits/.*"
