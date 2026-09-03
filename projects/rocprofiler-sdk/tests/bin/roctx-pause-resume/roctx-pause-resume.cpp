@@ -188,6 +188,8 @@ main(int argc, char** argv)
             pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
+            // Kernel launches are asynchronous; keep the profiler resumed until they complete.
+            checkHipErrors(hipDeviceSynchronize());
             roctxProfilerPause(tid);
         }
     }

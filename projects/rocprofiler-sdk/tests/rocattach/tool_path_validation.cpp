@@ -32,11 +32,30 @@ main(int argc, char** argv)
 {
     if(argc != 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <tool-library-path|--empty>\n";
+        std::cerr << "Usage: " << argv[0] << " <tool-library-path|--empty|--default>\n";
         return 1;
     }
 
     auto tool_library_path = std::string_view{argv[1]};
+    if(tool_library_path == "--default")
+    {
+        unsetenv("ROCPROF_ATTACH_TOOL_LIBRARY");
+        setenv("ROCATTACH_LOG_LEVEL", "trace", 1);
+
+        // setup() logs the selected default before looking for the attach thread.
+        // This process intentionally has no such thread, keeping the test GPU- and
+        // ptrace-independent.
+        auto status = rocattach_attach(getpid());
+        if(status != ROCATTACH_STATUS_ERROR)
+        {
+            std::cerr << "Test FAILED: expected ROCATTACH_STATUS_ERROR, got " << status << '\n';
+            return 1;
+        }
+
+        std::cout << "Test PASSED: default tool library selected before attach setup\n";
+        return 0;
+    }
+
     if(tool_library_path == "--empty") tool_library_path = "";
 
     setenv("ROCPROF_ATTACH_TOOL_LIBRARY", tool_library_path.data(), 1);
