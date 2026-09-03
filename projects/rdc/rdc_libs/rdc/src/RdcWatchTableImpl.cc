@@ -464,12 +464,13 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
     // get initial values
     rdc_field_value value;
+    // A field that cannot be read on one GPU must not stop priming the rest.
     result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK) break;
+    if (result != RDC_ST_OK) continue;
 
     // set initial values to cache
     result = cache_mgr_->rdc_health_set(group_id, fields->first, value);
-    if (result != RDC_ST_OK) break;
+    if (result != RDC_ST_OK) continue;
   }
 
   // Start to watch the fields and update fields per 1 second.
@@ -549,7 +550,7 @@ rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gp
   // get the history data last 1 minute
   rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PCIE_REPLAY_COUNT,
                                              start_timestamp, &start, &end);
-  if (result != RDC_ST_OK) return result;
+  if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t pcie_replay_count = end.value.l_int - start.value.l_int;
   if (pcie_replay_count > PCIE_MAX_REPLAYS_PERMIN) {
@@ -576,7 +577,7 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gp
   rdc_field_value end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_HEALTH_XGMI_ERROR, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
+  if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   amdsmi_xgmi_status_t status = static_cast<amdsmi_xgmi_status_t>(end.value.l_int);
   if (AMDSMI_XGMI_STATUS_NO_ERRORS != status) {
@@ -606,12 +607,11 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
                                              rdc_health_response_t* response) {
   // get field start/end values
   rdc_field_value start = {}, end = {};
+  // Each memory sub-check is evaluated independently: a field that cannot be
+  // read on this GPU skips only its own incident, not the rest of the check.
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
-
-  uint64_t ecc_uncorrectable_count = 0;
-  ecc_uncorrectable_count = end.value.l_int;
+  uint64_t ecc_uncorrectable_count = (result == RDC_ST_OK) ? end.value.l_int : 0;
   if (ecc_uncorrectable_count > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -626,9 +626,7 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   }
 
   result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PENDING_PAGE_NUM, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
-
-  uint64_t num_pages = end.value.l_int;
+  uint64_t num_pages = (result == RDC_ST_OK) ? end.value.l_int : 0;
   if (num_pages > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
@@ -644,16 +642,16 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
 
   // get retired page number
   result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
+  if (result != RDC_ST_OK) return RDC_ST_OK;  // nothing further to evaluate
   uint64_t retired_page = end.value.l_int;
 
-  // get retired page threshold
+  // get retired page threshold; without it only the weekly-delta check runs
   result =
       get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_LIMIT, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
-  uint32_t retired_page_threshold = end.value.l_int;
+  bool has_threshold = (result == RDC_ST_OK);
+  uint32_t retired_page_threshold = has_threshold ? end.value.l_int : 0;
 
-  if (retired_page > retired_page_threshold) {
+  if (has_threshold && retired_page > retired_page_threshold) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
@@ -675,7 +673,7 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
     // get retired page number last 1 week
     result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, start_timestamp,
                                   &start, &end);
-    if (result != RDC_ST_OK) return result;
+    if (result != RDC_ST_OK) return RDC_ST_OK;
 
     retired_page = end.value.l_int - start.value.l_int;
     if (retired_page > 1) {
@@ -701,7 +699,7 @@ rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id, uint32_t 
   rdc_field_value end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return result;
+  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return RDC_ST_OK;
 
   if (result == RDC_ST_CORRUPTED_EEPROM) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
@@ -725,7 +723,7 @@ rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id, uint32_t
   // get the history data last 1 minute
   rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_THERMAL_THROTTLE_TIME,
                                              start_timestamp, &start, &end);
-  if (result != RDC_ST_OK) return result;
+  if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_socket_thrm = end.value.l_int - start.value.l_int;
   if (0 < acc_socket_thrm) {
@@ -752,7 +750,7 @@ rdc_status_t RdcWatchTableImpl::power_check(rdc_gpu_group_t group_id, uint32_t g
   // get the history data last 1 minute
   rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_POWER_THROTTLE_TIME,
                                              start_timestamp, &start, &end);
-  if (result != RDC_ST_OK) return result;
+  if (result != RDC_ST_OK) return RDC_ST_OK;  // field unavailable on this GPU: skip component
 
   uint64_t acc_ppt_pwr = end.value.l_int - start.value.l_int;
   if (0 < acc_ppt_pwr) {
@@ -791,12 +789,13 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
     // get current values
     rdc_field_value value;
+    // A field that cannot be read on one GPU must not stop refreshing the rest.
     result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK) break;
+    if (result != RDC_ST_OK) continue;
 
     // set current values to cache
     result = cache_mgr_->rdc_update_health_stats(group_id, fields->first, value);
-    if (result != RDC_ST_OK) break;
+    if (result != RDC_ST_OK) continue;
   }
 
   // init response
