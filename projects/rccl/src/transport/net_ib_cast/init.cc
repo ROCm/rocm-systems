@@ -554,6 +554,16 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            "IB Use Inline: enabled; GDR Flush: disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled");
     }
+    if (IbCastByOrderRequested()) {
+      if (ncclParamIbCastResiliencyPortFailover() > 0) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+             "(port failover and port recovery)", BY_ORDER);
+      }
+      if (ncclParamIbCastOooRq()) {
+	      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
+              " disabling out-of-order RQ", BY_ORDER);
+      }
+    }
   }
 exit:
   if (ret == ncclSuccess) ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);
