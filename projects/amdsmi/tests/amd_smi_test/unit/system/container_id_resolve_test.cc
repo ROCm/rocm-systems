@@ -15,6 +15,7 @@
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "container_id_test_util.h"
 #include "guarded_buffer.h"
+#include "unit_fixtures.h"
 
 namespace {
 
@@ -35,7 +36,7 @@ struct ResolveCase {
 // One row per container runtime, as the whole cgroup file looks on a host
 // running it. The OCI runtimes all report the bare 64-char ID; LXC reports the
 // container name, because LXC cgroups carry no SHA-256.
-TEST(SystemUnit, ResolveContainerIdCoversSupportedRuntimes) {
+TEST_F(SystemUnit, ResolveContainerIdCoversSupportedRuntimes) {
   const std::string id = amdsmi_test::kDocker64;
   const std::string pod = "kubepods-burstable-pod3f5e1c2a_9b7d_4c3e_8a11_0d2b4c6e8f90.slice";
   const std::vector<ResolveCase> cases = {
@@ -60,7 +61,7 @@ TEST(SystemUnit, ResolveContainerIdCoversSupportedRuntimes) {
 // A process that is not in a container must report no container, however much
 // its cgroup path looks like one. Every row here produced a wrong non-empty
 // value before the parser anchored its matches on path-component boundaries.
-TEST(SystemUnit, ResolveContainerIdReportsNoIdOutsideAContainer) {
+TEST_F(SystemUnit, ResolveContainerIdReportsNoIdOutsideAContainer) {
   const std::vector<ResolveCase> cases = {
       {{"0::/user.slice/user-1000.slice/session-3.scope"}, "", "ordinary login session"},
       {{"0::/system.slice/docker.service"}, "", "the docker daemon itself"},
@@ -84,7 +85,7 @@ TEST(SystemUnit, ResolveContainerIdReportsNoIdOutsideAContainer) {
 // after the separator to read. The v1 rows also confirm every line is scanned,
 // not just the first: on a v1 host the container appears on the controller
 // lines, and which controllers are mounted varies.
-TEST(SystemUnit, ResolveContainerIdScansEveryLineAndStopsAtLineEnd) {
+TEST_F(SystemUnit, ResolveContainerIdScansEveryLineAndStopsAtLineEnd) {
   const std::string id = amdsmi_test::kDocker64;
   const std::vector<ResolveCase> cases = {
       {{"0::/docker"}, "", "line ends on the runtime name"},
@@ -107,7 +108,7 @@ TEST(SystemUnit, ResolveContainerIdScansEveryLineAndStopsAtLineEnd) {
 
 // /proc content is not a trusted format. Resolution must terminate and leave a
 // NUL-terminated buffer for any input, and must never write outside `out_cap`.
-TEST(SystemUnit, ResolveContainerIdIsTotalOverMalformedInput) {
+TEST_F(SystemUnit, ResolveContainerIdIsTotalOverMalformedInput) {
   const std::vector<std::vector<std::string>> lines_set = {
       {"0::/docker"},
       {"0::/lxc"},
@@ -129,7 +130,7 @@ TEST(SystemUnit, ResolveContainerIdIsTotalOverMalformedInput) {
 }
 
 // A zero-capacity buffer must not be written to at all.
-TEST(SystemUnit, ResolveContainerIdZeroCapacityBufferIsNotWritten) {
+TEST_F(SystemUnit, ResolveContainerIdZeroCapacityBufferIsNotWritten) {
   amdsmi_test::GuardedBuffer<1> gb;
   gb.buf[0] = 'X';
   EXPECT_EQ(amd::smi::ResolveContainerId({"0::/docker/abc123"}, gb.buf, 0), 0u);
@@ -140,7 +141,7 @@ TEST(SystemUnit, ResolveContainerIdZeroCapacityBufferIsNotWritten) {
 // Resolution order is fixed, and neither scan is reached by accident: the
 // SHA-256 scan runs over every line before any prefix is tried, and the prefix
 // set is walked in its own order rather than the file's.
-TEST(SystemUnit, ResolveContainerIdAppliesScanPrecedence) {
+TEST_F(SystemUnit, ResolveContainerIdAppliesScanPrecedence) {
   const std::string id = amdsmi_test::kDocker64;
   const std::vector<ResolveCase> cases = {
       {{"10:memory:/docker/shortid1", "0::/lxc/web01"},
@@ -156,7 +157,7 @@ TEST(SystemUnit, ResolveContainerIdAppliesScanPrecedence) {
 // The refusal contract at the buffer boundary, on a path that returns a
 // non-zero length: an ID needing the whole buffer leaves no room for the NUL,
 // so it is reported as absent rather than as a truncated prefix.
-TEST(SystemUnit, ResolveContainerIdRefusesAnIdThatFillsTheBuffer) {
+TEST_F(SystemUnit, ResolveContainerIdRefusesAnIdThatFillsTheBuffer) {
   const std::string name(64, 'z');  // 'z' is an ID char but not hex, so the prefix scan resolves it
   const std::string line = "0::/docker/" + name;
   {

@@ -12,6 +12,7 @@
 
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "container_id_test_util.h"
+#include "unit_fixtures.h"
 
 using amdsmi_test::ExtractIdString;
 
@@ -24,7 +25,7 @@ bool ExpectedIdChar(int b) {
 }
 }  // namespace
 
-TEST(SystemUnit, ContainerIdHaltsAtFirstByteOutsideCharset) {
+TEST_F(SystemUnit, ContainerIdHaltsAtFirstByteOutsideCharset) {
   for (int b = 0; b <= 0xFF; ++b) {
     const char byte = static_cast<char>(b);
     std::string line = "0::/docker/abc";
@@ -41,7 +42,7 @@ TEST(SystemUnit, ContainerIdHaltsAtFirstByteOutsideCharset) {
 
 // The same rule at the first byte of the ID: there is no ID at all, and the
 // output must be an empty string rather than a partial one.
-TEST(SystemUnit, ContainerIdIsEmptyWhenFirstByteIsOutsideCharset) {
+TEST_F(SystemUnit, ContainerIdIsEmptyWhenFirstByteIsOutsideCharset) {
   for (int b = 0; b <= 0xFF; ++b) {
     if (ExpectedIdChar(b)) continue;
     std::string line = "0::/docker/";
@@ -55,7 +56,7 @@ TEST(SystemUnit, ContainerIdIsEmptyWhenFirstByteIsOutsideCharset) {
 // The charset predicates themselves, against literal ranges. Without this the
 // suite only ever asks the implementation to agree with itself: widening
 // IsLowerHexChar to accept 'g' leaves every other assertion in the suite green.
-TEST(SystemUnit, ContainerIdCharsetPredicatesMatchTheirRanges) {
+TEST_F(SystemUnit, ContainerIdCharsetPredicatesMatchTheirRanges) {
   for (int b = 0; b <= 0xFF; ++b) {
     const auto byte = static_cast<unsigned char>(b);
     EXPECT_EQ(amd::smi::IsContainerIdChar(byte), ExpectedIdChar(b))

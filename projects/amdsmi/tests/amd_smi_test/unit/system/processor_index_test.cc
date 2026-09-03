@@ -11,6 +11,7 @@
 #include <string>
 
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "unit_fixtures.h"
 
 namespace {
 
@@ -31,7 +32,7 @@ constexpr uint32_t kUnsetIndexLowByte = 255;
 constexpr uint32_t kSampleSocketIndex = 3;
 constexpr uint32_t kSampleCoreIndex = 191;
 
-TEST(SystemUnit, ProcessorIndexUnsetDefaultsToInvalid) {
+TEST_F(SystemUnit, ProcessorIndexUnsetDefaultsToInvalid) {
   AMDSmiProcessor gpu(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
   EXPECT_EQ(gpu.get_processor_index(), kUnsetIndex)
       << "pindex_ lost its default initializer in amd_smi_processor.h. GPU, NIC and\n"
@@ -39,14 +40,14 @@ TEST(SystemUnit, ProcessorIndexUnsetDefaultsToInvalid) {
          "values again. Fix the initializer, not this expectation. See AILITOOLS-304.";
 }
 
-TEST(SystemUnit, ProcessorIndexIdentifierCtorDefaultsToInvalid) {
+TEST_F(SystemUnit, ProcessorIndexIdentifierCtorDefaultsToInvalid) {
   AMDSmiProcessor by_id(std::string("0000:0c:00.0"));
   EXPECT_EQ(by_id.get_processor_index(), kUnsetIndex)
       << "The identifier constructor sets neither the type nor the index, so it\n"
          "depends entirely on the default initializer. See AILITOOLS-304.";
 }
 
-TEST(SystemUnit, ProcessorIndexPreservedWhenProvided) {
+TEST_F(SystemUnit, ProcessorIndexPreservedWhenProvided) {
   AMDSmiProcessor socket(AMDSMI_PROCESSOR_TYPE_AMD_CPU, kSampleSocketIndex);
   EXPECT_EQ(socket.get_processor_index(), kSampleSocketIndex)
       << "CPU sockets must keep the index they were built with. Any other value\n"
@@ -61,7 +62,7 @@ TEST(SystemUnit, ProcessorIndexPreservedWhenProvided) {
 // sockets, so the index has to hold values well beyond a single byte. amd-smi
 // assigns per-socket core indices today, so the system-wide ceiling is headroom
 // rather than a value it currently builds.
-TEST(SystemUnit, ProcessorIndexHoldsFullEsmiCoreRange) {
+TEST_F(SystemUnit, ProcessorIndexHoldsFullEsmiCoreRange) {
   AMDSmiProcessor last_in_socket(AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, kLastCoreInSocket);
   EXPECT_EQ(last_in_socket.get_processor_index(), kLastCoreInSocket)
       << "Core " << kLastCoreInSocket << " is the last of " << kMaxCoresPerSocket
@@ -79,7 +80,7 @@ TEST(SystemUnit, ProcessorIndexHoldsFullEsmiCoreRange) {
 // The CPU/Core APIs narrow the index to uint8_t before passing it to ESMI.
 // A low byte inside the socket range selects a real socket and returns its
 // data. The previous uninitialized value did this non-deterministically.
-TEST(SystemUnit, ProcessorIndexSentinelSurvivesUint8Narrowing) {
+TEST_F(SystemUnit, ProcessorIndexSentinelSurvivesUint8Narrowing) {
   AMDSmiProcessor gpu(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
   const uint32_t narrowed = static_cast<uint8_t>(gpu.get_processor_index());
   EXPECT_EQ(narrowed, kUnsetIndexLowByte)
