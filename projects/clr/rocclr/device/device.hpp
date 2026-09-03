@@ -734,9 +734,7 @@ class Settings {
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint umaLargeMemory_ : 1;               //!< Unified memory device: report the whole DRAM
-                                              //   pool rather than a heuristic estimate
-      uint reserved_ : 7;
+      uint reserved_ : 8;
     };
     uint value_;
   };

@@ -405,15 +405,12 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipErrorOutOfMemory;
   }
 
-  const amd::Device& device = *amdContext->devices()[0];
-  const auto& dev_info = device.info();
+  const auto& dev_info = amdContext->devices()[0]->info();
   hip::getCurrentDevice()->SetActiveStatus();
 
-  // maxMemAllocSize_ already covers the aperture, adding host memory double-counts it.
-  size_t max_device_size =
-      (IS_LINUX || device.settings().umaLargeMemory_)
-          ? dev_info.maxMemAllocSize_
-          : (dev_info.maxMemAllocSize_ + dev_info.maxPhysicalMemAllocSize_);
+  size_t max_device_size = IS_LINUX
+                               ? dev_info.maxMemAllocSize_
+                               : (dev_info.maxMemAllocSize_ + dev_info.maxPhysicalMemAllocSize_);
 
   if ((useHostDevice && dev_info.maxPhysicalMemAllocSize_ < sizeBytes) ||
       (!useHostDevice && max_device_size < sizeBytes)) {

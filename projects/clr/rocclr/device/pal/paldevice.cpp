@@ -223,9 +223,8 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevis
   pal::Settings* palSettings = new pal::Settings();
   settings_ = palSettings;
 
-  // Report 512MB for all offline devices. Zero the rest so the heaps fillDeviceInfo()
-  // reads below are defined rather than whatever the stack held.
-  Pal::GpuMemoryHeapProperties heaps[Pal::GpuHeapCount] = {};
+  // Report 512MB for all offline devices
+  Pal::GpuMemoryHeapProperties heaps[Pal::GpuHeapCount];
   heaps[Pal::GpuHeapLocal].logicalSize = heaps[Pal::GpuHeapLocal].physicalSize = 512 * Mi;
 
   Pal::WorkStationCaps wscaps = {};
@@ -343,43 +342,21 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.globalMemCacheType_ = CL_NONE;
   }
 
-  uint64_t visibleFB, invisibleFB;
+  uint64_t localRAM;
   if (GPU_ADD_HBCC_SIZE) {
-    visibleFB = heaps[Pal::GpuHeapLocal].logicalSize;
-    invisibleFB = heaps[Pal::GpuHeapInvisible].logicalSize;
+    localRAM = heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize;
   } else {
-    visibleFB = heaps[Pal::GpuHeapLocal].physicalSize;
-    invisibleFB = heaps[Pal::GpuHeapInvisible].physicalSize;
+    localRAM = heaps[Pal::GpuHeapLocal].physicalSize + heaps[Pal::GpuHeapInvisible].physicalSize;
   }
-  const uint64_t localRAM = visibleFB + invisibleFB;
 
   info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                           static_cast<uint64_t>(localRAM) / 100u);
 
   const uint64_t gartSize = static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize);
-  const uint64_t hostRAM = amd::Os::getPhysicalMemSize();
 
-  const bool umaLargeMemory = settings().umaLargeMemory_;
-
-  uint uswcPercentAvailable =
-      ((static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) / Mi) > 1536 && IS_WINDOWS)
-          ? 75
-          : 50;
-
-  // The aperture is host DRAM the GPU addresses directly, so discounting it only
-  // makes the runtime under-report.
-  if (umaLargeMemory) {
-    uswcPercentAvailable = 100;
-  }
-
-  uint64_t gartCredit = (gartSize * uswcPercentAvailable) / 100;
-
-  if (umaLargeMemory) {
-    // Crediting the whole aperture can leave the OS nothing, so hold back a floor of
-    // host memory. Binds only where the BIOS reserves too little on its own.
-    const uint64_t osFloor = std::min<uint64_t>(16 * Gi, hostRAM / 4);
-    gartCredit = std::min(gartCredit, (hostRAM > osFloor) ? (hostRAM - osFloor) : 0);
-  }
+  // The aperture is host DRAM the GPU addresses directly, so discount it by at most
+  // 25%, capped at 4 GiB, rather than the 50/75% heuristic. Applies to every APU.
+  const uint64_t gartCredit = gartSize - std::min<uint64_t>(gartSize / 4, 4 * Gi);
 
   if (settings().apuSystem_) {
     info_.globalMemSize_ += gartCredit;
@@ -396,29 +373,19 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 
 #if IS_WINDOWS
   if (settings().apuSystem_) {
-    info_.maxMemAllocSize_ = std::max(
-        (static_cast<uint64_t>(heaps[Pal::GpuHeapGartUswc].logicalSize) * uswcPercentAvailable) /
-            100,
-        info_.maxMemAllocSize_);
+    // One allocation is not confined to a single heap, so the ceiling is the whole pool:
+    // carve-out plus aperture. Measured on gfx1151 at 100 GiB across a carve-out split
+    // 64 GiB visible plus 32 GiB invisible.
+    info_.maxMemAllocSize_ = info_.globalMemSize_;
   }
 #endif
-
-  if (umaLargeMemory) {
-    // One allocation is not confined to a single heap. Measured on gfx1151: 100 GiB
-    // verified across a carve-out split 64 GiB visible plus 32 GiB invisible.
-    info_.maxMemAllocSize_ = std::max(info_.globalMemSize_, info_.maxMemAllocSize_);
-  }
-
   info_.maxMemAllocSize_ =
       uint64_t(info_.maxMemAllocSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);
 
   //! \note Force max single allocation size.
   //! 4GB limit for the blit kernels and 64 bit optimizations.
-  //! Skipped on large unified memory parts: the cap reports far below what they deliver.
-  if (!umaLargeMemory) {
-    info_.maxMemAllocSize_ =
-        std::min(info_.maxMemAllocSize_, static_cast<uint64_t>(settings().maxAllocSize_));
-  }
+  info_.maxMemAllocSize_ =
+      std::min(info_.maxMemAllocSize_, static_cast<uint64_t>(settings().maxAllocSize_));
 
   if (info_.maxMemAllocSize_ < uint64_t(128 * Mi)) {
     LogError(
@@ -438,17 +405,6 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   // We need to verify that we are not reporting more global memory
   // that 4x single alloc
   info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
-
-  // Offline devices carry a synthetic 512MB Local heap, so the breakdown says nothing.
-  if (isOnline()) {
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-            "PAL memory: visible FB %llu MiB, invisible FB %llu MiB, aperture %llu MiB "
-            "(credited %llu MiB at %u%%), host %llu MiB, apu %u, umaLargeMemory %u, "
-            "globalMemSize %llu MiB, maxMemAllocSize %llu MiB",
-            visibleFB / Mi, invisibleFB / Mi, gartSize / Mi, gartCredit / Mi, uswcPercentAvailable,
-            hostRAM / Mi, settings().apuSystem_ ? 1u : 0u, umaLargeMemory ? 1u : 0u,
-            info_.globalMemSize_ / Mi, info_.maxMemAllocSize_ / Mi);
-  }
 
   // Use 64 bit pointers
   info_.addressBits_ = 64;
