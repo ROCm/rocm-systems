@@ -933,6 +933,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             access_relay_words, "inline-shadow probe", arch, new_text, patches, result.errors,
             [](const PlannedInlineShadowPatch &, const ConSanMoiOperatingPoint &) { return true; }))
       return;
+    std::vector<MoiAccessPatchProgram> programs;
+    programs.reserve(planned_patches.size());
     for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       auto words = build_inline_shadow_words(bytes, candidate, planned_patch.emission, arch, layout,
@@ -967,6 +969,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       info.anchor_offset = candidate.anchor();
       note_moi_access_patch_info(info, planned_patch);
       info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
+      MoiAccessPatchProgram program;
+      program.publication = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                                ? MoiAccessBodyPublication::Append
+                                : MoiAccessBodyPublication::Overwrite;
+      program.body_offset = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                                ? planned_patch.placement.body_offset
+                                : candidate.anchor();
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
@@ -977,29 +986,25 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           return;
         }
         if (planned_patch.branch_only_relay_bank_offset) {
-          if (new_text.size() != *planned_patch.branch_only_relay_bank_offset) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe emitted a stale branch-only relay-bank mapping");
-            return;
-          }
-          for (uint64_t word = 0; word < planned_patch.branch_only_relay_bank_word_count; ++word)
-            append_word_bytes(new_text, build_s_nop(0, arch));
-        }
-        if (new_text.size() != cave_text_offset) {
-          result.errors.emplace_back(
-              "ConSan MOI inline-shadow probe emitted a stale appended-cave mapping: expected " +
-              std::to_string(cave_text_offset) + " actual " + std::to_string(new_text.size()));
-          return;
+          program.reserved_regions.push_back({
+              .offset = *planned_patch.branch_only_relay_bank_offset,
+              .word_count = static_cast<uint32_t>(
+                  planned_patch.branch_only_relay_bank_word_count),
+          });
         }
         const uint64_t entry_target =
             planned_patch.branch_only_route &&
                     !planned_patch.branch_only_route->entry_relay_offsets.empty()
                 ? planned_patch.branch_only_route->entry_relay_offsets.front()
                 : planned_patch.entry_island_offset.value_or(planned_patch.placement.body_offset);
-        if (!planned_patch.dense_call_anchor &&
-            !write_moi_appended_anchor(new_text, planned_patch, entry_target, arch,
-                                       "inline-shadow probe", result.errors))
-          return;
+        program.entry_target = entry_target;
+        if (!planned_patch.dense_call_anchor)
+          program.anchor = MoiAppendedAnchorPlan{
+              .candidate_anchor = candidate.anchor(),
+              .placement_anchor = planned_patch.placement.anchor_offset,
+              .original_size = planned_patch.placement.original_size,
+              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
+          };
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
           const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
@@ -1030,9 +1035,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 "ConSan MOI inline-shadow probe encoded an invalid entry island size");
             return;
           }
-          if (!write_moi_entry_island(new_text, planned_patch, island_words, patches,
-                                      "inline-shadow probe", result.errors))
-            return;
+          program.entry_island = MoiEntryIslandPlan{
+              .candidate_anchor = candidate.anchor(),
+              .island_offset = planned_patch.entry_island_offset,
+              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
+              .owner_descriptor_file_offsets =
+                  planned_patch.resources.owner_descriptor_file_offsets,
+          };
+          program.entry_island_words = std::move(island_words);
         }
 
         MoiAppendedBodyOptions body_options(arch);
@@ -1128,7 +1138,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           info.relocated_guest_instruction_offset =
               cave_text_offset + *finalized->deferred_guest_offset;
         cave_words = std::move(finalized->words);
-        append_words_bytes(new_text, *cave_words);
+        program.body_words = std::move(*cave_words);
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;
         info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
@@ -1139,13 +1149,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           result.errors.emplace_back("ConSan MOI inline-shadow probe final patch size changed");
           return;
         }
-        if (candidate.anchor() > new_text.size() ||
-            patch_bytes > new_text.size() - candidate.anchor()) {
-          result.errors.emplace_back("ConSan MOI inline-shadow probe exceeds .text");
-          return;
-        }
-        std::memcpy(new_text.data() + candidate.anchor(), words->data(),
-                    static_cast<size_t>(patch_bytes));
+        program.body_words = std::move(*words);
         info.trampoline_offset = candidate.anchor() + candidate.size();
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
@@ -1166,18 +1170,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");
         return;
       }
-      lowering_commits.push_back(std::move(*commit));
-      patches.push_back(info);
-      if (planned_patch.branch_only_route) {
-        std::string relay_error;
-        if (!BranchOnlyRelayRouter::emit_and_record(
-                new_text, *planned_patch.branch_only_route, info.trampoline_offset,
-                planned_patch.placement.return_target, arch, patches, &relay_error)) {
-          result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
-          return;
-        }
-      }
+      program.patch = std::move(info);
+      program.commit = std::move(*commit);
+      program.branch_only_route = planned_patch.branch_only_route;
+      program.return_target = planned_patch.placement.return_target;
+      programs.push_back(std::move(program));
     }
+
+    if (!emit_moi_access_programs(new_text, std::move(programs), arch, "inline-shadow probe",
+                                  patches, lowering_commits, result.errors))
+      return;
 
     if (!emit_moi_dense_entry_hosts(
             dense_entry_hosts, dense_groups, options, result.moi_operating_point,
@@ -1197,15 +1199,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }))
       return;
 
-    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI inline-shadow probe", result.program_inventory.code_object_id(),
-                             result.errors, &result.transform_failure_cause)) {
+    if (!publish_moi_appended_access_text(
+            std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
+            "inline-shadow probe", result, std::move(lowering_commits), std::move(patches)))
       return;
-    }
-    if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI inline-shadow probe",
-                                        std::move(lowering_commits), std::move(patches))) {
-      return;
-    }
     if (reserved_barrier_island_count != 0u) {
       barrier_reservation = MoiBarrierIslandReservation{
           .begin = original_text_size,
@@ -1217,29 +1214,41 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
 
-  if (!apply_inline_moi_access_patches(
-          bytes, planned_patches, descriptor_requirements, scalar_requirements,
-          private_requirements, &lds_requirements, &options, "inline-shadow probe", arch,
-          [&](const PlannedInlineShadowPatch &planned_patch) {
-            return build_inline_shadow_words(
-                bytes, *planned_patch.candidate, planned_patch.emission, arch, layout,
-                planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
-          },
-          [](const PlannedInlineShadowPatch &planned_patch) {
-            const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-            ConSanPatchInfo info;
-            info.kind = ConSanPatchKind::InlineMoiExactShadowStore;
-            info.anchor_offset = candidate.anchor();
-            info.trampoline_offset = candidate.anchor() + candidate.size();
-            info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            note_moi_access_patch_info(info, planned_patch);
-            info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
-            return info;
-          },
-          ConSanProbeIntentKind::ExactShadowAccess,
-          [](ConSanStaticAccessAttribution, const PlannedInlineShadowPatch &, const auto &) {
-            return std::optional{ConSanRuntimeStaticMapping{}};
-          },
-          result))
+  std::vector<MoiAccessPatchProgram> programs;
+  programs.reserve(planned_patches.size());
+  for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
+    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
+    auto words = build_inline_shadow_words(
+        bytes, candidate, planned_patch.emission, arch, layout,
+        planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
+    if (!words)
+      return;
+    ConSanPatchInfo info;
+    info.kind = ConSanPatchKind::InlineMoiExactShadowStore;
+    info.anchor_offset = candidate.anchor();
+    info.trampoline_offset = candidate.anchor() + candidate.size();
+    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
+    note_moi_access_patch_info(info, planned_patch);
+    info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
+    auto commit = make_moi_access_lowering_commit(
+        result.observation_plan(), candidate, info, ConSanProbeIntentKind::ExactShadowAccess,
+        [](ConSanStaticAccessAttribution) {
+          return std::optional{ConSanRuntimeStaticMapping{}};
+        });
+    if (!commit) {
+      result.errors.emplace_back(
+          "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");
+      return;
+    }
+    MoiAccessPatchProgram program;
+    program.body_offset = candidate.file_offset;
+    program.body_words = std::move(*words);
+    program.patch = std::move(info);
+    program.commit = std::move(*commit);
+    programs.push_back(std::move(program));
+  }
+  if (!apply_inline_moi_access_programs(
+          bytes, std::move(programs), descriptor_requirements, scalar_requirements,
+          private_requirements, &lds_requirements, &options, arch, "inline-shadow probe", result))
     return;
 }

@@ -705,6 +705,8 @@ void try_apply_direct_sampled_watchpoint_patch(
               return planned.emission.exec_save_sgpr.has_value();
             }))
       return;
+    std::vector<MoiAccessPatchProgram> programs;
+    programs.reserve(planned_patches.size());
     for (const PlannedSampledPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
       ConSanMoiCandidate lowered_candidate = candidate;
@@ -770,33 +772,29 @@ void try_apply_direct_sampled_watchpoint_patch(
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.anchor();
       note_moi_access_patch_info(info, planned_patch);
+      MoiAccessPatchProgram program;
+      program.publication = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                                ? MoiAccessBodyPublication::Append
+                                : MoiAccessBodyPublication::Overwrite;
+      program.body_offset = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                                ? planned_patch.placement.body_offset
+                                : candidate.anchor();
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
         const uint64_t cave_text_offset = planned_patch.placement.body_offset;
-        if (new_text.size() != cave_text_offset) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled probe emitted a stale appended-cave mapping");
-          return;
-        }
         const uint64_t entry_target =
             planned_patch.branch_only_route &&
                     !planned_patch.branch_only_route->entry_relay_offsets.empty()
                 ? planned_patch.branch_only_route->entry_relay_offsets.front()
                 : planned_patch.entry_island_offset.value_or(planned_patch.placement.body_offset);
-        const auto ret =
-            planned_patch.entry_island_offset || planned_patch.branch_only_scalar_spill
-                ? std::optional<int16_t>()
-                : compute_sopp_branch_simm16(planned_patch.placement.return_branch_offset,
-                                             planned_patch.placement.return_target);
-        if ((!planned_patch.dense_call_anchor &&
-             !write_moi_appended_anchor(new_text, planned_patch, entry_target, arch,
-                                        "sampled probe", result.errors)) ||
-            (!planned_patch.entry_island_offset && !planned_patch.branch_only_scalar_spill &&
-             !ret)) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled probe appended cave branch is out of range");
-          return;
-        }
+        program.entry_target = entry_target;
+        if (!planned_patch.dense_call_anchor)
+          program.anchor = MoiAppendedAnchorPlan{
+              .candidate_anchor = candidate.anchor(),
+              .placement_anchor = planned_patch.placement.anchor_offset,
+              .original_size = planned_patch.placement.original_size,
+              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
+          };
 
         if (planned_patch.entry_island_offset && !planned_patch.dense_call_anchor) {
           const MoiSpecialStateSgprs special_state = *planned_patch.scalar_abi.special_state;
@@ -827,9 +825,14 @@ void try_apply_direct_sampled_watchpoint_patch(
                 "ConSan MOI sampled probe could not encode its entry island");
             return;
           }
-          if (!write_moi_entry_island(new_text, planned_patch, island_words, patches,
-                                      "sampled probe", result.errors))
-            return;
+          program.entry_island = MoiEntryIslandPlan{
+              .candidate_anchor = candidate.anchor(),
+              .island_offset = planned_patch.entry_island_offset,
+              .entry_island_at_anchor = planned_patch.entry_island_at_anchor,
+              .owner_descriptor_file_offsets =
+                  planned_patch.resources.owner_descriptor_file_offsets,
+          };
+          program.entry_island_words = std::move(island_words);
         }
 
         std::vector<uint32_t> entry_prefix_words;
@@ -906,7 +909,7 @@ void try_apply_direct_sampled_watchpoint_patch(
         if (!finalized)
           return;
         cave_words = std::move(finalized->words);
-        append_words_bytes(new_text, *cave_words);
+        program.body_words = std::move(*cave_words);
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;
         info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
@@ -917,13 +920,7 @@ void try_apply_direct_sampled_watchpoint_patch(
           result.errors.emplace_back("ConSan MOI sampled probe final patch size changed");
           return;
         }
-        if (candidate.anchor() > new_text.size() ||
-            patch_bytes > new_text.size() - candidate.anchor()) {
-          result.errors.emplace_back("ConSan MOI sampled probe exceeds .text");
-          return;
-        }
-        std::memcpy(new_text.data() + candidate.anchor(), words->data(),
-                    static_cast<size_t>(patch_bytes));
+        program.body_words = std::move(*words);
         info.trampoline_offset = candidate.anchor() + candidate.size();
         info.original_size = static_cast<uint32_t>(patch_bytes);
         info.trampoline_size = 0;
@@ -940,18 +937,16 @@ void try_apply_direct_sampled_watchpoint_patch(
             "ConSan MOI sampled probe produced an invalid intent-bound lowering");
         return;
       }
-      lowering_commits.push_back(std::move(*commit));
-      patches.push_back(info);
-      if (planned_patch.branch_only_route) {
-        std::string relay_error;
-        if (!BranchOnlyRelayRouter::emit_and_record(
-                new_text, *planned_patch.branch_only_route, info.trampoline_offset,
-                planned_patch.placement.return_target, arch, patches, &relay_error)) {
-          result.errors.emplace_back("ConSan MOI sampled probe " + relay_error);
-          return;
-        }
-      }
+      program.patch = std::move(info);
+      program.commit = std::move(*commit);
+      program.branch_only_route = planned_patch.branch_only_route;
+      program.return_target = planned_patch.placement.return_target;
+      programs.push_back(std::move(program));
     }
+
+    if (!emit_moi_access_programs(new_text, std::move(programs), arch, "sampled probe", patches,
+                                  lowering_commits, result.errors))
+      return;
 
     if (!emit_moi_dense_entry_hosts(
             dense_entry_hosts, dense_groups, options, result.moi_operating_point,
@@ -965,52 +960,59 @@ void try_apply_direct_sampled_watchpoint_patch(
             [](const MoiDenseEntryHost &, std::vector<uint32_t> &) { return true; }))
       return;
 
-    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
-                             "MOI sampled probe", result.program_inventory.code_object_id(),
-                             result.errors, &result.transform_failure_cause)) {
+    if (!publish_moi_appended_access_text(
+            std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
+            "sampled probe", result, std::move(lowering_commits), std::move(patches)))
       return;
-    }
-    if (!result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI sampled probe",
-                                        std::move(lowering_commits), std::move(patches))) {
-      return;
-    }
     return;
   }
 
-  if (!apply_inline_moi_access_patches(
-          bytes, planned_patches, descriptor_requirements, scalar_requirements,
-          private_requirements, nullptr, nullptr, "sampled probe", arch,
-          [&](const PlannedSampledPatch &planned_patch) {
-            ConSanMoiCandidate lowered_candidate = *planned_patch.candidate;
-            lowered_candidate.kernel_descriptor_file_offset =
-                planned_patch.workgroup_descriptor_file_offset;
-            auto words = build_direct_sampled_watchpoint_words(
-                bytes, lowered_candidate, planned_patch.emission,
-                planned_patch.spill ? &*planned_patch.spill : nullptr, arch, result.errors);
-            if (words) {
-              const size_t planned_words =
-                  static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));
-              if (words->size() > planned_words) {
-                result.errors.emplace_back(
-                    "ConSan MOI sampled probe final patch grew after planning");
-                return std::optional<std::vector<uint32_t>>{};
-              }
-              words->resize(planned_words, build_s_nop(0, arch));
-            }
-            return words;
-          },
-          [&](const PlannedSampledPatch &planned_patch) {
-            const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-            ConSanPatchInfo info;
-            info.kind = ConSanPatchKind::InlineMoiSampledWatchpointStore;
-            info.anchor_offset = candidate.anchor();
-            info.trampoline_offset = candidate.anchor() + candidate.size();
-            info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            note_moi_access_patch_info(info, planned_patch);
-            info.relocated_guest_instruction_offset =
-                candidate.anchor() + planned_patch.probe_guest_instruction_offset;
-            return info;
-          },
-          ConSanProbeIntentKind::SampledAccess, make_runtime_mapping, result))
+  std::vector<MoiAccessPatchProgram> programs;
+  programs.reserve(planned_patches.size());
+  for (const PlannedSampledPatch &planned_patch : planned_patches) {
+    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
+    ConSanMoiCandidate lowered_candidate = candidate;
+    lowered_candidate.kernel_descriptor_file_offset =
+        planned_patch.workgroup_descriptor_file_offset;
+    auto words = build_direct_sampled_watchpoint_words(
+        bytes, lowered_candidate, planned_patch.emission,
+        planned_patch.spill ? &*planned_patch.spill : nullptr, arch, result.errors);
+    if (!words)
+      return;
+    const size_t planned_words =
+        static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));
+    if (words->size() > planned_words) {
+      result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
+      return;
+    }
+    words->resize(planned_words, build_s_nop(0, arch));
+    ConSanPatchInfo info;
+    info.kind = ConSanPatchKind::InlineMoiSampledWatchpointStore;
+    info.anchor_offset = candidate.anchor();
+    info.trampoline_offset = candidate.anchor() + candidate.size();
+    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
+    note_moi_access_patch_info(info, planned_patch);
+    info.relocated_guest_instruction_offset =
+        candidate.anchor() + planned_patch.probe_guest_instruction_offset;
+    auto commit = make_moi_access_lowering_commit(
+        result.observation_plan(), candidate, info, ConSanProbeIntentKind::SampledAccess,
+        [&](ConSanStaticAccessAttribution access) {
+          return make_runtime_mapping(std::move(access), planned_patch, info);
+        });
+    if (!commit) {
+      result.errors.emplace_back(
+          "ConSan MOI sampled probe produced an invalid intent-bound lowering");
+      return;
+    }
+    MoiAccessPatchProgram program;
+    program.body_offset = candidate.file_offset;
+    program.body_words = std::move(*words);
+    program.patch = std::move(info);
+    program.commit = std::move(*commit);
+    programs.push_back(std::move(program));
+  }
+  if (!apply_inline_moi_access_programs(
+          bytes, std::move(programs), descriptor_requirements, scalar_requirements,
+          private_requirements, nullptr, nullptr, arch, "sampled probe", result))
     return;
 }

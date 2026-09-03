@@ -61,70 +61,6 @@ template <typename MakeRuntimeMapping>
                                                  std::move(*runtime_mapping));
 }
 
-template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
-          typename MakeRuntimeMapping>
-[[nodiscard]] bool apply_inline_moi_access_patches(
-    std::span<const uint8_t> bytes, const std::vector<PlannedPatch> &planned_patches,
-    const MoiDescriptorVgprRequirements &descriptor_requirements,
-    const MoiDescriptorSgprRequirements &scalar_requirements,
-    const MoiDescriptorPrivateRequirements &private_requirements,
-    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
-    std::string_view probe_name, rj_code_arch_t arch, BuildWords build_words,
-    MakePatchInfo make_patch_info, ConSanProbeIntentKind expected_intent,
-    MakeRuntimeMapping make_runtime_mapping, ConSanTransformArtifacts &result) {
-  std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
-  for (const PlannedPatch &planned_patch : planned_patches) {
-    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    auto words = build_words(planned_patch);
-    if (!words)
-      return false;
-    const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-    if (patch_bytes != planned_patch.placement.body_size) {
-      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                                 " final patch size changed");
-      return false;
-    }
-    if (candidate.file_offset > replacement.size() ||
-        patch_bytes > replacement.size() - candidate.file_offset) {
-      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                                 " inline patch exceeds the code object");
-      return false;
-    }
-    std::memcpy(replacement.data() + candidate.file_offset, words->data(),
-                static_cast<size_t>(patch_bytes));
-  }
-
-  if (!apply_moi_descriptor_requirements(replacement, result.program_inventory,
-                                         descriptor_requirements, scalar_requirements,
-                                         private_requirements, lds_requirements, capabilities, arch,
-                                         "ConSan MOI " + std::string(probe_name), result.errors)) {
-    return false;
-  }
-
-  std::vector<ConSanPatchInfo> patch_infos;
-  std::vector<ConSanCommittedLowering> lowering_commits;
-  patch_infos.reserve(planned_patches.size());
-  lowering_commits.reserve(planned_patches.size());
-  for (const PlannedPatch &planned_patch : planned_patches) {
-    ConSanPatchInfo patch = make_patch_info(planned_patch);
-    auto commit = make_moi_access_lowering_commit(
-        result.observation_plan(), *planned_patch.candidate, patch, expected_intent,
-        [&](ConSanStaticAccessAttribution access) {
-          return make_runtime_mapping(std::move(access), planned_patch, patch);
-        });
-    if (!commit) {
-      result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
-                                 " produced an invalid intent-bound lowering");
-      return false;
-    }
-    patch_infos.push_back(std::move(patch));
-    lowering_commits.push_back(std::move(*commit));
-  }
-  return result.publish_access_lowering(std::move(replacement),
-                                        "ConSan MOI " + std::string(probe_name),
-                                        std::move(lowering_commits), std::move(patch_infos));
-}
-
 [[nodiscard]] bool apply_moi_appended_access_descriptor_requirements(
     CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
     const RuntimeCapabilities &capabilities,
@@ -474,6 +410,60 @@ struct MoiFinalizedAccessBody {
     std::vector<uint32_t> body, uint64_t body_text_offset, uint64_t planned_body_size,
     const MoiAccessContinuationPlan &continuation, rj_code_arch_t arch,
     std::string_view probe_name, std::vector<std::string> &errors);
+
+enum class MoiAccessBodyPublication : uint8_t {
+  Append,
+  Overwrite,
+};
+
+struct MoiAccessReservedRegion {
+  uint64_t offset = 0;
+  uint32_t word_count = 0;
+};
+
+/// Fully compiled, mode-independent text program for one access site.
+///
+/// Mode code has already lowered its evidence leaf and constructed its typed
+/// runtime mapping.  The shared executor sees only text operations and an
+/// intent-bound commit, so it cannot branch on a mode or architecture family.
+struct MoiAccessPatchProgram {
+  MoiAccessBodyPublication publication = MoiAccessBodyPublication::Overwrite;
+  uint64_t body_offset = 0;
+  bool pad_to_body_offset = false;
+  std::vector<MoiAccessReservedRegion> reserved_regions;
+  std::optional<MoiAppendedAnchorPlan> anchor;
+  uint64_t entry_target = 0;
+  std::optional<MoiEntryIslandPlan> entry_island;
+  std::vector<uint32_t> entry_island_words;
+  std::vector<uint32_t> body_words;
+  uint32_t trailing_reserved_word_count = 0;
+  std::optional<BranchOnlyRelayRoute> branch_only_route;
+  uint64_t return_target = 0;
+  ConSanPatchInfo patch;
+  ConSanCommittedLowering commit;
+};
+
+/// Execute already-compiled access programs against one tentative text image.
+/// All mutations remain private to the caller's transaction until the common
+/// publication step succeeds.
+[[nodiscard]] bool emit_moi_access_programs(
+    std::vector<uint8_t> &text, std::vector<MoiAccessPatchProgram> programs,
+    rj_code_arch_t arch, std::string_view probe_name, std::vector<ConSanPatchInfo> &patches,
+    std::vector<ConSanCommittedLowering> &commits, std::vector<std::string> &errors);
+
+[[nodiscard]] bool apply_inline_moi_access_programs(
+    std::span<const uint8_t> bytes, std::vector<MoiAccessPatchProgram> programs,
+    const MoiDescriptorVgprRequirements &descriptor_requirements,
+    const MoiDescriptorSgprRequirements &scalar_requirements,
+    const MoiDescriptorPrivateRequirements &private_requirements,
+    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
+    rj_code_arch_t arch, std::string_view probe_name, ConSanTransformArtifacts &result);
+
+[[nodiscard]] bool publish_moi_appended_access_text(
+    CodeObjectPatcher patcher, std::vector<uint8_t> text,
+    const ConSanPatchedImageGrowthLimit &growth_limit,
+    std::string_view probe_name, ConSanTransformArtifacts &result,
+    std::vector<ConSanCommittedLowering> commits, std::vector<ConSanPatchInfo> patches);
 
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,

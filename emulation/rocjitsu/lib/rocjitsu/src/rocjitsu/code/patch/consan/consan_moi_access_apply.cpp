@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
+#include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -447,6 +448,116 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                                          *deferred_guest_word * sizeof(uint32_t)))
                                    : std::nullopt,
   };
+}
+
+[[nodiscard]] bool emit_moi_access_programs(
+    std::vector<uint8_t> &text, std::vector<MoiAccessPatchProgram> programs,
+    rj_code_arch_t arch, std::string_view probe_name, std::vector<ConSanPatchInfo> &patches,
+    std::vector<ConSanCommittedLowering> &commits, std::vector<std::string> &errors) {
+  commits.reserve(commits.size() + programs.size());
+  patches.reserve(patches.size() + programs.size());
+  for (MoiAccessPatchProgram &program : programs) {
+    for (const MoiAccessReservedRegion &region : program.reserved_regions) {
+      if (text.size() != region.offset) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " emitted a stale reserved-region mapping");
+        return false;
+      }
+      for (uint32_t word = 0; word < region.word_count; ++word)
+        append_word_bytes(text, build_s_nop(0u, arch));
+    }
+
+    if (program.publication == MoiAccessBodyPublication::Append) {
+      if (program.pad_to_body_offset) {
+        while (text.size() < program.body_offset)
+          append_word_bytes(text, build_s_nop(0u, arch));
+      }
+      if (text.size() != program.body_offset) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " emitted a stale appended-body mapping");
+        return false;
+      }
+      if (program.anchor &&
+          !write_moi_appended_anchor(text, *program.anchor, program.entry_target, arch, probe_name,
+                                     errors)) {
+        return false;
+      }
+      if (program.entry_island &&
+          !write_moi_entry_island(text, *program.entry_island, program.entry_island_words, patches,
+                                  probe_name, errors)) {
+        return false;
+      }
+      append_words_bytes(text, program.body_words);
+      for (uint32_t word = 0; word < program.trailing_reserved_word_count; ++word)
+        append_word_bytes(text, build_s_nop(0u, arch));
+    } else {
+      const uint64_t body_bytes = program.body_words.size() * sizeof(uint32_t);
+      if (body_bytes != program.patch.original_size) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " final inline body size changed");
+        return false;
+      }
+      if (program.body_offset > text.size() || body_bytes > text.size() - program.body_offset) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " inline body exceeds .text");
+        return false;
+      }
+      std::memcpy(text.data() + program.body_offset, program.body_words.data(),
+                  static_cast<size_t>(body_bytes));
+    }
+
+    patches.push_back(std::move(program.patch));
+    commits.push_back(std::move(program.commit));
+    if (program.branch_only_route) {
+      std::string relay_error;
+      const ConSanPatchInfo &patch = patches.back();
+      if (!BranchOnlyRelayRouter::emit_and_record(
+              text, *program.branch_only_route, patch.trampoline_offset, program.return_target,
+              arch, patches, &relay_error)) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) + " " + relay_error);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool publish_moi_appended_access_text(
+    CodeObjectPatcher patcher, std::vector<uint8_t> text,
+    const ConSanPatchedImageGrowthLimit &growth_limit,
+    std::string_view probe_name, ConSanTransformArtifacts &result,
+    std::vector<ConSanCommittedLowering> commits, std::vector<ConSanPatchInfo> patches) {
+  if (!replace_consan_text(patcher, text, growth_limit, "MOI " + std::string(probe_name),
+                           result.program_inventory.code_object_id(), result.errors,
+                           &result.transform_failure_cause)) {
+    return false;
+  }
+  return result.publish_access_lowering(std::move(patcher).emit(),
+                                        "ConSan MOI " + std::string(probe_name),
+                                        std::move(commits), std::move(patches));
+}
+
+[[nodiscard]] bool apply_inline_moi_access_programs(
+    std::span<const uint8_t> bytes, std::vector<MoiAccessPatchProgram> programs,
+    const MoiDescriptorVgprRequirements &descriptor_requirements,
+    const MoiDescriptorSgprRequirements &scalar_requirements,
+    const MoiDescriptorPrivateRequirements &private_requirements,
+    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
+    rj_code_arch_t arch, std::string_view probe_name, ConSanTransformArtifacts &result) {
+  std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
+  std::vector<ConSanPatchInfo> patches;
+  std::vector<ConSanCommittedLowering> commits;
+  if (!emit_moi_access_programs(replacement, std::move(programs), arch, probe_name, patches,
+                                commits, result.errors) ||
+      !apply_moi_descriptor_requirements(
+          replacement, result.program_inventory, descriptor_requirements, scalar_requirements,
+          private_requirements, lds_requirements, capabilities, arch,
+          "ConSan MOI " + std::string(probe_name), result.errors)) {
+    return false;
+  }
+  return result.publish_access_lowering(std::move(replacement),
+                                        "ConSan MOI " + std::string(probe_name),
+                                        std::move(commits), std::move(patches));
 }
 
 [[nodiscard]] bool
