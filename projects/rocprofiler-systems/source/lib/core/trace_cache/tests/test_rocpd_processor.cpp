@@ -58,6 +58,14 @@ struct nic_pmc_spec
     const char* units;
 };
 
+struct pmc_sample_spec
+{
+    const char* pmc_name;
+    const char* track_name;
+    double      value;
+    size_t      timestamp;
+};
+
 constexpr std::array k_nic_pmcs{
     nic_pmc_spec{ .name = "nic_rx_ucast_pkts", .units = "packets" },
     nic_pmc_spec{ .name = "nic_tx_ucast_pkts", .units = "packets" },
@@ -436,25 +444,24 @@ protected:
 
     void insert_pmc_sample(const profiler_hub::writer_types::event_data_t&      event,
                            const profiler_hub::writer_types::agent_unique_id_t& agent_uid,
-                           const char* pmc_name, const char* track_name, double value,
-                           size_t timestamp)
+                           const pmc_sample_spec&                               spec)
     {
         profiler_hub::writer_types::track_info_t track{};
-        track.name       = track_name;
+        track.name       = spec.track_name;
         track.node_id    = NODE_ID;
         track.process_id = PID;
         m_writer->register_track_info(track);
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data{};
         pmc_data.event = event;
-        pmc_data.value = value;
+        pmc_data.value = spec.value;
         profiler_hub::writer_types::sample_data_t sample{};
-        sample.timestamp = timestamp;
+        sample.timestamp = spec.timestamp;
         sample.track     = track;
         pmc_data.sample  = sample;
 
         profiler_hub::writer_types::pmc_info_unique_id_t uid{};
-        uid.name     = pmc_name;
+        uid.name     = spec.pmc_name;
         uid.agent_id = agent_uid;
         m_writer->insert_pmc_event_data(pmc_data, uid);
     }
@@ -1375,16 +1382,14 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
     auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 3U);
 
-    bool found_gfx = false, found_umc = false, found_temp = false;
+    std::unordered_set<std::string> symbols;
     for(const auto& pmc_row : pmc_infos)
     {
-        if(pmc_row->symbol == "gfx_busy") found_gfx = true;
-        if(pmc_row->symbol == "umc_busy") found_umc = true;
-        if(pmc_row->symbol == "gpu_temperature") found_temp = true;
+        symbols.insert(pmc_row->symbol);
     }
-    EXPECT_TRUE(found_gfx) << "gfx_busy PMC info not found";
-    EXPECT_TRUE(found_umc) << "umc_busy PMC info not found";
-    EXPECT_TRUE(found_temp) << "gpu_temperature PMC info not found";
+    EXPECT_TRUE(symbols.count("gfx_busy")) << "gfx_busy PMC info not found";
+    EXPECT_TRUE(symbols.count("umc_busy")) << "umc_busy PMC info not found";
+    EXPECT_TRUE(symbols.count("gpu_temperature")) << "gpu_temperature PMC info not found";
 
     EXPECT_TRUE(std::filesystem::exists(m_db_path));
     EXPECT_GT(std::filesystem::file_size(m_db_path), 0U);
@@ -1408,10 +1413,16 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 
     register_pmc_info(nic_agent(), "nic_rx_ucast_bytes", "NIC");
     register_pmc_info(nic_agent(), "nic_tx_ucast_bytes", "NIC");
-    insert_pmc_sample(event, nic_uid, "nic_rx_ucast_bytes", "ainic_rx_rdma_ucast_bytes",
-                      k_rx_ucast_bytes, k_sample_timestamp);
-    insert_pmc_sample(event, nic_uid, "nic_tx_ucast_bytes", "ainic_tx_rdma_ucast_bytes",
-                      k_tx_ucast_bytes, k_sample_timestamp);
+    insert_pmc_sample(event, nic_uid,
+                      { .pmc_name   = "nic_rx_ucast_bytes",
+                        .track_name = "ainic_rx_rdma_ucast_bytes",
+                        .value      = k_rx_ucast_bytes,
+                        .timestamp  = k_sample_timestamp });
+    insert_pmc_sample(event, nic_uid,
+                      { .pmc_name   = "nic_tx_ucast_bytes",
+                        .track_name = "ainic_tx_rdma_ucast_bytes",
+                        .value      = k_tx_ucast_bytes,
+                        .timestamp  = k_sample_timestamp });
 
     flush_and_open_reader();
 
