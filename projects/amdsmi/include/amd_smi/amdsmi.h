@@ -1130,7 +1130,8 @@ typedef struct {
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;                      //!< The subsystem vendor ID
   uint64_t device_id;                         //!< The device ID of a GPU
-  uint32_t rev_id;                            //!< The revision ID of a GPU
+  uint32_t rev_id;                            //!< PCI config-space revision ID, 0xFFFFFFFF if
+                                              //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
   uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
@@ -1139,7 +1140,13 @@ typedef struct {
   uint32_t subsystem_id;             //!> The subsystem ID
   uint64_t flags;                    //!< Chip flags
   uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t reserved[17];
+  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
+                                          as the driver reports it, not decoded.
+                                          0xFFFFFFFF if not supported */
+  uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
+                                          recurs across unrelated ASIC families; pair it with
+                                          device_id. 0xFFFFFFFF if not supported */
+  uint32_t reserved[15];
 } amdsmi_asic_info_t;
 
 /**
@@ -1361,7 +1368,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t clk;            //!< In MHz
+  uint32_t clk;            //!< In MHz. UINT32_MAX when the clock is unavailable
   uint32_t min_clk;        //!< In MHz
   uint32_t max_clk;        //!< In MHz
   uint8_t clk_locked;      //!< True/False
@@ -2220,9 +2227,9 @@ typedef struct {
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
-  uint16_t average_dram_writes;                             //!< v3_0
-  uint16_t average_ipu_reads;                               //!< v3_0
-  uint16_t average_ipu_writes;                              //!< v3_0
+  uint16_t average_dram_writes;                             //!< v3_0 [MB/s]
+  uint16_t average_ipu_reads;                               //!< v3_0 [MB/s]
+  uint16_t average_ipu_writes;                              //!< v3_0 [MB/s]
 
   /**
    * @brief Power [mW]
