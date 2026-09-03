@@ -49,6 +49,14 @@
 #include <fcntl.h>
 #endif
 
+#if defined(ROCDXG_LIB_VERSION_MAJOR)
+#define ROCR_ROCDXG_STR2(v) #v
+#define ROCR_ROCDXG_STR(v) ROCR_ROCDXG_STR2(v)
+#define ROCR_ROCDXG_LIBNAME "librocdxg.so." ROCR_ROCDXG_STR(ROCDXG_LIB_VERSION_MAJOR)
+#else
+#define ROCR_ROCDXG_LIBNAME "librocdxg.so"
+#endif
+
 namespace rocr {
 namespace core {
 
@@ -78,7 +86,7 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       if (fd >= 0) {
         close(fd);
         is_wsl_dxg_ = true;
-        return "librocdxg.so";
+        return ROCR_ROCDXG_LIBNAME;
       }
     }
 #else
