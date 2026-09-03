@@ -175,6 +175,7 @@ size_t WarningCollector::DedupKeyHash::operator()(const DedupKey &key) const noe
   size_t seed = 0;
   hazard_core::hash_combine(seed, key.dispatch_id);
   hazard_core::hash_combine(seed, key.pc);
+  hazard_core::hash_combine(seed, key.source_pc);
   hazard_core::hash_combine(seed, key.message);
   hazard_core::hash_combine(seed, key.suggestion);
   return seed;
@@ -188,8 +189,8 @@ void WarningCollector::add(const HazardWarning &warning) {
     if (verbose_) {
       warnings_.push_back(warning);
     } else {
-      DedupKey key{warning.dispatch_id, warning.pc, dedup_message_key(warning.message),
-                   warning.suggestion};
+      DedupKey key{warning.dispatch_id, warning.pc, warning.source_pc,
+                   dedup_message_key(warning.message), warning.suggestion};
       auto it = dedup_index_.find(key);
       if (it == dedup_index_.end()) {
         dedup_index_.emplace(std::move(key), warnings_.size());

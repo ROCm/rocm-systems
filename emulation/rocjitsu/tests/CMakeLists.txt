@@ -560,6 +560,7 @@ add_executable(
     data-hazard/hazard_helpers_tests.cpp
     data-hazard/data_hazard_adapter_tests.cpp
     data-hazard/tensor_lds_range_tests.cpp
+    data-hazard/warning_dedup_tests.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
