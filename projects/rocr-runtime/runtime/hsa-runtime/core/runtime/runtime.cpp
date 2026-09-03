@@ -413,7 +413,9 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       debug_warning(false &&
                     "Freeing memory with active IPC export. "
                     "Pending importers will fail to attach.");
+      int fd = it->second.dmabuf_fd;
       ipc_sock_server_conns_.erase(it);
+      if (fd >= 0) os::DmaBufClose(&fd);
     }
   }
 
@@ -1441,7 +1443,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       for (auto& conns : ipc_sock_server_conns_) {
         if (conn_handle == conns.first) {
           ptr = reinterpret_cast<void*>(conn_handle);
-          len = conns.second;
+          len = conns.second.len;
           break;
         }
       }
@@ -1457,6 +1459,10 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
     }
   }
 
+  for (auto& conns : ipc_sock_server_conns_) {
+    if (conns.second.dmabuf_fd >= 0)
+      os::DmaBufClose(&conns.second.dmabuf_fd);
+  }
   ipc_sock_server_conns_.clear();
   os::CloseIPCSocket(ipc_sock_server_fd_);
 }
@@ -1566,7 +1572,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
   }
 
-  os::DmaBufClose(&dmabuf_fd);
+  // Keep dmabuf_fd open -- it holds a kernel reference on the BO that prevents
+  // the BO from being destroyed if the exporter frees its allocation before
+  // importers finish mapping. The fd is closed when the entry is removed
+  // from ipc_sock_server_conns_ (in FreeMemory or cleanup).
 
   std::unique_lock<std::mutex> lock(ipc_sock_server_lock_);
 
@@ -1624,7 +1633,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       }
     }
   }
-  ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
+  ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = {len, dmabuf_fd};
 
   // TODO: fragment block discard for better memory performance causes memory violations
   // with DMABuf export even when synchronously called. Bypass for now.
@@ -1634,7 +1643,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                              HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
-                             bool isDmabufSysmem, uint32_t shared_handle) {
+                             bool isDmabufSysmem, uint32_t shared_handle,
+                             int* out_dmabuf_fd) {
   char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
   snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
   std::chrono::milliseconds timeout(10000);
@@ -1658,7 +1668,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
 
   int dmabuf_fd = static_cast<int>(os::IPCRecvHandle(socket_fd));
   if (dmabuf_fd == -1) return -1;
-  MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
+  MAKE_SCOPE_GUARD([&]() {
+    if (dmabuf_fd >= 0) os::DmaBufClose(&dmabuf_fd);
+  });
 
   HsaGraphicsResourceInfo info;
   HSA_REGISTER_MEM_FLAGS regFlags{0};
@@ -1712,6 +1724,14 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
 
   // Ping socket server to close exporter
   if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
+
+  // Pass the dmabuf fd back to the caller so it can hold the kernel BO ref
+  // until MAP_MEMORY_TO_GPU completes. Setting dmabuf_fd to -1 prevents the
+  // scope guard from closing it.
+  if (out_dmabuf_fd && err == HSAKMT_STATUS_SUCCESS) {
+    *out_dmabuf_fd = dmabuf_fd;
+    dmabuf_fd = -1;
+  }
   return err;
 }
 
@@ -1721,6 +1741,10 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   void* importAddress;
   HSAuint64 importSize;
   uint64_t dmaBufFDHandle = 0;
+  int importedDmabufFd = -1;
+  MAKE_SCOPE_GUARD([&]() {
+    if (importedDmabufFd >= 0) os::DmaBufClose(&importedDmabufFd);
+  });
   hsa_amd_ipc_memory_t importHandle = *handle;
 
   // Extract fragment info
@@ -1749,7 +1773,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto importMemory = [&](unsigned int numNodes, HSAuint32* nodes, bool isSysMem) {
     int ret = ipc_dmabuf_supported_
         ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes, nodes, &importAddress,
-                          &importSize, isSysMem, importHandle.handle[7])
+                          &importSize, isSysMem, importHandle.handle[7],
+                          &importedDmabufFd)
         : HSAKMT_CALL(hsaKmtRegisterSharedHandle(
               reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle), &importAddress,
               &importSize));
