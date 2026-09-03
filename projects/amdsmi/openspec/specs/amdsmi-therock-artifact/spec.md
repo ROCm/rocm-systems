@@ -82,7 +82,7 @@ For AMD SMI this yields:
 - **THEN** they also sweep up `libgoamdsmi_shim64.so*` and the Go shim headers,
   because the build produces them unconditionally and both claims are
   path-based — nothing in the descriptor mentions Go, yet every TheRock-derived
-  channel ships the binding; see [amdsmi-language-bindings]
+  channel ships the binding
 
 #### Scenario: An empty run entry would swallow the later components
 

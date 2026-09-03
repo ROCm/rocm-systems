@@ -16,10 +16,8 @@ paths from two channels.
 Detailed behavior of each channel lives in the sibling capabilities:
 [amdsmi-python-wheel], [amdsmi-python-system-package],
 [amdsmi-rocm-python-distribution], and [amdsmi-rocm-os-packages]. The
-prefix-relative tree that step 3 resolves against is [amdsmi-install-layout].
-What the resolved module then offers a caller is [amdsmi-python-api], and what
-the resolved library exports is [amdsmi-c-api-abi]; this capability ends the
-moment a handle to the library exists.
+prefix-relative tree that step 3 resolves against is [amdsmi-install-layout];
+this capability ends the moment a handle to the library exists.
 
 ## Requirements
 
@@ -97,12 +95,11 @@ The library SHALL be opened with `RTLD_LOCAL`.
 ### Requirement: SONAME Pinned To The Library Major Version
 
 The loader SHALL reference the system library by the SONAME
-`libamd_smi.so.<MAJOR>`, where `<MAJOR>` is the library major that
-[amdsmi-c-api-abi] derives from the header. The generator SHALL parse it from
-the header it is already processing rather than hardcode it, so the loader
-cannot carry a major the library does not have. The value SHALL remain the
-*system* SONAME even when the wrapper is generated against the wheel-private
-library.
+`libamd_smi.so.<MAJOR>`, where `<MAJOR>` is the library major derived from the
+header. The generator SHALL parse it from the header it is already processing
+rather than hardcode it, so the loader cannot carry a major the library does
+not have. The value SHALL remain the *system* SONAME even when the wrapper is
+generated against the wheel-private library.
 
 #### Scenario: Generating against the wheel library does not change the SONAME
 
@@ -192,9 +189,8 @@ alternate library, and SHALL be honored in every channel including the wheel.
 
 ### Requirement: CLI Module Resolution Is Independent Of The Loader
 
-The `amd-smi` CLI, whose own contract is [amdsmi-cli], SHALL resolve the
-`amdsmi` module in its own order, distinct from a plain `import amdsmi` in a
-user script:
+The `amd-smi` CLI SHALL resolve the `amdsmi` module in its own order, distinct
+from a plain `import amdsmi` in a user script:
 
 1. `$ROCM_PATH`/`$ROCM_HOME` + `share/amd_smi`, when either variable is set;
 2. `share/amd_smi` resolved relative to the CLI's own location

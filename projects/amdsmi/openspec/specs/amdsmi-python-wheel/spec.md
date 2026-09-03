@@ -11,13 +11,10 @@ exists so a user can `pip install amdsmi` into a venv or container without
 `/opt/rocm` being present, and so that copy can never collide with a system
 `libamd_smi.so` already loaded in the same process.
 
-Loader behavior is specified in [amdsmi-python-loader] and the API the
-installed module exposes is [amdsmi-python-api]; this capability covers only
-how the artifact is built and what it contains. This wheel is a different
+Loader behavior is specified in [amdsmi-python-loader]; this capability covers
+only how the artifact is built and what it contains. This wheel is a different
 artifact from the `rocm-sdk-core` wheel that carries AMD SMI as part of a whole
-relocated ROCm tree; that one is [amdsmi-rocm-python-distribution]. The
-configure-time option set the switches below belong to, including what a build
-that does not ask for a wheel gets instead, is [amdsmi-build-configuration].
+relocated ROCm tree; that one is [amdsmi-rocm-python-distribution].
 
 ## Requirements
 

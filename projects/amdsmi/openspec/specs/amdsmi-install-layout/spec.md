@@ -17,15 +17,10 @@ loader's other steps. Those relationships are load-bearing, so they are
 specified here once rather than restated per channel.
 
 This capability owns the tree only — the paths and the relationships between
-them, never the behavior of what sits at each path. The `SOVERSION` that names
-the library and the surface it exports are [amdsmi-c-api-abi]; the `amdsmi`
-module's own contract is [amdsmi-python-api] and the CLI's is [amdsmi-cli].
-Library resolution is specified in [amdsmi-python-loader]; the additional
-site-packages copy that accompanies this tree in the deb/rpm is in
-[amdsmi-python-system-package]; artifact capture of the tree is in
-[amdsmi-therock-artifact]; and the configure-time variables that place the
-tree, along with the ROCm-prefix defaults they take, are
-[amdsmi-build-configuration].
+them, never the behavior of what sits at each path. Library resolution is
+specified in [amdsmi-python-loader]; the additional site-packages copy that
+accompanies this tree in the deb/rpm is in [amdsmi-python-system-package]; and
+artifact capture of the tree is in [amdsmi-therock-artifact].
 
 ## Requirements
 
@@ -44,8 +39,7 @@ Every build SHALL install, under the ROCm prefix:
 The same tree additionally carries `<root>/lib/libgoamdsmi_shim64.so*` and the
 Go shim headers `<root>/include/goamdsmi.h` and
 `<root>/include/amdsmi_go_shim.h` in any channel that installs the whole build
-rather than a selected component set. Which channels those are, and why the
-shim is absent from the rest, is [amdsmi-language-bindings].
+rather than a selected component set.
 
 #### Scenario: The module resolves the library by relative path
 

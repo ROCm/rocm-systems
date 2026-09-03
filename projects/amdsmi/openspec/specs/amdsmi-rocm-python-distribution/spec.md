@@ -11,9 +11,9 @@ This is a *different* Python channel from the standalone `amdsmi` PyPI wheel in
 `libamd_smi_python.so` and makes `import amdsmi` work. This one ships AMD SMI as
 part of a whole relocated ROCm tree inside site-packages, reaches the library
 through the relative path contract in [amdsmi-install-layout], and delivers the
-`amd-smi` command — whose behavior is [amdsmi-cli] — rather than an importable
-module. Artifact slicing is in [amdsmi-therock-artifact]; the native packages
-cut from the same artifact are [amdsmi-rocm-os-packages].
+`amd-smi` command rather than an importable module. Artifact slicing is in
+[amdsmi-therock-artifact]; the native packages cut from the same artifact are
+[amdsmi-rocm-os-packages].
 
 The transformation is not a copy: runtime wheels may contain no symlinks, so
 every symlink in the artifact is resolved, dropped, stubbed, or flattened. AMD

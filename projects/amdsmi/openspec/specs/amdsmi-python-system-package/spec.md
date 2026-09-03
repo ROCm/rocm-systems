@@ -16,12 +16,9 @@ to make that failure impossible or loud.
 
 This capability owns the site-packages copy and the maintainer scriptlets. The
 prefix-relative `share/amd_smi` copy the same package installs is specified in
-[amdsmi-install-layout]; loader behavior is in [amdsmi-python-loader]; what the
-delivered module then provides is [amdsmi-python-api]. The `amdrocm-amdsmi`
-package built by TheRock is an unrelated package family — see
-[amdsmi-rocm-os-packages]. The CMake options that drive this package, and the
-rule that freezes the detected site-packages destination into the maintainer
-scriptlets, are [amdsmi-build-configuration].
+[amdsmi-install-layout]; loader behavior is in [amdsmi-python-loader]. The
+`amdrocm-amdsmi` package built by TheRock is an unrelated package family — see
+[amdsmi-rocm-os-packages].
 
 ## Requirements
 

@@ -8,10 +8,6 @@
       "label": "Source"
     },
     {
-      "id": "build",
-      "label": "Build"
-    },
-    {
       "id": "artifact",
       "label": "Artifact"
     },
@@ -30,32 +26,6 @@
       "stage": "source",
       "label": "projects/amdsmi",
       "note": "C++ library, Python module, CLI, Go shim, Rust crate"
-    },
-    {
-      "id": "configure",
-      "stage": "build",
-      "label": "CMake configure",
-      "spec": "amdsmi-build-configuration",
-      "note": "options, defaults, rejected combinations"
-    },
-    {
-      "id": "lib",
-      "stage": "artifact",
-      "label": "libamd_smi.so.MAJOR",
-      "spec": "amdsmi-c-api-abi",
-      "note": "SOVERSION from the header; version-scripted exports"
-    },
-    {
-      "id": "module",
-      "stage": "artifact",
-      "label": "amdsmi Python module",
-      "spec": "amdsmi-python-api"
-    },
-    {
-      "id": "cli",
-      "stage": "artifact",
-      "label": "amd-smi CLI",
-      "spec": "amdsmi-cli"
     },
     {
       "id": "tree",
@@ -123,30 +93,6 @@
   "edges": [
     {
       "from": "sources",
-      "to": "configure"
-    },
-    {
-      "from": "configure",
-      "to": "lib"
-    },
-    {
-      "from": "configure",
-      "to": "module"
-    },
-    {
-      "from": "configure",
-      "to": "cli"
-    },
-    {
-      "from": "lib",
-      "to": "tree"
-    },
-    {
-      "from": "module",
-      "to": "tree"
-    },
-    {
-      "from": "cli",
       "to": "tree"
     },
     {
@@ -161,7 +107,7 @@
       "spec": "amdsmi-therock-subproject"
     },
     {
-      "from": "module",
+      "from": "sources",
       "to": "wheel",
       "label": "staged copy",
       "spec": "amdsmi-python-wheel"
