@@ -82,6 +82,10 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int numaId, char* affinityStr, s
 
 ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen);
 
+// Compute partition mode of an AMD GPU ("SPX", "DPX", "CPX", ...). Yields an empty string where the
+// platform does not report one, which callers must read as "unknown", not as "not partitioned".
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen);
+
 #if NCCL_OS_WINDOWS
 // Forward declare nvmlDevice_t to avoid including nvml.h
 struct nvmlDevice_st;

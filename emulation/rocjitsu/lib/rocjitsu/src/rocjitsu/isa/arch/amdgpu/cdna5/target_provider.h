@@ -10,11 +10,13 @@
 namespace rocjitsu::cdna5 {
 
 std::unique_ptr<rocjitsu::Decoder> create_target_decoder();
+std::unique_ptr<rocjitsu::Decoder> create_target_decoder(const IsaGpuTargetDescription &gpu_target);
 
 /// Full execution alternative; do not combine it with the model-only provider
 /// in the same registry.
-inline constexpr IsaTargetDescriptor kTargetDescriptor =
-    make_target_descriptor(true, &create_target_decoder);
+inline constexpr IsaTargetDescriptor kTargetDescriptor = make_target_descriptor(
+    kGpuTargets, true, static_cast<IsaTargetDescriptor::DecoderFactory>(&create_target_decoder),
+    static_cast<IsaTargetDescriptor::VariantDecoderFactory>(&create_target_decoder));
 
 } // namespace rocjitsu::cdna5
 

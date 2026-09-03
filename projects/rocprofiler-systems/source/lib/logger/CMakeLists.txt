@@ -29,7 +29,9 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-logger
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-spdlog>
+    PUBLIC
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-spdlog>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-fmt>
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

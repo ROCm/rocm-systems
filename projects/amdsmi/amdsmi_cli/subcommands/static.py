@@ -294,8 +294,11 @@ class StaticCommands:
                 "device_id": "N/A",
                 "subsystem_id": "N/A",
                 "rev_id": "N/A",
+                "chip_rev_id": "N/A",
+                "external_rev_id": "N/A",
                 "asic_serial": "N/A",
                 "oam_id": "N/A",
+                "physical_acc_id": "N/A",
                 "num_compute_units": "N/A",
                 "target_graphics_version": "N/A",
             }
@@ -330,26 +333,26 @@ class StaticCommands:
                 bus_info["max_pcie_speed"] = pcie_static["max_pcie_speed"]
                 bus_info["pcie_interface_version"] = pcie_static["pcie_interface_version"]
                 bus_info["slot_type"] = pcie_static["slot_type"]
-                if bus_info["max_pcie_speed"] % 1000 != 0:
-                    pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000, 1)
-                else:
-                    pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000)
+                if bus_info["max_pcie_speed"] != "N/A":
+                    if bus_info["max_pcie_speed"] % 1000 != 0:
+                        pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000, 1)
+                    else:
+                        pcie_speed_GTs_value = round(bus_info["max_pcie_speed"] / 1000)
 
-                bus_info["max_pcie_speed"] = pcie_speed_GTs_value
+                    bus_info["max_pcie_speed"] = pcie_speed_GTs_value
 
-                if bus_info["pcie_interface_version"] > 0:
+                pcie_interface_version_valid = (
+                    bus_info["pcie_interface_version"] != "N/A"
+                    and bus_info["pcie_interface_version"] > 0
+                )
+                if pcie_interface_version_valid:
                     bus_info["pcie_interface_version"] = f"Gen {bus_info['pcie_interface_version']}"
 
                 # Set the unit for pcie_speed
                 pcie_speed_unit = "GT/s"
-                if self.logger.is_human_readable_format():
-                    bus_info["max_pcie_speed"] = f"{bus_info['max_pcie_speed']} {pcie_speed_unit}"
-
-                if self.logger.is_json_format():
-                    bus_info["max_pcie_speed"] = {
-                        "value": bus_info["max_pcie_speed"],
-                        "unit": pcie_speed_unit,
-                    }
+                bus_info["max_pcie_speed"] = self.helpers.unit_format(
+                    self.logger, bus_info["max_pcie_speed"], pcie_speed_unit
+                )
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get bus info for gpu %s | %s", gpu_id, e.get_error_info())
@@ -388,8 +391,6 @@ class StaticCommands:
                         if value.strip() == "":
                             vbios_info[key] = "N/A"
                 static_dict["ifwi"] = vbios_info
-                # Remove boot_firmware since it's not used
-                del static_dict["ifwi"]["boot_firmware"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ifwi"] = "N/A"
                 logging.debug(
@@ -801,11 +802,14 @@ class StaticCommands:
                 static_dict["ras"] = ras_dict
         if args.partition:
             try:
-                compute_partition = amdsmi_interface.amdsmi_get_gpu_compute_partition(args.gpu)
+                accel_partition_dict = (
+                    amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(args.gpu)
+                )
+                accel_partition = accel_partition_dict["partition_profile"]["profile_type"]
             except amdsmi_exception.AmdSmiLibraryException as e:
-                compute_partition = "N/A"
+                accel_partition = "N/A"
                 logging.debug(
-                    "Failed to get compute partition info for gpu %s | %s",
+                    "Failed to get accelerator partition info for gpu %s | %s",
                     gpu_id,
                     e.get_error_info(),
                 )
@@ -838,7 +842,7 @@ class StaticCommands:
                     "Failed to get partition ID for gpu %s | %s", gpu_id, e.get_error_info()
                 )
             static_dict["partition"] = {
-                "accelerator_partition": compute_partition,
+                "accelerator_partition": accel_partition,
                 "memory_partition": memory_partition,
                 "partition_id": partition_id,
                 "compute_partition_mem_alloc_mode": mem_alloc_mode,

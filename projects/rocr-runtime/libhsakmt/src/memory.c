@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -764,6 +764,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
 					  HSAuint64 *AvailableBytes)
 {
 	return hsaKmtAvailableMemoryCtx(&hsakmt_primary_kfd_ctx, Node, AvailableBytes);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpuCtx(HsaKFDContext *ctx,
+						   HSAuint32 *NodeId,
+						   HSAuint32 *GpuId)
+{
+	CHECK_KFD_OPEN();
+
+	if (!NodeId || !GpuId)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	return hsakmt_fmm_get_default_host_gpu(ctx, NodeId, GpuId);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
+						HSAuint32 *GpuId)
+{
+	return hsaKmtGetDefaultHostGpuCtx(&hsakmt_primary_kfd_ctx, NodeId, GpuId);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,

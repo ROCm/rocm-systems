@@ -66,13 +66,6 @@ set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
 )
 
-# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
-# interposer service the amdgpu DRM ioctl surface using the real kernel structs
-# instead of hand-mirrored copies, without depending on libdrm library types.
-set(DRM_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
-)
-
 include(rj_log)
 
 # Install directory variables are used by subdirectories that add install rules.
@@ -108,6 +101,11 @@ option(
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(
+    ROCJITSU_ENABLE_VFIO
+    "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
+    OFF
+)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -347,6 +345,16 @@ include(rj_flatbuffers)
 set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
 set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
 
+if(ROCJITSU_ENABLE_VFIO)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_VFIO=ON is Linux-only: the vfio-user protocol reuses the Linux VFIO uapi definitions and the transport relies on AF_UNIX file-descriptor passing."
+        )
+    endif()
+    include(rj_libvfio_user)
+endif()
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -378,6 +386,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_drm_headers
         util
         flatbuffers
         Threads::Threads
@@ -394,7 +403,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_shared
         PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
     )
-    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
@@ -407,6 +415,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
+add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

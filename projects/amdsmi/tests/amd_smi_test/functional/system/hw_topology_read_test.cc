@@ -63,6 +63,25 @@ void TestHWTopologyRead::Run(void) {
 
   uint32_t num_devices = num_monitor_devs();
 
+  // Null output pointers must be rejected regardless of topology.
+  if (num_devices > 0) {
+    amdsmi_link_type_t null_type;
+    amdsmi_p2p_capability_t null_cap;
+    uint64_t null_hops;
+    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], nullptr,
+                                        &null_type),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
+                                        nullptr),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], nullptr,
+                                         &null_cap),
+              AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(amdsmi_topo_get_p2p_status(processor_handles_[0], processor_handles_[0], &null_type,
+                                         nullptr),
+              AMDSMI_STATUS_INVAL);
+  }
+
   // gpu_link_t gpu_links[num_devices][num_devices];
   std::vector<std::vector<gpu_link_t>> gpu_links(num_devices, std::vector<gpu_link_t>(num_devices));
   // uint32_t numa_numbers[num_devices];
