@@ -28,7 +28,7 @@ __version__ = "%s.%s.%s+%s" % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
 # `amd-smi --rocm-smi` mirrors legacy rocm-smi's default output, so it keeps
 # rocm-smi's binary exit convention (0 = success, 1 = error) instead of amd-smi's
-# exit-code redesign (the 192-255 AmdSmiExitCode band + library status codes).
+# exit-code redesign (the 193-253 AmdSmiExitCode band + library status codes).
 # Adopting the new codes here could break scripts that rely on rocm-smi's existing
 # $? contract.
 @enum.unique
