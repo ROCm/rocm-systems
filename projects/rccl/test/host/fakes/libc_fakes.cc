@@ -11,6 +11,7 @@
 #include <sys/time.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +23,7 @@
 
 std::string g_writtenData;
 std::string g_stdoutData;
+FILE* g_lastFwriteStream = nullptr;
 std::vector<int> g_closedFds;
 std::vector<MicroReadStep> g_readScript;
 size_t g_readScriptPos = 0;
@@ -54,7 +56,13 @@ static ssize_t DefaultRead(int, void* buf, size_t count) {
     return step.ret;
   }
   if (step.ret == 0) return 0;
-  const size_t n = std::min(step.data.size(), count);
+  // A positive ret is the byte count the step promises. Assert the script means what it says, and clamp to the promise
+  // as well so ScriptRead(3, 0, "abcdefgh") cannot hand over eight bytes in a Release build, where NDEBUG drops the
+  // assert. Without both, a mismatched script silently pins the fake's behaviour instead of the unit's.
+  assert(static_cast<size_t>(step.ret) == step.data.size() &&
+         "ScriptRead: a positive ret must equal data.size(); use ScriptReadData to derive it");
+  const size_t promised = std::min(static_cast<size_t>(step.ret), step.data.size());
+  const size_t n = std::min(promised, count);
   std::memcpy(buf, step.data.data(), n);
   return static_cast<ssize_t>(n);
 }
@@ -91,6 +99,12 @@ static int DefaultGetaddrinfo(const char*, const char*, const struct addrinfo*, 
   for (int i = 0; i < g_addrinfoCount; ++i) {
     auto* ai = static_cast<struct addrinfo*>(std::calloc(1, sizeof(struct addrinfo)));
     auto* sa = static_cast<struct sockaddr_in*>(std::calloc(1, sizeof(struct sockaddr_in)));
+    // Stop at the short list rather than dereferencing null; the unit still gets a well-formed chain of what was built.
+    if (ai == nullptr || sa == nullptr) {
+      std::free(ai);
+      std::free(sa);
+      break;
+    }
     sa->sin_family = AF_INET;
     sa->sin_port = htons(static_cast<uint16_t>(g_addrinfoBasePort + i));
     sa->sin_addr.s_addr = htonl(INADDR_LOOPBACK + i);
@@ -128,7 +142,10 @@ static int DefaultGetnameinfo(const struct sockaddr* sa, socklen_t, char* host, 
 
 static const char* DefaultGaiStrerror(int code) { return gai_strerror(code); }
 
-static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE*) {
+// Records the stream too: without it g_stdoutData reads identically whether the unit chose stdout or stderr, so a
+// stream swap in the unit under test would leave every assertion on the bytes green.
+static size_t DefaultFwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  g_lastFwriteStream = stream;
   g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
   return nmemb;
 }
@@ -181,6 +198,7 @@ void ResetLibcFakes() {
 
   g_writtenData.clear();
   g_stdoutData.clear();
+  g_lastFwriteStream = nullptr;
   g_closedFds.clear();
   g_readScript.clear();
   g_readScriptPos = 0;

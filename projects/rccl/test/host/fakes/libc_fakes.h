@@ -26,6 +26,7 @@
 
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <getopt.h>
 
@@ -73,7 +74,8 @@ extern std::function<void(int)> g_exit;
 // hook over a seam stops feeding the corresponding record.
 // ---------------------------------------------------------------------------
 extern std::string g_writtenData;       // every byte the unit wrote to a descriptor
-extern std::string g_stdoutData;        // every byte the unit fwrite()'d
+extern std::string g_stdoutData;        // every byte the unit fwrite()'d, whichever stream it chose
+extern FILE* g_lastFwriteStream;        // stream of the last fwrite; distinguishes stdout from stderr
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;

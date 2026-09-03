@@ -17,8 +17,9 @@
 
 #include <gtest/gtest.h>
 
-// Every libc header client.cc reaches through os.h, pulled in BEFORE the macro
-// renames below so the renames never rewrite a declaration.
+// Every header that DECLARES a name libc_seam.h renames, pulled in BEFORE the seam so a rename never rewrites a
+// declaration. client.cc reaches many more headers than these through os.h/nccl.h/ras_internal.h, but those are
+// included after the seam and are harmless as long as none of them is the first declaration of a seamed name.
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <netdb.h>
@@ -27,6 +28,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <cassert>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -67,8 +69,8 @@ void ResetRasClientGlobals() {
 // ===========================================================================
 // Default fixture for every test in this file. Tests that need extra per-test
 // state derive from it; report any derived suite name so it can be registered
-// in test/test_categories_micro_ras_client.yaml -- gtest's '*' does not match
-// across the literal '.', so an unlisted suite never runs under CTest.
+// in test/test_categories_micro.yaml -- gtest's '*' does not match across the
+// literal '.', so an unlisted suite never runs under CTest.
 // ===========================================================================
 class RasClientMicrotest : public ::testing::Test {
  protected:
@@ -111,26 +113,33 @@ constexpr int kParseArgsNoExit = -999;
 struct ParseArgsOutcome {
   int exitStatus = kParseArgsNoExit;
   std::string log;
+  // parseArgs stores optarg straight into its globals (client.cc:76 `format = optarg`), so the argv strings must
+  // outlive every assertion that reads one, not merely the parseArgs call. Keeping them here ties their lifetime to
+  // the outcome the test holds. Returning by value is safe: a vector move steals the buffer, it does not relocate.
+  std::vector<std::string> argvStorage;
 };
 
-// getopt permutes argv in place, so it needs writable storage; `args` is taken
-// by value precisely so the char* below point at strings that outlive the call.
-void InvokeParseArgs(std::vector<std::string> args) {
-  args.insert(args.begin(), "rccl-ras-client");
+// getopt permutes argv in place, so it needs writable storage; `storage` is the caller's for the lifetime reason above.
+void InvokeParseArgs(std::vector<std::string>& storage) {
   std::vector<char*> argv;
-  argv.reserve(args.size() + 1);
-  for (std::string& a : args) argv.push_back(&a[0]);
+  argv.reserve(storage.size() + 1);
+  for (std::string& a : storage) {
+    argv.push_back(&a[0]);
+  }
   argv.push_back(nullptr);
-  parseArgs(static_cast<int>(args.size()), argv.data());
+  parseArgs(static_cast<int>(storage.size()), argv.data());
 }
 
 // The catch must sit inside CaptureLog: gtest has a single stderr capture slot
 // and an exception escaping the body would leave it open for the next test.
 ParseArgsOutcome RunParseArgs(const std::vector<std::string>& args) {
   ParseArgsOutcome out;
+  out.argvStorage.reserve(args.size() + 1);
+  out.argvStorage.emplace_back("rccl-ras-client");
+  out.argvStorage.insert(out.argvStorage.end(), args.begin(), args.end());
   out.log = CaptureLog([&]() {
     try {
-      InvokeParseArgs(args);
+      InvokeParseArgs(out.argvStorage);
     } catch (const MicroExit& e) {
       out.exitStatus = e.status;
     }
@@ -223,8 +232,9 @@ TEST_F(RasClientMicrotest, ParseArgsFormat_TextWithSuffix_ReportsInvalidFormatAn
 
 TEST_F(RasClientMicrotest, ParseArgsFormat_UnknownValue_TerminatesProcessWithStatusOne) {
   ScopedHook exitHook(g_exit, [](int status) { ::_exit(status); });
+  std::vector<std::string> argv{"rccl-ras-client", "-f", "xml"};
 
-  EXPECT_EXIT(InvokeParseArgs({"-f", "xml"}), ::testing::ExitedWithCode(1),
+  EXPECT_EXIT(InvokeParseArgs(argv), ::testing::ExitedWithCode(1),
               "Invalid format: xml \\(must be text or json\\)");
 }
 
@@ -546,12 +556,7 @@ struct ReadRequest {
   size_t count;
 };
 
-// One scripted read outcome: ret < 0 fails with `err`, ret == 0 is EOF.
-struct ReadStep {
-  ssize_t ret;
-  int err;
-  std::string data;
-};
+// Scripted read outcomes reuse MicroReadStep from fakes/libc_fakes.h: ret < 0 fails with `err`, ret == 0 is EOF.
 
 // Records every request and serves `steps` front-to-back; past the end, and for
 // a zero-length request, it returns 0 exactly as a real read(2) would. It never
@@ -559,18 +564,23 @@ struct ReadStep {
 // unit's, not the fake's.
 class RecordingReader {
  public:
-  RecordingReader(const char* base, std::vector<ReadStep> steps) : base_(base), steps_(std::move(steps)) {}
+  RecordingReader(const char* base, std::vector<MicroReadStep> steps) : base_(base), steps_(std::move(steps)) {}
 
   ssize_t operator()(int, void* buf, size_t count) {
     requests.push_back(ReadRequest{static_cast<const char*>(buf) - base_, count});
     if (count == 0 || pos_ >= steps_.size()) return 0;
-    const ReadStep& step = steps_[pos_++];
+    const MicroReadStep& step = steps_[pos_++];
     if (step.ret < 0) {
       errno = step.err;
       return step.ret;
     }
     if (step.ret == 0) return 0;
-    const size_t n = step.data.size() < count ? step.data.size() : count;
+    // Same rule the default read seam enforces: a positive ret is the promise, so it must match the bytes on offer,
+    // and the delivery is clamped to it so a mismatched script cannot over-deliver where NDEBUG drops the assert.
+    assert(static_cast<size_t>(step.ret) == step.data.size() && "RecordingReader: positive ret must equal data.size()");
+    const size_t promised = static_cast<size_t>(step.ret) < step.data.size() ? static_cast<size_t>(step.ret)
+                                                                             : step.data.size();
+    const size_t n = promised < count ? promised : count;
     memcpy(buf, step.data.data(), n);
     return static_cast<ssize_t>(n);
   }
@@ -579,7 +589,7 @@ class RecordingReader {
 
  private:
   const char* base_;
-  std::vector<ReadStep> steps_;
+  std::vector<MicroReadStep> steps_;
   size_t pos_ = 0;
 };
 
@@ -877,6 +887,22 @@ TEST_F(RasClientMicrotest, SocketWrite_NonEintrError_ReturnsMinusOneAndAbandonsP
   EXPECT_EQ("ABCDEF", rec.data);
 }
 
+// Arm: ret == 0 on a non-empty write. `done += 0` makes no progress and the guard is unchanged, so production retries
+// the identical call forever; against a real write(2) returning 0 this loop never terminates. Only WriteRecorder's
+// kHardCap turns that into a finite EIO here, which is what makes the path observable at all.
+TEST_F(RasClientMicrotest, SocketWrite_ZeroReturnOnNonEmptyBuffer_MakesNoProgressAndRepeatsTheSameCall) {
+  WriteRecorder rec(kPayload, {{0, 0}, {0, 0}, {0, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  errno = 0;
+  // The fourth call exhausts the script and fails with EIO; without that the call above would not return.
+  EXPECT_EQ(static_cast<ssize_t>(-1), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(EIO, errno);
+  EXPECT_EQ(4, writeHook.calls);
+  EXPECT_EQ("0/19,0/19,0/19,0/19", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("", rec.data);
+}
+
 // Arm: count == 0. The do/while body runs unconditionally, so production issues
 // one zero-length write before the guard stops the loop.
 TEST_F(RasClientMicrotest, SocketWrite_ZeroCount_StillIssuesOneZeroLengthWrite) {
@@ -917,10 +943,10 @@ constexpr const char kUsageProg[] = "ras-client-argv0-probe";
 // the status the default exit seam threw and everything written to stderr.
 ParseArgsOutcome RunParseArgv(std::initializer_list<const char*> args) {
   ParseArgsOutcome out;
-  RasArgv argv(args);
+  out.argvStorage.assign(args.begin(), args.end());
   out.log = CaptureLog([&]() {
     try {
-      parseArgs(argv.argc(), argv.argv());
+      InvokeParseArgs(out.argvStorage);
     } catch (const MicroExit& e) {
       out.exitStatus = e.status;
     }
@@ -991,7 +1017,8 @@ TEST_F(RasClientMicrotest, PrintUsage_MacroDefaults_AreInterpolatedWithSurroundi
   char portLine[160];
   char timeoutLine[160];
   std::snprintf(portLine, sizeof(portLine), "                      (%d by default)\n", NCCL_RAS_CLIENT_PORT);
-  std::snprintf(timeoutLine, sizeof(timeoutLine), "                      (%d secs by default; 0 disables the timeout)\n",
+  std::snprintf(timeoutLine, sizeof(timeoutLine),
+                "                      (%d secs by default; 0 disables the timeout)\n",
                 RAS_COLLECTIVE_LEG_TIMEOUT_SEC);
 
   EXPECT_TRUE(LogHas(log, portLine)) << portLine << "\n--- log ---\n" << log;
@@ -3041,6 +3068,8 @@ TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcc
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ("more", g_stdoutData);
+  // g_stdoutData alone cannot tell stdout from stderr, so pin the stream the unit actually chose.
+  EXPECT_EQ(stdout, g_lastFwriteStream);
   EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
   EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
 }
@@ -3329,6 +3358,7 @@ TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturns
   EXPECT_EQ(1, rc);
   EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
   EXPECT_EQ("data1\n", g_stdoutData);
+  EXPECT_EQ(stdout, g_lastFwriteStream);
   EXPECT_EQ(2, readHook.calls);
   EXPECT_EQ(1, fflushHook.calls);
   EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
@@ -3358,6 +3388,18 @@ void MainArmSuccessfulConnect() {
   ScriptReadData("SERVER PROTOCOL " STR(NCCL_RAS_CLIENT_PROTOCOL) "\n");
 }
 
+// main reaches parseArgs, whose exiting arms throw MicroExit. The catch has to sit inside the CaptureLog body at every
+// call site: gtest has a single stderr capture slot and an exception crossing it leaves that slot armed for the whole
+// binary. No test below expects main to exit, so record the escape as a failure here rather than letting it propagate.
+int CallRasClientMain(RasArgv& args) {
+  try {
+    return rasClientMain(args.argc(), args.argv());
+  } catch (const MicroExit& e) {
+    ADD_FAILURE() << "rasClientMain exited with status " << e.status;
+    return e.status;
+  }
+}
+
 }  // namespace
 
 // connectToNCCL fails before any socket exists: nothing to close, no worker.
@@ -3369,7 +3411,7 @@ TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsBeforeAnySocket_ReturnsOneA
   std::string log;
   {
     ScopedHook socketHook(g_socket, [](int, int, int) { return kMainSockFd; });
-    log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+    log = CaptureLog([&]() { rc = CallRasClientMain(args); });
     EXPECT_EQ(0, socketHook.calls);
   }
 
@@ -3390,7 +3432,7 @@ TEST_F(RasClientMicrotest, RasClientMain_ConnectFailsAfterSocketOpened_ClosesOnc
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: HELLO SAILOR\n")) << log;
@@ -3408,7 +3450,7 @@ TEST_F(RasClientMicrotest, RasClientMain_SetOutputFormatFails_ClosesSockOnceAndR
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: NOPE\n")) << log;
@@ -3425,7 +3467,7 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorModeClear_RunsGetNcclStatusAndRe
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(0, rc);
   EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
@@ -3444,7 +3486,7 @@ TEST_F(RasClientMicrotest, RasClientMain_MonitorFlagInArgv_RunsMonitorNcclEvents
   RasArgv args{"rccl-ras-client", "--monitor"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(0, rc);
   EXPECT_TRUE(monitorMode);
@@ -3462,7 +3504,7 @@ TEST_F(RasClientMicrotest, RasClientMain_WorkerReturnsNonZero_ClosesSockOnceAndR
   RasArgv args{"rccl-ras-client"};
 
   int rc = -1;
-  const std::string log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+  const std::string log = CaptureLog([&]() { rc = CallRasClientMain(args); });
 
   EXPECT_EQ(1, rc);
   EXPECT_EQ(kMainClientHello + "STATUS\n", g_writtenData);
@@ -3487,7 +3529,7 @@ TEST_F(RasClientMicrotest, RasClientMain_FinalCloseFails_ReportsPerrorAndReturns
       errno = EIO;
       return -1;
     });
-    log = CaptureLog([&]() { rc = rasClientMain(args.argc(), args.argv()); });
+    log = CaptureLog([&]() { rc = CallRasClientMain(args); });
     EXPECT_EQ(1, closeHook.calls);
   }
 

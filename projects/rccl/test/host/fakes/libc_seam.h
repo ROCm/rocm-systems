@@ -6,8 +6,8 @@
 
 // Installs the libc seam over a unit under test.
 //
-// Include this AFTER every system header the unit reaches (so the renames
-// below never rewrite a declaration) and immediately BEFORE the
+// Include this AFTER every header that declares one of the names renamed below
+// (so a rename never rewrites a declaration) and immediately BEFORE the
 // #include <UNIT>_CC_PATH. Include fakes/libc_seam_undef.h straight after the
 // unit to take the renames back off, so the test body itself still sees real
 // libc. There is no include guard on purpose: the push/pop pair is positional.
