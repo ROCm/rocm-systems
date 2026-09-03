@@ -2371,6 +2371,9 @@ hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
     hsa_signal_t completion_signal) {
   TRY;
   IS_OPEN();
+  // The batch completes with a host side SubRelaxed(1) on this signal
+  // (Runtime::SvmDiscardAndPrefetchBatch), which is a host read-modify-write.
+  if (IsOrderingEdgeSignal(completion_signal)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   IS_BAD_PTR(ptrs);
   IS_BAD_PTR(sizes);
   IS_ZERO(count);
