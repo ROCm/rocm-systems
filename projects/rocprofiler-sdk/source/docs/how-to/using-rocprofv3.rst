@@ -612,6 +612,18 @@ The conversion generates a ``rocshmem_api_trace.csv`` file. Here are its content
 
 Perfetto will also show rocSHMEM API arguments. Pointers will not be dereferenced and only the address will be displayed.
 
+HIP event trace
+++++++++++++++++
+
+HIP event tracing captures GPU-side barrier packets produced by ``hipEventRecord`` and ``hipStreamWaitEvent``. Each record includes the operation type, the ``hipEvent_t`` handle, the queue where the barrier executed, and (for cross-stream waits) the source queue where the event was originally recorded. This enables visibility into cross-stream synchronization dependencies at the GPU level.
+
+.. code-block:: shell
+
+    rocprofv3 --hip-event-trace -- <application_path>
+    rocpd convert -i <output-file>_results.db --output-format csv
+
+HIP event records are emitted to the JSON and ``rocpd`` output formats. Use ``rocpd convert`` to produce CSV or Perfetto output from the database. ``--hip-event-trace`` is automatically enabled by ``--hip-trace`` and ``--hip-runtime-trace``.
+
 hipFILE trace
 +++++++++++++
 
