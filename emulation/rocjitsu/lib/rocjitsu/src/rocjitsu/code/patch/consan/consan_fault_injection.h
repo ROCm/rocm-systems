@@ -7,7 +7,6 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_fault_planning.h"
 
 #include <span>
 
@@ -20,8 +19,7 @@ class AmdGpuCodeObject;
 /// those exact resolutions into mutation before returning.
 void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                     const ConSanOptions &options, bool apply,
-                                    bool require_applicable_plan,
-                                    bool require_exactly_one_applied,
+                                    bool require_applicable_plan, bool require_exactly_one_applied,
                                     ConSanTransformArtifacts &result);
 
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
