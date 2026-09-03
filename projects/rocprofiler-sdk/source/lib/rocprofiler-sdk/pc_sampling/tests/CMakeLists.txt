@@ -5,6 +5,7 @@ include(GoogleTest)
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES
     configure_service.cpp
     cid_manager.cpp
+    backend_selector_test.cpp
     # samples_processing.cpp
     pc_sampling_vs_counter_collection.cpp
     query_configuration.cpp
