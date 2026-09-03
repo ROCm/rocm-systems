@@ -86,14 +86,6 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
-static inline bool rcclIsGfx120x(char const* arch) {
-  return IsArchMatch(arch, "gfx1200") || IsArchMatch(arch, "gfx1201");
-}
-
-static inline bool rcclIsGfx110x(char const* arch) {
-  return IsArchMatch(arch, "gfx1100") || IsArchMatch(arch, "gfx1101");
-}
-
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -152,7 +144,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && rcclIsGfx120x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
@@ -166,7 +158,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;
     }
-  } else if (!userProtocolInput && rcclIsGfx110x(comm->topo->nodes[GPU].nodes[0].gpu.gcn)) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110" /*match gfx110x*/)) {
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
     }
