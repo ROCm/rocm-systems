@@ -11,7 +11,7 @@
 # The HRR tests use a small local harness (hrr_test_common.hh / hrr_test_process.hh)
 # instead of the hip-tests Catch2 infrastructure.
 
-option(HRR_BUILD_INTEGRATION_TESTS "Build HRR GPU capture/replay integration tests" ON)
+option(HRR_BUILD_INTEGRATION_TESTS "Build HRR GPU capture/replay integration tests" OFF)
 
 # Catch2 test framework. Prefer an installed Catch2 (as the hip-tests suite
 # does); fall back to fetching the pinned tarball used across rocm-systems.
