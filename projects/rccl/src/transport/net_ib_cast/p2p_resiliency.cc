@@ -221,8 +221,9 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
         // required.
       memset(sendReqs[r]->events, 0, sizeof(sendReqs[r]->events));
 
-        // Populate events
-      int nqps = IbCastCommBaseGetNqpsPerRequest(sendReqs[r]->base);
+        // Populate events. IbCastMultiSend below reposts over the QP set the first
+        // request was sent on, so probe exactly that set.
+      int nqps = sendReqs[0]->desc.nqps;
       int qpIndex = -1;
       ncclIbQp* qp = NULL;
       for (int i = 0; i < nqps; i++) {
@@ -231,7 +232,7 @@ static ncclResult_t IbCastResiliencyRepostRequest(struct ncclIbRequest* request)
           // the logic here will retrieve the QP that was used for the first send attempt
           // and not the QP that was used for the second send attempt! Causing
           // probably data corruption or a hang.
-        NCCLCHECK(IbCastCommBaseGetQpForRequest(sendReqs[r]->base, sendReqs[r]->id, i, &qp, &qpIndex));
+        NCCLCHECK(IbCastCommBaseGetQpForRequest(sendReqs[r]->base, sendReqs[0]->desc.startQpIndex, i, &qp, &qpIndex));
 
           // Selective Retransmission:
           // If the probing result shows that the data was delivered successfully on this QP,
