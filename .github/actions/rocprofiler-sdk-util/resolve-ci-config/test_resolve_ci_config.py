@@ -310,6 +310,8 @@ class TestMain(unittest.TestCase):
             self.assertIn(f"{family}_runner", outputs, f"Missing output for {family}")
             self.assertTrue(outputs[f"{family}_runner"], f"Empty output for {family}")
         self.assertIn("gfx94x_sandbox_runner", outputs)
+
+
 class TestConstants(unittest.TestCase):
     def test_gpu_families_not_empty(self):
         self.assertTrue(len(GPU_FAMILIES) > 0)
