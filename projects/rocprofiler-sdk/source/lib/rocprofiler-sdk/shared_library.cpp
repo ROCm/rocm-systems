@@ -59,21 +59,21 @@ struct library_info
     library_info(std::string_view sym_name, void* sym);
 
     std::string as_string() const;
-                operator bool() const { return (handle != nullptr || !fname.empty()); }
+                operator bool() const { return (load_address != nullptr); }
     friend bool operator==(const library_info& lhs, const library_info& rhs);
 
-    std::string fname  = {};
-    void*       handle = nullptr;
+    std::string fname        = {};
+    void*       load_address = nullptr;
 };
 
 library_info::library_info(std::string_view sym_name, void* sym)
 {
     auto _info = Dl_info{};
     auto _ec   = ::dladdr(sym, &_info);
-    if(_ec != 0 && _info.dli_fname != nullptr)
+    if(_ec != 0 && _info.dli_fbase != nullptr)
     {
-        fname  = _info.dli_fname;
-        handle = ::dlopen(_info.dli_fname, RTLD_NOW | RTLD_NOLOAD);
+        if(_info.dli_fname != nullptr) fname = _info.dli_fname;
+        load_address = _info.dli_fbase;
     }
     else
     {
@@ -95,23 +95,13 @@ library_info::library_info(std::string_view sym_name, void* sym)
 std::string
 library_info::as_string() const
 {
-    return fmt::format("fname='{}', handle={}", fname, sdk::utility::as_hex(handle));
+    return fmt::format("fname='{}', load_address={}", fname, sdk::utility::as_hex(load_address));
 }
 
 bool
 operator==(const library_info& lhs, const library_info& rhs)
 {
-    // if both handles are resolved, compare only the handles
-    if(lhs.handle != nullptr && rhs.handle != nullptr) return (lhs.handle == rhs.handle);
-
-    // if both have names, compare the file names as a fallback
-    if(!lhs.fname.empty() && !rhs.fname.empty()) return (lhs.fname == rhs.fname);
-
-    // if neither are populated, this should be a warning or a failure in CI.
-    ROCP_CI_LOG_IF(WARNING, !lhs && !rhs)
-        << "Comparing two empty rocprofiler-sdk library_info objects";
-
-    return std::tie(lhs.handle, lhs.fname) == std::tie(rhs.handle, rhs.fname);
+    return (lhs && rhs && lhs.load_address == rhs.load_address);
 }
 
 auto
@@ -149,7 +139,7 @@ lifetime::lifetime()
     {
         auto _this = get_this_library_info();
         auto _glob = get_global_library_info();
-        if(_this == _glob || (_this && !_glob))
+        if(!_this || !_glob || _this == _glob)
         {
             ROCP_INFO << "Initializing rocprofiler-sdk library...";
             registration::initialize();
