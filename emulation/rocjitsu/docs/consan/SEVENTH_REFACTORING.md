@@ -719,14 +719,11 @@ choke points:
 
 All transformer sources beyond those choke points compiled unchanged. The
 many test compilation failures all originated in two exhaustive switches in
-the shared test-support header, not in repeated production policy. This is
-strong evidence that the existing `MoiModeOperations` boundary has already
-removed most transformer-side identity fanout. It is not yet the full vertical
-exercise: an access and synchronization implementation, report layout, host
-mode stages, validation, and the synthetic-target composition still need to be
-driven. The remaining question is whether those implementations reveal a
-duplicated lifecycle, not whether another callback should be added to the
-already broad operations product.
+the shared test-support header, not in repeated production policy. This was
+strong evidence that the existing `MoiModeOperations` boundary had already
+removed most transformer-side identity fanout. Section 14.6 records the later
+full vertical exercise, including access, synchronization, report, host,
+validation, and synthetic-target composition.
 
 ### 14.3 Full synthetic-target pressure
 
@@ -764,10 +761,10 @@ RDNA3.5 encoding compatibility, not an alias retained from this synthetic
 exercise.
 
 The target half of the full pressure exercise is therefore complete. Its
-cross-axis result so far is also favorable: every existing mode composed with
-the synthetic target once the lower builder dependency admitted it. The
-remaining fifth-mode vertical exercise still needs to determine whether a new
-mode's own implementation and host report path expose an axis leak.
+cross-axis result is favorable: every existing mode composed with the
+synthetic target once the lower builder dependency admitted it, and Section
+14.6 subsequently drove the hypothetical fifth mode over that same target
+without pair-specific code.
 
 ### 14.4 Representation and host-lifetime rejection evidence
 
@@ -847,3 +844,61 @@ would spread exception semantics through dozens of interfaces. All production
 scaffold was therefore removed. The exact prototype source was preserved
 outside the repository only as temporary forensic material; no exception
 contract or parallel failure path survives in ConSan.
+
+### 14.6 Full hypothetical-mode and cross-axis pressure
+
+The fifth-mode probe was extended from an identity-only compile check to a
+vertical executable path. The temporary `Hypothetical` MOI identity reused
+Record/Replay mechanics deliberately: the experiment was measuring how a new
+mode implementation plugs into common lifecycles, not pretending that copied
+toy semantics would reveal useful sharing. The mode was registered as an
+independent identity and driven through:
+
+- object and resource planning;
+- many-access lowering, relocation, and final validation;
+- native-LDS access and workgroup-barrier evidence;
+- scalar/vector group-flat address materialization;
+- report layout and current-header validation;
+- host snapshot representation, typed decode, static owner attribution,
+  conflict analysis, and rendering; and
+- RDNA3, RDNA4, and CDNA5 targets.
+
+The executable pressure suite passed 28 engine-conformance cases after adding
+the fifth engine. A separate host pipeline case proved that the fifth identity
+retained its own report-layout identity while using the selected
+Record/Replay decoded and analysis alternatives; it also exercised disjoint
+static-owner attribution and the renderer's typed-analysis trust check.
+
+The production edit ledger was only seven common files and eight substantive
+lines outside a hypothetical mode package:
+
+1. one public report-ABI enum value and one canonical spelling;
+2. one capability-engine projection;
+3. one `MoiModeOperations` registry entry;
+4. one raw report-header admitted-identity bound;
+5. one host decoded-variant selection case; and
+6. one host analysis-variant consistency case.
+
+Request validation, observation planning, evidence planning, access and
+synchronization orchestration, resource placement, mutation, report-region
+planning, and final patch validation required no new mode switch. The report
+renderer already dispatches on the decoded typed alternative and needed no
+identity edit. The repeated host cases are not a mode-sized lifecycle: they
+are the two explicit trust-boundary projections from an untrusted ABI identity
+to a closed decoded variant and from that variant to its analysis type.
+
+The cross-axis case then temporarily restored the gfx1151/RDNA3.5 target from
+Section 14.3 and lowered both an LDS access and a workgroup barrier in the
+fifth mode. It passed with no mode-by-target source, switch, callback, or
+adapter. The required target edits were exactly the already-measured target
+profile/analysis registrations plus the lower RocJitsu instruction-builder
+admission; there was no additional edit attributable to the pair.
+
+All hypothetical identities, target admissions, test fixtures, and production
+aliases were removed after measurement. This completes the mandatory extension
+pressure exercises and is strong negative evidence against mode/target axis
+fanout as the next macro deletion source. The remaining common switches are
+narrow identity-to-type trust boundaries, while the transformer composes its
+axes through normalized operations. A later macro-slice must therefore be
+justified by a duplicated semantic representation or lifecycle, not by adding
+another registry or callback layer around these seams.
