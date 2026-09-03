@@ -3,6 +3,12 @@
 
 #include "rocm/sha2/sha256.h"
 
+// Stub out rocprofiler's logging
+#include <iostream>
+#define ROCP_CI_LOG_IF(LEVEL, COND)                                            \
+  if (COND)                                                                    \
+  ::std::cerr
+
 #include <cstring>
 #include <iomanip>
 #include <sstream>
