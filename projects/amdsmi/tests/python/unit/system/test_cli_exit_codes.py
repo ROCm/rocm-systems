@@ -773,6 +773,10 @@ class _DriverlessLibErr(amdsmi.AmdSmiLibraryException):
 
     def __init__(self, code):
         self._code = code
+        # The real type's __str__ reads these, so anything that logs the
+        # exception (rather than its status) would raise AttributeError.
+        self.err_code = code
+        self.err_info = f"status {code}"
 
     def get_error_code(self):
         return self._code
@@ -1366,6 +1370,132 @@ def _build_reset_specs(reset):
         "power_cap": power_cap,
         "clean_local_data": clean_local_data,
     }
+
+
+class _CperLogger:
+    """Logger stand-in for dump_cper_entries: only the format probes are used."""
+
+    def __init__(self, fmt):
+        self.format = fmt
+
+    def is_json_format(self):
+        return self.format == "json"
+
+    def is_human_readable_format(self):
+        return self.format == "human"
+
+    def is_csv_format(self):
+        return self.format == "csv"
+
+
+class TestRasCperAfidExitCodes(unittest.TestCase):
+    """A ``ras --cper`` AFID decode failure must record, not just print.
+
+    The --afid paths record the library status; dump_cper_entries caught the same
+    AmdSmiLibraryException with a bare ``except Exception`` and only logged it,
+    so the decode failure never reached the exit code.
+    """
+
+    ROW = ("2026-01-01 00:00:00", 0, "fatal", "fatal-1.cper", b"\x00\x01")
+
+    def setUp(self):
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        from amdsmi_helpers import AMDSMIHelpers
+
+        self.helpers = AMDSMIHelpers()
+        self.printed = []
+        self.helpers.cper_print = lambda text, logger=None: self.printed.append(text)
+        self.helpers._write_cper_files = lambda *a, **k: {"/tmp/fatal-1.cper": self.ROW}
+
+    def _drive(self, fmt, afids=None, fail_code=None):
+        if fail_code is None:
+            self.helpers.cper_dump_afids = lambda raw: list(afids or [])
+        else:
+
+            def _boom(raw):
+                raise _DriverlessLibErr(fail_code)
+
+            self.helpers.cper_dump_afids = _boom
+        rows = self.helpers.dump_cper_entries(
+            "/tmp", {}, [], "gpu-handle", logger=_CperLogger(fmt), emit_inline=False
+        )
+        return rows
+
+    def test_decode_failure_records_the_library_status(self):
+        """A decode failure must resolve to the library status, not 0."""
+        self._drive("json", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertTrue(self.helpers.error_collector.has_errors)
+        self.assertEqual(
+            self.helpers.error_collector.resolve_exit_code(),
+            amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA,
+        )
+
+    def test_decode_failure_json_row_carries_the_status_fields(self):
+        """The row keeps afids/decode_failed and gains status/message/code."""
+        rows = self._drive("json", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["afids"], [])
+        self.assertTrue(row["decode_failed"])
+        self.assertEqual(row["status"], "AMDSMI_STATUS_UNEXPECTED_DATA")
+        self.assertNotEqual(row["code"], 0)
+
+    def test_successful_decode_keeps_afids_a_list_and_records_nothing(self):
+        """Control: afids stays a list so len() counts AFIDs, not characters."""
+        rows = self._drive("json", afids=[11, 22, 33])
+        self.assertEqual(rows[0]["afids"], [11, 22, 33])
+        self.assertFalse(rows[0]["decode_failed"])
+        self.assertFalse(self.helpers.error_collector.has_errors)
+
+    def test_real_decode_failure_through_the_file_write_path(self):
+        """End-to-end minus the driver read: real files, real library decode.
+
+        The other tests stub _write_cper_files and cper_dump_afids. This one
+        stubs neither -- it hands dump_cper_entries the entries/bytes the driver
+        would have returned, lets it write the .cper/.json pair and call the real
+        amdsmi_get_afids_from_cper, and checks the resulting status reaches the
+        exit code. Only amdsmi_get_gpu_cper_entries() is unexercised, and that
+        needs a GPU with logged RAS records.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        helpers = AMDSMIHelpers()
+        raw = b"\x00" * 64  # not a valid CPER record, so the library rejects it
+        entries = {0: {"error_severity": "fatal", "notify_type": "", "timestamp": "2026-01-01"}}
+        cper_data = [{"bytes": raw, "size": len(raw)}]
+        with tempfile.TemporaryDirectory() as folder:
+            rows = helpers.dump_cper_entries(
+                folder,
+                entries,
+                cper_data,
+                Path(folder),  # a Path device handle keeps gpu_id off the driver
+                logger=_CperLogger("json"),
+                emit_inline=False,
+            )
+            written = sorted(p.name for p in Path(folder).glob("*"))
+        # The dump itself succeeded: both files exist even though decoding failed.
+        self.assertEqual(written, ["fatal-1.cper", "fatal-1.json"])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertTrue(row["decode_failed"])
+        self.assertEqual(row["afids"], [])
+        # The exact status depends on how the library rejects these bytes, so
+        # pin the contract (a real status reached the exit code), not the value.
+        self.assertTrue(row["status"].startswith("AMDSMI_STATUS_"))
+        self.assertNotEqual(row["code"], 0)
+        self.assertTrue(helpers.error_collector.has_errors)
+        self.assertEqual(helpers.error_collector.resolve_exit_code(), row["code"])
+
+    def test_human_table_shows_the_status_instead_of_a_generic_message(self):
+        """Human output names the failure, replacing 'Error fetching AFIDs'."""
+        self._drive("human", fail_code=amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA)
+        self.assertTrue(self.printed)
+        self.assertIn("[AMDSMI_STATUS_UNEXPECTED_DATA]", self.printed[-1])
+        self.assertTrue(self.helpers.error_collector.has_errors)
 
 
 class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):

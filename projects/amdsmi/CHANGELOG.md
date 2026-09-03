@@ -98,18 +98,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - An out-of-range value on one GPU is reported for that GPU, while in-range GPUs still apply.
   - The process exit code reflects the per-device failure.
 
-- **Clearer, more consistent `amd-smi` error messages.**
+- **Clearer, more consistent `amd-smi` error messages.**  
   - Errors now read `[AMDSMI_STATUS_<name>] <message>`, so the underlying status is obvious at a glance. The internal class name is no longer prepended, and `--json`/`--csv` errors are now valid JSON/CSV.
     - Before: `amdsmi_cli_exceptions.AmdSmiLibraryErrorException: AMDSMI has returned error '-1002' - 'Command not supported' Error code: -1002`
     - After (human): `[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported Error code: 2`
     - After (`--json`): `{"error": "[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported", "code": 2}`
-  - `amd-smi ras` no longer prints a Python traceback when a CPER file can't be read or decoded (`--afid --cper-file`, `--afid --folder`, `--cper`). It reports the failure and exits with the matching status code.
+  - `amd-smi ras` reports a readable error when a CPER file can't be read or decoded, instead of printing a Python traceback.
 
-- **Unified `amd-smi ras --afid` output across human/JSON/CSV, and made its exit codes truthful.**
-  - `--afid --folder <DIR>` and `--afid --cper-file <FILE>` now render the same per-file schema.
-  - A file that fails to decode shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs, replacing the previous `decode failed` placeholder.
-  - JSON and CSV emit a structured per-file record with the fields `cper_file, afids, status, message, code` (`afids` is `N/A` when a file has no AFIDs or fails to decode).
-  - The command now exits with the underlying `AMDSMI_STATUS_*` (e.g. `43`), or `205` when files fail with differing codes. Previously decode failures in `--folder` silently exited `0`, `--csv` emitted the human table instead of CSV, and a failed `--json` record carried an ad-hoc `decode_status` object instead of the status fields above.
+- **`amd-smi ras` now exits non-zero when a CPER file fails to decode.**  
+  - Affects `--afid --folder`, `--afid --cper-file`, and `--cper`, which previously exited `0`.
+  - The exit code is the underlying `AMDSMI_STATUS_*`, for example `43`. When files fail with different codes, the command exits `205`.
+  - The failing file shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs.
+  - `--json` and `--csv` gain `status`, `message`, and `code` fields. Existing fields are unchanged.
+  - `--afid --csv` now emits CSV instead of the human-readable table.
 
 - **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**
   - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.

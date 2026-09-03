@@ -96,9 +96,13 @@ class TestRas(TestCliBase):
                     dict,
                     f"'{cmd}' emitted a non-object element (double-wrapped?): {entry!r}",
                 )
-                # Unified per-file schema: cper_file, afids, status, message, code.
+                # Per-file schema: the pre-existing cper_file/afids/decode_failed
+                # plus the status fields. afids stays a list so a consumer doing
+                # len(entry["afids"]) still counts AFIDs, not characters.
                 self.assertIn("cper_file", entry)
                 self.assertIn("afids", entry)
+                self.assertIsInstance(entry["afids"], list)
+                self.assertIn("decode_failed", entry)
                 self.assertIn("status", entry)
                 self.assertIn("message", entry)
                 self.assertIn("code", entry)
@@ -106,6 +110,7 @@ class TestRas(TestCliBase):
                 # a matching non-zero code (garbage.cper -> UNEXPECTED_DATA).
                 if entry["status"] != "AMDSMI_STATUS_SUCCESS":
                     self.assertNotEqual(entry["code"], 0)
+                    self.assertTrue(entry["decode_failed"])
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         return
