@@ -58,6 +58,11 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#    include <rocprofiler-sdk/ompt.h>
+#    include <rocprofiler-sdk/ompt/omp-tools.h>
+#endif
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -86,10 +91,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(std::uint32_t version, const char* runtime_version,
-                      std::uint32_t priority, rocprofiler_client_id_t* id);
 
 namespace rocprofsys
 {
@@ -2924,15 +2925,15 @@ reset_sdk_session_guards()
 void
 setup()
 {
-    // rocprof-sys is otherwise a passive rocprofiler-sdk client: rocprofiler-register
-    // initializes the SDK when HSA or HIP loads. A process using OpenMP only on the host
-    // loads neither, and OMPT tool discovery is honored only when the SDK is already
-    // initialized, so bring it up here instead of waiting for a registration that never
-    // arrives.
-    int _initialized = 0;
-    if(rocprofiler_is_initialized(&_initialized) == ROCPROFILER_STATUS_SUCCESS &&
-       _initialized != 0)
+    // rocprofiler-register initializes the SDK when HSA or HIP loads; a host-only OpenMP
+    // process loads neither, and OMPT discovery is honored only when the SDK is already
+    // initialized. Bring it up here instead of waiting for that registration.
+    int initialized = 0;
+    if(rocprofiler_is_initialized(&initialized) == ROCPROFILER_STATUS_SUCCESS &&
+       initialized != 0)
+    {
         return;
+    }
 
     ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
 }
@@ -3193,12 +3194,10 @@ extern "C"
     ompt_start_tool_result_t* ompt_start_tool(
         unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
 
-    // rocprofiler-sdk does not export ompt_start_tool. A tool that wants OMPT provides
-    // its own and forwards to rocprofiler_ompt_start_tool(), which is honored only once
-    // rocprofiler-sdk is initialized. Nothing here may read configuration or load
-    // anything: an offloading binary registers its device image from a static
-    // initializer, and the OpenMP runtime holds its initialization lock across the
-    // call, so re-entering either is a deadlock.
+    // rocprofiler-sdk does not export ompt_start_tool; a tool provides its own and
+    // forwards. The forward is honored only once the SDK is initialized. Read and load
+    // nothing here: the OpenMP runtime holds its init lock across the call and offloading
+    // binaries make it from a static initializer, so re-entry deadlocks.
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
