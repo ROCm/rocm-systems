@@ -631,9 +631,9 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
         auto shared = makeHostBufferAutoGuard(malloc(sharedSize));
         ASSERT_NE(shared.get(), nullptr);
 
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            vdev, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), nThreads, "threaded RegDeregCycling_VNic",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 void* workerComm = (rank == 0) ? pair.recvComm : pair.sendComm;
                 for (int i = 0; i < 50; i++) {
@@ -659,8 +659,6 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
                 return WorkerSendRecvPattern(rank, pair, slot, slotSize, 530, mhandle,
                                              WorkerSeed(threadIdx, 0));
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded RegDeregCycling_VNic");
         return;
     }
 
@@ -752,15 +750,13 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
         const size_t threadedSize =
             std::max<size_t>(4 * 1024 * 1024,
                              (64 * 1024 * 1024) / MPIEnvironment::nThreads);
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            vdev, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded LargeTransfer_VNic",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 return WorkerHostTransfer(rank, pair, threadedSize, 540,
                                           WorkerSeed(threadIdx, 5400), kLargeTransferTimeout);
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded LargeTransfer_VNic");
         return;
     }
 
@@ -1157,9 +1153,9 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
     // the harness, since the current device is thread-local.
     if (MPIEnvironment::nThreads > 1) {
         static constexpr int kThreadedIters = 20;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            vdev, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded FlushRepeated_VNic",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t size = kSmallBufferSize;
@@ -1189,8 +1185,20 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
                         return result;
                     }
 
-                    // The size is checked: with one pattern per worker and no clearing
-                    // between iterations, a short receive would verify on a stale tail.
+                    // Cleared before every receive, not just the first: the expected
+                    // pattern is the same on all iterations, so after iteration 0 a
+                    // flush that did nothing would leave the previous payload in place
+                    // and verify clean. Zeroing first makes each iteration prove that
+                    // this transfer's data became visible.
+                    if (rank == 0 && hipMemset(gpuBuffer, 0, size) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "clearing the GPU receive buffer failed at iteration "
+                                     + std::to_string(iter);
+                        return result;
+                    }
+
+                    // The size is checked too, so a short receive cannot verify on a
+                    // tail this clearing happened to leave at the expected value.
                     int received = 0;
                     result = WorkerSendRecvRaw(rank, pair, gpuBuffer, size, 600, mhandle,
                                                kDefaultTimeoutMs, &received);
@@ -1230,8 +1238,6 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded FlushRepeated_VNic");
         return;
     }
 
@@ -1325,9 +1331,9 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
     // long-lived MRs at once.
     if (MPIEnvironment::nThreads > 1) {
         static constexpr int kThreadedIters = 100;
-        const RdmaResourceCounts before = CaptureRdmaResources();
-        RunMultiThreadedIndependent(
-            vdev, MPIEnvironment::nThreads,
+        RunThreadedBody(
+            ThreadDevPolicy::Fixed(vdev), MPIEnvironment::nThreads,
+            "threaded SequentialTransfers_VNic",
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
                 const size_t size = kSmallBufferSize;
@@ -1353,8 +1359,6 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
                 }
                 return result;
             });
-        MPI_Barrier(MPI_COMM_WORLD);
-        AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SequentialTransfers_VNic");
         return;
     }
 
