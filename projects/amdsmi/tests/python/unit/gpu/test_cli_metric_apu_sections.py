@@ -32,6 +32,7 @@ METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "
 
 # Sections gated on APU parts, and the value each reports when named explicitly.
 _SCALAR_NA_SECTIONS = ("ecc_blocks", "overdrive", "xgmi_err", "energy")
+_DICT_NA_SECTIONS = ("pcie", "voltage_curve", "voltage")
 
 
 class _FakeLibraryException(Exception):
@@ -291,7 +292,7 @@ class TestCliMetricApuSections(unittest.TestCase):
         self.assertEqual(captured["mem_overdrive"], "N/A")
 
     def test_explicit_dict_sections_report_na_on_apu(self):
-        # pcie and voltage_curve carry per-field dicts rather than a scalar.
+        # pcie, voltage_curve, and voltage carry per-field dicts rather than a scalar.
         pcie = self._run_metric(pcie=True)["pcie"]
         self.assertEqual(pcie["width"], "N/A")
         self.assertEqual(pcie["speed"], "N/A")
@@ -299,6 +300,9 @@ class TestCliMetricApuSections(unittest.TestCase):
         curve = self._run_metric(voltage_curve=True)["voltage_curve"]
         self.assertEqual(curve["point_0_frequency"], "N/A")
         self.assertEqual(curve["point_0_voltage"], "N/A")
+
+        voltage = self._run_metric(voltage=True)["voltage"]
+        self.assertEqual(voltage["vddboard"], "N/A")
 
     def test_explicit_fan_reports_na_when_apu_pwm_absent(self):
         # On an APU the fan section is served by apu_metrics.fan_pwm; when that
@@ -310,7 +314,7 @@ class TestCliMetricApuSections(unittest.TestCase):
         # Bare `amd-smi metric` keeps the unsupported sections out so the dump
         # is not padded with N/A blocks.
         captured = self._run_metric()
-        for section in _SCALAR_NA_SECTIONS + ("pcie", "voltage_curve", "fan"):
+        for section in _SCALAR_NA_SECTIONS + _DICT_NA_SECTIONS + ("fan",):
             with self.subTest(section=section):
                 self.assertNotIn(section, captured)
 

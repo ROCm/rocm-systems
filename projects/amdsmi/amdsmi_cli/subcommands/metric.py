@@ -1798,14 +1798,14 @@ class MetricCommands:
                     )
 
                 values_dict["fan"] = fan_dict
-            elif args.fan and show_apu:
+            elif args.fan and show_apu and not apu_suppressed:
                 # fan_pwm reported as a duty-cycle percentage
                 apu_fan_pwm = gpu_metric.get("apu_metrics.fan_pwm", "N/A")
                 if apu_fan_pwm != "N/A":
                     values_dict["fan"] = {
                         "apu_fan_pwm": self.helpers.unit_format(self.logger, apu_fan_pwm, "%")
                     }
-                elif not apu_suppressed:
+                else:
                     values_dict["fan"] = {"apu_fan_pwm": "N/A"}
         if "voltage_curve" in current_platform_args:
             if args.voltage_curve and not apu_suppressed:
@@ -1913,7 +1913,7 @@ class MetricCommands:
                         e.get_error_info(),
                     )
         if "voltage" in current_platform_args:
-            if args.voltage:
+            if args.voltage and not apu_suppressed:
                 voltage_dict = {}
                 all_voltage = {"vddboard": amdsmi_interface.AmdSmiVoltageType.VDDBOARD}
                 for volt_type, volt_metric in all_voltage.items():
@@ -2327,12 +2327,12 @@ class MetricCommands:
         # sections; a standard field that reports a real value is preserved.
         # Scope this to the default dump (apu_suppressed) so an explicitly named
         # section (e.g. --temperature) keeps its keys even if they are N/A.
-        if apu_suppressed:
+        if show_apu:
             apu_only_sections = {"usage", "power", "clock", "temperature", "voltage", "throttle"}
             for section_key in list(values_dict.keys()):
                 section_val = values_dict[section_key]
                 if isinstance(section_val, dict):
-                    if section_key in apu_only_sections:
+                    if section_key in apu_only_sections and apu_suppressed:
                         non_apu_keys = [
                             k
                             for k in section_val
@@ -2347,8 +2347,10 @@ class MetricCommands:
                             del values_dict[section_key]
                         else:
                             values_dict[section_key] = "N/A"
-                elif section_val == "N/A" and apu_suppressed:
-                    del values_dict[section_key]
+                elif section_val == "N/A":
+                    if apu_suppressed:
+                        del values_dict[section_key]
+                    # else: keep the N/A for explicitly named sections
 
         # Store timestamp first if watching_output is enabled
         if watching_output:
