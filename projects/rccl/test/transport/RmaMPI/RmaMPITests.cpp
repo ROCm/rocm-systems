@@ -789,31 +789,49 @@ TEST_F(RmaMPIFusedNicTest, IPutOverFusedVNic)
 
     void* sendBuf = AllocBuf(kSize);
     void* recvBuf = AllocBuf(kSize);
-    ASSERT_NE(sendBuf, nullptr);
-    ASSERT_NE(recvBuf, nullptr);
 
-    if(worldRank_ == 0)
+    if(worldRank_ == 0 && sendBuf != nullptr)
     {
         FillBuf(sendBuf, kSize, /*seed=*/0xE7);
     }
 
+    // Setup runs on both ranks, but it can fail on one of them alone, so the
+    // verdict is agreed before anyone leaves the test.
     void *sendMh = nullptr, *recvMh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh));
-    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh));
+    bool setupFailed = sendBuf == nullptr || recvBuf == nullptr
+                       || RegMr(sendBuf, kSize, &sendMh) != ncclSuccess
+                       || RegMr(recvBuf, kSize, &recvMh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
 
     Barrier();
 
+    // Non-fatal on purpose: a fatal assertion here would return from the test
+    // on rank 0 only, and rank 1 would then wait in the barrier below until the
+    // suite timed out, reporting a hang instead of this failure.
+    bool putFailed = false;
     if(worldRank_ == 0)
     {
         void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, /*context=*/0,
-                             /*srcOff=*/0, sendMh, kSize,
-                             /*dstOff=*/0, recvMh,
-                             /*peerRank=*/1, &req));
-        ASSERT_TRUE(PollUntilDone(req));
+        putFailed = rma_->iput(rmaCtx_, /*context=*/0,
+                               /*srcOff=*/0, sendMh, kSize,
+                               /*dstOff=*/0, recvMh,
+                               /*peerRank=*/1, &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iput over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iput over a fused vNIC never completed";
+        }
     }
     Barrier();
+
+    // Skip verification when the put never landed: the payload mismatch that
+    // rank 1 would report says nothing beyond what rank 0 already reported.
+    if(AnyRankFailed(putFailed)) return;
 
     if(worldRank_ == 1)
     {
@@ -834,26 +852,40 @@ TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
     constexpr size_t kSize = 1 * 1024 * 1024;
 
     void* buf = AllocBuf(kSize);
-    ASSERT_NE(buf, nullptr);
-    if(worldRank_ == 1)
+    if(worldRank_ == 1 && buf != nullptr)
     {
         FillBuf(buf, kSize, /*seed=*/0xD4);
     }
 
     void* mh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(buf, kSize, &mh));
+    bool setupFailed = buf == nullptr || RegMr(buf, kSize, &mh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
 
     Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 is waiting in
+    // the barrier below and a fatal assertion here would leave it there.
     if(worldRank_ == 0)
     {
         void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  rma_->iget(rmaCtx_, /*context=*/0,
-                             /*remoteOff=*/0, mh, kSize,
-                             /*localOff=*/0, mh,
-                             /*peerRank=*/1, &req));
-        ASSERT_TRUE(PollUntilDone(req));
-        EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
+        if(rma_->iget(rmaCtx_, /*context=*/0,
+                      /*remoteOff=*/0, mh, kSize,
+                      /*localOff=*/0, mh,
+                      /*peerRank=*/1, &req) != ncclSuccess)
+        {
+            ADD_FAILURE() << "iget over a fused vNIC was rejected";
+        }
+        else if(!PollUntilDone(req))
+        {
+            ADD_FAILURE() << "iget over a fused vNIC never completed";
+        }
+        else
+        {
+            EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
+        }
     }
     Barrier();
 }
@@ -873,36 +905,48 @@ TEST_F(RmaMPIFusedNicTest, IPutSignalOverFusedVNic)
     void* sendBuf = AllocBuf(kSize);
     void* recvBuf = AllocBuf(kSize);
     void* sigBuf  = AllocBuf(kSignalSize);
-    ASSERT_NE(sendBuf, nullptr);
-    ASSERT_NE(recvBuf, nullptr);
-    ASSERT_NE(sigBuf, nullptr);
 
-    if(worldRank_ == 0)
+    if(worldRank_ == 0 && sendBuf != nullptr)
     {
         FillBuf(sendBuf, kSize, /*seed=*/0x3C);
     }
 
     void *sendMh = nullptr, *recvMh = nullptr, *sigMh = nullptr;
-    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh));
-    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh));
-    ASSERT_EQ(ncclSuccess, RegMr(sigBuf, kSignalSize, &sigMh));
+    bool setupFailed = sendBuf == nullptr || recvBuf == nullptr || sigBuf == nullptr
+                       || RegMr(sendBuf, kSize, &sendMh) != ncclSuccess
+                       || RegMr(recvBuf, kSize, &recvMh) != ncclSuccess
+                       || RegMr(sigBuf, kSignalSize, &sigMh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer allocation or registration failed";
+        return;
+    }
 
     Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 is waiting in
+    // the barrier below and a fatal assertion here would leave it there.
+    bool putFailed = false;
     if(worldRank_ == 0)
     {
         void* req = nullptr;
-        ASSERT_EQ(ncclSuccess,
-                  IPutSignal(/*context=*/0,
-                             /*srcOff=*/0, sendMh, kSize,
-                             /*dstOff=*/0, recvMh,
-                             /*peerRank=*/1,
-                             /*signalOff=*/0, sigMh,
-                             /*signalValue=*/0, // unused for INC
-                             NCCL_NET_SIGNAL_OP_INC,
-                             &req));
-        ASSERT_TRUE(PollUntilDone(req));
+        putFailed = IPutSignal(/*context=*/0,
+                               /*srcOff=*/0, sendMh, kSize,
+                               /*dstOff=*/0, recvMh,
+                               /*peerRank=*/1,
+                               /*signalOff=*/0, sigMh,
+                               /*signalValue=*/0, // unused for INC
+                               NCCL_NET_SIGNAL_OP_INC,
+                               &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iputSignal over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iputSignal over a fused vNIC never completed";
+        }
     }
     Barrier();
+
+    if(AnyRankFailed(putFailed)) return;
 
     if(worldRank_ == 1)
     {
