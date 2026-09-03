@@ -100,6 +100,7 @@ def export_query(
     output_format,
     query_name,
     query,
+    **kwargs,
 ) -> None:
     """Write the contents of a SQL query to an output format."""
 
@@ -125,7 +126,11 @@ def export_query(
     # call query module to export.  query will append the extension
     export_path = os.path.join(output_path, output_filename)
     export_sqlite_query(
-        connection, query, export_format=output_format, export_path=export_path
+        connection,
+        query,
+        export_format=output_format,
+        export_path=export_path,
+        **kwargs,
     )
 
 
@@ -505,8 +510,8 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 
     domain_summary = kwargs.get("domain_summary", False)
     by_rank = kwargs.get("summary_by_rank", False)
-    output_file = kwargs.get("output_file", "")
-    output_path = kwargs.get("output_path", "./rocpd-output-data")
+    output_file = kwargs.pop("output_file", "")
+    output_path = kwargs.pop("output_path", "./rocpd-output-data")
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
     mangled_kernels = kwargs.get("mangled_kernels", False)
@@ -572,7 +577,13 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     # Export all summary queries
     for query_name, query in summary_queries.items():
         export_query(
-            connection, output_path, output_file, output_format, query_name, query
+            connection,
+            output_path,
+            output_file,
+            output_format,
+            query_name,
+            query,
+            **kwargs,
         )
 
 
@@ -671,6 +682,7 @@ def main(argv=None) -> int:
     )
 
     process_outcfg_args = output_config.add_args(parser)
+    process_generic_args = output_config.add_generic_args(parser)
     process_summary_args = add_args(parser)
     process_time_window_args = time_window.add_args(parser)
 
@@ -681,10 +693,11 @@ def main(argv=None) -> int:
     )
 
     summary_args = process_summary_args(input, args)
+    generic_args = process_generic_args(input, args)
     io_args = process_outcfg_args(input, args)
     process_time_window_args(input, args)
 
-    all_args = {**summary_args, **io_args}
+    all_args = {**summary_args, **io_args, **generic_args}
 
     execute(
         input,

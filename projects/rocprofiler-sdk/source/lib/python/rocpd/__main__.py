@@ -126,10 +126,12 @@ Example usage:
 """
     input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"
 
+    rocpd_help_string = "Aggregate and/or analyze ROCm Profiling Data (rocpd). Provide rocpd .db files or .rpdb folders to generate reports, summaries, and other analyses."
+
     # Add the subparsers
     parser = argparse.ArgumentParser(
         prog="rocpd",
-        description="Aggregate and/or analyze ROCm Profiling Data (rocpd)",
+        description=rocpd_help_string,
         allow_abbrev=False,
     )
 
@@ -234,12 +236,14 @@ Example usage:
     # query: subparser args
     process_query_reporter_args = []
     process_query_reporter_args.append(output_config.add_args(query_reporter))
+    process_query_reporter_args.append(output_config.add_generic_args(query_reporter))
     process_query_reporter_args.append(query.add_args(query_reporter))
     process_query_reporter_args.append(time_window.add_args(query_reporter))
 
     # summary: subparser args
     process_generate_summary_args = []
     process_generate_summary_args.append(output_config.add_args(generate_summary))
+    process_generate_summary_args.append(output_config.add_generic_args(generate_summary))
     process_generate_summary_args.append(summary.add_args(generate_summary))
     process_generate_summary_args.append(time_window.add_args(generate_summary))
 
@@ -272,24 +276,17 @@ Example usage:
         for pitr in process_converter_args:
             all_args.update(pitr(input, args))
 
-        # setup the config args
-        config = (
-            output_config.output_config(**all_args)
-            if config is None
-            else config.update(**all_args)
-        )
-
         # process each requested output format
         format_handlers = {
-            "pftrace": pftrace.write_pftrace,
-            "csv": csv.write_csv,
-            "otf2": otf2.write_otf2,
+            "pftrace": pftrace.execute,
+            "csv": csv.execute,
+            "otf2": otf2.execute,
         }
 
         for out_format in args.output_format:
             if out_format in format_handlers:
                 print(f"Converting database(s) to {out_format} format:")
-                format_handlers[out_format](input, config)
+                format_handlers[out_format](input, **all_args)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
 
@@ -334,7 +331,6 @@ Example usage:
 
         query.execute(
             input,
-            args,
             **query_args,
         )
 
@@ -353,7 +349,7 @@ Example usage:
         for pitr in process_generate_summary_args:
             summary_args.update(pitr(input, args))
 
-        summary.generate_all_summaries(input, **summary_args)
+        summary.execute(input, **summary_args)
 
     print("Done. Exiting...")
 

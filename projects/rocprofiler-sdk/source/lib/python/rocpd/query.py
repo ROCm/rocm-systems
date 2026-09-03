@@ -58,124 +58,365 @@ def export_sqlite_query(
     Returns the path to the exported file (or None if nothing was exported).
 
     Supported export_format values (case-insensitive):
-        - "csv"
-        - "html"
-        - "md"   (markdown)
-        - "pdf"
-        - "dashboard"   (templated HTML dashboard)
-        - "clipboard"
+        - "console"     (default; prints to stdout — no pandas required)
+        - "csv"         (no pandas required)
+        - "json"        (no pandas required)
+        - "html"        (no pandas required)
+        - "md"          (markdown — no pandas required)
+        - "pdf"         (requires pandas + reportlab)
+        - "dashboard"   (templated HTML dashboard — requires pandas + jinja2)
+        - "clipboard"   (requires pandas)
 
     If export_format == "dashboard", you may optionally pass a
     dashboard_template_path (a Jinja2 template file). If omitted,
     a built-in default template is used.
     """
     try:
-        import pandas as pd
-    except ImportError as e:
-        raise ImportError(
-            "pandas module not found. Please install it using 'pip install pandas' to export to other formats"
-        ) from e
+        import pandas  # noqa: F401
+
+        _pandas_available = True
+    except ModuleNotFoundError as e:
+        if e.name != "pandas":
+            raise e
+        _pandas_available = False
 
     try:
         conn = conn.connection if isinstance(conn, RocpdImportData) else conn
 
-        # 1) Run the query via pandas
-        df = pd.read_sql_query(query, conn, params=params)
+        normalized_format = export_format.lower() if export_format else None
+        _stdlib_formats = {None, "console", "csv", "json", "html", "md"}
 
-        if df.empty:
-            sys.stderr.write(f"No results found for query: {query}\n")
-            sys.stderr.flush()
-            return None
+        # parse backend here
+        export_backend = kwargs.get("export_backend", "auto")
 
-        if export_format == "console" or export_format is None:
-            # 2) Print to console
-            print(df.to_string(index=False))
-            return None
+        if not isinstance(export_backend, list):
+            export_backend = [export_backend]
 
-        elif export_format == "clipboard":
-            df.to_clipboard(excel=False)
-            return None
+        for backend_itr in export_backend:
+            if backend_itr == "pandas":
+                libpyrocpd.rocpd_log_info("User requested pandas backend for export")
+                if _pandas_available:
+                    return _export_with_pandas(
+                        conn,
+                        query,
+                        params,
+                        export_format,
+                        export_path,
+                        dashboard_template_path=dashboard_template_path,
+                        **kwargs,
+                    )
+                else:
+                    libpyrocpd.rocpd_log_warning(
+                        "Module 'pandas' not found but user requested pandas backend. Doing nothing.\n"
+                    )
 
-        export_format = export_format.lower()
-        ext = export_format
-        export_path = export_path or f"query_output.{ext}"
-        if not export_path.endswith(f".{ext}"):
-            export_path = f"{export_path}.{ext}"
-        export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
-
-        os.makedirs(os.path.dirname(export_path), exist_ok=True)
-
-        def write_export(content):
-            with open(export_path, "w") as ofs:
-                ofs.write(f"{content}\n")
-                ofs.flush()
-
-        # 3) Export based on format
-        if export_format == "csv":
-            import csv
-
-            cols = [f"{itr}" for itr in df.columns.tolist()]
-            col_names = (
-                [f"{itr}".title() for itr in cols]
-                if kwargs.get("title_columns", True)
-                else cols[:]
-            )
-            df.to_csv(
-                export_path,
-                index=False,
-                columns=cols,
-                header=col_names,
-                quoting=csv.QUOTE_NONNUMERIC,
-            )
-
-        elif export_format == "html":
-            write_export(df.to_html(index=False))
-
-        elif export_format == "md":
-            # pandas 1.0+ has to_markdown
-            try:
-                write_export(df.to_markdown(index=False))
-            except AttributeError:
-                # fallback: manually write markdown table
-                _df_to_markdown_fallback(df, export_path)
-
-        elif export_format == "pdf":
-            _export_df_to_pdf(df, export_path)
-
-        elif export_format == "dashboard":
-            _export_dashboard(
-                df, export_path=export_path, template_path=dashboard_template_path
-            )
-
-        elif export_format == "json":
-            df.to_json(export_path, index=False, indent=2, orient="records")
-
-        else:
-            print(f"Unsupported export format: {export_format}")
-            return None
-
-        print(f"Exported to: {export_path}\n")
-        return export_path
+            elif backend_itr == "native":
+                libpyrocpd.rocpd_log_info("User requested native backend for export")
+                if normalized_format in _stdlib_formats:
+                    return _export_without_pandas(
+                        conn, query, params, normalized_format, export_path, **kwargs
+                    )
+                else:
+                    libpyrocpd.rocpd_log_error(
+                        f"Export format '{normalized_format}' requires pandas. User requested native backend. Doing nothing.\n"
+                    )
+            else:
+                # automatically try pandas if available
+                if _pandas_available:
+                    return _export_with_pandas(
+                        conn,
+                        query,
+                        params,
+                        export_format,
+                        export_path,
+                        dashboard_template_path=dashboard_template_path,
+                        **kwargs,
+                    )
+                else:
+                    if normalized_format in _stdlib_formats:
+                        libpyrocpd.rocpd_log_warning(
+                            "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
+                        )
+                        return _export_without_pandas(
+                            conn, query, params, normalized_format, export_path, **kwargs
+                        )
+                    else:
+                        libpyrocpd.rocpd_log_error(
+                            f"Export format '{normalized_format}' requires pandas. Install it with: pip install pandas\n"
+                        )
 
     except Exception as e:
         print(f"Error: {e}")
         return None
 
 
-def _df_to_markdown_fallback(df, path: str):
+def _export_with_pandas(
+    conn,
+    query,
+    params,
+    export_format,
+    export_path,
+    dashboard_template_path=None,
+    **kwargs,
+):
     """
-    Simple fallback if pandas.DataFrame.to_markdown(...) is unavailable.
+    Execute a SQLite query and export results using pandas.
+    Handles: console, clipboard, csv, html, md, pdf, dashboard, json.
     """
-    headers = list(df.columns)
-    with open(path, "w", encoding="utf-8") as f:
-        # Header row
-        f.write("| " + " | ".join(headers) + " |\n")
-        # Separator
-        f.write("|" + "|".join("---" for _ in headers) + "|\n")
-        # Data rows
-        for row in df.itertuples(index=False):
-            line = "| " + " | ".join(str(v) for v in row) + " |\n"
-            f.write(line)
+    import pandas as pd
+
+    libpyrocpd.rocpd_log_info(
+        f"Running query via pandas for export format: {export_format}"
+    )
+    # 1) Run the query via pandas
+    df = pd.read_sql_query(query, conn, params=params)
+
+    if df.empty:
+        sys.stderr.write(f"No results found for query: {query}\n")
+        sys.stderr.flush()
+        return None
+
+    if export_format in (None, "console"):
+        # 2) Print to console
+        print(df.to_string(index=False))
+        return None
+
+    elif export_format == "clipboard":
+        df.to_clipboard(excel=False)
+        return None
+
+    ext = export_format
+    export_path = export_path or f"query_output.{ext}"
+    if not export_path.endswith(f".{ext}"):
+        export_path = f"{export_path}.{ext}"
+    export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
+
+    os.makedirs(os.path.dirname(export_path), exist_ok=True)
+
+    def write_export(content):
+        with open(export_path, "w") as ofs:
+            ofs.write(f"{content}\n")
+            ofs.flush()
+
+    # 3) Export based on format
+    if export_format == "csv":
+        import csv
+
+        cols = [f"{itr}" for itr in df.columns.tolist()]
+        col_names = (
+            [f"{itr}".title() for itr in cols]
+            if kwargs.get("title_columns", True)
+            else cols[:]
+        )
+        df.to_csv(
+            export_path,
+            index=False,
+            columns=cols,
+            header=col_names,
+            quoting=csv.QUOTE_NONNUMERIC,
+        )
+
+    elif export_format == "html":
+        write_export(df.to_html(index=False))
+
+    elif export_format == "md":
+        try:
+            write_export(df.to_markdown(index=False))
+        except AttributeError:
+            return _export_without_pandas(
+                conn, query, params, "md", export_path, **kwargs
+            )
+
+    elif export_format == "pdf":
+        _export_df_to_pdf(df, export_path)
+
+    elif export_format == "dashboard":
+        _export_dashboard(
+            df, export_path=export_path, template_path=dashboard_template_path
+        )
+
+    elif export_format == "json":
+        df.to_json(export_path, index=False, indent=2, orient="records")
+
+    else:
+        print(f"Unsupported export format: {export_format}")
+        return None
+
+    print(f"Exported to: {export_path}\n")
+    return export_path
+
+
+def _export_without_pandas(conn, query, params, export_format, export_path, **kwargs):
+    """
+    Execute a SQLite query and export results using only the standard library.
+    Handles: console, csv, json, html, md.
+    """
+    import csv as _csv
+    import json
+    import html as _html
+
+    libpyrocpd.rocpd_log_info(
+        f"Running query via stdlib for export format: {export_format}"
+    )
+    cursor = conn.cursor()
+    cursor.execute(query, params if params else ())
+    rows = cursor.fetchall()
+    col_names_raw = [desc[0] for desc in cursor.description] if cursor.description else []
+
+    if not rows:
+        sys.stderr.write(f"No results found for query: {query}\n")
+        sys.stderr.flush()
+        return None
+
+    if export_format in (None, "console"):
+        str_rows = [[str(v) for v in row] for row in rows]
+        col_widths = [len(c) for c in col_names_raw]
+        for row in str_rows:
+            for i, v in enumerate(row):
+                col_widths[i] = max(col_widths[i], len(v))
+        header = "  ".join(c.rjust(col_widths[i]) for i, c in enumerate(col_names_raw))
+        print(header)
+        for row in str_rows:
+            print("  ".join(v.rjust(col_widths[i]) for i, v in enumerate(row)))
+        return None
+
+    ext = export_format
+    export_path = export_path or f"query_output.{ext}"
+    if not export_path.endswith(f".{ext}"):
+        export_path = f"{export_path}.{ext}"
+    export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
+    os.makedirs(os.path.dirname(export_path), exist_ok=True)
+
+    if export_format == "csv":
+        title_columns = kwargs.get("title_columns", True)
+        col_names = (
+            [c.title() for c in col_names_raw] if title_columns else col_names_raw[:]
+        )
+        with open(export_path, "w", newline="", encoding="utf-8") as f:
+            writer = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
+            writer.writerow(col_names)
+            writer.writerows(rows)
+
+    elif export_format == "json":
+        records = [dict(zip(col_names_raw, row)) for row in rows]
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, default=str)
+            f.write("\n")
+
+    elif export_format == "html":
+        lines = ['<table border="1" class="dataframe">', "  <thead>", "    <tr>"]
+        for col in col_names_raw:
+            lines.append(f"      <th>{_html.escape(str(col))}</th>")
+        lines += ["    </tr>", "  </thead>", "  <tbody>"]
+        for row in rows:
+            lines.append("    <tr>")
+            for v in row:
+                lines.append(f"      <td>{_html.escape(str(v))}</td>")
+            lines.append("    </tr>")
+        lines += ["  </tbody>", "</table>"]
+        with open(export_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    elif export_format == "md":
+
+        def _fmt_val_md(v):
+            import math
+
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                return "nan"
+            if isinstance(v, float):
+                return f"{v:.6g}"
+            return str(v)
+
+        def _split_decimal(s):
+            """Split a formatted value at its first '.'; return (int_part, frac_part)."""
+            dot = s.find(".")
+            if dot == -1:
+                return s, ""
+            return s[:dot], s[dot:]
+
+        # Detect column types (numeric = all non-None values are int or float)
+        col_numeric = [
+            all(isinstance(row[ci], (int, float)) or row[ci] is None for row in rows)
+            for ci in range(len(col_names_raw))
+        ]
+
+        # Format all cell values
+        str_rows = [
+            [_fmt_val_md(row[ci]) for ci in range(len(col_names_raw))] for row in rows
+        ]
+
+        # Compute per-column layout parameters
+        # For numeric: decimal-point alignment (padded_w = max(header+2, max_int+max_frac))
+        # For strings: simple left-align (padded_w = max(header, max_data))
+        col_padded_w = []
+        col_eff_int = []  # effective max integer-part width (after header expansion)
+        col_max_frac = []
+
+        for ci, header in enumerate(col_names_raw):
+            if col_numeric[ci]:
+                splits = [_split_decimal(r[ci]) for r in str_rows]
+                max_int = max(len(ip) for ip, fp in splits)
+                max_frac = max(len(fp) for ip, fp in splits)
+                data_w = max_int + max_frac
+                padded_w = max(len(header) + 2, data_w)
+                col_padded_w.append(padded_w)
+                col_eff_int.append(padded_w - max_frac)
+                col_max_frac.append(max_frac)
+            else:
+                max_data = max(len(r[ci]) for r in str_rows)
+                padded_w = max(len(header), max_data)
+                col_padded_w.append(padded_w)
+                col_eff_int.append(padded_w)
+                col_max_frac.append(0)
+
+        def _pad_cell(s, ci):
+            if col_numeric[ci]:
+                ip, fp = _split_decimal(s)
+                return (
+                    " " * (col_eff_int[ci] - len(ip))
+                    + ip
+                    + fp
+                    + " " * (col_max_frac[ci] - len(fp))
+                )
+            return s.ljust(col_padded_w[ci])
+
+        with open(export_path, "w", encoding="utf-8") as f:
+            # Header row: numeric → right-aligned, string → left-aligned
+            f.write(
+                "| "
+                + " | ".join(
+                    (
+                        col_names_raw[ci].rjust(col_padded_w[ci])
+                        if col_numeric[ci]
+                        else col_names_raw[ci].ljust(col_padded_w[ci])
+                    )
+                    for ci in range(len(col_names_raw))
+                )
+                + " |\n"
+            )
+            # Separator: width = col_padded_w + 2 (to match the `| cell |` spacing)
+            sep_parts = [
+                (
+                    ("-" * (col_padded_w[ci] + 1) + ":")
+                    if col_numeric[ci]
+                    else (":" + "-" * (col_padded_w[ci] + 1))
+                )
+                for ci in range(len(col_names_raw))
+            ]
+            f.write("|" + "|".join(sep_parts) + "|\n")
+            # Data rows
+            for row in str_rows:
+                f.write(
+                    "| "
+                    + " | ".join(
+                        _pad_cell(row[ci], ci) for ci in range(len(col_names_raw))
+                    )
+                    + " |\n"
+                )
+
+    print(f"Exported to: {export_path}\n")
+    return export_path
 
 
 def _export_df_to_pdf(df, path: str):
@@ -452,13 +693,33 @@ def add_args(parser):
     )
 
     def process_args(input, args):
+        valid_args = [
+            "query",
+            "script",
+            "format",
+            "email_to",
+            "email_from",
+            "email_subject",
+            "smtp_server",
+            "smtp_port",
+            "smtp_user",
+            "smtp_password",
+            "zip_attachments",
+            "inline_preview",
+            "template_path",
+        ]
         ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
         return ret
 
     return process_args
 
 
-def execute(input, args, config=None, **kwargs):
+def execute(input, config=None, **kwargs):
 
     config = (
         output_config.output_config(**kwargs)
@@ -466,20 +727,20 @@ def execute(input, args, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    if args.script:
+    if kwargs.get("script", None):
         # read script and execute statements
-        with open(args.script, "r") as ifs:
+        with open(kwargs.get("script", None), "r") as ifs:
             for itr in ifs.read().split(";"):
                 input.execute(f"{itr}")
 
     # Prepare parameters for export
-    query = args.query
+    query = kwargs.pop("query", None)
     db = input
-    export_format = args.format
+    export_format = kwargs.pop("format", None)
     export_path = os.path.join(config.output_path, config.output_file)
 
     # Dashboard-only extra
-    dashboard_template = kwargs.get("template_path", None)
+    dashboard_template = kwargs.pop("template_path", None)
 
     # 1) Run and export
     exported_file = export_sqlite_query(
@@ -489,28 +750,29 @@ def execute(input, args, config=None, **kwargs):
         export_format=export_format,
         export_path=export_path,
         dashboard_template_path=dashboard_template,
+        **kwargs,
     )
 
     # 2) If --email-to was provided and we have a file, send it
-    if args.email_to:
-        if not args.email_from:
+    if kwargs.get("email_to", None):
+        if not kwargs.get("email_from", None):
             raise ValueError("--email-from is required when --email-to is used.")
         if not exported_file:
             print("No file was exported; skipping email.")
             return
 
-        recipients = [addr.strip() for addr in args.email_to.split(",")]
+        recipients = [addr.strip() for addr in kwargs.get("email_to", None).split(",")]
         send_report_email(
             file_paths=[exported_file],
             to=recipients,
-            sender=args.email_from,
-            subject=args.email_subject,
-            inline_preview=args.inline_preview,
-            smtp_server=args.smtp_server,
-            smtp_port=args.smtp_port,
-            smtp_user=args.smtp_user,
-            smtp_password=args.smtp_password,
-            zip_attachments=args.zip_attachments,
+            sender=kwargs.get("email_from", None),
+            subject=kwargs.get("email_subject", None),
+            inline_preview=kwargs.get("inline_preview", None),
+            smtp_server=kwargs.get("smtp_server", None),
+            smtp_port=kwargs.get("smtp_port", None),
+            smtp_user=kwargs.get("smtp_user", None),
+            smtp_password=kwargs.get("smtp_password", None),
+            zip_attachments=kwargs.get("zip_attachments", None),
         )
 
 
@@ -558,7 +820,6 @@ def main(argv=None):
 
     execute(
         input,
-        args,
         **all_args,
     )
 

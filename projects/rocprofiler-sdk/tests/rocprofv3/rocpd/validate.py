@@ -387,6 +387,134 @@ def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_dat
     _verify_names_match_json(csv_kernels_mangled, json_data, "mangled")
 
 
+#########################################################################################
+#
+# ROCPD CSV comparison Validation
+#
+#########################################################################################
+
+
+def test_compare_csv_files(csv_compare_1, csv_compare_2):
+    """
+    Test that two CSV files are identical using pandas.
+    """
+    # compare the headers
+    assert csv_compare_1.columns.equals(
+        csv_compare_2.columns
+    ), "CSV files have different headers"
+    # compare the data
+    for col in csv_compare_1.columns:
+        assert csv_compare_1[col].equals(
+            csv_compare_2[col]
+        ), f"CSV files have different data in column {col}"
+
+
+def _decimal_places(value: str):
+    """Return the number of decimal places in a numeric string, or None if not numeric.
+
+    The exponent shifts the decimal point, so it is factored into the result.
+    For example: "1.23e+1" -> 1, "1.23e-1" -> 3, "1.23e+10" -> 0.
+    """
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        float(value)
+    except ValueError:
+        return None
+
+    # Strip the exponent and record its value (e.g. "1.23e+10" -> exponent=10).
+    exponent = 0
+    exp_pos = value.lower().find("e")
+    if exp_pos != -1:
+        try:
+            exponent = int(value[exp_pos + 1 :])
+        except ValueError:
+            pass
+        value = value[:exp_pos]
+
+    dot_pos = value.find(".")
+    frac_len = 0 if dot_pos == -1 else len(value[dot_pos + 1 :])
+
+    # A positive exponent shifts digits left (fewer decimals); negative shifts right (more).
+    return max(0, frac_len - exponent)
+
+
+def test_compare_csv_output_files(csv_output_1, csv_output_2):
+    """
+    Compare two CSV output files for consistent text formatting.
+
+    Verifies:
+    - Header text matches exactly (column names and order)
+    - Number of columns is the same
+    - Number of data rows is the same
+    - Each header cell has the same quoting (present vs absent) in both files
+    - Each data cell has the same quoting in both files
+    - Each numeric cell has the same number of decimal places as its counterpart
+    - Each numeric cell has the same value as its counterpart
+    - Each non-numeric cell has the same string value as its counterpart
+    """
+    headers1, rows1, hquote1, rquote1 = csv_output_1
+    headers2, rows2, hquote2, rquote2 = csv_output_2
+
+    assert len(headers1) == len(headers2), (
+        f"Column count differs: file1={len(headers1)}, file2={len(headers2)}\n"
+        f"  file1 headers: {headers1}\n"
+        f"  file2 headers: {headers2}"
+    )
+
+    assert (
+        headers1 == headers2
+    ), f"CSV headers differ:\n  file1: {headers1}\n  file2: {headers2}"
+
+    # Check header quoting consistency
+    for col_idx, (q1, q2) in enumerate(zip(hquote1, hquote2)):
+        assert q1 == q2, (
+            f"Header quoting differs for column '{headers1[col_idx]}': "
+            f"file1={'quoted' if q1 else 'unquoted'}, "
+            f"file2={'quoted' if q2 else 'unquoted'}"
+        )
+
+    assert len(rows1) == len(
+        rows2
+    ), f"Row count differs: file1={len(rows1)}, file2={len(rows2)}"
+
+    for row_idx, (row1, row2, qrow1, qrow2) in enumerate(
+        zip(rows1, rows2, rquote1, rquote2)
+    ):
+        assert len(row1) == len(row2), (
+            f"Column count differs at data row {row_idx + 1}: "
+            f"file1={len(row1)}, file2={len(row2)}"
+        )
+        for col_idx, (val1, val2, q1, q2) in enumerate(zip(row1, row2, qrow1, qrow2)):
+            assert q1 == q2, (
+                f"Cell quoting differs at row {row_idx + 1}, "
+                f"column '{headers1[col_idx]}': "
+                f"file1='{val1}' ({'quoted' if q1 else 'unquoted'}), "
+                f"file2='{val2}' ({'quoted' if q2 else 'unquoted'})"
+            )
+            dec1 = _decimal_places(val1)
+            dec2 = _decimal_places(val2)
+            if dec1 is not None and dec2 is not None:
+                assert dec1 == dec2, (
+                    f"Decimal precision differs at row {row_idx + 1}, "
+                    f"column '{headers1[col_idx]}': "
+                    f"file1='{val1}' ({dec1} decimal(s)), "
+                    f"file2='{val2}' ({dec2} decimal(s))"
+                )
+                assert float(val1) == float(val2), (
+                    f"Numeric value differs at row {row_idx + 1}, "
+                    f"column '{headers1[col_idx]}': "
+                    f"file1='{val1}', file2='{val2}'"
+                )
+            else:
+                assert val1 == val2, (
+                    f"Cell value differs at row {row_idx + 1}, "
+                    f"column '{headers1[col_idx]}': "
+                    f"file1='{val1}', file2='{val2}'"
+                )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

@@ -80,6 +80,20 @@ get_status_string(rocpd_status_t status, std::index_sequence<Idx, Tail...>)
 }
 }  // namespace
 
+// make this visible to python bindings, used with ROCPD_LOG_LEVEL env variable
+ROCPD_PUBLIC_API void
+rocpd_log_message(int level, std::string_view msg)
+{
+    switch(level)
+    {
+        case ROCP_LOG_LEVEL_TRACE: ROCP_TRACE << msg; break;
+        case ROCP_LOG_LEVEL_INFO: ROCP_INFO << msg; break;
+        case ROCP_LOG_LEVEL_WARNING: ROCP_WARNING << msg; break;
+        case ROCP_LOG_LEVEL_ERROR: ROCP_ERROR << msg; break;
+        default: ROCP_ERROR << msg; break;
+    }
+}
+
 // force initialization of logging on library load
 bool _rocpd_init_logging = (rocprofiler::common::init_logging("ROCPD"), true);
 }  // namespace rocpd

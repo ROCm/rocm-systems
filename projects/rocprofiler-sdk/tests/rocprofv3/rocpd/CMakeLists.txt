@@ -529,3 +529,73 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package-multiproc)
+
+#########################################################################################
+#
+# Query SQL string without pandas (stdlib-only fallback path)
+#
+#########################################################################################
+
+foreach(_fmt console csv json html md)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-rocpd-query-no-pandas-${_fmt}
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rocpd_no_pandas.py
+            query -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/merged_db.db --query
+            "SELECT id, type FROM rocpd_info_agent LIMIT 10;" --format ${_fmt} -d
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/query-no-pandas
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 60
+        LABELS "integration-tests;rocpd"
+        ENVIRONMENT "${rocprofv3-rocpd-env}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        FIXTURES_SETUP rocprofv3-test-rocpd-no-pandas
+        FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package)
+endforeach()
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-native-csv
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --format csv
+        --export-backend native -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_native
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-no-pandas-csv-generated
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-no-pandas)
+
+# Validate csv data matches between native and pandas output
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-csv-compare-validation
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_compare_csv_files
+         --csv-compare-file1
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_hip_summary.csv
+         --csv-compare-file2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_native/out_hip_summary.csv
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;kernel-name"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-no-pandas-csv-generated)
+
+# Validate csv output files match between native and pandas output
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-csv-output-compare-validation
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_compare_csv_output_files
+         --csv-output-file1
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_hip_summary.csv
+         --csv-output-file2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_native/out_hip_summary.csv
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;kernel-name"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-no-pandas-csv-generated)

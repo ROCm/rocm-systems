@@ -75,6 +75,9 @@ namespace py = ::pybind11;
 
 namespace rocpd
 {
+void
+rocpd_log_message(int level, std::string_view msg);
+
 template <typename Tp>
 auto
 read_impl(sqlite3* conn, std::string_view conditions)
@@ -191,6 +194,15 @@ struct jinja_variables
     py::str uuid = py::none{};
     py::str guid = py::none{};
 };
+
+enum log_level_t : int
+{
+    log_level_none    = ROCP_LOG_LEVEL_NONE,
+    log_level_error   = ROCP_LOG_LEVEL_ERROR,
+    log_level_warning = ROCP_LOG_LEVEL_WARNING,
+    log_level_info    = ROCP_LOG_LEVEL_INFO,
+    log_level_trace   = ROCP_LOG_LEVEL_TRACE,
+};
 }  // namespace rocpd
 
 PYBIND11_MODULE(libpyrocpd, pyrocpd)
@@ -218,6 +230,36 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             return tool::format_path(std::move(inp), tag);
         },
         "Resolve output keys in filepath");
+
+    // Bind logging functions
+    pyrocpd.def(
+        "rocpd_log_trace",
+        [](const std::string& msg) { rocpd::rocpd_log_message(ROCP_LOG_LEVEL_TRACE, msg); },
+        py::arg("msg"),
+        "Emit a TRACE log message");
+    pyrocpd.def(
+        "rocpd_log_info",
+        [](const std::string& msg) { rocpd::rocpd_log_message(ROCP_LOG_LEVEL_INFO, msg); },
+        py::arg("msg"),
+        "Emit an INFO log message");
+    pyrocpd.def(
+        "rocpd_log_warning",
+        [](const std::string& msg) { rocpd::rocpd_log_message(ROCP_LOG_LEVEL_WARNING, msg); },
+        py::arg("msg"),
+        "Emit a WARNING log message");
+    pyrocpd.def(
+        "rocpd_log_error",
+        [](const std::string& msg) { rocpd::rocpd_log_message(ROCP_LOG_LEVEL_ERROR, msg); },
+        py::arg("msg"),
+        "Emit an ERROR log message");
+    pyrocpd.def(
+        "rocpd_log",
+        [](rocpd::log_level_t level, const std::string& msg) {
+            rocpd::rocpd_log_message(static_cast<int>(level), msg);
+        },
+        py::arg("level"),
+        py::arg("msg"),
+        "Emit a log message at the given level (libpyrocpd.log_level enum or integer)");
 
     py::enum_<rocpd_sql_engine_t>(pyrocpd, "sql_engine", "Load schema engines")
         .value("sqlite3", ROCPD_SQL_ENGINE_SQLITE3);

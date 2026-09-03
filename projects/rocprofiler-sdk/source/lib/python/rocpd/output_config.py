@@ -153,9 +153,7 @@ def add_args(parser):
         for itr in valid_args:
             if hasattr(args, itr):
                 val = getattr(args, itr)
-                if itr == "output_format":
-                    ret[itr] = val
-                elif itr == "output_path" and val is not None:
+                if itr == "output_path" and val is not None:
                     ret[itr] = format_path(val)
                 elif val is not None:
                     ret[itr] = val
@@ -188,8 +186,18 @@ def add_generic_args(parser):
         default="relative",
     )
 
+    generic_options.add_argument(
+        "--export-backend",
+        choices=("auto", "pandas", "native"),
+        help="""Explicitly select export backend to use. Pandas is preferred if available (default: auto):
+        auto: attempts to use pandas and falls back to native if not available.
+        pandas: explicitly uses pandas for export.
+        native: only supports select formats (console, csv, html, json, md) where standard libraries are available.""",
+        nargs="+",
+    )
+
     def process_args(input, args):
-        valid_args = ["agent_index_value", "kernel_rename"]
+        valid_args = ["agent_index_value", "export_backend", "kernel_rename"]
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
