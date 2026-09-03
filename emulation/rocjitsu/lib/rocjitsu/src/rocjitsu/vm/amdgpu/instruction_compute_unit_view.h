@@ -53,6 +53,7 @@ public:
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
+  uint32_t fetch_instruction_word(uint64_t address, uint32_t process_id) const;
   void request_functional_yield();
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);

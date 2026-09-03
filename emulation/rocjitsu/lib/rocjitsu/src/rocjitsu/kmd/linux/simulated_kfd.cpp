@@ -3312,18 +3312,29 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
 
   const auto arch = wave.cu().arch();
   bool profiling_interrupt = false;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2) {
-    // GFX9.0-9.3 preserves host-trap provenance in TTMP11 after clearing the
-    // live cause. At send_signal, TTMP13 holds the saved M0 while TTMP2 still
-    // belongs to the signal path; the later exception path saves M0 in TTMP2.
-    // Stochastic sampling is supported only on GFX9.4+.
-    profiling_interrupt = (wave.ttmp(11) & (1u << 22)) != 0 && wave.ttmp(2) != wave.ttmp(13);
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    // GFX9.4+ preserves stochastic and host-trap provenance in TTMP13. TTMP6
-    // holds send_signal's saved M0; a concurrent exception subsequently copies
-    // that restored M0 into TTMP2 before issuing its own interrupt.
-    profiling_interrupt =
-        (wave.ttmp(13) & ((1u << 21) | (1u << 22))) != 0 && wave.ttmp(2) != wave.ttmp(6);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // ROCr's GFX9 handler has two MSG_INTERRUPT sites. At the profiling site it
+    // loads the event id from TTMP7; at the queue-exception site it loads the
+    // packed exception from TTMP3. Both insert an s_nop immediately before the
+    // message. Classify the actual control-flow site instead of inspecting the
+    // TTMP values: a signal pointer can equal saved M0, and a concurrent trap
+    // can legitimately rewrite those registers before the second interrupt.
+    constexpr uint32_t kSMovM0Ttmp7 = 0xBEFC0080u;
+    constexpr uint32_t kSMovM0Ttmp3 = 0xBEFC006Fu;
+    constexpr uint32_t kSNop0 = 0xBF800000u;
+    if (wave.pc >= 2 * sizeof(uint32_t)) {
+      const uint32_t payload_move =
+          wave.cu().fetch_instruction_word(wave.pc - 2 * sizeof(uint32_t), wave.process_id());
+      const uint32_t delay =
+          wave.cu().fetch_instruction_word(wave.pc - sizeof(uint32_t), wave.process_id());
+      if (delay == kSNop0 && payload_move == kSMovM0Ttmp7)
+        profiling_interrupt = true;
+      else if (delay != kSNop0 || payload_move != kSMovM0Ttmp3)
+        return false;
+    } else {
+      return false;
+    }
   } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
     // GFX12 exposes the host/performance causes in common TRAPSTS bits 22/26.
     profiling_interrupt = (wave.trapsts() & ((1u << 22) | (1u << 26))) != 0;

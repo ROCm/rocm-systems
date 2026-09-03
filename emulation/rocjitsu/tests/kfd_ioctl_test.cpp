@@ -48,6 +48,8 @@ namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
+const std::string CDNA2_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx90a_mi210_kmd.json";
+constexpr uint32_t kCdna2GpuId = 50149;
 const std::string CDNA5_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 constexpr uint32_t kCdna5GpuId = 1250;
 
@@ -197,6 +199,17 @@ protected:
 class KfdIoctlRdna3Test : public KfdIoctlTest {
 protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
+};
+
+struct Gfx9TrapParam {
+  const char *config_path;
+  uint32_t gpu_id;
+};
+
+class KfdIoctlGfx9TrapTest : public KfdIoctlTest,
+                             public ::testing::WithParamInterface<Gfx9TrapParam> {
+protected:
+  void SetUp() override { SetUpWithConfig(GetParam().config_path); }
 };
 
 // A compute queue created through KFD is replicated onto every XCD so its
@@ -758,7 +771,7 @@ TEST_F(KfdIoctlCdna5Test, RuntimeTrapInterruptSignalsQueueExceptionFromM0) {
   EXPECT_EQ(read_pointer, 0u) << "the fatal queue gate must prevent pending packet fetch";
 }
 
-TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads) {
+TEST_P(KfdIoctlGfx9TrapTest, ProfilingCompletionAndQueueExceptionUseDistinctSendSites) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
   constexpr uint64_t kTrapHandlerAddress = 0x600001000ULL;
   constexpr uint32_t kExceptionEventId = 41;
@@ -779,7 +792,7 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
               sizeof(kExceptionEventId));
 
   kfd_ioctl_set_trap_handler_args set_handler{};
-  set_handler.gpu_id = kGpuId;
+  set_handler.gpu_id = GetParam().gpu_id;
   set_handler.tba_addr = kTrapHandlerAddress;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_TRAP_HANDLER, &set_handler), 0);
 
@@ -816,7 +829,7 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
   uint64_t read_pointer = 0;
   uint64_t write_pointer = 0;
   kfd_ioctl_create_queue_args create{};
-  create.gpu_id = kGpuId;
+  create.gpu_id = GetParam().gpu_id;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
   create.ring_size = static_cast<uint32_t>(ring.size());
@@ -829,8 +842,12 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
 
   constexpr uint32_t kSTrapBreakpoint = 0xBF920001u;
   const uint32_t handler[] = {
-      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT), profiling completion
-      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT), queue exception
+      0xBEFC0080u, // s_mov_b32 m0, ttmp7 (profiling event id)
+      0xBF800000u, // s_nop 0
+      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xBEFC006Fu, // s_mov_b32 m0, ttmp3 (packed queue exception)
+      0xBF800000u, // s_nop 0
+      0xBF900001u, // s_sendmsg sendmsg(MSG_INTERRUPT)
   };
   memory->write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
   for (uint32_t i = 0; i < std::size(handler); ++i)
@@ -842,25 +859,39 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
   wave->set_process_id(driver_->local_process_id());
   wave->set_queue_id(create.queue_id);
   cu->step(); // Enter the GFX9 trap handler.
-  wave->set_trapsts(wave->trapsts() | (1u << 26));
+  // Make every register-value heuristic ambiguous: the profiling path's live
+  // value equals both saved-M0 candidates, while both architecture-specific
+  // provenance markers are present.
+  wave->set_ttmp(7, 0x400u);
+  wave->set_ttmp(2, 0x400u);
+  wave->set_ttmp(6, 0x400u);
+  wave->set_ttmp(13, 0x400u);
+  wave->set_ttmp(11, wave->ttmp(11) | (1u << 22));
   wave->set_ttmp(13, wave->ttmp(13) | (1u << 21));
-  wave->set_ttmp(6, 0x55u);   // send_signal's saved M0
-  wave->set_ttmp(2, 0x1234u); // live signal-path state
-  wave->set_m0(0x400u);
-  wave->set_trapsts(wave->trapsts() & ~(1u << 26));
-  cu->step(); // Send the completion after the handler cleared its cause bit.
+  cu->step(); // s_mov_b32 m0, ttmp7
+  cu->step(); // s_nop
+  cu->step(); // Send the profiling completion from its distinct site.
 
   EXPECT_FALSE(delivered.load(std::memory_order_acquire));
   EXPECT_FALSE(
       cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
-  // The real handler leaves the sampling marker set, restores M0 from TTMP6,
-  // and saves it in TTMP2 before sending a concurrent queue exception.
-  wave->set_ttmp(2, wave->ttmp(6));
-  wave->set_m0(0x407u);
-  cu->step(); // Route it independently of the profiling-completion payload.
+  // Model a concurrent exception after send_signal changed its scratch state.
+  // The profiling marker remains set and saved-M0 values now differ, so only
+  // the actual send site reliably identifies this as a queue exception.
+  wave->set_ttmp(2, 0x400u);
+  wave->set_ttmp(6, 0x55u);
+  wave->set_ttmp(13, wave->ttmp(13) | 0x800u);
+  wave->set_ttmp(3, 0x407u);
+  cu->step(); // s_mov_b32 m0, ttmp3
+  cu->step(); // s_nop
+  cu->step(); // Route the queue exception from its distinct site.
   EXPECT_TRUE(delivered.load(std::memory_order_acquire));
   EXPECT_TRUE(cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
 }
+
+INSTANTIATE_TEST_SUITE_P(Gfx9Layouts, KfdIoctlGfx9TrapTest,
+                         ::testing::Values(Gfx9TrapParam{CDNA2_CONFIG_PATH.c_str(), kCdna2GpuId},
+                                           Gfx9TrapParam{CONFIG_PATH.c_str(), kGpuId}));
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
