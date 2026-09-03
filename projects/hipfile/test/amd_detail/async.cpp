@@ -557,6 +557,90 @@ TEST_P(FallbackAsyncIO, multipleChunksAreQueued)
     std::this_thread::sleep_for(500ms);
 }
 
+TEST_P(FallbackAsyncIO, failoverEnqueuesGateAndCommitsOnSuccess)
+{
+    auto failover      = std::make_shared<AsyncFailoverState>();
+    size               = 1_MiB;
+    size_t chunk_size  = 256_KiB;
+    int    chunk_count = 4;
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(size));
+    EXPECT_CALL(*mbuffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
+    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<hipStream_t>(0xBADBADBB)));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+
+    auto op_data = malloc(sizeof(AsyncOpFallback));
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
+    ASSERT_NE(op_data, nullptr);
+    auto bounce_buffer = make_shared_void(chunk_size);
+    EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data));
+    EXPECT_CALL(*mstream, asyncBufferHostPtr).WillOnce(Return(bounce_buffer.get()));
+    EXPECT_CALL(*mstream, asyncBufferDevPtr).WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
+    EXPECT_CALL(*mstream, asyncBufferSize).Times(2).WillRepeatedly(Return(chunk_size));
+    EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(op_data), _))
+        .WillOnce(Return(reinterpret_cast<void *>(0xDE000000)));
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    // The gate is enqueued first, ahead of the per-chunk work and cleanup.
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_failover_gate), _));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cpu_copy), _)).Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchKernel).Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_advance), _)).Times(chunk_count);
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    // The primary owns the output in the failover path; the fallback must not reset it.
+    bytes_written = 4242;
+    Fallback().enqueueAsyncIo(io_type, mfile, mbuffer, &size, &file_offset, &buffer_offset, &bytes_written,
+                              mstream, failover);
+    ASSERT_EQ(bytes_written, 4242);
+    ASSERT_TRUE(failover->fallback_committed.load());
+    async_io_cleanup(op_data);
+    std::this_thread::sleep_for(500ms);
+}
+
+TEST_P(FallbackAsyncIO, failoverPartialEnqueueLeavesUncommitted)
+{
+    auto failover = std::make_shared<AsyncFailoverState>();
+    EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(1024 * 1024));
+    EXPECT_CALL(*mbuffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
+    EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<hipStream_t>(0xBADBADBB)));
+    EXPECT_CALL(*mstream, getHipDevice).WillOnce(Return(0));
+    EXPECT_CALL(*mstream, fixedIOSize).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(true));
+
+    auto op_data = malloc(sizeof(AsyncOpFallback));
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
+    ASSERT_NE(op_data, nullptr);
+    auto bounce_buffer = make_shared_void(size);
+    EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data));
+    EXPECT_CALL(*mstream, asyncBufferHostPtr).WillOnce(Return(bounce_buffer.get()));
+    EXPECT_CALL(*mstream, asyncBufferDevPtr).WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
+    EXPECT_CALL(*mstream, asyncBufferSize).Times(2).WillRepeatedly(Return(size));
+    EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(op_data), _))
+        .WillOnce(Return(reinterpret_cast<void *>(0xDE000000)));
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
+    EXPECT_CALL(*mstream, getLock);
+    EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
+    // Fail the gate (the first host function) to simulate a partially submitted fallback; cleanup is
+    // still enqueued from the catch, but the sequence must not be marked committed.
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_failover_gate), _))
+        .WillOnce(Throw(Hip::RuntimeError(hipErrorInvalidHandle)));
+    EXPECT_CALL(mhip, hipLaunchHostFunc(_, Eq(&async_io_cleanup), _));
+
+    EXPECT_THROW(Fallback().enqueueAsyncIo(io_type, mfile, mbuffer, &size, &file_offset, &buffer_offset,
+                                           &bytes_written, mstream, failover),
+                 Hip::RuntimeError);
+    ASSERT_FALSE(failover->fallback_committed.load());
+    async_io_cleanup(op_data);
+    std::this_thread::sleep_for(500ms);
+}
+
 INSTANTIATE_TEST_SUITE_P(FallbackAsyncIOSuite, FallbackAsyncIO,
                          ::testing::Values(IoType::Read, IoType::Write));
 
@@ -632,12 +716,13 @@ TEST_F(AsyncIoOp, bindAllParamsAreFixedAfter)
     (void)current_io_size;
 }
 
-TEST_F(AsyncIoOp, failoverGateArmsWhenFallbackNeeded)
+TEST_F(AsyncIoOp, failoverGateArmsWhenNeededAndCommitted)
 {
-    op->failover                   = std::make_shared<AsyncFailoverState>();
-    op->failover->fallback_needed  = true;
-    op->bytes_transferred_internal = -1;
-    op->write_result               = false;
+    op->failover                     = std::make_shared<AsyncFailoverState>();
+    op->failover->fallback_needed    = true;
+    op->failover->fallback_committed = true;
+    op->bytes_transferred_internal   = -1;
+    op->write_result                 = false;
     async_failover_gate(op.get());
     ASSERT_EQ(op->bytes_transferred_internal, 0);
     ASSERT_TRUE(op->write_result);
@@ -645,10 +730,23 @@ TEST_F(AsyncIoOp, failoverGateArmsWhenFallbackNeeded)
 
 TEST_F(AsyncIoOp, failoverGateSkipsWhenFallbackNotNeeded)
 {
-    op->failover                   = std::make_shared<AsyncFailoverState>();
-    op->failover->fallback_needed  = false;
-    op->bytes_transferred_internal = -1;
-    op->write_result               = false;
+    op->failover                     = std::make_shared<AsyncFailoverState>();
+    op->failover->fallback_needed    = false;
+    op->failover->fallback_committed = true;
+    op->bytes_transferred_internal   = -1;
+    op->write_result                 = false;
+    async_failover_gate(op.get());
+    ASSERT_LT(op->bytes_transferred_internal, 0);
+    ASSERT_FALSE(op->write_result);
+}
+
+TEST_F(AsyncIoOp, failoverGateSkipsWhenNotCommitted)
+{
+    op->failover                     = std::make_shared<AsyncFailoverState>();
+    op->failover->fallback_needed    = true;
+    op->failover->fallback_committed = false;
+    op->bytes_transferred_internal   = -1;
+    op->write_result                 = false;
     async_failover_gate(op.get());
     ASSERT_LT(op->bytes_transferred_internal, 0);
     ASSERT_FALSE(op->write_result);

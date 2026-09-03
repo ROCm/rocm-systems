@@ -6,6 +6,7 @@
 
 #include "hipfile.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -31,7 +32,8 @@ enum class IoType;
 namespace hipFile {
 
 struct AsyncFailoverState {
-    bool fallback_needed{false};
+    bool              fallback_needed{false};
+    std::atomic<bool> fallback_committed{false};
 };
 
 class AsyncOp {

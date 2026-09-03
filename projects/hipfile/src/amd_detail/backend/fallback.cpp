@@ -203,7 +203,11 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
         throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
     }
 
-    *bytes_transferred_p = 0;
+    // In the failover path the primary already initialized the output before enqueuing its jobs, which
+    // may have already published a real result by now. Only a standalone fallback may zero it.
+    if (!failover) {
+        *bytes_transferred_p = 0;
+    }
 
     if (*size_p == 0) {
         return;
@@ -279,6 +283,13 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
                                         "Unable to enqueue async cleanup function. This will leak memory.");
         }
         throw;
+    }
+
+    // Reached only when every host function above (including cleanup) was enqueued. Publishing here,
+    // after a rethrow on any failure, is what lets the gate distinguish a complete fallback from a
+    // partially submitted one.
+    if (op->failover) {
+        op->failover->fallback_committed.store(true, std::memory_order_release);
     }
 }
 
@@ -372,7 +383,11 @@ void
 async_failover_gate(void *userargs)
 {
     auto op = static_cast<AsyncOpFallback *>(userargs);
-    if (op->failover && op->failover->fallback_needed) {
+    // Only arm a fallback that is both needed (primary failed eligibly) and fully submitted. A
+    // partially enqueued fallback never sets fallback_committed, so its stray callbacks stay skipped
+    // and cannot execute or publish a partial result.
+    if (op->failover && op->failover->fallback_needed &&
+        op->failover->fallback_committed.load(std::memory_order_acquire)) {
         op->bytes_transferred_internal = 0;
         op->write_result               = true;
     }
