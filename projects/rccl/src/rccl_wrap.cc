@@ -156,6 +156,12 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if (comm->nNodes == 1) {
       info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
     }
+    /**
+     * We prefer simple protocol when p2p_disabled = 1,
+     * This is due to a fix in LL protocol implementation
+     * for gfx120x with __HIP_MEMORY_SCOPE_SYSTEM in prims_ll.h
+     * causing poor performance but keeps the LL protocol functional
+     */
     bool p2p_disabled = ncclParamP2pDisable();
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;

@@ -31,7 +31,8 @@ THE SOFTWARE.
 RCCL_PARAM_DECLARE(IntraGraphGen);
 RCCL_PARAM_DECLARE(InterGraphGen);
 void permute_array_inplace(int* input, int length, int* permutation);
-void findRingCutIndices(int nChannels, int nNodes /*nodes in the ring graph*/, const int* flattenedRings /* Hamiltonian rings*/, int* cutIndices);
+void findRingCutIndices(int nChannels, int nNodes /*nodes in the ring graph*/,
+                        const int* flattenedRings /* Hamiltonian rings*/, int* cutIndices);
 ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder);
 
 #endif  // RCCL_GRAPH_GEN_H_
