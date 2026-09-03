@@ -7,7 +7,11 @@
 # automatically selects host-asan for pull_request events (faster, host-only)
 # and full asan for workflow_dispatch (comprehensive device-side instrumentation).
 #
-# For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
+# The presubmit is scoped to a runtime-only build (compiler-runtime and
+# runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
+# run automatically on every pull request. See ROCm/TheRock#7202.
+#
+# For scheduled nightly runs with full ASAN, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
 
@@ -59,9 +63,14 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
-      build_variant: "asan"
+      build_variant: "host-asan"
+      build_stages: "compiler-runtime,runtime-tests"
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || 'test:hip-tests,test:rocrtst' }}
+      build_native_linux: false
+      build_python_packages: false
+      build_pytorch: false
+      build_jax: false
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
