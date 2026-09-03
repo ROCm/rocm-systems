@@ -93,6 +93,29 @@ sampled_route_ranges_are_safe(MoiResourcePlanningState &state, std::span<const u
          moi_resource_owner_anchors_admit_scalar_router_ranges(state, owners, anchors, ranges);
 }
 
+void append_sampled_dense_sync_relay_patches(std::vector<ConSanPatchInfo> &patches,
+                                             uint64_t semantic_anchor, uint64_t host_offset,
+                                             uint32_t host_size, uint64_t host_body_offset,
+                                             uint32_t host_body_size, uint64_t dispatcher_offset,
+                                             uint32_t dispatcher_size,
+                                             const std::vector<uint64_t> &owner_descriptors) {
+  ConSanPatchInfo host;
+  host.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  host.anchor_offset = host_offset;
+  host.original_size = host_size;
+  host.trampoline_offset = host_body_offset;
+  host.trampoline_size = host_body_size;
+  host.owner_descriptor_file_offsets = owner_descriptors;
+  patches.push_back(std::move(host));
+  ConSanPatchInfo dispatcher;
+  dispatcher.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+  dispatcher.anchor_offset = semantic_anchor;
+  dispatcher.trampoline_offset = dispatcher_offset;
+  dispatcher.trampoline_size = dispatcher_size;
+  dispatcher.owner_descriptor_file_offsets = owner_descriptors;
+  patches.push_back(std::move(dispatcher));
+}
+
 using SampledCfgDistance = MoiCfgDistance;
 
 [[nodiscard]] std::optional<SampledCfgDistance>
@@ -1089,6 +1112,7 @@ void try_apply_sampled_barrier_sync_patch(
                                      ": incomplete scalar router state");
         continue;
       }
+      const uint16_t jump_pc_sgpr = dense_router->indirect_jump.pc_sgpr;
       const uint16_t saved_scc_sgpr = dense_router->indirect_jump.scc_save_sgpr;
       const uint16_t key_sgpr = dense_router->dispatch_key_sgpr;
       const uint16_t call_return_sgpr = *dense_router->call_return_sgpr;
@@ -1099,6 +1123,14 @@ void try_apply_sampled_barrier_sync_patch(
           target_profile->direct_call_form == ConSanDirectCallForm::SCallI64;
       const bool derive_key_at_entry = spill_backed_router && !use_clone_local_routes;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
+      const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
+        if (target_profile->direct_call_form == ConSanDirectCallForm::SCallI64)
+          return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
+        if (target_profile->direct_call_form == ConSanDirectCallForm::SCallB64 &&
+            target_profile->supports_moi_dense_s_call_b64)
+          return build_s_call_b64(call_return_sgpr, simm16, arch);
+        return std::nullopt;
+      };
       const uint64_t island_words_count =
           use_clone_local_routes
               ? 2u * (indices.size() + 1u) + kMoiCompactIndirectIslandWords
@@ -1180,7 +1212,67 @@ void try_apply_sampled_barrier_sync_patch(
         bodies.push_back({index, body_offset, std::move(*body_words)});
       }
       const uint64_t host_body_offset = new_text.size();
+      std::vector<uint32_t> host_words = displaced_words;
+      if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
+                                                   host_offset + host_bytes, jump_pc_sgpr,
+                                                   saved_scc_sgpr, /*capture_scc=*/true, arch)) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense barrier relay could not return from its host");
+        return;
+      }
+      append_words_bytes(new_text, host_words);
+
       const uint64_t island_offset = host_offset + sizeof(uint32_t);
+      std::optional<std::vector<uint32_t>> island_words;
+      if (use_clone_local_routes) {
+        std::vector<uint32_t> clone_local_words;
+        clone_local_words.reserve(island_words_count);
+        const uint64_t common_entry_offset =
+            island_offset + 2u * (indices.size() + 1u) * sizeof(uint32_t);
+        for (size_t route_id = 0u; route_id <= indices.size(); ++route_id) {
+          clone_local_words.push_back(build_s_mov_b32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_id)), arch));
+          const uint64_t branch_offset =
+              island_offset + clone_local_words.size() * sizeof(uint32_t);
+          const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
+          if (!branch_delta) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled dense barrier relay could not encode a clone-local route");
+            return;
+          }
+          clone_local_words.push_back(build_s_branch(*branch_delta, arch));
+        }
+        if (!append_moi_scc_preserving_indirect_jump(
+                clone_local_words, island_offset, dispatcher_offset, jump_pc_sgpr, saved_scc_sgpr,
+                /*capture_scc=*/true, arch)) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier relay could not encode its common entry");
+          return;
+        }
+        island_words = std::move(clone_local_words);
+      } else {
+        island_words = build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                                            {.jump_pc_sgpr = jump_pc_sgpr,
+                                                             .saved_scc_sgpr = saved_scc_sgpr,
+                                                             .key_sgpr = key_sgpr,
+                                                             .call_return_sgpr = call_return_sgpr},
+                                                            derive_key_at_entry, arch);
+      }
+      if (!island_words || island_words->size() != island_words_count) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense barrier relay could not encode its island");
+        return;
+      }
+      std::memcpy(new_text.data() + island_offset, island_words->data(),
+                  island_words->size() * sizeof(uint32_t));
+      const auto host_call = build_direct_call(/*next instruction=*/0);
+      if (!host_call) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense barrier relay could not encode its host call");
+        return;
+      }
+      std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
+
       std::vector<MoiDenseRelayRoute> routes{
           {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
       routes.reserve(bodies.size() + 1u);
@@ -1188,37 +1280,45 @@ void try_apply_sampled_barrier_sync_patch(
         const DenseBody &body = bodies[body_index];
         const ConSanBarrierSite &site = selected[body.selected_index].candidate.barrier.site;
         routes.push_back({.identity = static_cast<uint32_t>(body_index + 1u),
-                          .anchor = site.text_offset,
-                          .anchor_size = site.size,
                           .caller_return = site.text_offset + sizeof(uint32_t),
                           .target = body.offset});
       }
-      if (!emit_moi_dense_relay(
-              {
-                  .call_form = target_profile->direct_call_form,
-                  .indirect_jump = dense_router->indirect_jump,
-                  .key_sgpr = key_sgpr,
-                  .call_return_sgpr = call_return_sgpr,
-                  .derive_key_at_entry = derive_key_at_entry,
-                  .key_encodes_scc = key_encodes_scc,
-                  .match_call_return = false,
-                  .clone_local_routes = use_clone_local_routes,
-                  .host_offset = host_offset,
-                  .host_body_offset = host_body_offset,
-                  .island_offset = island_offset,
-                  .dispatcher_offset = dispatcher_offset,
-                  .dispatcher_capacity_bytes = dispatcher_reservation,
-                  .displaced_host_words = displaced_words,
-                  .routes = routes,
-                  .owner_descriptors = group_owners,
-              },
-              arch, "sampled dense barrier relay", new_text, patches, result.errors)) {
+      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
+          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
+          key_encodes_scc, /*match_call_return=*/false, use_clone_local_routes, dispatcher_offset,
+          island_offset,
+          *target_profile, arch);
+      if (!dispatcher_words ||
+          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense barrier dispatcher could not fit its reserved relay space");
         return;
       }
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
+                  dispatcher_words->size() * sizeof(uint32_t));
+
+      append_sampled_dense_sync_relay_patches(
+          patches, selected[indices.front()].candidate.barrier.site.text_offset, host_offset,
+          static_cast<uint32_t>(host_bytes), host_body_offset,
+          static_cast<uint32_t>(host_words.size() * sizeof(uint32_t)), dispatcher_offset,
+          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t)), group_owners);
       for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
         const DenseBody &body = bodies[body_index];
         const Planned &planned = selected[body.selected_index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
+        const uint64_t call_target = use_clone_local_routes
+                                         ? island_offset + 2u * (body_index + 1u) * sizeof(uint32_t)
+                                         : island_offset;
+        const auto call_delta = compute_sopp_branch_simm16(site.text_offset, call_target);
+        const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;
+        if (!call) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier relay could not encode a barrier call");
+          return;
+        }
+        std::vector<uint32_t> anchor(site.size / sizeof(uint32_t), build_s_nop(0, arch));
+        anchor.front() = *call;
+        std::memcpy(new_text.data() + site.text_offset, anchor.data(), site.size);
         ConSanPatchInfo info;
         info.kind = ConSanPatchKind::TrampolineMoiSampledSyncMetadata;
         info.anchor_offset = site.text_offset;
@@ -2107,40 +2207,76 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         bodies.push_back({index, body_offset, std::move(*body_words), guest_instruction_offset});
       }
       const uint64_t host_body_offset = new_text.size();
+      std::vector<uint32_t> host_words = std::move(dense_host->displaced_words);
+      if (!append_moi_scc_preserving_indirect_jump(host_words, host_body_offset,
+                                                   host_offset + host_bytes, jump_pc_sgpr,
+                                                   saved_scc_sgpr, /*capture_scc=*/true, arch)) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic relay could not return from its host");
+        return;
+      }
+      append_words_bytes(new_text, host_words);
+
+      auto island_words =
+          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                               {.jump_pc_sgpr = jump_pc_sgpr,
+                                                .saved_scc_sgpr = saved_scc_sgpr,
+                                                .key_sgpr = key_sgpr,
+                                                .call_return_sgpr = call_return_sgpr},
+                                               derive_key_at_entry, arch);
+      if (!island_words || island_words->size() != island_words_count) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic relay could not encode its island");
+        return;
+      }
+      std::memcpy(new_text.data() + island_offset, island_words->data(),
+                  island_words->size() * sizeof(uint32_t));
+      const auto host_call = build_s_call_b64(call_return_sgpr, /*next instruction=*/0, arch);
+      std::memcpy(new_text.data() + host_offset, &host_call, sizeof(uint32_t));
+
       std::vector<MoiDenseRelayRoute> routes{
           {.identity = 0u, .caller_return = island_offset, .target = host_body_offset}};
       routes.reserve(bodies.size() + 1u);
       for (const DenseBody &body : bodies) {
         const Planned &planned = selected[body.selected_index];
         routes.push_back({.identity = static_cast<uint32_t>(routes.size()),
-                          .anchor = planned.physical_anchor_offset,
-                          .anchor_size = planned.relocated_guest_size,
                           .caller_return = planned.physical_anchor_offset + sizeof(uint32_t),
                           .target = body.offset});
       }
-      const std::vector<uint32_t> displaced_host_words = std::move(dense_host->displaced_words);
-      if (!emit_moi_dense_relay(
-              {
-                  .call_form = ConSanDirectCallForm::SCallB64,
-                  .indirect_jump = dense_router->indirect_jump,
-                  .key_sgpr = key_sgpr,
-                  .call_return_sgpr = call_return_sgpr,
-                  .derive_key_at_entry = derive_key_at_entry,
-                  .key_encodes_scc = key_encodes_scc,
-                  .host_offset = host_offset,
-                  .host_body_offset = host_body_offset,
-                  .island_offset = island_offset,
-                  .dispatcher_offset = dispatcher_offset,
-                  .dispatcher_capacity_bytes = dispatcher_reservation,
-                  .displaced_host_words = displaced_host_words,
-                  .routes = routes,
-                  .owner_descriptors = group_owners,
-              },
-              arch, "sampled dense atomic relay", new_text, patches, result.errors)) {
+      const auto dispatcher_words = build_moi_dense_relay_dispatcher(
+          routes, jump_pc_sgpr, saved_scc_sgpr, key_sgpr, call_return_sgpr, derive_key_at_entry,
+          key_encodes_scc, /*match_call_return=*/false, /*clone_local_routes=*/false,
+          dispatcher_offset, island_offset,
+          *target_profile, arch);
+      if (!dispatcher_words ||
+          dispatcher_words->size() * sizeof(uint32_t) > dispatcher_reservation) {
+        result.errors.emplace_back(
+            "ConSan MOI sampled dense atomic dispatcher could not fit its reserved relay space");
         return;
       }
+      std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
+                  dispatcher_words->size() * sizeof(uint32_t));
+
+      append_sampled_dense_sync_relay_patches(
+          patches, selected[indices.front()].candidate.atomic.site.text_offset, host_offset,
+          static_cast<uint32_t>(host_bytes), host_body_offset,
+          static_cast<uint32_t>(host_words.size() * sizeof(uint32_t)), dispatcher_offset,
+          static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t)), group_owners);
       for (const DenseBody &body : bodies) {
         const Planned &planned = selected[body.selected_index];
+        const auto call_delta =
+            compute_sopp_branch_simm16(planned.physical_anchor_offset, island_offset);
+        if (!call_delta) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense atomic relay could not encode an atomic call");
+          return;
+        }
+        const uint32_t call = build_s_call_b64(call_return_sgpr, *call_delta, arch);
+        std::vector<uint32_t> anchor(planned.relocated_guest_size / sizeof(uint32_t),
+                                     build_s_nop(0, arch));
+        anchor.front() = call;
+        std::memcpy(new_text.data() + planned.physical_anchor_offset, anchor.data(),
+                    planned.relocated_guest_size);
         if (!append_atomic_patch(planned, body.offset, body.words, body.guest_instruction_offset))
           return;
         routed_by_dense_relay[body.selected_index] = true;
