@@ -156,7 +156,9 @@ def _format_dtype_shape(obj: object) -> Optional[str]:
 def _format_triton_arg(obj: object) -> str:
     """Render one Triton launch arg as a shape/type summary or scalar value."""
     if isinstance(obj, (list, tuple)):
-        inner = ", ".join(_format_triton_arg(o) for o in obj[:8])
+        inner = ", ".join(
+            _format_triton_arg(o) for o in obj[: marker_format.MAX_NESTED_ARG_ITEMS]
+        )
         return f"[{inner}]"
     dtype_shape = _format_dtype_shape(obj)
     if dtype_shape is not None:

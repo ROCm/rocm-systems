@@ -1,6 +1,7 @@
 {
   "max_args_len": 512,
   "max_arg_items": 32,
+  "max_nested_arg_items": 8,
   "cases": [
     {
       "name": "empty",

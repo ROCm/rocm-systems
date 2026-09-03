@@ -757,8 +757,9 @@ warning:
   arguments (numbers, booleans, and truncated strings). Tensor contents are
   not recorded.
 
-At most 32 arguments are recorded per operator. The rendered list is truncated
-to 512 characters, followed by ``...``.
+Each operator records at most 32 arguments. At most eight items are rendered
+from each list or tuple. Argument text is truncated to 512 characters and
+followed by ``...``.
 
 For example, the same Triton kernel launch under each capture level::
 

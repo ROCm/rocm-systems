@@ -616,6 +616,23 @@ def test_marker_args_codec_limits():
 
     assert marker_format.MAX_ARGS_LEN == _MARKER_ARGS_CODEC["max_args_len"]
     assert marker_format.MAX_ARG_ITEMS == _MARKER_ARGS_CODEC["max_arg_items"]
+    assert (
+        marker_format.MAX_NESTED_ARG_ITEMS == _MARKER_ARGS_CODEC["max_nested_arg_items"]
+    )
+
+
+def test_python_arg_formatters_limit_nested_items():
+    from utils.inject_roctx import core, marker_format
+    from utils.inject_roctx._backends import torch as torch_backend
+    from utils.inject_roctx._backends import triton as triton_backend
+
+    core.set_args_capture(True, False)
+    item_limit = marker_format.MAX_NESTED_ARG_ITEMS
+    items = list(range(item_limit + 1))
+    expected = f"[{', '.join(['int'] * item_limit)}]"
+
+    assert torch_backend._format_dispatch_arg(items) == expected
+    assert triton_backend._format_triton_arg(items) == expected
 
 
 @pytest.mark.parametrize(

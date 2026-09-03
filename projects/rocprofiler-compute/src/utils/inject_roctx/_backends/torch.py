@@ -630,7 +630,9 @@ def _format_dispatch_arg(obj: object) -> str:
         dtype = str(obj.dtype).replace("torch.", "")
         return f"{dtype}[{dims}]"
     if isinstance(obj, (list, tuple)):
-        inner = ", ".join(_format_dispatch_arg(o) for o in obj[:8])
+        inner = ", ".join(
+            _format_dispatch_arg(o) for o in obj[: marker_format.MAX_NESTED_ARG_ITEMS]
+        )
         return f"[{inner}]"
     if core.args_values_enabled():
         if isinstance(obj, (int, float)):

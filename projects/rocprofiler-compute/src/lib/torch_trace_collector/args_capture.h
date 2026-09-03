@@ -27,6 +27,8 @@ inline constexpr std::size_t kMaxArgsLen = 512;
 // Maximum number of operator inputs rendered into an args blob.
 inline constexpr std::size_t kMaxArgItems = 32;
 
+inline constexpr std::size_t kMaxNestedArgItems = 8;
+
 // Maximum number of characters taken from a string IValue.
 inline constexpr std::size_t kMaxStringChars = 32;
 
@@ -169,16 +171,16 @@ inline std::string render_leaf_ivalue(const c10::IValue& iv, bool values)
         }
         if (iv.isTensorList())
         {
+            const auto  tensors      = iv.toTensorList();
+            const auto  render_count = std::min(tensors.size(), kMaxNestedArgItems);
             std::string inner;
-            bool        first = true;
-            for (const auto& tensor : iv.toTensorVector())
+            for (std::size_t i = 0; i < render_count; ++i)
             {
-                if (!first)
+                if (i > 0)
                 {
                     inner += ", ";
                 }
-                first = false;
-                inner += render_leaf_ivalue(c10::IValue(tensor), values);
+                inner += render_leaf_ivalue(c10::IValue(tensors.get(i)), values);
             }
             return "[" + inner + "]";
         }

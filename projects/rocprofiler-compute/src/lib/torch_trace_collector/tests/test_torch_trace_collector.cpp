@@ -317,6 +317,7 @@ TEST(ArgsEncoding, MatchesMarkerArgsCodec)
     ASSERT_FALSE(codec.empty());
     ASSERT_EQ(kMaxArgsLen, codec.at("max_args_len").get<std::size_t>());
     ASSERT_EQ(kMaxArgItems, codec.at("max_arg_items").get<std::size_t>());
+    ASSERT_EQ(kMaxNestedArgItems, codec.at("max_nested_arg_items").get<std::size_t>());
 
     ASSERT_TRUE(codec.contains("cases"));
     ASSERT_FALSE(codec.at("cases").empty());
@@ -374,6 +375,19 @@ TEST(ArgsRendering, TensorListRendersBracketed)
         at::zeros({3, 4}, at::TensorOptions().dtype(at::kInt)),
     };
     EXPECT_EQ(render_leaf_ivalue(c10::IValue(tensors), /*values=*/false), "[float32[2], int32[3x4]]");
+}
+
+TEST(ArgsRendering, TensorListRenderingHonorsItemLimit)
+{
+    std::vector<at::Tensor> tensors;
+    for (std::int64_t size = 1; size <= 16; ++size)
+    {
+        tensors.emplace_back(at::zeros({size}, at::TensorOptions().dtype(at::kFloat)));
+    }
+
+    EXPECT_EQ(render_leaf_ivalue(c10::IValue(tensors), /*values=*/false),
+              "[float32[1], float32[2], float32[3], float32[4], float32[5], float32[6], "
+              "float32[7], float32[8]]");
 }
 
 TEST(ArgsRendering, ScalarValueModeRendersValueOtherwiseTypeTag)

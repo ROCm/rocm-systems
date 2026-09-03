@@ -9,6 +9,7 @@ Encodes ``%``, ``|``, ``;``, and newlines.
 # Args blob limits.
 MAX_ARGS_LEN = 512
 MAX_ARG_ITEMS = 32
+MAX_NESTED_ARG_ITEMS = 8
 
 
 def encode_args(args: str) -> str:
