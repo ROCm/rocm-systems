@@ -284,14 +284,15 @@ def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
     analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
     analyzer.pre_processing()
 
-    report = tmp_path / "analysis_report.txt"
-    assert report.is_file()
-    assert not analyzer._output.closed
-    assert Path(analyzer._output.name).resolve() == report
-    assert analyzer._output.writable()
-    assert "analysis_report.txt" in mocks["warning"].call_args.args[1]
-
-    analyzer._output.close()
+    try:
+        report = tmp_path / "analysis_report.txt"
+        assert report.is_file()
+        assert not analyzer._output.closed
+        assert Path(analyzer._output.name).resolve() == report
+        assert analyzer._output.writable()
+        assert "analysis_report.txt" in mocks["warning"].call_args.args[1]
+    finally:
+        analyzer._output.close()
 
 
 def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
@@ -302,11 +303,12 @@ def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
     analyzer = make_analyzer(monkeypatch, "txt")
     analyzer.pre_processing()
 
-    created = list(tmp_path.iterdir())
-    assert len(created) == 1
-    assert created[0].match("rocprof_compute_*.txt")
-
-    analyzer._output.close()
+    try:
+        created = list(tmp_path.iterdir())
+        assert len(created) == 1
+        assert created[0].match("rocprof_compute_*.txt")
+    finally:
+        analyzer._output.close()
 
 
 def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
@@ -328,11 +330,13 @@ def test_txt_output_matches_stdout_output(tmp_path, monkeypatch, capsys) -> None
 
     txt_analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
     txt_analyzer.pre_processing()
-    render_report(txt_analyzer, monkeypatch)
-    # The analyzer never closes _output, so flush before reading it back.
-    txt_analyzer._output.flush()
-    txt_report = (tmp_path / "analysis_report.txt").read_text(encoding="utf-8")
-    txt_analyzer._output.close()
+    try:
+        render_report(txt_analyzer, monkeypatch)
+        # The analyzer never closes _output, so flush before reading it back.
+        txt_analyzer._output.flush()
+        txt_report = (tmp_path / "analysis_report.txt").read_text(encoding="utf-8")
+    finally:
+        txt_analyzer._output.close()
 
     stdout_analyzer = make_analyzer(monkeypatch, "stdout")
     stdout_analyzer.pre_processing()
