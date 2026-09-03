@@ -7,7 +7,7 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "logger/debug.hpp"
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
@@ -538,7 +538,7 @@ discover_torch_libpath(const std::string& python_binary)
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
-        for(unsigned char c : path)
+        for(const unsigned char c : path)
         {
             if(std::isalnum(c) != 0) continue;
             switch(c)
@@ -580,7 +580,7 @@ discover_torch_libpath(const std::string& python_binary)
         if(!result.empty() && result.back() == '\n') break;
     }
 
-    int status = pclose(pipe);
+    const int status = pclose(pipe);
 
     if(status != 0 || result.empty())
     {

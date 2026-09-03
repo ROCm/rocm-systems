@@ -60,8 +60,6 @@ using namespace std;
  *        header so hipGetProcAddress() is used to lookup each function's function
  *        pointer
  *      - returns
- *          - hipSuccess if size is zero
- *              - This check should be removed
  *          - hipErrorInvalidDevice if unable to lookup current device
  *          - hipErrorUnknown if rocr runtime does not return success
  *  - ROCR Runtime (userspace)
@@ -78,8 +76,6 @@ using namespace std;
  *      - hsa_amd_ais_file_read(...), hsa_amd_ais_file_write(...)
  *      - status and size_coppied untouched
  *      - returns
- *          - HSA_STATUS_ERROR_INVALID_ARGUMENT if size is zero
- *              - This check should be be removed
  *          - HSA_STATUS_ERROR_INVALID_ARGUMENT if devicePtr is NULL
  *              - This check should be be removed
  *          - HSA_STATUS_ERROR if hsaKmtAisReadWriteFile(...) does not return success

@@ -22,6 +22,8 @@
 
 #include "symbol_lookup.hpp"
 
+#include "common/filesystem.hpp"
+
 #include "lib/common/scope_destructor.hpp"
 
 #include <dlfcn.h>
@@ -29,14 +31,18 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
+#include <cerrno>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,7 +71,7 @@ cleanup_loaded_library(loaded_library& library)
     if(library.remove_on_cleanup && !library.path.empty())
     {
         std::error_code ec;
-        std::filesystem::remove(library.path, ec);
+        common::fs::remove(library.path, ec);
     }
 }
 
@@ -159,7 +165,7 @@ loaded_library
 create_and_load_sectionless_copy(const loaded_library& source, std::string_view label)
 {
     auto path =
-        std::filesystem::temp_directory_path() /
+        common::fs::temp_directory_path() /
         ("librocprofiler-register.so.rocattach-sectionless-" + std::string{label} + "-XXXXXX");
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
@@ -206,8 +212,8 @@ create_and_load_sectionless_copy(const loaded_library& source, std::string_view 
 void
 expect_malformed_mapped_elf_fails()
 {
-    auto path = std::filesystem::temp_directory_path() /
-                "librocprofiler-register.so.rocattach-malformed-XXXXXX";
+    auto path =
+        common::fs::temp_directory_path() / "librocprofiler-register.so.rocattach-malformed-XXXXXX";
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
     if(fd < 0)
@@ -240,30 +246,236 @@ expect_malformed_mapped_elf_fails()
         std::cerr << "find_symbol unexpectedly resolved malformed mapped ELF " << path_buffer
                   << " to " << resolved << '\n';
         munmap(mapping, contents.size());
-        std::filesystem::remove(path_buffer);
+        common::fs::remove(path_buffer);
         std::exit(1);
     }
 
     munmap(mapping, contents.size());
-    std::filesystem::remove(path_buffer);
+    common::fs::remove(path_buffer);
+}
+
+std::optional<size_t>
+find_build_id_descriptor(const std::vector<uint8_t>& bytes)
+{
+    auto header = Elf64_Ehdr{};
+    if(bytes.size() < sizeof(header)) return std::nullopt;
+    std::memcpy(&header, bytes.data(), sizeof(header));
+
+    for(auto idx = uint16_t{0}; idx < header.e_phnum; ++idx)
+    {
+        auto segment = Elf64_Phdr{};
+        auto offset  = header.e_phoff + (static_cast<size_t>(idx) * header.e_phentsize);
+        if(offset + sizeof(segment) > bytes.size()) return std::nullopt;
+        std::memcpy(&segment, bytes.data() + offset, sizeof(segment));
+        if(segment.p_type != PT_NOTE) continue;
+
+        auto cursor = static_cast<size_t>(segment.p_offset);
+        auto end    = cursor + static_cast<size_t>(segment.p_filesz);
+        if(end > bytes.size()) return std::nullopt;
+
+        while(cursor + sizeof(Elf64_Nhdr) <= end)
+        {
+            auto note = Elf64_Nhdr{};
+            std::memcpy(&note, bytes.data() + cursor, sizeof(note));
+
+            auto name_offset = cursor + sizeof(note);
+            auto descriptor  = name_offset + ((note.n_namesz + 3U) & ~3U);
+            auto next        = descriptor + ((note.n_descsz + 3U) & ~3U);
+            if(descriptor > end || next > end) break;
+
+            if(note.n_type == NT_GNU_BUILD_ID && note.n_namesz == 4 && note.n_descsz > 0 &&
+               std::memcmp(bytes.data() + name_offset, "GNU", 4) == 0)
+            {
+                return descriptor;
+            }
+            cursor = next;
+        }
+    }
+    return std::nullopt;
+}
+
+// Copies source and flips one byte inside its NT_GNU_BUILD_ID descriptor. The
+// result is byte-identical to the source everywhere else, so a rejection can
+// only come from the Build ID comparison and never from a layout difference.
+void
+copy_with_flipped_build_id(const std::string& source, const std::string& destination)
+{
+    auto input = std::ifstream{source, std::ios::binary};
+    auto bytes = std::vector<uint8_t>{std::istreambuf_iterator<char>{input},
+                                      std::istreambuf_iterator<char>{}};
+    input.close();
+
+    auto descriptor = find_build_id_descriptor(bytes);
+    if(!descriptor)
+    {
+        std::cerr << "could not locate a GNU Build ID note in " << source << '\n';
+        std::exit(1);
+    }
+    bytes.at(*descriptor) ^= 0xffU;
+
+    auto output = std::ofstream{destination, std::ios::binary | std::ios::trunc};
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    output.close();
+    if(!output)
+    {
+        std::cerr << "failed to write Build ID variant " << destination << '\n';
+        std::exit(1);
+    }
+}
+
+bool
+expect_pathname_lookup_validates_build_id(const loaded_library& source,
+                                          const loaded_library& no_build_id)
+{
+    auto path =
+        common::fs::temp_directory_path() / "librocprofiler-register.so.rocattach-replaced-XXXXXX";
+    auto path_buffer = path.string();
+    auto fd          = mkstemp(path_buffer.data());
+    if(fd < 0)
+    {
+        std::cerr << "mkstemp failed for replaced ELF fixture\n";
+        return false;
+    }
+    close(fd);
+
+    common::fs::copy_file(source.path, path_buffer, common::fs::copy_options::overwrite_existing);
+
+    auto mapped = load_library(path_buffer.c_str());
+    auto unload_mapped =
+        rocprofiler::common::scope_destructor{[&]() { cleanup_loaded_library(mapped); }};
+
+    auto* symbol = dlsym(mapped.handle, ATTACH_SYMBOL_NAME);
+    if(symbol == nullptr)
+    {
+        std::cerr << "dlsym failed for " << path_buffer << "::" << ATTACH_SYMBOL_NAME << '\n';
+        return false;
+    }
+    auto expected = reinterpret_cast<uintptr_t>(symbol);
+
+    struct stat mapped_identity
+    {};
+    if(stat(path_buffer.c_str(), &mapped_identity) != 0)
+    {
+        std::cerr << "stat failed for " << path_buffer << '\n';
+        return false;
+    }
+
+    auto done_pipe = std::array<int, 2>{};
+    if(pipe(done_pipe.data()) != 0)
+    {
+        std::cerr << "pipe failed for cross-process Build ID test\n";
+        return false;
+    }
+
+    auto child = fork();
+    if(child < 0)
+    {
+        std::cerr << "fork failed for cross-process Build ID test\n";
+        return false;
+    }
+    if(child == 0)
+    {
+        close(done_pipe[1]);
+        auto done = char{};
+        while(read(done_pipe[0], &done, sizeof(done)) < 0 && errno == EINTR)
+        {}
+        _exit(0);
+    }
+
+    close(done_pipe[0]);
+    auto release_child = rocprofiler::common::scope_destructor{[&]() {
+        close(done_pipe[1]);
+        auto status = int{};
+        if(waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        {
+            std::cerr << "cross-process Build ID child did not exit cleanly\n";
+        }
+        std::error_code ec;
+        common::fs::remove(path_buffer, ec);
+        common::fs::remove(path_buffer + ".replacement", ec);
+        common::fs::remove(path_buffer + ".flipped", ec);
+    }};
+
+    // Repoint the pathname at a different inode while the child keeps the
+    // original one mapped. Confirm the inode actually changed,
+    // otherwise the Build ID comparison would never be reached.
+    auto install_at_pathname = [&](const std::string& file) {
+        auto replacement = path_buffer + ".replacement";
+        common::fs::copy_file(file, replacement, common::fs::copy_options::overwrite_existing);
+        common::fs::rename(replacement, path_buffer);
+
+        struct stat installed
+        {};
+        if(stat(path_buffer.c_str(), &installed) != 0 ||
+           (installed.st_dev == mapped_identity.st_dev &&
+            installed.st_ino == mapped_identity.st_ino))
+        {
+            std::cerr << "replacing " << path_buffer << " did not change its inode\n";
+            return false;
+        }
+        return true;
+    };
+
+    // Forces the /proc/<pid>/root path instead of /proc/<pid>/map_files.
+    constexpr auto pathname_only = true;
+
+    auto expect_lookup = [&](bool should_resolve, const char* description) {
+        void* resolved    = nullptr;
+        auto  did_resolve = rocprofiler::rocattach::find_symbol(
+            child, resolved, path_buffer, ATTACH_SYMBOL_NAME, pathname_only);
+        if(did_resolve != should_resolve)
+        {
+            std::cerr << description << '\n';
+            return false;
+        }
+        if(should_resolve && reinterpret_cast<uintptr_t>(resolved) != expected)
+        {
+            std::cerr << "find_symbol resolved the wrong address: " << description << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    if(!install_at_pathname(source.path)) return false;
+    if(!expect_lookup(true, "find_symbol rejected a pathname replacement with a matching Build ID"))
+    {
+        return false;
+    }
+
+    auto flipped = path_buffer + ".flipped";
+    copy_with_flipped_build_id(source.path, flipped);
+    if(!install_at_pathname(flipped)) return false;
+    if(!expect_lookup(false,
+                      "find_symbol accepted a replacement whose only difference is its Build ID"))
+    {
+        return false;
+    }
+
+    if(!install_at_pathname(no_build_id.path)) return false;
+    if(!expect_lookup(false, "find_symbol accepted a replacement without a Build ID"))
+    {
+        return false;
+    }
+    return true;
 }
 }  // namespace
 
 int
 main(int argc, char** argv)
 {
-    if(argc != 7)
+    if(argc != 8)
     {
         std::cerr << "Usage: " << argv[0]
                   << " <normal-lib> <gnu-hash-lib> <sysv-hash-lib> <shifted-lib> "
-                     "<ambiguous-a> <ambiguous-b>\n";
+                     "<no-build-id-lib> <ambiguous-a> <ambiguous-b>\n";
         return 1;
     }
 
     auto libraries = std::vector<loaded_library>{};
-    libraries.reserve(6);
-    for(auto* path :
-        std::array<const char*, 6>{argv[1], argv[2], argv[3], argv[4], argv[5], argv[6]})
+    libraries.reserve(7);
+    for(const auto* path :
+        std::array<const char*, 7>{argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]})
     {
         libraries.emplace_back(load_library(path));
     }
@@ -272,6 +484,7 @@ main(int argc, char** argv)
     expect_resolves_to_dlsym(libraries.at(1));
     expect_resolves_to_dlsym(libraries.at(2));
     expect_resolves_to_dlsym(libraries.at(3));
+    expect_resolves_to_dlsym(libraries.at(4));
     expect_different_symbol_offsets(libraries.at(0), libraries.at(3));
     {
         auto sectionless_normal  = create_and_load_sectionless_copy(libraries.at(0), "normal");
@@ -288,6 +501,7 @@ main(int argc, char** argv)
     }
     expect_ambiguous_basename_fails();
     expect_malformed_mapped_elf_fails();
+    if(!expect_pathname_lookup_validates_build_id(libraries.at(0), libraries.at(4))) return 1;
 
     std::cout << "Test PASSED: target ELF resolver resolved exact mapped libraries and rejected "
                  "ambiguous and malformed mappings\n";

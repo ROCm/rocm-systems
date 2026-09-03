@@ -27,7 +27,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
             </colgroup>
             <tbody class="cli-options">
                 <tr>
-                    <th rowspan="7">I/O options</th>
+                    <th rowspan="7" id="io-options">I/O options</th>
                     <td>-i INPUT | --input INPUT</td>
                     <td>Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. See <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#collecting-traces-using-input-file">collecting traces using input file</a> and <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-input-file">counter collection using input file.</a></td>
                 </tr>
@@ -41,7 +41,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>-f {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...] | --output-format {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]</td>
-                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#output-formats">Read more...</a></td>
+                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. Direct CSV, PFTrace, and OTF2 output is deprecated; collect in the default rocpd format and use <code>rocpd convert</code> instead. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#output-formats">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--output-config [BOOL]</td>
@@ -56,12 +56,12 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the path to a YAML file consisting of extra counter definitions. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#extra-counters">Read more...</a></td>
                 </tr>
                 <tr>
-                    <th>Dynamic process attachment</th>
+                    <th id="dynamic-process-attachment">Dynamic process attachment</th>
                     <td>-p PID | --pid PID | --attach PID</td>
                     <td>Attaches to a running process by process ID and profiles it dynamically. This enables profiling of applications that are already running without needing to restart them from the profiler. The profiler will instrument the target process and collect the specified tracing or counter data for the configured duration. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3-process-attachment.html">Read more...</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="2">Aggregate tracing</th>
+                    <th rowspan="2" id="aggregate-tracing">Aggregate tracing</th>
                     <td>-r [BOOL] | --runtime-trace [BOOL]</td>
                     <td>Collects tracing data for HIP runtime API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocation), and kernel dispatches. Similar to --sys-trace without HIP compiler API and the underlying HSA API tracing. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#runtime-trace">Read more...</a></td>
                 </tr>
@@ -70,24 +70,24 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects tracing data for HIP API, HSA API, marker (ROCTx) API, RCCL API, memory operations (copies, scratch, and allocations), and kernel dispatches. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#system-trace">Read more...</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="4">PC sampling</th>
+                    <th rowspan="4" id="pc-sampling">PC sampling</th>
                     <td>--pc-sampling-beta-enabled [BOOL]</td>
                     <td>Enables PC sampling and sets the ROCPROFILER_PC_SAMPLING_BETA_ENABLED environment variable. Note that PC sampling support is in beta version. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <td>--pc-sampling-unit {instructions,cycles,time}</td>
-                    <td>Specifies the unit for PC sampling type or method. Note that only units of time are supported. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
+                    <td>--pc-sampling-unit {cycles,time}</td>
+                    <td>Specifies the unit for the PC sampling interval: time (microseconds, used with host_trap) or cycles (used with stochastic). For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
                     <td>--pc-sampling-method {stochastic,host_trap}</td>
-                    <td>Specifies the PC sampling type. Note that only host trap method is supported. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
+                    <td>Specifies the PC sampling method: stochastic (AMD Instinct™ MI300 series and later, recommended starting gfx942) or host_trap (AMD Instinct MI200 series and later). For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
                     <td>--pc-sampling-interval PC_SAMPLING_INTERVAL</td>
                     <td>Specifies the PC sample generation frequency. For more details, see <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-pc-sampling.html">PC sampling.</a></td>
                 </tr>
                 <tr>
-                    <th rowspan="12">Basic tracing</th>
+                    <th rowspan="12" id="basic-tracing">Basic tracing</th>
                     <td>--hip-trace [BOOL]</td>
                     <td>Combination of --hip-runtime-trace and --hip-compiler-trace. This option enables only the HIP API tracing. Unlike previous iterations of rocprofv3, this option doesn’t enable kernel tracing, memory copy tracing, and so on. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hip-trace">Read more...</a></td>
                 </tr>
@@ -180,9 +180,17 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects traces of KFD events dropped by the KFD device driver.</td>
                 </tr>
                 <tr>
-                    <th>Counter collection</th>
+                    <th rowspan="2" id="counter-collection">Counter collection</th>
                     <td>--pmc [PMC …]</td>
                     <td>Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple --pmc flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#counter-collection-using-command-line">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--replay-mode {kernel,application}</td>
+                    <td>(beta) Select the counter-collection replay strategy. 'kernel' collects all --pmc groups in a single application run by replaying each dispatch once per group with device-memory snapshot/restore between passes, instead of re-running the whole application per group. Requires --pmc and --kernel-replay-beta-enabled. 'application' (default) re-runs the whole application once per counter group. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--kernel-replay-beta-enabled [BOOL]</td>
+                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>

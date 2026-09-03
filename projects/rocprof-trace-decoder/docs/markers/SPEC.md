@@ -1,8 +1,8 @@
-# SQTT Instrument Pass -- Technical Specification
+# AMD SQTT Marker Pass -- Technical Specification
 
 ## Overview
 
-SQTTInstrumentPass is an LLVM pass plugin for AMDGPU that injects
+The AMD SQTT marker pass is an LLVM pass plugin for AMDGPU that injects
 `s_ttracedata` / `s_ttracedata_imm` markers into shader code at compile time.
 These markers appear in SQTT (SeQuencer Thread Trace) hardware trace buffers,
 enabling correlation of trace timestamps with source-level events such as
@@ -10,8 +10,10 @@ function entry/exit, barrier synchronization, and user-defined annotations.
 
 The system consists of:
 
-- **`libsqttinstrumentpass.so`** -- LLVM pass plugin loaded via `-fpass-plugin=`
-- **`markers.hpp`** -- Device-side header for user markers
+- **`libsqtt-marker.so`** -- LLVM pass plugin from
+  `llvm-project/amd/sqtt-marker`, loaded via `-fpass-plugin=`
+- **`amd_sqtt_marker/sqtt_marker.h`** -- Device-side header installed by that
+  project for user markers
 - **`sqtt_flamegraph.py`** -- Post-processing tool: reads SQTT traces and
   `.sqtt_funcmap` sections to generate flamegraphs
 - **`sqtt_perfetto.py`** -- Post-processing tool: exports SQTT traces as
@@ -21,26 +23,27 @@ The system consists of:
 ## Building
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -S /path/to/llvm-project/amd/sqtt-marker -B build-sqtt-marker \
+      -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm
+cmake --build build-sqtt-marker
 ```
 
-Requires ROCm LLVM (tested with ROCm 7.x). The plugin links no LLVM libraries;
-it gets symbols from the host compiler process.
+The plugin must be built against the same LLVM build as the compiler process
+that loads it.
 
 ## Usage
 
 ```bash
 # Minimal (barriers + user markers only)
 SQTT_INSTRUMENT_BARRIERS=1 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 
 # Full (function entry/exit with threshold, barriers, scope filtering)
 SQTT_INSTRUMENT_FUNCTIONS=10 SQTT_INSTRUMENT_BARRIERS=1 \
 SQTT_SCOPE_CU=0x3 \
-hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/libsqttinstrumentpass.so \
-      -I include/rocprof_trace_decoder/cxx/ my_kernel.hip -o my_kernel
+hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=build-sqtt-marker/lib/libsqtt-marker.so \
+      -I /path/to/llvm-project/amd/sqtt-marker/include/ my_kernel.hip -o my_kernel
 ```
 
 All configuration is read from environment variables at compile time and baked
@@ -432,8 +435,8 @@ Function instrumentation uses a two-phase design to correctly handle inlining:
 
 - Registered at `PipelineEarlySimplificationEP` (skipped at `-O0`)
 - Force-inlines wrappers around named marker sentinels
-  (`__sqtt_named_marker_enter`, `__sqtt_named_marker_exit`,
-  `__sqtt_named_marker_point`, `__sqtt_named_marker_data`), then resolves
+  (`sqtt_marker_enter`, `sqtt_marker_exit`,
+  `sqtt_marker_point`, `sqtt_marker_data`), then resolves
   sentinel calls to bare
   `s_ttracedata` intrinsics. Adjacent exit+enter pairs in the same basic block
   are fused into a single `s_ttracedata` with `exit_prev=true`.
@@ -477,10 +480,10 @@ early/late split needed since there is no inlining).
 
 ---
 
-## User Marker API (`markers.hpp`)
+## User Marker API (`amd_sqtt_marker/sqtt_marker.h`)
 
-Include with `#include "markers.hpp"` and compile with `-DSQTT_ENABLED=1`.
-When `SQTT_ENABLED` is 0 or undefined, all calls compile to nothing.
+Include with `#include <amd_sqtt_marker/sqtt_marker.h>` and compile with `-DAMD_SQTT_MARKER_ENABLE=1`.
+When `AMD_SQTT_MARKER_ENABLE` is 0 or undefined, all calls compile to nothing.
 
 ### Functions
 
@@ -494,7 +497,7 @@ __device__ void sqtt_marker_enter(const char *name);
 
 // Numeric enter marker (no pass plugin required)
 // Emits sched_barrier + s_ttracedata((data << 2) | ENTER_FLAG) + sched_barrier.
-__device__ void sqtt_marker_enter(uint32_t data);
+__device__ void sqtt_marker_enter_id(uint32_t data);
 
 // --- Exit (scope close) ---
 
@@ -504,7 +507,7 @@ __device__ void sqtt_marker_exit(const char *name);
 // Numeric exit marker (no pass plugin required)
 // Emits s_ttracedata with EXIT_PREV (value 1). The data parameter is
 // kept for API compatibility but ignored -- exit always pops the top.
-__device__ void sqtt_marker_exit(uint32_t data);
+__device__ void sqtt_marker_exit_id(uint32_t data);
 
 // --- Point (no scope change) ---
 
@@ -514,7 +517,7 @@ __device__ void sqtt_marker_point(const char *name);
 
 // Numeric point marker
 // Emits s_ttracedata with (data << 2) (no flags).
-__device__ void sqtt_marker_point(uint32_t data);
+__device__ void sqtt_marker_point_id(uint32_t data);
 
 // Named point marker followed by one raw 32-bit payload record.
 // The funcmap stores P:id:name plus R:id:extra_payload_count=1.
@@ -544,7 +547,7 @@ using the marker's `R:id:extra_payload_count=1` metadata.
 
 1. User writes `sqtt_marker_enter("my_label")`, `sqtt_marker_exit("my_label")`,
    `sqtt_marker_point("my_label")`, or `sqtt_marker_data("my_label", value)`
-2. The compiler emits calls to `__sqtt_named_marker_enter(const char*)` and
+2. The compiler emits calls to `sqtt_marker_enter(const char*)` and
    the matching named marker sentinel respectively
 3. The Early pass force-inlines the wrappers, resolves the string literal,
    assigns a unique ID (starting at 1, with deduplication within each
@@ -557,10 +560,10 @@ using the marker's `R:id:extra_payload_count=1` metadata.
    emit `R:id:extra_payload_count=1`.
 
 If you forget to load the pass plugin, you get a linker error
-("undefined reference to `__sqtt_named_marker_enter`") -- no silent
+("undefined reference to `sqtt_marker_enter`") -- no silent
 miscompilation.
 
-When `SQTT_ENABLED=0` (the default), named markers compile to nothing.
+When `AMD_SQTT_MARKER_ENABLE=0` (the default), named markers compile to nothing.
 
 ---
 

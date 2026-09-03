@@ -248,7 +248,7 @@ class Exec(RectFrame):
             self.x_min + 4.0,
             self.y_max - 6.0,
             format_text(
-                key="RVGPRseq",
+                key="VGPRs",
                 value=self.vgprs,
                 key_step_prec_leftalign=6,
                 value_step_prec_rightalign=5,

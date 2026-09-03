@@ -133,7 +133,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
         std::string_view{ _arg }.find("Space::") != std::string_view::npos))
         return true;
 
-    size_t _len =
+    const size_t _len =
         (strlength(std::forward<Arg>(_arg)) + ... + strlength(std::forward<Args>(_args)));
 
     // ignore labels without names

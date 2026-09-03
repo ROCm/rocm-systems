@@ -26,6 +26,7 @@
 ///     modifiers — verified inline in the regen for this slice) + 2 ints
 ///     missing from CDNA4 (v_minmax / v_maxmin u32/i32 are RDNA3+ only).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -226,7 +227,7 @@ void check_case(const VopCase &c, uint64_t exec) {
       vop3_encode(c.opcode, kDstVgpr, SRC0_VGPR, SRC1_VGPR, SRC2_VGPR, words);
       break;
     }
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << ": decode failed";
     auto out = fx.run(inst, rot, exec, vcc_in);
     delete inst;

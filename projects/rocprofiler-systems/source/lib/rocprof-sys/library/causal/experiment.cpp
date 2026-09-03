@@ -288,8 +288,8 @@ experiment::stop()
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto         _pt  = fitr.second - init_progress[fitr.first];
-        std::int64_t _num = std::max<std::int64_t>(
+        auto               _pt  = fitr.second - init_progress[fitr.first];
+        const std::int64_t _num = std::max<std::int64_t>(
             { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0) _prog_vals.emplace_back(_num);
     }
@@ -518,7 +518,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         save_line_info(_binfo_cfg, config::get_verbose());
     }
 
-    bool _causal_output_reset =
+    const bool _causal_output_reset =
         config::get_setting_value<bool>(std::string{ env_vars::CAUSAL_FILE_RESET })
             .value_or(false);
 
@@ -591,7 +591,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name =
+            const std::string _name =
                 (_selection.symbol_address > 0)
                     ? _line_info.func
                     : fmt::format("{}:{}", _line_info.file, _line_info.line);

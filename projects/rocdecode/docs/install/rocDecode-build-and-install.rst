@@ -14,6 +14,17 @@ TheRock is the recommended way to build ROCm components from source.
 Alternatively, you can build rocDecode standalone using the following
 instructions.
 
+.. note::
+   
+   To use the rocDecode samples and tutorials, the ``ROCM_PATH`` environment variable needs to point to the location of your ROCm installation:
+
+   .. code:: shell
+
+      export ROCM_PATH=path_to_your_ROCm_installation
+
+   Set this variable after installation.
+
+
 Prerequisites
 =============
 

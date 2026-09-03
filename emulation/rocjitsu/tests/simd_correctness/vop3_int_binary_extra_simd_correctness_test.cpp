@@ -13,6 +13,7 @@
 /// equal with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
 /// in-process). In-process inactive lanes must keep the sentinel.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -145,7 +146,7 @@ void check_case(const Case &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_bin_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, rot, exec);
     delete inst;

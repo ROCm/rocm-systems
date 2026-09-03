@@ -17,7 +17,7 @@ endif()
 
 set(_required_symbols
     "rj_test_narrow_target_count"
-    "rocjitsu::cdna5::Decoder::decode(unsigned int const*)"
+    "rocjitsu::cdna5::Decoder::decode(unsigned int const*, util::DiagnosticEmitter const&)"
 )
 foreach(_required IN LISTS _required_symbols)
     string(FIND "${_symbols}" "${_required}" _match)

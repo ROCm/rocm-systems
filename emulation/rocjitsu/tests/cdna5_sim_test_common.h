@@ -4,6 +4,7 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
@@ -74,7 +75,7 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 namespace rocjitsu::test::cdna5 {
 
-inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
+inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 
 inline constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 inline constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -156,7 +157,8 @@ struct Gfx1250Sim {
                         bool enable_wg_id_x = false, bool enable_wg_id_y = false,
                         bool enable_wg_id_z = false, uint32_t kernel_code_properties = 0,
                         uint32_t kernarg_size = 0, uint32_t kernarg_preload_length = 0,
-                        uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0,
+                        uint32_t named_barrier_blocks = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -165,7 +167,7 @@ struct Gfx1250Sim {
                     ((vgprs / kGfx1250VgprEncodingGranule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     enable_wg_id_x);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
@@ -174,6 +176,8 @@ struct Gfx1250Sim {
                     enable_wg_id_z);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
+                    named_barrier_blocks);
     kd.kernel_code_properties = kernel_code_properties;
     AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
     AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);
@@ -319,13 +323,13 @@ inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;
   }
 
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   if (!inst) {
     ADD_FAILURE() << "decode() returned nullptr for gfx1250 instruction";
     return nullptr;

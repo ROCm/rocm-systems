@@ -20,7 +20,8 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
-#include <cuda_runtime.h>
+
+#include "inspector_gpu_compat.h"
 
 // External references from inspector.cc
 extern struct inspectorState g_state;

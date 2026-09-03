@@ -82,6 +82,15 @@ Examples:
             help="gtest-style glob filter on suite names: ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'CE*' runs all CE suites; '*:-NET*' runs all except NET)"
         )
         self.parser.add_argument(
+            '--scope',
+            type=str,
+            default='all',
+            choices=['all', 'nightly', 'smoke'],
+            help="Select the suite scope from the config: 'smoke' runs only suites "
+                 "marked \"smoke\": true; 'all' (the default) or 'nightly' run all "
+                 "enabled suites. Combine with --suite-name to narrow further."
+        )
+        self.parser.add_argument(
             '--no-build',
             action='store_true',
             help="Skip build step and use existing build artifacts"

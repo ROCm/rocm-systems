@@ -16,6 +16,10 @@ using namespace rocprofiler_compute_tool;
 
 namespace
 {
+// Profile mode looks for this exact name, so it is pinned here rather than
+// derived. The .gz is the counters writer compressing its output.
+constexpr std::string_view kCountersSuffix = "_native_counter_collection.csv.gz";
+
 std::filesystem::path expected_output_path(std::string_view output_path, std::string_view suffix)
 {
     const auto filename = std::to_string(getpid()) + std::string{suffix};
@@ -37,8 +41,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->output_filename,
-              expected_output_path(EnvInputParameters::kDefaultOutputPath, "_native_counter_collection.csv")
-                  .string());
+              expected_output_path(EnvInputParameters::kDefaultOutputPath, kCountersSuffix).string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedPcSamplingMethod_EnablesPcSampling)
@@ -92,8 +95,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedUnsetOutputPath_UsesDefault)
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->output_filename,
-              expected_output_path(EnvInputParameters::kDefaultOutputPath, "_native_counter_collection.csv")
-                  .string());
+              expected_output_path(EnvInputParameters::kDefaultOutputPath, kCountersSuffix).string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedUnsetRequestedCounters_UsesDefault)
@@ -136,8 +138,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
     m_input_parameters->set_output_path("out");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->output_filename,
-              expected_output_path("out", "_native_counter_collection.csv").string());
+    EXPECT_EQ(tool_data->output_filename, expected_output_path("out", kCountersSuffix).string());
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)

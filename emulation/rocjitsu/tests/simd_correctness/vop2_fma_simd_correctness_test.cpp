@@ -22,6 +22,7 @@
 /// equal per active, non-skipped lane (util::set_force_scalar_for_testing flips
 /// the gate in-process).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -188,7 +189,7 @@ void check_case(const FmaCase &c, uint64_t exec) {
     // f16 constant 0x3E00 = 1.5h (high bits ignored by the op).
     const uint32_t literal = c.is_f16 ? 0x00003E00u : 0x3FC00000u;
     uint32_t words[4] = {enc, c.has_literal ? literal : 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     seeded = fx.seed_inputs(SEED, c.is_f16, exec, &nan_lane);
     fx.cu->execute_instruction(inst, *fx.wf);

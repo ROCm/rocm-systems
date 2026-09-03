@@ -34,6 +34,7 @@ The documentation is structured as follows:
 
    .. grid-item-card:: Quick Reference
 
+      * :ref:`rocprofiler-sdk-at-a-glance`
       * :ref:`quick-guide`
       * :ref:`cli-options`
 
@@ -54,6 +55,8 @@ The documentation is structured as follows:
       * :ref:`using-thread-trace`
       * :ref:`using-rocprofv3-on-wsl`
       * :ref:`using-spm`
+      * :ref:`using-kernel-replay`
+      * :ref:`using-kernel-replay-rocprofv3`
       * :doc:`Samples <how-to/samples>`
 
    .. grid-item-card:: API reference
@@ -67,12 +70,14 @@ The documentation is structured as follows:
       * :doc:`PC sampling <api-reference/pc_sampling>`
       * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
       * :doc:`Streaming Performance Monitor (SPM) <api-reference/spm>`
+      * :doc:`Kernel replay (experimental) <api-reference/kernel_replay>`
       * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
       * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
 
    .. grid-item-card:: Conceptual
 
       * :ref:`comparing-with-legacy-tools`
+      * :ref:`kernel-replay-conceptual`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

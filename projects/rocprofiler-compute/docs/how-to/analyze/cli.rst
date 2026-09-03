@@ -529,13 +529,12 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* HTML plots have the ability to select/deselect specific rooflines and cache-level-specific kernels. In the right-hand legend of the plot, click on individual items in the legend once to display or remove the item from the plot. Double-click on an item to make it the only displayed item in the plot; double-click on any item in the legend to reset the plot to display all items.
-* Hovering your mouse on the plot displays a menu in the top right-hand corner of the page which has tools for the following:
-   * Saving the plot as a .png
-   * Zoom, pan, reset scale
-* Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top right-hand corner of the page (described in the above bullet point)
+* Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
+* Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
+* Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
+* Drag to pan, scroll to zoom, double-click or use *Reset zoom* to re-frame the chart, use *Export PNG* to save the current view, and use *Theme toggle* to switch between light and dark modes.
 
-Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+Below is an example of the interactive HTML plot:
 
 .. image:: ../../data/analyze/cli/roofline_html_interact.png
    :align: center
@@ -600,14 +599,13 @@ format is ``stdout``.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``csv`` format:
-   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
    * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
+   * For a PC-sampled workload it also holds each kernel's disassembly and source; see :ref:`pc-sampling-per-kernel-csv`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``db`` format:
-   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
    * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.

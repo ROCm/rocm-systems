@@ -121,7 +121,6 @@ class cli_analysis(OmniAnalyze_Base):
                 path_info[0],
                 args.kernel_verbose,
                 args.verbose,
-                self._profiling_config,
             )
 
             if self._profiling_config.get("iteration_multiplexing") is not None:

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -892,7 +893,7 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
   auto decode_at = [&](uint64_t off) {
     std::array<rj_code_binary_inst_t, 2> w{};
     std::memcpy(w.data(), text->data() + off, w.size() * sizeof(rj_code_binary_inst_t));
-    return std::unique_ptr<Instruction>(decoder->decode(w.data()));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, w.data()));
   };
 
   // Patched anchor decodes as a forward s_branch.
@@ -1186,7 +1187,7 @@ protected:
   std::unique_ptr<Instruction> decode_word(const Section *section, size_t byte_offset) {
     rj_code_binary_inst_t word = 0;
     std::memcpy(&word, section->data() + byte_offset, sizeof(word));
-    return std::unique_ptr<Instruction>(decoder_->decode(&word));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder_, &word));
   }
 
   // Byte size of the original .text before instrumentation. The trampoline cave
@@ -1748,6 +1749,38 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
 //   trampoline_offset   = 8 + 4 (body)  = 12
 //   anchor at offset 4, return_target   = 4 + 4 = 8
 //==============================================================================
+
+TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
+  constexpr uint32_t kGfx1250Nop = 0xBF800000u;
+  constexpr uint32_t kGfx1250SetPcS30 = 0xBE80481Eu;
+  // Public LLVM gfx1251_asm_vop3p.s encoding for
+  // v_pk_add_nc_u64 v[4:7], v[8:11], v[12:15].
+  constexpr std::array<uint32_t, 2> kGfx1251OnlyInstruction{0xCC4C4004u, 0x1A021908u};
+
+  auto target = make_amdgpu_kernel_elf({kGfx1250Nop, kGfx1250Nop}, /*private_bytes=*/0,
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  auto probe = make_amdgpu_probe_elf(
+      "rj_gfx1251_probe",
+      {kGfx1251OnlyInstruction[0], kGfx1251OnlyInstruction[1], kGfx1250SetPcS30},
+      EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_TRUE(probe_obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA5);
+  InstrumentationPoint point;
+  point.anchor_offset = 4;
+  point.probe_obj = &probe_obj;
+  point.probe_symbol = "rj_gfx1251_probe";
+  instrumentor.add_point(point);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("concrete target"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {
   auto target = make_gfx950_kernel_elf_with_two_nops();

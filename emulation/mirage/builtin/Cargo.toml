@@ -1,6 +1,6 @@
 [package]
 name = "mirage_builtin"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [lib]
@@ -8,6 +8,15 @@ path = "src/lib.rs"
 
 [dependencies]
 mirage_core = { workspace = true }
+inventory = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true
