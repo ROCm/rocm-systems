@@ -1112,3 +1112,69 @@ shared owners, and all five emulated targets. Exact operating-point,
 diagnostic, descriptor, spill, and emitted-byte assertions remain the
 differential oracle. The cutover gate remains the complete nonphysical
 RocJitsu matrix.
+
+The cutover converged on one range-accounting mechanism without turning it
+into a mode-aware solver. `MoiScalarPlacementDomain` now owns ordinary-file
+bounds, target-owned architectural reservations, alignment, fixed and newly
+selected overlap, optional site availability, and the combined CDNA physical-
+VCC proof. Fallback order and semantic eligibility remain visible in the
+calling placement code. Inline, compact, fixed-stack, dynamic-stack, global,
+owner-component, dispatch, owner, and persistent-state searches all consume
+that domain rather than carrying private overlap predicates.
+
+Owner topology and immutable owner facts are also derived once. One connected-
+component builder serves transient and persistent placement. Resolved owner
+contexts carry their scalar tail, initialized entry extent, and conservative
+fixed/dynamic-stack classification. One availability snapshot carries both
+the complete site union and per-owner unions; ownerless shared contexts remain
+in the former rather than being accidentally projected through an owner map.
+One explicit transient-state inventory reserves accepted global and owner-
+local state for later persistent searches.
+
+The spill fallbacks now share the same transaction boundary. Global and
+component-local Inline spill placement use the domain for the saved window and
+router tuple. RDNA Inline and CDNA compact branch-only spill use one borrowed-
+window allocator, while their target/mode eligibility and the compact entry-
+PC preservation fact remain outside it. The owner-wide partial fallback was
+reduced to a domain transaction with explicit rollback, and scalar layout is
+validated through one orchestration entry point. The duplicate public range
+record and unused validation-reason taxonomy were deleted. The architecture-
+boundary test now requires the unified validator and forbids restoring the
+split validator APIs or a second scalar-range type.
+
+Two tempting deletions were rejected by differential evidence rather than
+papered over. Four heterogeneous CDNA tests proved that the owner-wide partial
+fallback has semantics not supplied by component-only placement, including
+rollback when dispatch relocation does not recover a component. Two RDNA4
+full-pressure Inline tests proved that object-wide spill/router coordination
+is distinct from owner-component spill placement. Both behaviors remain, but
+their range mechanics now use the common domain. A zero-width explicit EXEC
+window used only by an owner-entry prologue likewise remains a legal declared
+range while being ineligible for allocation.
+
+The production accounting from the committed Macro-slice 7 result through the
+completed scalar cutover is:
+
+| Signal | Macro-slice 7 | Macro-slice 8 result | Change |
+| --- | ---: | ---: | ---: |
+| ConSan production files | 312 | 312 | 0 |
+| Physical ConSan production lines | 98,060 | 97,525 | **-535** |
+| Nonblank ConSan production lines | 91,656 | 91,118 | **-538** |
+| ConSan implementation lines | 84,017 | 83,516 | **-501** |
+
+The production diff contains 692 added and 1,227 deleted physical lines. The
+501-line governing reduction clears the 500-line abort floor, although it
+falls 99 lines short of the 600-line conservative target. From the 88,015-line
+sixth-refactoring baseline, the campaign has now removed **4,499 net
+production implementation lines**, leaving 501 lines to the 5,000-line
+stretch milestone.
+
+The focused MOI matrix passed 827/827 tests. The complete nonphysical ConSan
+matrix passed 4,787/4,787 tests across all four modes and all five target
+architectures. The complete `-j16 -LE physical` RocJitsu gate then processed
+9,572 registered entries with zero failures, one disabled test, and nine
+expected environment-dependent skips. No physical gfx1201 test was run at
+this intermediate milestone. Macro-slice 8 therefore closes as an accepted
+subsystem convergence, but the sixth-refactoring campaign remains active and
+returns to a fresh whole-codebase search rather than extending scalar
+placement mechanically.
