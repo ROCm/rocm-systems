@@ -564,6 +564,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               " disabling out-of-order RQ", BY_ORDER);
       }
     }
+    IbCastReportMatchingScheme();
   }
 exit:
   if (ret == ncclSuccess) ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);

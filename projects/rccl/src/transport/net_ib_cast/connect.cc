@@ -99,6 +99,15 @@ bool IbCastByOrderRequested() {
   return IBCastUsedMatchingScheme == BY_ORDER;
 }
 
+void IbCastReportMatchingScheme()
+{
+  INFO(NCCL_NET, "NET/IB-CAST: collectives communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(0)? "ON":"OFF" , IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(0)));
+  INFO(NCCL_NET, "NET/IB-CAST: P2P communicators: CTS Offload: %s   RecvMatchingScheme: %d",
+       IbCastIsCtsOffloadEnabled(1)? "ON":"OFF" , IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(1)));
+}
+
+
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
