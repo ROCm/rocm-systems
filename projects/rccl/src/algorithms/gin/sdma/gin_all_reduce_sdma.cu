@@ -64,7 +64,7 @@ static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
 
   struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.lsaBarrierCount = kGinAllReduceLsaTwoShotMaxCtas;
-  // GinAlltoAllKernel: one world barrier + GIN signal per CTA.
+  // ginAllReduceTwoShotKernel: one world barrier + GIN signal per CTA.
   reqs.barrierCount = kGinAllReduceLsaCtas;
   reqs.ginSignalCount = kGinAllReduceLsaCtas;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
