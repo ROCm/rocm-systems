@@ -1534,7 +1534,7 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     const int rank = MPIEnvironment::world_rank;
     void* comm = (rank == 0) ? recvComm : sendComm;
