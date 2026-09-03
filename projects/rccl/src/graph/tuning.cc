@@ -684,12 +684,6 @@ static struct tuningModel tuning_model_6{
   },
 };
 
-/**
- * This tuning model is owned by gfx120x, borrowed by gfx110x
- * Collectives in these systems are primarily PCIe bandwidth 
- * driven, Hence sharing is harmless and performs better than 
- * default '0' for gfx110x.
- */
 static struct tuningModel tuning_model_7{
   .hwLat =
     {
@@ -1014,9 +1008,107 @@ static struct tuningModel tuning_model_9{
   },
 };
 
+/**
+ * This tuning model is owned by gfx110x, borrowed .hwLat,
+ * bwRatio, treeCorrectionFactor, ringCorrectionFactor from 
+ * tuning_model_0, channelThresholds from tuning_model_7 (gfx120x)
+ */
+static struct tuningModel tuning_model_10 {
+  .hwLat =
+    {
+      /* NVLINK */
+      {/* Tree (LL/LL128/Simple)*/ {0.8, 1.4, 2.5}, /* Ring (LL/LL128/Simple)*/ {0.8, 2.2, 3.6},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 0.8}, /* CollNetChain (Simple)*/ {0.0, 0.0, 1.4}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 3.6}},
+      /* PCI */
+      {/* Tree (LL/LL128/Simple)*/ {2.2, 2.2, 5.7}, /* Ring (LL/LL128/Simple)*/ {2.2, 2.2, 5.7},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 5.7}, /* CollNetChain (Simple)*/ {0.0, 0.0, 5.7}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 5.7}},
+      /* NET */
+      {/* Tree (LL/LL128/Simple)*/ {11.8, 18.2, 20.8}, /* Ring (LL/LL128/Simple)*/ {9.5, 19.8, 15.1},
+       /* CollNetDirect (Simple)*/ {0.0, 0.0, 11.8}, /* CollNetChain (Simple)*/ {0.0, 0.0, 18.2}, /* NVLS */ {0, 0, 0},
+       /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 15.1}},
+    },
+
+  .bwRatio =
+    {
+      /* 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.04, 0.22, 0.91}, /* Ring (LL/LL128/Simple)*/ {0.04, 0.34, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 0}},
+      /* more than 2 nodes */
+      {/* Tree (LL/LL128/Simple)*/ {0.04, 0.22, 0.95}, /* Ring (LL/LL128/Simple)*/ {0.04, 0.34, 1.00},
+       /* CollNetDirect (Simple)*/ {0.00, 0.00, 1.00}, /* CollNetChain (Simple)*/ {0.00, 0.00, 1.00},
+       /* NVLS */ {0, 0, 0}, /* NVLS Tree */ {0, 0, 0}, /* PAT */ {0, 0, 1.00}},
+    },
+
+  .treeCorrectionFactor =
+    {
+      {
+        0.1, 0.2, 0.1, 0.1, 0.9, 0.3, 0.4, 0.1, 0.2, 0.4, 0.2, 0.1, 0.3, 0.3,
+        0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.3, 1.0, 0.1, 0.5, 1.0, 0.9, 1.0, 1.0, 1.0, 0.3, 0.1, 0.4, 0.5,
+        0.5, 0.4, 0.4, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2,
+      },
+      {
+        0.2, 1.0, 0.1, 0.1, 0.7, 0.2, 0.4, 0.1, 0.1, 0.3, 0.4, 0.3, 0.6, 0.8,
+        1.0, 1.0, 1.0, 1.0, 0.9, 0.8, 0.8, 0.8, 0.8, 0.8, 0.9, 0.9, 0.9,
+      },
+    },
+
+  .ringCorrectionFactor =
+    {
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.2, 0.4, 0.2, 0.3, 0.5, 0.3, 0.1, 0.5, 0.5,
+        0.3, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
+      },
+      {
+        0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.3, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 0.8, 0.7, 0.5, 0.4, 0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3,
+      },
+      {
+        1.0, 0.8, 0.2, 1.0, 1.0, 0.3, 1.0, 0.1, 0.1, 0.2, 0.2, 0.1, 0.5, 1.0,
+        0.8, 0.8, 1.0, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+      },
+    },
+
+  .llProtoRanges = {{{RCCL_LL_LIMITS_UNDEFINED}}},
+  .channelThresholds = {
+    // For each collective, define minMax per-rank size threshold for 32,40,48,56,64 channels
+    /*ReduceScatter*/ {{512, 1024, 2},
+                       {1024, 2048, 4},
+                       {2048, 4096, 8},
+                       {4096, 65536, 16},
+                       {65536, 262144, 32},
+                       {262144, 524288, 40},
+                       {1, 1, 48},
+                       {524288, 1048576, 56},
+                       {1048576, 268435457, 64}},
+    /*AllGather*/
+    {{2048, 4096, 2},
+     {4096, 8192, 4},
+     {8192, 16384, 8},
+     {16384, 262144, 16},
+     {262144, 524288, 32},
+     {524288, 1048576, 40},
+     {1, 1, 48},
+     {1048576, 4194304, 56},
+     {4194304, 268435457, 64}},
+    /*AllReduce*/ 
+    {{1, 128, 1}, {128, 65536, 2}, {65536, 262144, 4}, {262144, 1048576, 8}, {1048576, 16777216, 14}, {16777216, 268435456, 28}, {268435456, 34359738368, 42}, {0, 0, 0}, {0, 0, 0}},
+    /*Reduce*/
+    {{1, 4096, 1}, {4096, 32768, 2}, {32768, 65536, 4}, {65536, 1048576, 8}, {1048576, 134217728, 16}, {134217728, 34359738368, 32}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+    /*Broadcast*/
+    {{1, 1024, 1}, {1024, 16384, 2}, {16384, 1048576, 4}, {1048576, 2097152, 8}, {2097152, 8388608, 16}, {8388608, 34359738368, 32}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+  },
+};
+
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0, tuning_model_1, tuning_model_2, tuning_model_3, tuning_model_4,
   tuning_model_5, tuning_model_6, tuning_model_7, tuning_model_8, tuning_model_9,
+  tuning_model_10,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -1648,12 +1740,12 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
     {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 5},  {"gfx950", 6},  {"gfx1030", 0},
-    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
+    {"gfx1100",10}, {"gfx1101", 10}, {"gfx1102", 0}, {"gfx1151", 9}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
     {"gfx906", 0},  {"gfx908", 0},  {"gfx90a", 0},  {"gfx942", 8},  {"gfx950", 6},
-    {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0}, {"gfx1200", 7}, {"gfx1201", 7}
+    {"gfx1030", 0}, {"gfx1100", 10}, {"gfx1102", 0}, {"gfx1200", 7}, {"gfx1201", 7}
   };
 
   if (gfxarch == nullptr) return 0;
