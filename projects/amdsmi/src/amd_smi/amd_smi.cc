@@ -1339,6 +1339,33 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
 #ifdef BUILD_CUID
 namespace {
 
+// A CUID library failure in amd-smi's vocabulary. The distinction that has to
+// survive the mapping is "this caller may not know" against "this node cannot
+// answer": they ask different things of an operator.
+amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
+  switch (status) {
+    case AMDCUID_STATUS_SUCCESS:
+      return AMDSMI_STATUS_SUCCESS;
+    case AMDCUID_STATUS_FILE_NOT_FOUND:
+      return AMDSMI_STATUS_FILE_NOT_FOUND;
+    case AMDCUID_STATUS_DEVICE_NOT_FOUND:
+      return AMDSMI_STATUS_NOT_FOUND;
+    case AMDCUID_STATUS_PERMISSION_DENIED:
+      return AMDSMI_STATUS_NO_PERM;
+    case AMDCUID_STATUS_INVALID_ARGUMENT:
+      return AMDSMI_STATUS_INVAL;
+    case AMDCUID_STATUS_UNSUPPORTED:
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    case AMDCUID_STATUS_INSUFFICIENT_SIZE:
+      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+    case AMDCUID_STATUS_FILE_ERROR:
+      return AMDSMI_STATUS_FILE_ERROR;
+    case AMDCUID_STATUS_INVALID_FORMAT:
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    default:
+      return AMDSMI_STATUS_API_FAILED;
+  }
+}
 // Resolve a processor handle to its CUID handle. The CUID library's handle *is*
 // the device's derived CUID.
 amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle, std::string& bdf_out,
@@ -1356,34 +1383,6 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle, std::s
     return cuid_status_to_amdsmi(cuid_status);
   }
   return AMDSMI_STATUS_SUCCESS;
-}
-
-// A CUID library failure in amd-smi's vocabulary. The distinction that has to
-// survive the mapping is "this caller may not know" against "this node cannot
-// answer": they ask different things of an operator.
-amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
-  switch (status) {
-    case AMDCUID_STATUS_SUCCESS:
-      return AMDSMI_STATUS_SUCCESS;
-    case AMDCUID_STATUS_FILE_NOT_FOUND:
-      return AMDSMI_STATUS_FILE_NOT_FOUND;
-    case AMDCUID_STATUS_DEVICE_NOT_FOUND:
-      return AMDSMI_STATUS_NOT_FOUND;
-    case AMDCUID_STATUS_PERMISSION_DENIED:
-      return AMDSMI_STATUS_NO_PERM;
-    case AMDCUID_STATUS_INVALID_ARGUMENT:
-      return AMDSMI_STATUS_INVAL;
-    case AMDCUID_STATUS_NOT_SUPPORTED:
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    case AMDCUID_STATUS_INSUFFICIENT_SIZE:
-      return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    case AMDCUID_STATUS_FILE_ERROR:
-      return AMDSMI_STATUS_FILE_ERROR;
-    case AMDCUID_STATUS_INVALID_FORMAT:
-      return AMDSMI_STATUS_UNEXPECTED_DATA;
-    default:
-      return AMDSMI_STATUS_API_FAILED;
-  }
 }
 
 // The CUID handle is resolved by BDF and every partition of one device shares a

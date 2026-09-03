@@ -1593,7 +1593,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-r", "--ras", action="store_true", required=False, help=ras_help
             )
             static_parser.add_argument(
-                "-U", "--cuid", action="store_true", required=False, help=cuid_help
+                "-Y", "--cuid", action="store_true", required=False, help=cuid_help
             )
             static_parser.add_argument(
                 "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
