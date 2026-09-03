@@ -52,7 +52,7 @@ class ParseGinConfigTest(unittest.TestCase):
                             "kind": "pytest",
                             "bin": "test_Broadcast.py",
                             "env": ["NCCL_CUMEM_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1"],
-                            "args": "-k gin_sdma -v",
+                            "args": "-k GinSdma -v",
                         }
                     ],
                 }
@@ -66,7 +66,7 @@ class ParseGinConfigTest(unittest.TestCase):
         self.assertEqual(
             parts[4], "-x NCCL_CUMEM_ENABLE=1 -x HSA_NO_SCRATCH_RECLAIM=1"
         )
-        self.assertEqual(parts[5], "-k gin_sdma -v")
+        self.assertEqual(parts[5], "-k GinSdma -v")
 
 
 def _write_json(data: dict) -> Path:

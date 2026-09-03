@@ -46,6 +46,7 @@ TEST(ParseSize, NegativeIsUnset) {
   EXPECT_EQ(parseSize("-1"), kUnset);
   EXPECT_EQ(parseSize("-4K"), kUnset);
   EXPECT_EQ(parseSize("-262144"), kUnset);
+  EXPECT_EQ(parseSize(" -4K"), kUnset);
 }
 
 TEST(ParseSize, PlainDecimal) {
@@ -279,8 +280,9 @@ TEST(BcastRingChunks, SizeAdaptivePerCtaClampedToRange) {
   EXPECT_EQ(bcastRingChunks(1u << 20, 128, kUnset), kBroadcastRingMinChunks);
   // Very large message over few CTAs -> capped at the maximum depth.
   EXPECT_EQ(bcastRingChunks(2ull << 30, 1, kUnset), kBroadcastRingMaxChunks);
-  // Mid message: ~64 KiB per chunk of this CTA's stripe.
-  // 128 MiB / 8 CTAs = 16 MiB stripe; 16 MiB / 64 KiB = 256 -> capped to max.
+  // Interior case: 64 MiB / 8 CTAs = 8 MiB stripe; 8 MiB / 64 KiB = 128 chunks.
+  EXPECT_EQ(bcastRingChunks(64ull << 20, 8, kUnset), 128);
+  // Mid message at max depth: 128 MiB / 8 CTAs = 16 MiB stripe -> 256 chunks.
   EXPECT_EQ(bcastRingChunks(128u << 20, 8, kUnset), kBroadcastRingMaxChunks);
 }
 
@@ -384,6 +386,21 @@ TEST(BcastPolicyCtas, LadderIsMonotonicAcrossTiers) {
     EXPECT_GE(g, 1);
     EXPECT_LE(g, pool);
   }
+}
+
+TEST(BcastPolicyCtas, SagEnvPinHonoredWithinPool) {
+  const int pool = bcastHybridPoolCtas(64);
+  const size_t thr = kBroadcastSdmaThresholdDefault;
+  EXPECT_EQ(bcastSagCtas(128ull << 20, 8, thr, 8, pool), 8);
+  EXPECT_EQ(bcastSagCtas(2ull << 20, 8, thr, 0, pool),
+            bcastSagCtas(2ull << 20, 8, thr, kBroadcastCtasUnset, pool));
+}
+
+TEST(BcastPoolCtas, HybridPoolAndRingPeak) {
+  EXPECT_EQ(bcastPoolCtas(16, 8), 16);
+  EXPECT_EQ(bcastPoolCtas(16, 128), 128);
+  EXPECT_GE(bcastPoolCtas(4, 64), 64);
+  EXPECT_GE(bcastPoolCtas(16, 128), bcastHybridPoolCtas(16));
 }
 
 TEST(BcastPolicyCtas, GridNeverExceedsPool) {
