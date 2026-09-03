@@ -47,6 +47,7 @@ public:
     ssize_t                              bytes_transferred_internal;
     std::shared_ptr<AsyncFailoverState>  failover{};
     bool                                 write_result{true};
+    bool                                 committed{true};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
