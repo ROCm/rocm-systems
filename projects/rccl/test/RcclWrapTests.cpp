@@ -1538,8 +1538,7 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         std::unordered_map<std::string, std::string> extraEnv;
     };
 
-    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8-node threshold (64MB)
-    const size_t FULL = HIERARCHICAL_TEMP_BUFFER_SIZE;     // 16-node threshold (128MB)
+    const size_t HALF = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 8/16-node threshold (64MB)
 
     std::vector<HierRSCase> testCases = {
         // nNodes < 8 --> disabled
@@ -1548,8 +1547,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"CommsNotInitialized",       16, false, 1ULL << 20, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 8 node size > 64MB --> disabled
         {"Disabled_8Nodes_AboveHalf", 8,  true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
-        // 16 node size > 128MB --> disabled
-        {"Disabled_16N_AboveFull",    16, true,  FULL + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 node size > 64MB --> disabled
+        {"Disabled_16N_AboveHalf",    16, true,  HALF + 1,   false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // disabled by default
         {"DisabledByDefault",          16, true,  1ULL << 20, false, {}},
         // env var forces off --> disabled
@@ -1559,9 +1558,9 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         // 8 nodes, exactly at threshold --> enabled
         {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
-        {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_16Nodes_BelowHalf", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
-        {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Enabled_16Nodes_AtHalf",    16, true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };
 
     // Base environment shared by every case
@@ -1693,8 +1692,8 @@ TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
 
     EXPECT_EQ(rcclHierarchicalTempBufferSize(8, false, true), HALF);
     EXPECT_EQ(rcclHierarchicalTempBufferSize(15, false, true), HALF);
-    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), FULL);
-    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), FULL);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(16, false, true), HALF);
+    EXPECT_EQ(rcclHierarchicalTempBufferSize(32, false, true), HALF);
 }
 
 TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
