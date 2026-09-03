@@ -1003,6 +1003,7 @@
     },
     "net_ib_multithread_independent": {
       "extends": "net_ib_multithread_base",
+      "timeout": 600,
       "tests": [
         {
           "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
@@ -1079,7 +1080,7 @@
     "net_ib_multithread_multiqp": {
       "extends": "net_ib_multithread_base",
       "env_variables": {
-        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_QPS_PER_CONNECTION": "8",
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
       },
       "tests": [

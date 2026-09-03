@@ -1260,6 +1260,57 @@ protected:
         return result;
     }
 
+    // Post a whole batch of equal-sized slots carved out of one registered buffer,
+    // then drain and verify every one. Both slot-pressure bodies did exactly this,
+    // differing only in how they labelled a failure, so the label is the parameter.
+    //
+    // Slot identity rests on the tag, not the payload: with the whole batch in
+    // flight at once a per-slot seed would alias into another worker's patterns
+    // modulo 256, so every slot carries this worker's single pattern and a payload
+    // arriving on the wrong connection is a mismatch rather than a clean pass.
+    ThreadResult WorkerBatchPostDrain(int rank, ConnectionPair& pair, void* buffer,
+                                      size_t slotSize, int slots, void* mhandle, int pattern,
+                                      const std::string& where) {
+        ThreadResult result;
+        std::vector<void*> requests(slots, nullptr);
+        for (int i = 0; i < slots; i++) {
+            char* slot = static_cast<char*>(buffer) + i * slotSize;
+            if (rank == 0) {
+                memset(slot, 0, slotSize);
+                result = WorkerPostRecv(pair.recvComm, slot, slotSize, i, mhandle, &requests[i]);
+            } else {
+                fillHostBufferWithPattern<uint8_t>(slot, slotSize, makeBytePattern(pattern));
+                // kStressTimeoutMs rather than the default slot wait: this post has
+                // to outlast the peer rank publishing all of its own slots under
+                // N-way contention on one NIC, which the drain below also budgets for.
+                result = WorkerPostSend(pair.sendComm, slot, slotSize, i, mhandle, &requests[i],
+                                        /*busyPoll=*/false, kStressTimeoutMs);
+            }
+            if (!result.ok) return result;
+        }
+        for (int i = 0; i < slots; i++) {
+            int sizes[1] = {0};
+            result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
+            if (!result.ok) return result;
+            if (rank != 0) continue;
+            const char* slot = static_cast<const char*>(buffer) + i * slotSize;
+            if (sizes[0] != static_cast<int>(slotSize)) {
+                result.ok = false;
+                result.msg = where + "slot " + std::to_string(i) + ": received "
+                             + std::to_string(sizes[0]) + " of " + std::to_string(slotSize)
+                             + " bytes";
+                return result;
+            }
+            if (!verifyHostBufferData<uint8_t>(slot, slotSize, makeBytePattern(pattern))) {
+                result.ok = false;
+                result.msg = where + "slot " + std::to_string(i)
+                             + ": payload is not this worker's pattern";
+                return result;
+            }
+        }
+        return result;
+    }
+
     // A worker's registered host buffer, kept alive as one movable value: the
     // allocation and its registration, released registration-first when this
     // dies because mhandleGuard is declared after bufferGuard. Returning it lets

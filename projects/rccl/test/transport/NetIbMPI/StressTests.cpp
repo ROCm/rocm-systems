@@ -104,6 +104,10 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 (void)threadIdx;
                 void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                // The unwind paths below release through this rather than calling
+                // deregMr directly, so a refusal while already failing still lands
+                // in g_workerDeregFailures instead of resurfacing later as a leak.
+                NetMHandleWorkerDeleter release(net_, comm);
                 void* mh1 = nullptr;
                 void* mh2 = nullptr;
                 ThreadResult result = WorkerRegister(comm, shared.get(), sharedSz,
@@ -115,12 +119,12 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
                 result = WorkerRegister(comm, shared.get(), sharedSz, NCCL_PTR_HOST, &mh2);
                 if (!result.ok) {
                     registerFailed.store(true, std::memory_order_release);
-                    DeregisterMemory(comm, mh1);
+                    release(mh1);
                     return result;
                 }
                 if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls, &registerFailed)) {
-                    DeregisterMemory(comm, mh1);
-                    DeregisterMemory(comm, mh2);
+                    release(mh1);
+                    release(mh2);
                     result.ok = false;
                     result.msg =
                         registerFailed.load(std::memory_order_acquire)
@@ -525,10 +529,34 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                     }
                 }
 
-                // The slow receiver guarantees the sender saw backpressure.
-                if (rank != 0 && nullCount == 0) {
-                    result.ok = false;
-                    result.msg = "expected at least one NULL request (FIFO backpressure)";
+                // The 50 ms receiver delay puts the sender under backpressure in
+                // practice and nullCount records it, but nothing orders the sender's
+                // attempt inside that window: a descheduled sender can find every
+                // slot already published and count no NULL at all, which is not a
+                // defect. Asserting on the count would fail a correct plugin under
+                // load, so the assertion rests on a case the scheduler cannot change.
+                //
+                // The loop is a strict ping-pong, so every slot the receiver
+                // published has been consumed by the time it ends, and it posts
+                // nothing further. One more isend therefore has no slot to take and
+                // must come back without a request -- which is the contract this test
+                // exists to check.
+                if (rank != 0) {
+                    void* probe = nullptr;
+                    if (PostSend(pair.sendComm, buffer, sz, /*tag=*/kThreadedMsgs, mh, &probe)
+                        != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "the backpressure probe send failed outright after "
+                                     + std::to_string(nullCount) + " NULL requests in the loop";
+                        return result;
+                    }
+                    if (probe != nullptr) {
+                        result.ok = false;
+                        result.msg = "isend handed back a request with no receive posted, so "
+                                     "FIFO backpressure is not being reported ("
+                                     + std::to_string(nullCount)
+                                     + " NULL requests during the loop)";
+                    }
                 }
                 return result;
             });
@@ -635,40 +663,9 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
                 // the failure this test is pointed at. Slot identity rests on the tag
                 // instead, which is what the plugin matches on.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
-                std::vector<void*> requests(kMaxReqsPerComm, nullptr);
-                for (int i = 0; i < kMaxReqsPerComm; i++) {
-                    char* slot = static_cast<char*>(buffer) + i * sz;
-                    if (rank == 0) {
-                        memset(slot, 0, sz);
-                        result = WorkerPostRecv(pair.recvComm, slot, sz, i, mh, &requests[i]);
-                    } else {
-                        fillHostBufferWithPattern<uint8_t>(slot, sz,
-                                                           makeBytePattern(workerPattern));
-                        result = WorkerPostSend(pair.sendComm, slot, sz, i, mh, &requests[i]);
-                    }
-                    if (!result.ok) return result;
-                }
-                for (int i = 0; i < kMaxReqsPerComm; i++) {
-                    int sizes[1] = {0};
-                    result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
-                    if (!result.ok) return result;
-                    if (rank != 0) continue;
-                    const char* slot = static_cast<char*>(buffer) + i * sz;
-                    if (sizes[0] != (int)sz) {
-                        result.ok = false;
-                        result.msg = "slot " + std::to_string(i) + " completed with size "
-                                     + std::to_string(sizes[0]) + " instead of "
-                                     + std::to_string(sz);
-                        return result;
-                    }
-                    if (!verifyHostBufferData<uint8_t>(slot, sz,
-                                                       makeBytePattern(workerPattern))) {
-                        result.ok = false;
-                        result.msg = "slot " + std::to_string(i)
-                                     + " holds another worker's payload";
-                        return result;
-                    }
-                }
+                result = WorkerBatchPostDrain(rank, pair, buffer, sz, kMaxReqsPerComm, mh,
+                                              workerPattern, /*where=*/"");
+                if (!result.ok) return result;
 
                 // Slots must be recycled: another round on the same comm.
                 for (int i = 0; i < 4; i++) {
@@ -2045,47 +2042,10 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
                 // per-slot seed would alias into another worker's patterns modulo 256.
                 const int workerPattern = WorkerSeed(threadIdx, 0);
                 for (int cycle = 0; cycle < kThreadedCycles; cycle++) {
-                    std::vector<void*> requests(kThreadedBatch, nullptr);
-                    for (int i = 0; i < kThreadedBatch; i++) {
-                        char* slot = static_cast<char*>(buffer) + i * sz;
-                        // Per-worker payloads, so a completion or a payload routed
-                        // to another worker's communicator is a data failure here.
-                        // Draining and checking only that requests complete would
-                        // pass on exactly the misrouting this test is pointed at,
-                        // and every worker posting the same bytes would hide it.
-                        if (rank == 0) {
-                            memset(slot, 0, sz);
-                            result = WorkerPostRecv(pair.recvComm, slot, sz, i, mh, &requests[i]);
-                        } else {
-                            fillHostBufferWithPattern<uint8_t>(slot, sz,
-                                                               makeBytePattern(workerPattern));
-                            result = WorkerPostSend(pair.sendComm, slot, sz, i, mh, &requests[i]);
-                        }
-                        if (!result.ok) return result;
-                    }
-                    for (int i = 0; i < kThreadedBatch; i++) {
-                        int sizes[1] = {0};
-                        result = WorkerWait(requests[i], sizes, kStressTimeoutMs);
-                        if (!result.ok) return result;
-                        if (rank != 0) continue;
-                        const char* slot = static_cast<const char*>(buffer) + i * sz;
-                        if (sizes[0] != static_cast<int>(sz)) {
-                            result.ok = false;
-                            result.msg = "cycle " + std::to_string(cycle) + " slot "
-                                         + std::to_string(i) + ": received "
-                                         + std::to_string(sizes[0]) + " of "
-                                         + std::to_string(sz) + " bytes";
-                            return result;
-                        }
-                        if (!verifyHostBufferData<uint8_t>(slot, sz,
-                                                          makeBytePattern(workerPattern))) {
-                            result.ok = false;
-                            result.msg = "cycle " + std::to_string(cycle) + " slot "
-                                         + std::to_string(i)
-                                         + ": payload is not this worker's pattern";
-                            return result;
-                        }
-                    }
+                    result = WorkerBatchPostDrain(rank, pair, buffer, sz, kThreadedBatch, mh,
+                                                  workerPattern,
+                                                  "cycle " + std::to_string(cycle) + " ");
+                    if (!result.ok) return result;
                 }
                 return result;
             });
