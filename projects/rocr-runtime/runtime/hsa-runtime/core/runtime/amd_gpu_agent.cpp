@@ -4127,7 +4127,16 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   size_t totalDeviceAllocSize = deviceAllocSize * pcs_data->num_xcc;
   pcs_data->per_xcc_device_stride = deviceAllocSize;  // Cache for trap handler update in Destroy
 
-  pcs_data->device_data_base = (pcs_sampling_data_t*)finegrain_allocator()(totalDeviceAllocSize, 0);
+  // On the CPU (large-BAR) drain path the host reads the trap handler's completion
+  // counter directly from VRAM, so the device buffer must be uncached to avoid reading a
+  // stale GL2 copy. The PM4 drain path invalidates GL2 on the command processor itself and
+  // keeps the buffer cached.
+  core::MemoryRegion::AllocateFlags pcs_alloc_flags = core::MemoryRegion::AllocateNoFlags;
+  if (!pcs_data->use_pm4_fallback) {
+    pcs_alloc_flags = core::MemoryRegion::AllocateUncached;
+  }
+  pcs_data->device_data_base =
+      (pcs_sampling_data_t*)finegrain_allocator()(totalDeviceAllocSize, pcs_alloc_flags);
   if (pcs_data->device_data_base == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   if (AMD::hsa_amd_agents_allow_access(2, agents_to_grant, NULL, pcs_data->device_data_base) !=
