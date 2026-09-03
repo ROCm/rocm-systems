@@ -124,6 +124,52 @@ add_library(rocprofiler-register::tests-rocp ALIAS rocprofiler-register-tests-ro
 
 add_subdirectory(runtime-soname)
 
+# Mock attachment library used to verify that an ambient configure symbol does not
+# suppress explicitly requested attachment support.
+add_library(rocprofiler-register-tests-implicit-attach SHARED)
+target_sources(rocprofiler-register-tests-implicit-attach
+               PRIVATE attachment-selection-fixture.cpp)
+target_compile_definitions(rocprofiler-register-tests-implicit-attach
+                           PRIVATE ROCPROFILER_REGISTER_TEST_ATTACH_FIXTURE=1)
+target_link_libraries(
+    rocprofiler-register-tests-implicit-attach
+    PRIVATE rocprofiler-register::rocprofiler-register rocprofiler-register::tests-common)
+set_target_properties(rocprofiler-register-tests-implicit-attach
+                      PROPERTIES OUTPUT_NAME rocprofiler-sdk-attach)
+
+# A preload can resolve rocprofiler_configure from one of its dependencies. Give both DSOs
+# the same basename to verify discovery compares loaded-object identity instead of
+# inferring ownership from the filename.
+add_library(rocprofiler-register-tests-preload-collision-dependency SHARED)
+target_sources(rocprofiler-register-tests-preload-collision-dependency
+               PRIVATE attachment-selection-fixture.cpp)
+target_compile_definitions(rocprofiler-register-tests-preload-collision-dependency
+                           PRIVATE ROCPROFILER_REGISTER_TEST_PRELOAD_DEPENDENCY=1)
+target_link_libraries(
+    rocprofiler-register-tests-preload-collision-dependency
+    PRIVATE rocprofiler-register::rocprofiler-register rocprofiler-register::tests-common)
+set_target_properties(
+    rocprofiler-register-tests-preload-collision-dependency
+    PROPERTIES OUTPUT_NAME rocprofiler-register-tests-preload-collision
+               NO_SONAME ON
+               LIBRARY_OUTPUT_DIRECTORY
+               "${CMAKE_CURRENT_BINARY_DIR}/preload-collision/dependency")
+
+add_library(rocprofiler-register-tests-preload-collision-wrapper SHARED)
+target_sources(rocprofiler-register-tests-preload-collision-wrapper
+               PRIVATE attachment-selection-fixture.cpp)
+target_compile_definitions(rocprofiler-register-tests-preload-collision-wrapper
+                           PRIVATE ROCPROFILER_REGISTER_TEST_PRELOAD_WRAPPER=1)
+target_link_libraries(
+    rocprofiler-register-tests-preload-collision-wrapper
+    PRIVATE rocprofiler-register::rocprofiler-register rocprofiler-register::tests-common
+            rocprofiler-register-tests-preload-collision-dependency)
+set_target_properties(
+    rocprofiler-register-tests-preload-collision-wrapper
+    PROPERTIES OUTPUT_NAME rocprofiler-register-tests-preload-collision
+               LIBRARY_OUTPUT_DIRECTORY
+               "${CMAKE_CURRENT_BINARY_DIR}/preload-collision/wrapper")
+
 #
 # test scenarios
 #
@@ -217,6 +263,140 @@ function(rocp_register_test_executable _NAME)
         "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
 endfunction()
+
+set(_ATTACH_REGISTER_PRELOAD_LIBS "librocprofiler-register.so")
+set(_ATTACH_TOOL_PRELOAD_LIBS "libgeneric-tool.so")
+set(_ATTACH_REGISTER_TOOL_PRELOAD_LIBS "librocprofiler-register.so" "libgeneric-tool.so")
+if(ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY)
+    list(PREPEND _ATTACH_REGISTER_PRELOAD_LIBS
+         "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
+    list(PREPEND _ATTACH_TOOL_PRELOAD_LIBS
+         "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
+    list(PREPEND _ATTACH_REGISTER_TOOL_PRELOAD_LIBS
+         "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
+endif()
+list(JOIN _ATTACH_REGISTER_PRELOAD_LIBS ":" _ATTACH_REGISTER_PRELOAD)
+list(JOIN _ATTACH_TOOL_PRELOAD_LIBS ":" _ATTACH_TOOL_PRELOAD)
+list(JOIN _ATTACH_REGISTER_TOOL_PRELOAD_LIBS ":" _ATTACH_REGISTER_TOOL_PRELOAD)
+
+# A framework-owned rocprofiler_configure symbol must not activate the SDK when
+# ROCP_TOOL_ATTACH explicitly requests attachment.
+add_executable(test-implicit-configure-attachment)
+target_sources(test-implicit-configure-attachment PRIVATE test-attachment-selection.cpp)
+target_link_libraries(
+    test-implicit-configure-attachment
+    PRIVATE rocprofiler-register::rocprofiler-register rocprofiler-register::tests-common
+            hsa-runtime::hsa-runtime)
+set_target_properties(test-implicit-configure-attachment PROPERTIES ENABLE_EXPORTS ON)
+add_dependencies(
+    test-implicit-configure-attachment rocprofiler-register-tests-implicit-attach
+    rocprofiler-register-tests-preload-collision-wrapper generic-tool rocprofiler)
+
+add_test(NAME test-implicit-configure-attachment
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-implicit-configure-attachment
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        "Test PASSED: attachment library selected over implicit configure symbol"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED"
+        LABELS
+        "attachment;insecure")
+
+add_test(NAME test-preloaded-register-with-ambient-symbol
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-preloaded-register-with-ambient-symbol
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=${_ATTACH_REGISTER_PRELOAD};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        "Test PASSED: attachment library selected over implicit configure symbol"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED"
+        LABELS
+        "attachment;insecure")
+
+set(_PRELOAD_COLLISION_LIBS
+    "$<TARGET_FILE:rocprofiler-register-tests-preload-collision-wrapper>")
+if(ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY)
+    list(PREPEND _PRELOAD_COLLISION_LIBS
+         "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
+endif()
+list(JOIN _PRELOAD_COLLISION_LIBS ":" _PRELOAD_COLLISION)
+
+add_test(NAME test-preloaded-dependency-configure-with-ambient-symbol
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-preloaded-dependency-configure-with-ambient-symbol
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=${_PRELOAD_COLLISION};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        "Test PASSED: attachment library selected over implicit configure symbol"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED"
+        LABELS
+        "attachment;insecure")
+
+add_test(NAME test-explicit-configure-with-attachment
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-explicit-configure-with-attachment
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_FORCE_LOAD=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa ::"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED|attachment library selected over implicit configure symbol"
+        LABELS
+        "attachment;insecure")
+
+add_test(NAME test-explicit-tool-libraries-with-attachment
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-explicit-tool-libraries-with-attachment
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCP_TOOL_ATTACH=1;ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa ::"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED|attachment library selected over implicit configure symbol"
+        LABELS
+        "attachment;insecure")
+
+add_test(NAME test-explicit-register-library-with-attachment
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-explicit-register-library-with-attachment
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LIBRARY=$<TARGET_SONAME_FILE:rocprofiler>;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa ::"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED|attachment library selected over implicit configure symbol"
+        LABELS
+        "attachment;insecure")
+
+add_test(NAME test-preloaded-configure-with-ambient-symbol
+         COMMAND $<TARGET_FILE:test-implicit-configure-attachment>)
+set_tests_properties(
+    test-preloaded-configure-with-ambient-symbol
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=${_ATTACH_TOOL_PRELOAD};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa ::"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED|attachment library selected over implicit configure symbol"
+        LABELS
+        "attachment;insecure")
 
 # serial
 rocp_register_test_executable(
@@ -546,6 +726,23 @@ target_sources(test-amdhip-hsart-roctx PRIVATE test-amdhip-hsart-roctx.cpp)
 target_link_libraries(
     test-amdhip-hsart-roctx PRIVATE rocprofiler-register::tests-common
                                     hsa-runtime::hsa-runtime amdhip::amdhip roctx::roctx)
+add_dependencies(test-amdhip-hsart-roctx generic-tool rocprofiler)
+
+add_test(
+    NAME test-preloaded-configure-with-attachment
+    COMMAND $<TARGET_FILE:test-amdhip-hsart-roctx>
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+set_tests_properties(
+    test-preloaded-configure-with-attachment
+    PROPERTIES
+        ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=${_ATTACH_REGISTER_TOOL_PRELOAD};ROCP_TOOL_ATTACH=1;ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+        PASS_REGULAR_EXPRESSION
+        ".rocprofiler.cpp. hsa ::"
+        FAIL_REGULAR_EXPRESSION
+        "attachment library selected over implicit configure symbol"
+        LABELS
+        "attachment;insecure")
 
 add_test(
     NAME test-force-rocprofiler-dlopen
