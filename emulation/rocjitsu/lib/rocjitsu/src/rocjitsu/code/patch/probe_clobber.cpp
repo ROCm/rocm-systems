@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/probe_clobber.h"
 
-#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"

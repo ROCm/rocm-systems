@@ -10,6 +10,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Added GPU-only multi-segment registration for symmetric memory windows, enabling contiguous VA ranges backed by multiple physical segments (single-node validated).
 * Added Elastic Buffer support for symmetric windows spanning device and host/`HOST_NUMA` memory segments (`NCCL_ELASTIC_BUFFER_REGISTER`, `NCCL_SYM_REUSE_SYSMEM_HANDLES`). Single-node path validated; multi-node registration remains limited pending HIP/HSA multi-segment DMA-BUF export support.
 * Added `install.sh --all_unrolls` (`-DBUILD_ALL_UNROLLS=ON`) to generate every unroll factor (1, 2, 4, 8, 16, 32) for the targeted GPU architecture(s), for measuring unroll factors that the default per-arch matrix does not build.
+* Added an experimental gfx1250 (MI450) Tensor Data Mover path for copy-shaped SIMPLE-protocol transfers. All collectives can reach it, but reduction collectives only qualify on slices that carry no reduction operation. Excluded from the default build: it requires `--enable-tdm-simple` at build time and `RCCL_TDM_SIMPLE_ENABLE=1` at runtime. Reduction into LDS staging buffers and double buffering are not yet implemented.
 
 ### Changed
 * Narrowed unroll-factor kernel generation: gfx1250 (MI450/MI455) local builds now generate only unroll 32, its runtime default, instead of 8/16/32, and a multi-arch build generates 1/2/4/32 instead of all six factors. This cuts the multi-arch kernel count by roughly a third; use `--all_unrolls` to build 8 and 16.
@@ -34,6 +35,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Compatibility with NCCL 2.29.7.
 * Compatibility with NCCL 2.28.9.
 * Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
+* Added accl-profiler profiler plugin for per-collective timing decomposition (`ACCL_PROFILER_OUTPUT_DIR`, `ACCL_PROFILER_MIN_SIZE_BYTES`).
 * Added `ncclBarrierSession` LSA validation for barrier sessions.
 * Added GPU-Initiated Networking (GIN) InfiniBand proxy backend for device-initiated collectives on RDMA-capable NICs. Select with `NCCL_GIN_TYPE=2` (proxy). Requires symmetric window registration and Linux kernel ≥ 6.8 for expected performance.
 * Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.

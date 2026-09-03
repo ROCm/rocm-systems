@@ -33,28 +33,25 @@ ncclResult_t ncclCommSetAsyncError(struct ncclComm* comm, ncclResult_t nextState
   return g_commSetAsyncError(comm, nextState);
 }
 
+ncclResult_t g_commEnsureReadyResult = ncclSuccess;
+ncclResult_t ncclCommEnsureReady(struct ncclComm*) { return g_commEnsureReadyResult; }
+
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;
+  g_commEnsureReadyResult = ncclSuccess;
 }
 
-// --- Comm / util globals (real in init.cc / utils.cc) ---------------------
+// --- Comm globals (real in init.cc) ---------------------------------------
 enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
 
-// Per-thread wait signal referenced by the inline MPSC-callback drain helpers
-// in utils.h.
-thread_local struct ncclThreadSignal ncclThreadSignalLocalInstance = {};
+// ncclThreadSignalLocalInstance is owned by src/misc/utils.cc, not init.cc, and
+// lives in utils_fakes.cc: the init and enqueue targets compile the real
+// utils.cc as an oracle TU, so a copy here is a duplicate symbol for them.
 
 // --- Pure instrumentation (no behaviour to assert) ------------------------
-namespace rccl {
-Recorder::Recorder() {}
-Recorder::~Recorder() {}
-Recorder& Recorder::instance() {
-  static Recorder inst;
-  return inst;
-}
-ncclResult_t Recorder::record(rcclCall_t, int) { return ncclSuccess; }  // group op
-void Recorder::record(int, ncclSimInfo_t*) {}                           // SimulatedGroupEnd
-}  // namespace rccl
+// rccl::Recorder lives in recorder_fakes.cc: it was defined identically here, in
+// init_fakes.cc and in enqueue_fakes.cc, differing only in which record()
+// overloads each target referenced.
 
 roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
 roctx_scoped_range_in::~roctx_scoped_range_in() {}
