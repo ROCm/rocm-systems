@@ -203,7 +203,9 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
         throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
     }
 
-    *bytes_transferred_p = 0;
+    if (!failover) {
+        *bytes_transferred_p = 0;
+    }
 
     if (*size_p == 0) {
         return;
@@ -215,13 +217,10 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
     auto op = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback(
         type, std::move(file), buffer, stream, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p));
     if (failover) {
-        // Seed the op as skipped: the gate arms it only if the primary failed in a
-        // fallback-eligible way. Otherwise every fallback callback and the memcpy
-        // kernel early out on the negative bytes_transferred_internal, and cleanup
-        // leaves the primary's result untouched.
         op->failover                   = std::move(failover);
         op->bytes_transferred_internal = -1;
         op->write_result               = false;
+        op->committed                  = false;
     }
     Context<AsyncMonitor>::get()->addOp(op);
     auto  op_dev_ptr     = op->devPtr();
@@ -267,6 +266,7 @@ Fallback::enqueueAsyncIo(IoType type, std::shared_ptr<IFile> file, std::shared_p
             }
             Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_advance, op.get());
         }
+        op->committed = true;
         Context<Hip>::get()->hipLaunchHostFunc(op->stream->getHipStream(), async_io_cleanup, op.get());
     }
     catch (...) {
