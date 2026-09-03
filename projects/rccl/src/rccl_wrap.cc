@@ -1467,10 +1467,27 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
+  // Window registration type is needed for both symSuppressedBySize and CE
+  // branch gates below; hoist the lookup here so it is computed once.
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  const bool agRecvRegistered = (winRegType == ncclSymSendRegRecvReg ||
+                                  winRegType == ncclSymSendNonregRecvReg);
+
   // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
   // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
-  const bool symEligible =
+  const bool agSymkRequested =
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+  // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
+  // (mirrors the AllReduce symSuppressedBySize pattern).
+  const size_t agSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllGather, /*graphMode=*/false);
+  const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
+                                     agSymMaxR2 > 0 && totalBytes > agSymMaxR2;
+  const bool symEligible = agSymkRequested && !agSymSuppressedBySize;
   // symEligible gates DDA below; the symk report itself is deferred until after
   // the CE-registered check so it loses to CE exactly as dispatch does
   // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
@@ -1569,13 +1586,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect
   // order. Live and query share these gates; taskAppend honors the decision.
   {
-    struct ncclDevrWindow* sendWin = nullptr;
-    struct ncclDevrWindow* recvWin = nullptr;
-    ncclDevrFindWindow(comm, sendbuff, &sendWin);
-    ncclDevrFindWindow(comm, recvbuff, &recvWin);
     const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-    ncclSymRegType_t winRegType;
-    NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     // Branch #2: CE via DDA scratch (unregistered windows).
     // Fires either via RCCL_FORCE_CE or automatically when totalBytes falls in the
     // [ceNonRegMin, ceNonRegMax] window from the arch table.  The scratch buffer
@@ -1715,7 +1726,19 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
                                datatype, recvcount, sendbuff, recvbuff);
   const size_t rsSymMinR2 = rcclSymMinR2Cap(comm, ncclFuncReduceScatter);
   const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
-  const bool symEligible = symkRequested && !symSuppressedByMin;
+  // Hoist window lookup for symSuppressedBySize (needed before DDA gate).
+  struct ncclDevrWindow* rsSendWin = nullptr;
+  struct ncclDevrWindow* rsRecvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &rsSendWin);
+  ncclDevrFindWindow(comm, recvbuff, &rsRecvWin);
+  ncclSymRegType_t rsWinRegType;
+  NCCLCHECK(ncclGetSymRegType(rsSendWin, rsRecvWin, &rsWinRegType));
+  const bool rsRecvRegistered = (rsWinRegType == ncclSymSendRegRecvReg ||
+                                  rsWinRegType == ncclSymSendNonregRecvReg);
+  const size_t rsSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncReduceScatter, /*graphMode=*/false);
+  const bool symSuppressedBySize = symkRequested && rsRecvRegistered &&
+                                   rsSymMaxR2 > 0 && totalBytes > rsSymMaxR2;
+  const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedBySize;
 
   // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
   // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
@@ -1885,9 +1908,27 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   }
 #endif
 
+  // Hoist window lookup for symSuppressedBySize (needed before DDA and CE gates).
+  struct ncclDevrWindow* a2aSendWin = nullptr;
+  struct ncclDevrWindow* a2aRecvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &a2aSendWin);
+  ncclDevrFindWindow(comm, recvbuff, &a2aRecvWin);
+  ncclSymRegType_t a2aWinRegType;
+  NCCLCHECK(ncclGetSymRegType(a2aSendWin, a2aRecvWin, &a2aWinRegType));
+  const bool a2aRecvRegistered = (a2aWinRegType == ncclSymSendRegRecvReg ||
+                                   a2aWinRegType == ncclSymSendNonregRecvReg);
+  // symMaxR2[A2A] withdraws symk above threshold so CE-registered can win.
+  const bool a2aSymkRequested =
+    isSymmetricKernelRequested(comm, ncclFuncAlltoAll, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
+  const size_t a2aSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAlltoAll, /*graphMode=*/false);
+  const bool a2aSymSuppressedBySize = a2aSymkRequested && a2aRecvRegistered &&
+                                      a2aSymMaxR2 > 0 && totalBytes > a2aSymMaxR2;
+  const bool a2aSymEligible = a2aSymkRequested && !a2aSymSuppressedBySize;
+
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
+  // Symmetric-registered buffers defer to the symmetric kernel; DDA gated on !a2aSymEligible.
   const size_t a2aDdaMax = rcclDdaVmmThreshold(comm, ncclFuncAlltoAll);
-  if (rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll))) {
+  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll))) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       const size_t llThresh   = rcclDdaLLThreshold(comm, ncclFuncAlltoAll);
       const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll);
@@ -1940,20 +1981,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
-    struct ncclDevrWindow* sendWin = nullptr;
-    struct ncclDevrWindow* recvWin = nullptr;
-    ncclSymRegType_t winRegType;
-    ncclDevrFindWindow(comm, sendbuff, &sendWin);
-    ncclDevrFindWindow(comm, recvbuff, &recvWin);
-    NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
-        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
+        ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
 
     // (5) Hierarchical CE: multi-node, non-LSA-spanning.
-    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, winRegType)) {
+    if (ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
       if (query) {
         int a, p, ch;

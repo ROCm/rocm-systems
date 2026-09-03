@@ -1060,11 +1060,11 @@ static struct tuningModel tuning_model_10{
       // RS ≤4MB total handled by DDA; Ring kicks in above. For Ring proto selection:
       // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 64MB/rank (=256MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 2097152, 1, 64}},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 4194304, 1, 64}},
       /*AllGather*/
       // LL  wins 0 – 1MB/rank (=4MB total); LL128 wins 1MB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 33554432, 1, 64}},
+       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 16777216, 1, 64}},
       /*AllReduce*/
       // LL  wins 0 – 128KB/rank (=512KB total); LL128 wins 128KB – 32MB/rank (=128MB total); Simple above.
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 131072,    1, 0},
@@ -1766,7 +1766,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather       -- 128 KiB (kernel hard cap kDdaLLAgMaxPerRankBytes)
     4ULL*1024*1024,         // [3] ReduceScatter   -- 1 MiB per-rank (= 4 MiB total at 4 ranks; DDA/LL wins up to 4M total)
-    8ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
+    16ULL*1024*1024,       // [4] AllReduce       -- 16 MiB (DDA/LL wins 0-16 MiB; matches ddaVmmMax ceiling)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -1805,7 +1805,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    0,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
+    64ULL*1024,,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
     0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
     1ULL*1024*1024,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
     0,                   // [5] SendRecv        -- not used
@@ -1879,9 +1879,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    4ULL*1024*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
-    0,                    // [3] ReduceScatter   -- no suppression (placeholder)
-    4ULL*1024*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
+    2ULL*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
+    1ULL*1024,                    // [3] ReduceScatter   -- no suppression (placeholder)
+    256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
@@ -1891,9 +1891,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2Graph = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    0,                    // [2] AllGather       -- keep symk in graph mode
-    0,                    // [3] ReduceScatter   -- keep symk in graph mode
-    1ULL*1024,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
+    2ULL*1024*1024,                    // [2] AllGather       -- keep symk in graph mode
+    1ULL*1024,                    // [3] ReduceScatter   -- keep symk in graph mode
+    256ULL*1024,            // [4] AllReduce       -- keep symk in graph mode (CE blocked)
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
