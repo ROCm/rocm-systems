@@ -24,6 +24,7 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -121,6 +122,10 @@ convert_arg_type(Tp&& val)
     if constexpr(std::is_same<data_type, dim3>::value)
     {
         return rocprofiler_dim3_t{val.x, val.y, val.z};
+    }
+    else if constexpr(std::is_same<data_type, const char*>::value)
+    {
+        return common::get_string_entry(val)->c_str();
     }
     else
     {
@@ -231,12 +236,14 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
-    auto  extended_record  = common::init_public_api_struct(buffered_ext_data_t{});
-    auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
-    auto* corr_id          = tracing::correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
-    auto  ancestor_corr_id = corr_id->ancestor;
+    auto  buffer_record   = common::init_public_api_struct(buffered_api_data_t{});
+    auto  extended_record = common::init_public_api_struct(buffered_ext_data_t{});
+    auto  tracer_data     = common::init_public_api_struct(callback_api_data_t{});
+    auto* corr_id         = tracing::correlation_service::construct(ref_count);
+    RETURN_UNTRACED_ON_NULL_CORRELATION_ID(
+        corr_id, RetT, exec(info_type::get_table_func(), std::forward<Args>(args)...));
+    auto internal_corr_id = corr_id->internal;
+    auto ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,

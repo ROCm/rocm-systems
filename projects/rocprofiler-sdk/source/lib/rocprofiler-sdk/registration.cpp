@@ -36,6 +36,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
@@ -49,6 +50,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -161,6 +163,23 @@ resolved_exists(std::string_view fname)
     return fs::exists(fname);
 }
 
+fs::path
+normalized_library_path(const fs::path& path)
+{
+    auto ec       = std::error_code{};
+    auto resolved = fs::weakly_canonical(path, ec);
+    return (ec) ? path.lexically_normal() : resolved;
+}
+
+bool
+same_library_path(const fs::path& lhs, const fs::path& rhs)
+{
+    auto ec = std::error_code{};
+    if(fs::equivalent(lhs, rhs, ec)) return true;
+
+    return normalized_library_path(lhs) == normalized_library_path(rhs);
+}
+
 auto
 get_this_library_path()
 {
@@ -230,16 +249,18 @@ set_rocprofiler_register_library()
             else
             {
                 // only report conflict if existing value differs from this library path
-                auto _existing_path = fs::path{_existing};
+                auto _existing_path     = fs::path{_existing};
+                auto _current_path      = fs::path{_this_library_path};
+                auto _existing_resolved = normalized_library_path(_existing_path);
                 ROCP_CI_LOG_IF(WARNING,
                                _existing_path.is_absolute() &&
-                                   fs::canonical(_existing_path).string() != _this_library_path)
+                                   !same_library_path(_existing_path, _current_path))
                     << fmt::format(
                            "ROCPROFILER_REGISTER_LIBRARY is already set to '{}' (resolves to "
                            "'{}'), not overriding with '{}'",
                            _existing,
-                           fs::canonical(_existing_path).string(),
-                           _this_library_path);
+                           _existing_resolved.string(),
+                           _current_path.string());
             }
         }
     });
@@ -905,6 +926,11 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
+            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // and buffer machinery next, so no callback-capable signal-less completion
+            // may survive. On timeout this abandons+disables signal-less process-wide
+            // (correct here -- the client is going away). No-op with the feature off.
+            kfd::signal_less_fence_completions();
             pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
@@ -957,6 +983,11 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
+                // F23 terminal fail-closed fence: the client finalizer frees the
+                // tool's callback/buffer machinery next, so no callback-capable
+                // signal-less completion may survive. On timeout abandon+disable
+                // process-wide. No-op with the feature off.
+                kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
@@ -1389,6 +1420,7 @@ rocprofiler_set_api_table(const char* name,
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
         rocprofiler::hip::graph::update_table(hip_runtime_api_table);
+        rocprofiler::hip::event::update_table(hip_runtime_api_table);
 
         rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
@@ -1527,6 +1559,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
+        rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->amd_ext_, lib_instance);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
@@ -1549,6 +1583,9 @@ rocprofiler_set_api_table(const char* name,
                             ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
                             ctx->dispatch_spm != nullptr ||
                             ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_GRAPH) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
+                            ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT) ||
                             (ctx->device_thread_trace != nullptr &&
                              ctx->device_thread_trace->requires_queue_intercept()));
                 });

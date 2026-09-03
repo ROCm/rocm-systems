@@ -26,7 +26,7 @@
 #ifndef LIBHSAKMT_H_INCLUDED
 #define LIBHSAKMT_H_INCLUDED
 
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "hsakmt/hsakmt.h"
 #include "kfdcontext.h"
 #include "hsakmt/hsakmtctx.h"
@@ -275,7 +275,6 @@ extern int hsakmt_open(const char *path, int flags);
 void hsakmt_clear_events_page(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx);
 void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx);
-void hsakmt_fmm_destroy_always_mapped_tracker(HsaKFDContext *ctx);
 void hsakmt_clear_process_doorbells(HsaKFDContext *ctx);
 uint32_t hsakmt_get_num_sysfs_nodes(HsaKFDContext *ctx);
 

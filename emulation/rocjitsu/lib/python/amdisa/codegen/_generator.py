@@ -5296,6 +5296,54 @@ class CodeGenerator:
               const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
               return {pair.lo, pair.hi};
             }
+
+            struct PkU64Pair {
+              uint64_t lo;
+              uint64_t hi;
+            };
+
+            struct PkU32Pair {
+              uint32_t lo;
+              uint32_t hi;
+            };
+
+            Operand packed_register_dword_offset(const Operand &operand, uint32_t dword_offset) {
+              Operand shifted = operand;
+              shifted.encoding_value_ += static_cast<int>(dword_offset);
+              return shifted;
+            }
+
+            PkU64Pair read_pk_u64_pair(const Operand &operand, const amdgpu::Wavefront &wf,
+                                       uint32_t lane) {
+              const uint64_t lo = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
+              const auto reg = operand.to_register_ref();
+              if (!reg || reg->cls != RegClass::VGPR)
+                return {lo, lo};
+
+              const Operand hi_operand = packed_register_dword_offset(operand, 2);
+              return {lo, amdgpu::RegisterAccess(wf).read_lane64(hi_operand, lane)};
+            }
+
+            PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
+                                       uint32_t lane) {
+              // GFX12+ single-SGPR-read operands read the first SGPR and replicate it.
+              // VGPRs and 64-bit special registers such as VCC and EXEC remain pairs.
+              const auto reg = operand.to_register_ref();
+              if (reg && reg->cls == RegClass::SGPR) {
+                const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
+                return {value, value};
+              }
+              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+              return {pair.lo, pair.hi};
+            }
+
+            void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
+                                   PkU64Pair value) {
+              const Operand hi_operand = packed_register_dword_offset(operand, 2);
+              amdgpu::RegisterAccess access(wf);
+              access.write_lane64(operand, lane, value.lo);
+              access.write_lane64(hi_operand, lane, value.hi);
+            }
             ''')
         model = (
             'namespace {\n\n'
@@ -6100,6 +6148,10 @@ class CodeGenerator:
                     mode_sensitive_f16_dst=not cls.startswith('scalar_'),
                     mask_result_writer=result_writer,
                 )
+                inst_fields = getattr(self, '_current_inst_fields', set())
+                integer_clamp_dtype = profile.integer_clamp_dtypes.get(inst.name)
+                if is_vop3 and 'clamp' in inst_fields and integer_clamp_dtype:
+                    lctx.integer_saturation_dtype = integer_clamp_dtype
                 if cls == 'vector_cmp':
                     # V_CMP writes a fresh wave mask initialized to zero, so false
                     # lanes can remain clear without emitting redundant bit clears.
@@ -6218,17 +6270,13 @@ class CodeGenerator:
                     ),
                     'V_MAD_I16': (
                         3,
-                        (
-                            'int32_t a = static_cast<int16_t>(s0);',
-                            'int32_t b = static_cast<int16_t>(s1);',
-                            'int32_t c = static_cast<int16_t>(s2);',
-                        ),
-                        'static_cast<uint32_t>(static_cast<uint16_t>(a * b + c))',
+                        (),
+                        'amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp)',
                     ),
                     'V_MAD_U16': (
                         3,
                         (),
-                        '(s0 * s1 + s2) & 0xffffu',
+                        'amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp)',
                     ),
                 }
                 if is_true16_vop3 and inst.name in true16_special_vop3_ops:
