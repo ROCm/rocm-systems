@@ -69,7 +69,7 @@ static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
 
 static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   // Order matters here:
-  // BY_ORDER -> ctsoffload (forced), or explicitly requested
+  // BY_ORDER -> ctsoffload (forced), or explicitly requested, or AINIC default
   // BY_ID -> failover / OOO RQ
   // BY_INDEX -> default or user requested
 
@@ -77,7 +77,7 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
     return BY_ORDER;
   }
 
-  if (IbCastByOrderRequested()) {
+  if (ncclParamIbCastReceiverSideMatchingScheme() == BY_ORDER) {
     return BY_ORDER;
   }
 
@@ -87,9 +87,18 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
 
   int64_t requested = ncclParamIbCastReceiverSideMatchingScheme();
   if (requested == -2) {
-    return BY_INDEX;
+    return IbCastAinicRoce ? BY_ORDER : BY_INDEX;
   }
   return requested;
+}
+
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
+static int IBCastUsedMatchingScheme = -1;
+bool IbCastByOrderRequested() {
+  if (IBCastUsedMatchingScheme < 0) {
+    IBCastUsedMatchingScheme = IbCastResolveRecvMatchingScheme(IbCastOffloadEnabled);
+  }
+  return IBCastUsedMatchingScheme == BY_ORDER;
 }
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
