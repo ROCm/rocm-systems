@@ -29,11 +29,13 @@ class AmdSmiExitCode(enum.IntEnum):
     runtime result from a device call and is honored as-is (exit code 2). The
     CLI's own COMMAND_NOT_SUPPORTED (199) is a parse-time decision (the command
     isn't available on this system, so no library call is made), so callers can
-    tell the two apart from the exit code alone.
+    tell the two apart from the exit code alone. DEVICE_INTERFACE_UNAVAILABLE
+    (200) covers the remaining case: the command is valid and the device is
+    present, but an interface the CLI reads directly yielded no usable data, so
+    there is no library status to fold.
 
     Reserved, not emitted by this CLI (via another PR; consolidating with original PR author.
     Free to re-assign if needed and remove this comment (and the below items).):
-      200 - retired "parameter not supported" slot (AmdSmiParameterNotSupportedException, removed)
       203 - retired; permission-denied surfaces the library NO_PERM (10) directly
       204 - reserved for a CLI platform/build mismatch
     """
@@ -54,6 +56,11 @@ class AmdSmiExitCode(enum.IntEnum):
     INVALID_PARAMETER_VALUE = (197, "invalid parameter value")
     MISSING_PARAMETER_VALUE = (198, "missing parameter value")
     COMMAND_NOT_SUPPORTED = (199, "command not available on this system (parse-time)")
+    # TEMPORARY. Sole user is the gpu_od fan OD_RANGE read, which parses sysfs
+    # directly because no API reports the range minimum. Retire this code once
+    # amdsmi_get_gpu_fan_speed_range() lands and that branch can record the
+    # library status instead (see the TODO in tests/python/common/common.py).
+    DEVICE_INTERFACE_UNAVAILABLE = (200, "required device interface unavailable to the CLI")
     REQUIRED_COMMAND = (201, "required command/target missing")
     INVALID_SUBCOMMAND = (202, "invalid subcommand")
     MIXED_DEVICE_ERRORS = (205, "aggregated: >1 recorded failure with DIFFERING codes")
