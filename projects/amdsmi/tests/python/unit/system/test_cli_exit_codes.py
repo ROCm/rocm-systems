@@ -6,8 +6,8 @@
 
 Ported from the pre-migration ``tests/python_unittest/unit_tests.py`` monolith
 into the ``tests/python/unit/`` tree. Exercises the record-then-finalize error
-model (``AmdSmiErrorCollector``, the library-status -> POSIX-byte fold, severity
-split, and the reserved 192-255 CLI-only code band) without needing a
+model (``AmdSmiErrorCollector``, the library-status -> POSIX-byte mapping, severity
+split, and the reserved 193-253 CLI-only code band) without needing a
 GPU/CPU/Core or elevated permissions.
 """
 
@@ -30,6 +30,7 @@ from common.common import (
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 if _CLI_DIR and _CLI_DIR not in sys.path:
     sys.path.append(_CLI_DIR)
+
 
 # Required for when the amdgpu driver is not loaded. We are required to
 # fake the initialization module so the set/reset gpu CLI commands can be ran.
@@ -118,9 +119,9 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
     Exercises the record-then-finalize error model in amdsmi_cli_exceptions
     without needing a GPU/CPU/Core or elevated permissions:
-    the AmdSmiErrorCollector, the library-status -> POSIX-byte fold, exit codes surfaced by
+    the AmdSmiErrorCollector, the library-status -> POSIX-byte mapping, exit codes surfaced by
     AmdSmiLibraryErrorException, the FATAL vs DEVICE severity split, and the
-    reserved 192-255 CLI-only code band.
+    reserved 193-253 CLI-only code band.
     """
 
     ExitCode: Any = cli_exc.AmdSmiExitCode if cli_exc is not None else None
@@ -177,26 +178,6 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         self.assertEqual(
             cli_exc.library_code_to_exit_code(amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR), 254
         )
-
-    def test_status_exits_zero_only_when_it_is_success(self):
-        # Walks the whole enum, not a sample. A nonzero status that is an exact
-        # multiple of 256 folds to 0 and would report a failed command as successful;
-        # SUCCESS itself must still exit 0.
-        for status in amdsmi.AmdSmiStatus:
-            exit_code = cli_exc.library_code_to_exit_code(status.value)
-            if status.value == 0:
-                self.assertEqual(exit_code, 0, f"{status.name} must exit 0")
-            else:
-                self.assertNotEqual(
-                    exit_code, 0, f"{status.name} ({status.value}) folds to a success exit code"
-                )
-
-    def test_status_that_folds_to_zero_never_exits_success(self):
-        # 256 and 512 are not real statuses; they stand in for any future multiple
-        # of 256, which the byte fold alone would turn into a success exit code.
-        # The enum-wide test above cannot catch this until such a status exists.
-        for status in (256, 512):
-            self.assertNotEqual(cli_exc.library_code_to_exit_code(status), 0)
 
     def test_library_exception_surfaces_status(self):
         exc = cli_exc.AmdSmiLibraryErrorException("", amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
@@ -287,6 +268,86 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                 int(code), band_end, f"{code.name} not in {band_start}-{band_end} band"
             )
 
+    def test_cli_band_sits_clear_of_signal_exit_codes(self):
+        """A signalled process is reported by the shell as 128 + signal number,
+        so 129-192 (SIGRTMAX = 64) can never be a CLI code: a caller reading 139 (128 + SIGSEGV(11))
+        has to be able to conclude a segfault and nothing else.
+        """
+        import signal
+
+        signal_exit_codes = {128 + int(sig) for sig in signal.Signals}
+        for code in self.ExitCode:
+            self.assertNotIn(
+                int(code),
+                signal_exit_codes,
+                f"{code.name} ({int(code)}) collides with a 128+signal exit code",
+            )
+        self.assertGreater(cli_exc.CLI_EXIT_CODE_BAND_START, max(signal_exit_codes))
+
+    def test_library_status_outside_its_range_reports_unrepresentable(self):
+        """The library owns 0-128 plus its two 32-bit sentinels. A value outside
+        that cannot survive being squeezed into a byte -- 256 would report
+        success and 300 would report status 44, a real but unrelated failure --
+        so it reports UNREPRESENTABLE_LIBRARY_STATUS rather than a plausible
+        wrong answer.
+        """
+        to_exit = cli_exc.library_code_to_exit_code
+        unrepresentable = int(self.ExitCode.UNREPRESENTABLE_LIBRARY_STATUS)
+
+        self.assertEqual(to_exit(cli_exc.AMDSMI_STATUS_MAP_ERROR), 254)
+        self.assertEqual(to_exit(cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR), 255)
+
+        # Every real status still passes through as itself; the rule change is
+        # only visible for values the library has never used.
+        sentinels = (cli_exc.AMDSMI_STATUS_MAP_ERROR, cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR)
+        real_statuses = [
+            abs(int(status))
+            for status in amdsmi_wrapper.amdsmi_status_t__enumvalues
+            if abs(int(status)) not in sentinels
+        ]
+        self.assertTrue(real_statuses, "walked zero library statuses -- the wrapper enum is empty")
+        for value in real_statuses:
+            self.assertEqual(to_exit(value), value)
+
+        # The boundary itself is not a defined status, so the loop cannot reach it.
+        self.assertEqual(to_exit(cli_exc.LIBRARY_STATUS_MAX), cli_exc.LIBRARY_STATUS_MAX)
+
+        for status in (
+            cli_exc.LIBRARY_STATUS_MAX + 1,  # first value past the library's half of the byte
+            cli_exc.CLI_EXIT_CODE_BAND_START - 1,  # last signal code, just below the CLI band
+            256,  # folds to 0 -- would report success
+            300,  # folds to 44 -- a real but unrelated status
+            0x10000,  # 32-bit, but not one of the known sentinels
+        ):
+            with self.subTest(status=status):
+                self.assertEqual(to_exit(status), unrepresentable)
+
+    def test_unrepresentable_library_status_stays_unreachable(self):
+        """UNREPRESENTABLE_LIBRARY_STATUS is a guard, not a code to emit.
+
+        Reaching it means the library outgrew the byte: every status past
+        LIBRARY_STATUS_MAX collapses onto that one value, so callers can no
+        longer tell those failures apart from the exit code. The guard keeps
+        that from being silent, and this keeps it from being permanent.
+
+        The passthrough loop above would also fail in that case, but only with a
+        bare value mismatch. This names the offending statuses and what to do.
+        """
+        sentinels = (cli_exc.AMDSMI_STATUS_MAP_ERROR, cli_exc.AMDSMI_STATUS_UNKNOWN_ERROR)
+        too_large = sorted(
+            f"{name} ({abs(int(code))})"
+            for code, name in amdsmi_wrapper.amdsmi_status_t__enumvalues.items()
+            if abs(int(code)) not in sentinels and abs(int(code)) > cli_exc.LIBRARY_STATUS_MAX
+        )
+        self.assertEqual(
+            too_large,
+            [],
+            f"these statuses no longer fit the library's 0-{cli_exc.LIBRARY_STATUS_MAX} range "
+            f"and would all report {int(self.ExitCode.UNREPRESENTABLE_LIBRARY_STATUS)}: "
+            f"{', '.join(too_large)}. The exit-code map in amdsmi_cli_exceptions needs "
+            "revisiting -- a byte can no longer carry a status one-to-one.",
+        )
+
     def test_exit_codes_are_unique(self):
         """Two members sharing a value is a silent bug: the second becomes an
         alias of the first and vanishes from enum iteration, so iterating
@@ -311,7 +372,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         or a CLI-invented code, never both.
 
         A band check alone isn't enough, because the two library sentinels also
-        land in the CLI's 192-255 band (AMDSMI_STATUS_MAP_ERROR -> 254,
+        land above the CLI's 193-253 band (AMDSMI_STATUS_MAP_ERROR -> 254,
         AMDSMI_STATUS_UNKNOWN_ERROR -> 255). So this asserts directly that no CLI
         code equals any exit code a library status can produce -- otherwise a
         caller couldn't tell a library failure from a CLI one by exit code alone.
@@ -624,7 +685,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
     # ---- rocm-smi compat exit-code contract ----
     def test_rocm_smi_compat_exit_codes_stay_binary(self):
         """The --rocm-smi shim intentionally follows rocm-smi's BINARY 0/1 exit
-        convention, not amd-smi's 192+ band. Guards against someone 'upgrading'
+        convention, not amd-smi's 193+ band. Guards against someone 'upgrading'
         it to AmdSmiExitCode values, which would break scripts targeting
         rocm-smi's contract.
         """
@@ -810,7 +871,6 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         for valid in ("sclk", "mclk", "pcie", "fclk", "socclk"):
             self.assertIn(valid, message)
 
-    # ---- direct-call guards: no target -> REQUIRED_COMMAND (201) ----
     def test_set_cpu_without_target_raises_required_command(self):
         """set_cpu with no CPU target raises AmdSmiRequiredCommandException
         (REQUIRED_COMMAND / 201). Reachable only via a direct/programmatic call
@@ -1665,7 +1725,7 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
     def test_unreadable_od_range_records_device_interface_unavailable(self):
         """OD_RANGE unreadable: parse_gpu_od_fan_range swallows the OSError and
         returns (None, None), so there is no library status -- the CLI records
-        DEVICE_INTERFACE_UNAVAILABLE (200) rather than exiting 0."""
+        DEVICE_INTERFACE_UNAVAILABLE rather than exiting 0."""
         collector = self._drive_fan(self.OD_RANGE_UNREADABLE, self.IN_RANGE_PERCENT)
         self.assertTrue(collector.has_errors)
         self.assertEqual(
