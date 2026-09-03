@@ -218,8 +218,12 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. cancel-in-progress stays false
-    # at the GitHub layer; submit_and_poll.sh already traps scancel if the
-    # step is killed. Role label only; see file header. Do not add self-hosted.
+    # at the GitHub layer so a superseded PR does not SIGKILL a running detect
+    # and leave the 4-node allocation. Detect submit/cancel lives in ROCm/cvs
+    # (submit_and_poll.sh on the branch linked in the file header); a bash trap
+    # does not run after GitHub SIGKILL (~2.5s), so that script's own cancel
+    # path is the follow-up, not this workflow. Role label only; see file
+    # header. Do not add self-hosted.
     concurrency:
       group: rccl-perf-gate-pinned-nodes
       cancel-in-progress: false
