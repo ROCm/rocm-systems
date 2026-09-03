@@ -1129,3 +1129,68 @@ one another so the next comparative read can distinguish a removable shared
 state machine from superficially similar instruction emission. The complete
 641-test nonphysical InlineShadow-focused selection passed across all five
 emulated targets; the updated architecture-boundary test also passes.
+
+### 14.11 Rejected decoded-program inventory collapse
+
+The post-locality read first compared the decoded CFG, owner-scope, liveness,
+descriptor, and maximum-register-reference setup in the SuperCollider LDS and
+FLAT lowerers. Those two paths do reconstruct the same pristine code object,
+but a common SuperCollider inventory would remove only roughly 200--300
+implementation lines. It would also have to reconcile two intentionally
+different scalability contracts: LDS restricts CFG construction to preflight
+candidates in very large generated objects, while FLAT needs the complete
+donor and owner view.
+
+Widening the comparison to all ConSan CFG construction did not improve the
+thesis. Program analysis can reuse its graph internally and already does so;
+MOI resource placement decodes the staged image including preapplied code
+ranges; final validation must independently decode pristine and replacement
+bytes; and SuperCollider has its own bounded large-object view. Persisting one
+graph across those epochs would make it stale or weaken the independent proof
+boundary. A small SuperCollider-only cache is still possible, but it does not
+meet the macro floor and is not accepted as a seventh-refactoring slice.
+
+### 14.12 Macro-slice 4: make SuperCollider an access-placement consumer
+
+The more important SuperCollider duplication is below its replay semantics,
+not above them. The native-LDS and FLAT implementations currently own two
+complete access-lowering transactions totaling 5,100 physical lines. Each
+rediscovers admitted sites and NOP caves, constructs scratch and owner plans,
+enumerates inline/local/appended/indirect/branch-only candidates, runs shared
+placement and relay machinery, grows descriptors, mutates the code object,
+and publishes patch and coverage products. The three MOI modes already use
+the common access-placement mechanisms for both native-LDS and FLAT sites;
+SuperCollider is the remaining mode that treats those mechanics as its own
+protocol.
+
+The replacement thesis is one SuperCollider access action consumed by that
+common placement boundary. SuperCollider continues to own replay, compare,
+runtime group gating, delay, mismatch evidence, and the exact guest-state
+preservation needed by those bodies. Common placement owns site admission,
+owner-complete resource qualification, cave and entry-island discovery,
+direct and indirect routing, transactional descriptor growth and mutation,
+patch publication, and rejection coverage. Native-LDS and FLAT remain typed
+body variants inside the mode rather than options in common code. Processing
+both origins in one transaction also removes the current sequential
+LDS-then-FLAT reservation and patch-budget reconciliation path.
+
+The hard prototype is a shared-function FLAT site requiring a far appended
+body and scalar/VGPR preservation on CDNA5, followed by a native-LDS site in
+the same object on RDNA4. Those cases exercise multi-owner liveness, runtime
+group gating, entry relocation, branch-only or indirect reachability,
+descriptor growth, and the combined-origin budget. Dense LDS generated-island
+routing and the large-object bounded-CFG case are attacked before simple
+inline placement is migrated.
+
+The complete old frontier is the 3,226-line LDS and 1,874-line FLAT bodies plus
+their special composition branch. The replacement is expected to retain
+roughly 1,800--2,500 lines of mode-owned body construction and special dense
+LDS routing, while deleting the duplicated planning, selection, commit, and
+publication lifecycles. The acceptance target is **at least 1,500 net
+production implementation lines removed**, with the normal 750-line abort
+floor. Abort and revert if the common boundary needs a SuperCollider switch,
+an origin-policy callback table, or a union of LDS/FLAT candidate state; if
+the existing MOI placement cannot express the dense and bounded variants
+without recreating a second transaction; if exact diagnostics or patch-budget
+selection change; or if independent final validation would need to trust the
+new producer.
