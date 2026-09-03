@@ -402,7 +402,7 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_objs,
                 kernel_symbols,
                 source_frames,
-                sys_info=sys_info,
+                sys_info,
             )
             self.add_code_object_isa(
                 workload_path,
@@ -629,7 +629,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
-        sys_info: Optional[dict[str, Any]],
+        sys_info: dict[str, Any],
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload.
 
@@ -645,9 +645,7 @@ class db_analysis(OmniAnalyze_Base):
         for tool_data in tool_data_records:
             pid: int = tool_data["metadata"]["pid"]
 
-            for code_object in load_aggregated_pc_sampling(
-                tool_data, sys_info=sys_info
-            ):
+            for code_object in load_aggregated_pc_sampling(tool_data, sys_info):
                 for line in code_object.instruction_lines:
                     kernel = kernel_objs.get(line.kernel_name)
                     if kernel is None:

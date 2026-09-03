@@ -1154,7 +1154,7 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
         {},
         {},
         make_source_frame_collector(workload),
-        sys_info=None,
+        sys_info={},
     )
     db_session.commit()
 
@@ -1185,7 +1185,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
         kernel_objs,
         {},
         make_source_frame_collector(workload),
-        sys_info=None,
+        sys_info={},
     )
     db_session.commit()
 
@@ -1305,7 +1305,7 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
         kernel_objs,
         {},
         make_source_frame_collector(workload),
-        sys_info=None,
+        sys_info={},
     )
     db_session.commit()
 
@@ -2337,7 +2337,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             kernel_objs,
             kernel_symbols,
             source_frames,
-            sys_info=None,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2450,7 +2450,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             kernel_objs,
             kernel_symbols,
             source_frames,
-            sys_info=None,
+            sys_info={},
         )
         assert code_object_stores == {}
         analyzer.add_code_object_isa(
@@ -2526,7 +2526,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
             kernel_objs,
             kernel_symbols,
             source_frames,
-            sys_info=None,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2618,7 +2618,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             kernel_objs,
             kernel_symbols,
             source_frames,
-            sys_info=None,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2766,7 +2766,7 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
         kernel_objs,
         {},
         make_source_frame_collector(workload),
-        sys_info=None,
+        sys_info={},
     )
     db_session.commit()
 

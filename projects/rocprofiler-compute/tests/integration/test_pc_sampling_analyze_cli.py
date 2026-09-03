@@ -213,7 +213,7 @@ def test_pc_sampling_analyze_database_output(
         # (0xFFFFFFFFFFFFFFFF) against sysinfo wave_size 64, so each line is
         # exactly 100% active. This pins the popcount against mask precision loss.
         assert (db_wave_metrics["active_thread_percent"] == 100.0).all()
-        # wave_cnt varies per sample (8..32) against max_waves_per_cu 32, so
+        # wave_cnt varies per sample (4..32) against max_waves_per_cu 32, so
         # occupancy differs per line; assert only that it is populated and sane.
         assert db_wave_metrics["wave_occupancy_percent"].notna().all()
         assert (
