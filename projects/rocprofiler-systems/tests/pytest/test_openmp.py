@@ -213,6 +213,12 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+@pytest.fixture
+def openmp_cg_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for OpenMP CG tests."""
+    return [validation_rules_dir / "openmp-cg" / "sdk-metrics-rules.json"]
+
+
 # ============================================================================
 # Test Class: OpenMP CG Tests
 # ============================================================================
@@ -247,6 +253,9 @@ class TestOpenMPCG(RocprofsysTest):
             binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(result)
+
+        if mode == "sampling":
+            self.assert_rocpd(result, rules_files=openmp_cg_rules)
 
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
