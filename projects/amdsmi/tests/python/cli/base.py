@@ -13,6 +13,7 @@ files each subclass ``TestCliBase`` and add their own test_* methods.
 
 import json
 import os
+import re
 import stat
 import unittest
 
@@ -251,8 +252,6 @@ class TestCliBase(unittest.TestCase):
                     item_index = 0
 
                 sub_found = False
-                # An uppercase token after the flag is an argparse metavar, so the
-                # flag needs a value and must never be emitted on its own.
                 requires_value = False
                 if item_index >= 0:
                     if items[item_index][-1:] == ",":
@@ -292,9 +291,14 @@ class TestCliBase(unittest.TestCase):
                         if items[item_index + 1][0:1] == self.openBracket:
                             items[item_index + 1] = items[item_index + 1][1:]
                         sub_arg = items[item_index + 1]
-                        requires_value = sub_arg.isupper()
+                        # A single space before the next token is a real argparse metavar;
+                        # argparse pads 2+ spaces before the help-text column when there is none.
+                        gap = re.search(
+                            r"(?:^|\s)" + re.escape(items[item_index]) + r",?( +)\S", line
+                        )
+                        requires_value = bool(gap) and len(gap.group(1)) == 1
                         # Expand out sub_args
-                        if sub_arg.isupper() and sub_arg in self.sub_args:
+                        if requires_value and sub_arg in self.sub_args:
                             sub_found = True
                             for item in self.sub_args[sub_arg]:
                                 options.append(f"{items[item_index]} {item}")
