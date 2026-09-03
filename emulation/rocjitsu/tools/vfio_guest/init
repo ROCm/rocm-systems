@@ -1,0 +1,106 @@
+#!/bin/busybox sh
+
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+set -eu
+
+/bin/busybox --install -s /bin
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+echo "guest: kernel $(uname -r)"
+if grep -qw hypervisor /proc/cpuinfo; then
+  echo "guest: cpuid hypervisor bit: set"
+else
+  echo "guest: FATAL: cpuid hypervisor bit: clear"
+  poweroff -f
+  exit 1
+fi
+
+amdgpu_args=""
+workload="none"
+for word in $(cat /proc/cmdline); do
+  case "${word}" in
+  amdgpu.*) amdgpu_args="${amdgpu_args} ${word#amdgpu.}" ;;
+  rocjitsu.workload=*) workload="${word#rocjitsu.workload=}" ;;
+  esac
+done
+
+while read -r module; do
+  case "${module}" in
+  "" | \#*) continue ;;
+  amdgpu.ko)
+    insmod "/modules/${module}" ${amdgpu_args} ||
+      echo "guest: module load failed: ${module}"
+    ;;
+  *)
+    insmod "/modules/${module}" || echo "guest: module load failed: ${module}"
+    ;;
+  esac
+done </modules/load-order
+
+echo "guest: === module parameters ==="
+for parameter in discovery emu_mode fw_load_type gpu_recovery ip_block_mask vm_update_mode vramlimit; do
+  value="$(cat "/sys/module/amdgpu/parameters/${parameter}" 2>/dev/null || echo unset)"
+  echo "guest: amdgpu.${parameter}=${value}"
+done
+
+echo "guest: === PCI binding ==="
+for device in /sys/bus/pci/devices/*; do
+  [ -f "${device}/vendor" ] || continue
+  vendor="$(cat "${device}/vendor")"
+  [ "${vendor}" = "0x1002" ] || continue
+  echo "guest: device=$(basename "${device}") vendor=${vendor} device_id=$(cat "${device}/device")"
+  if [ -L "${device}/driver" ]; then
+    echo "guest: driver=$(basename "$(readlink "${device}/driver")")"
+  else
+    echo "guest: driver=none"
+  fi
+done
+
+echo "guest: === firmware request inventory ==="
+dmesg | grep -i "firmware" || true
+
+echo "guest: === KFD ==="
+if [ -e /dev/kfd ]; then
+  echo "guest: /dev/kfd present"
+else
+  echo "guest: /dev/kfd absent"
+fi
+
+echo "guest: === workload ==="
+case "${workload}" in
+none)
+  echo "guest: workload=disabled"
+  ;;
+sgemm)
+  if [ ! -e /dev/kfd ]; then
+    echo "guest: FATAL: SGEMM requested without /dev/kfd"
+    poweroff -f
+    exit 1
+  fi
+  if [ ! -x /opt/rocjitsu/bin/m2-rocblas-sgemm ]; then
+    echo "guest: FATAL: SGEMM workload is missing"
+    poweroff -f
+    exit 1
+  fi
+  export LD_LIBRARY_PATH="/opt/rocm/core-7.14/lib:/opt/rocm/core-7.14/lib/llvm/lib:/opt/rocm/core-7.14/lib/rocm_sysdeps/lib"
+  export ROCBLAS_USE_HIPBLASLT="0"
+  export ROCBLAS_TENSILE_LIBPATH="/opt/rocm/core-7.14/lib/rocblas/library"
+  if ! /opt/rocjitsu/bin/m2-rocblas-sgemm; then
+    echo "guest: FATAL: SGEMM workload failed"
+    poweroff -f
+    exit 1
+  fi
+  ;;
+*)
+  echo "guest: FATAL: unknown workload ${workload}"
+  poweroff -f
+  exit 1
+  ;;
+esac
+
+echo "guest: done"
+poweroff -f

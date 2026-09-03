@@ -373,6 +373,42 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
+add_test(
+    NAME VfioGuestProvenanceUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_provenance.py -v
+)
+add_test(
+    NAME VfioGuestImageUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_image.py -v
+)
+add_test(
+    NAME VfioGuestFirmwareUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_firmware.py -v
+)
+add_test(
+    NAME VfioGuestLockUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_lock.py -v
+)
+add_test(
+    NAME VfioGuestRunUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_run.py -v
+)
+add_test(
+    NAME VfioGuestSgemmInventoryUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_vfio_guest_sgemm_inventory.py -v
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLUGIN_LOADER_FIXTURE_DIR
@@ -417,13 +453,9 @@ add_executable(
     rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
-    gpu_vm_translation_test.cpp
-    gpu_vm_service_test.cpp
     gpu_vm_pipeline_test.cpp
-    completion_tracker_test.cpp
-    pm4_bootstrap_executor_test.cpp
-    sdma_executor_test.cpp
-    sdma_queue_runner_test.cpp
+    gpu_vm_service_test.cpp
+    gpu_vm_translation_test.cpp
     config_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -437,6 +469,10 @@ add_executable(
     cdna5_execution_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
+    completion_tracker_test.cpp
+    pm4_bootstrap_executor_test.cpp
+    sdma_executor_test.cpp
+    sdma_queue_runner_test.cpp
     cdna5_tensor_dma_test.cpp
     lds_test.cpp
     l2_cache_test.cpp

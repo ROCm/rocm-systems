@@ -13,7 +13,8 @@ From bottom up:
 ├─────────────────────────────────────────────┤  └──────────────────────────┘
 │  VM Layer (vm/amdgpu/)                      │
 │    GPU SOC and component blocks             │
-│    GpuMemory (VMID page tables)             │
+│    GpuVm (address spaces and translation)   │
+│    GpuMemory (legacy-compatible backing)    │
 │    Cache and memory models                  │
 ├─────────────────────────────────────────────┤
 │  ISA Layer (isa/)                           │
@@ -56,16 +57,71 @@ Models the GPU hardware pipeline:
   modes.
 - **CompletionTracker** — Tracks per-dispatch workgroup retirement.
   Fires completion signals in submission order. Writes queue-inactive
-  signal on HQD idle.
+  signal on HQD idle. Guest-visible publication is journaled across transient
+  backing stalls; only the affected queue pauses while independent queues keep
+  fetching and dispatching.
 - **ShaderEngine / XCD / IOD** — Hierarchical GPU topology matching
   real hardware (shader engines contain CU arrays, XCDs contain SEs).
-- **GpuMemory** — VRAM model with per-process VMID page tables.
-  Supports passthrough mode (GPU VA == host VA) and daemon mode
-  (shared memfd mappings).
+- **GpuVm** — Frontend-neutral owner of address-space identity, lifetime,
+  translation policy, permissions, invalidation epochs, and typed access
+  outcomes. Legacy KFD/interposer and PCI/VFIO queues retain the same
+  generation-checked address-space handles and feed the same CP, SDMA, and CU
+  execution models.
+- **GpuMemory** — Backing storage and legacy compatibility implementation. It
+  retains the older per-VMID mappings, passthrough mode, and shared-memfd
+  behavior for the interposer path, but does not own PCI/VFIO routing or the
+  GFX12 page-table policy.
+- **SdmaQueueRunner** — Transport-neutral owner of one SDMA root ring's device
+  cursor, immutable VM snapshot, wrapped fetch progress, resumable packet
+  executor, retirement publication, and terminal state. Both the legacy CP and
+  PCI SDMA block are thin adapters over this runner; neither owns a second SDMA
+  fetch or retry state machine.
+- **PCI/VFIO adapters** — PCI configuration, BAR/MMIO, DMA, interrupts, and
+  transport-session lifetime. These adapt accesses into `GpuVm` and the shared
+  block models; they do not contain alternate CP, MES, SDMA, or shader models.
 - **Cache hierarchy** — L1 vector cache, L1 scalar cache, L2 cache,
   memory-side cache. MTYPE-aware (UC, CC, RW).
 - **Execution plugins** — Pluggable hooks for race detection, kernel
   logging, and more. See [plugins.md](plugins.md).
+
+### PCI/VFIO control-path boundary
+
+`VfioDeviceHost` owns only the libvfio-user transport boundary. It translates
+VFIO callbacks into PCI configuration, BAR/MMIO, DMA, and interrupt operations;
+it does not implement GPU queues or execution engines. A `PciTransportSession`
+adds a generation-checked lifetime around the active DMA/IRQ endpoints, and
+operation leases keep an in-flight callback bound to the session generation it
+captured even if the transport is detached or replaced concurrently.
+
+`GpuPciDevice` owns the device-facing control plane. MMIO writes enqueue
+deferred work into a FIFO, and reset advances the device epoch so stale work is
+discarded rather than applied to a replacement session. Register-block
+observers publish queue changes through `QueueService`; command-processor queue
+registration is delivered through the CP inbox on the CP's execution context.
+Observer callbacks, reset, and deferred-work draining must not run while the
+libvfio-user `vfu_mutex_` is held, because those paths can re-enter transport or
+simulation services.
+
+The PCI models are adapters over the shared `GpuVm`, `CommandProcessor`, MES,
+SDMA, and CU objects. They must not grow alternate CP/MES/SDMA execution
+backends; new PCI-visible behavior should terminate at the narrow MMIO, DMA,
+interrupt, address-space, or queue-service interface owned by the corresponding
+core model.
+
+The firmware-free non-AQL compute startup ring follows the same boundary. MES
+selects its `GpuVm` address space and adapts the one permitted MMIO write, while
+the transport-neutral `Pm4BootstrapExecutor` owns ring traversal and the exact
+NOP/SET_UCONFIG_REG packet subset. It is deliberately not a general PM4 backend;
+normal compute execution remains on the shared command processor.
+
+SDMA follows the same composition rule. MMIO and MES decode queue configuration
+and doorbells, while `SdmaQueueRunner` owns root-ring traversal and delegates
+packet semantics to `SdmaExecutor`. A service attempt retains one `GpuVmAccess`
+through fetch, execution, and read-pointer publication. Temporary backing or
+transport unavailability resumes that exact state; malformed requests and
+permanent faults terminate the queue without replaying already-retired packet
+effects. The legacy CP uses the same runner and differs only in how it obtains
+the producer cursor and schedules retries.
 
 ### ISA — Instruction Set Architecture (`isa/`)
 

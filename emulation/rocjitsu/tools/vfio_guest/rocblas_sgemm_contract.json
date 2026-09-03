@@ -1,0 +1,133 @@
+{
+  "artifacts": {
+    "code_object": {
+      "abi_version": 4,
+      "guest_path": "opt/rocm/core-7.14/lib/rocblas/library/gfx1250/TensileLibrary_Type_SS_Contraction_l_Ailk_Bljk_Cijk_Dijk_fallback_gfx1250.hsaco",
+      "processor": "gfx1250",
+      "sha256": "b4d076e1bd71e0901329957d195413663f381cfb66e51571545e52f1d9fff00c",
+      "silicon_revision": "B0",
+      "target": "amdgcn-amd-amdhsa--gfx1250"
+    },
+    "lazy_metadata": {
+      "guest_path": "opt/rocm/core-7.14/lib/rocblas/library/gfx1250/TensileLibrary_lazy_gfx1250.dat",
+      "sha256": "e332b01a2d075bbd211143fca10d8ce9f1bd252c587c72fd3ffdfe42c28a1af6"
+    },
+    "metadata": {
+      "guest_path": "opt/rocm/core-7.14/lib/rocblas/library/gfx1250/TensileLibrary_Type_SS_Contraction_l_Ailk_Bljk_Cijk_Dijk_fallback_gfx1250.dat",
+      "sha256": "e19b435fd6937aefcb9f85d698e5135fc0f0a5d7870915f39267309e4354cbfa"
+    }
+  },
+  "feature_tasks": {
+    "aql_dispatch_and_kernarg": "Stage J establishes the ROCr queue, signal, executable, and kernarg contract.",
+    "buffer_memory_and_coherency": "Stage E implements GPUVM and physical memory; Stage K validates the selected kernel's cache flags.",
+    "control_flow_and_waits": "Stage K closes any remaining gfx1250 scalar/vector control-flow and wait-state ISA gaps.",
+    "lds_and_barriers": "Stage K validates LDS allocation, ds_* instructions, barriers, and workgroup scheduling.",
+    "packed_valu": "Stage K validates the selected gfx1250 packed FP32 VALU instructions and dual-issue forms.",
+    "private_segment": "Stage J provides the dispatch ABI; Stage K must model scratch only if the selected metadata reports a nonzero private segment."
+  },
+  "guest_init": {
+    "guest_path": "init",
+    "sha256": "9851082e55ea6581b732fce4b79a79fe4a98ff0657fe36e562c4055af9790ec8"
+  },
+  "packages": [
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-base7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-base7.14",
+      "sha256": "66e5e1a6d17d06b1ede88b6067d2e4e0c1abbae8795380dd823e22ec0fbf4745",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-blas-host7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-blas-host7.14",
+      "sha256": "43a6bf7f035ae5db4a77a1aa2ead2672f951a1ae8c0b3806423bfae265d6cb04",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-blas7.14-gfx1250_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-blas7.14-gfx1250",
+      "sha256": "f292da789f062296022dfd8a5ac05c9acab4d5ac31e76983543d15b453c50e7e",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-llvm7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-llvm7.14",
+      "sha256": "5c623fca2226b82a8f75868b641e8c4f01c65e57c0b9de6f7e7209eba9b9b45a",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-profiler-base7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-profiler-base7.14",
+      "sha256": "596630e3e359a46286bf9641ff44c93565a75db4cf2ec5df3f48c4720f15cd58",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-runtime7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-runtime7.14",
+      "sha256": "b8f3b3b874b97ad60b9f9d8b8f6519dbeff164ebc94a871f21c5b6f2e1f8203f",
+      "version": "7.14.0~pre3-29052710811"
+    },
+    {
+      "architecture": "amd64",
+      "filename": "amdrocm-sysdeps7.14_7.14.0~pre3-29052710811_amd64.deb",
+      "name": "amdrocm-sysdeps7.14",
+      "sha256": "64cf9d7cba3d84196b1ef4c5bb4360b4a18f71ebb8ca5156b5f4c51f53da2a1b",
+      "version": "7.14.0~pre3-29052710811"
+    }
+  ],
+  "runtime": {
+    "backend": "Tensile",
+    "environment": {
+      "ROCBLAS_TENSILE_LIBPATH": "/opt/rocm/core-7.14/lib/rocblas/library",
+      "ROCBLAS_USE_HIPBLASLT": "0"
+    }
+  },
+  "schema_version": 2,
+  "selection": {
+    "expected_solution_indices": [
+      363,
+      364
+    ],
+    "expected_symbol": "Cijk_Ailk_Bljk_SB_GB_MT128x64x8_SN_AMAS0_BL0_BS1_GLVWA1_GLVWB1_GRVW1_GSU1_GSUASB_K1_LRVW1_NLCA1_NLCB1_PGR0_PLR0_SIA1_SU32_SUS256_SVW4_TT8_4_USFGRO0_VAW1_VS1_VW1_VWB1_WG16_16_1_WGM8",
+    "matching_key": [
+      128,
+      128,
+      128
+    ],
+    "matching_mode": "nearest_euclidean",
+    "operation_identifier": "Contraction_l_Ailk_Bljk_Cijk_Dijk",
+    "placeholder": "TensileLibrary_Type_SS_Contraction_l_Ailk_Bljk_Cijk_Dijk_fallback_gfx1250",
+    "strided_batched": false
+  },
+  "source": {
+    "guest_path": "usr/src/rocjitsu/rocblas_sgemm.cpp",
+    "path": "rocblas_sgemm.cpp"
+  },
+  "workload": {
+    "alpha": 1.0,
+    "api": "rocblas_sgemm",
+    "beta": 0.0,
+    "data_type": "fp32",
+    "error_bound": {
+      "formula": "4 * gamma_k * sum(abs(A[i,k] * B[k,j]))",
+      "gamma_k": "K * 2^-24 / (1 - K * 2^-24)",
+      "safety_factor": 4.0,
+      "unit_roundoff": "2^-24"
+    },
+    "guest_executable": "opt/rocjitsu/bin/m2-rocblas-sgemm",
+    "input_a": "((row * 17 + column * 13 + 1) % 33 - 16) / 16",
+    "input_b": "((row * 29 + column * 7 + 3) % 33 - 16) / 16",
+    "k": 128,
+    "layout": "column-major",
+    "m": 128,
+    "n": 128,
+    "reference_accumulator": "long double",
+    "trans_a": "none",
+    "trans_b": "none"
+  }
+}

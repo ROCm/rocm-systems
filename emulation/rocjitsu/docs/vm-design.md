@@ -22,7 +22,9 @@ execution.
 | `amdgpu/shader_engine.h/cpp` | SE: container of compute units |
 | `amdgpu/xcd.h/cpp` | XCD: CP + shader engines |
 | `amdgpu/wavefront.h/cpp` | Wavefront: ISA-specific thread state |
-| `amdgpu/gpu_memory.h` | GpuMemory: flat address space wrapper |
+| `amdgpu/gpu_vm.h/cpp` | GpuVm: address-space identity, translation, permissions, lifetime, and physical-access routing |
+| `amdgpu/gpu_memory.h` | GpuMemory: backing storage plus the legacy interposer compatibility mapping |
+| `amdgpu/sdma_queue_runner.h/cpp` | SdmaQueueRunner: shared SDMA ring cursor, fetch, retry, execution, and retirement publication |
 
 ---
 
@@ -40,7 +42,8 @@ SimulationEngine                           (simdojo - owns topology)
             │                                "soc", and find_child returns the first
             │                                match, so the wrapper is what keeps the
             │                                paths unique)
-            ├── GpuMemory ("memory")        (shared across all XCDs)
+            ├── GpuVm                       (shared address-space service)
+            ├── GpuMemory ("memory")        (legacy-compatible backing store)
             ├── Iod[0..I] ("iod0"..)       (CompositeComponent - memory-side cache + HBM controllers)
             └── Xcd[0..N] ("xcd0"..)       (CompositeComponent)
                 ├── CommandProcessor ("cp") (Component - event-driven dispatch)
@@ -52,6 +55,63 @@ The `VirtualMachine` is a `simdojo::CompositeComponent` set as the topology root
 and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 (engine, topology, partitioning) is managed by `SimulationEngine`; the SoC
 represents the hardware being modeled.
+
+## Address spaces, translation, and backing
+
+`GpuVm` is the single address-space authority for both front ends. The legacy
+KFD/interposer path registers a compatibility binding over `GpuMemory`; the PCI
+path registers a GFX12 page-table translator and a `PhysicalMemoryAccess`
+backing supplied by the active PCI transport session. Both receive an
+`AddressSpaceHandle`, and queues, dispatches, and wavefronts carry that handle
+rather than treating a numeric VMID/PASID as lifetime identity.
+
+An address-space slot generation changes when a slot is destroyed and reused.
+Its translation epoch changes when a root is replaced or invalidated. A
+`GpuVmAccess` captures the handle, epoch, translator, and physical backing under
+one lock for the duration of an operation. This prevents a multi-page access
+from combining an old root with a replacement backing and provides
+`VmCacheNamespace` for virtually indexed clean caches. Access results are
+typed as complete, temporarily unavailable, faulted, or malformed; transport
+availability is not encoded as a fake mapping in `GpuMemory`.
+
+### M2 cache boundary
+
+The existing scalar, vector, and L2 caches are keyed by numeric VMID and virtual
+address, and L2 writeback targets `GpuMemory`. They are therefore valid only for
+the legacy compatibility binding today. Translated PCI/VFIO scalar and vector
+loads, stores, and atomics intentionally bypass those caches and operate through
+one `GpuVmAccess` snapshot per instruction. Contiguous lanes are still grouped
+into block accesses, and atomics use the backing's indivisible load and
+compare/exchange operations rather than synthesized read/write pairs.
+
+The instruction cache is clean-only, so translated instruction fetch can use it
+safely: its tag includes the full address-space handle generation and
+translation epoch. Root replacement or slot reuse consequently misses without
+allowing stale code from the prior namespace to alias.
+
+This bypass is a safe M2 intermediate state, not the final physical-cache
+model. A future translated data-cache implementation must key lines by physical
+backing/domain identity plus translated line address and retain the backing
+snapshot needed for eviction. Until that contract exists, routing translated
+data through the legacy caches would permit dirty lines from an old binding to
+write into a replacement backing and is prohibited.
+
+### SDMA queue execution
+
+`SdmaQueueRunner` is the sole owner of transport-independent root-ring state.
+It captures one `GpuVmAccess` snapshot for a service batch, fetches wrapped ring
+segments without repeating completed reads, resumes `SdmaExecutor` at the first
+uncommitted packet effect, and atomically publishes the retired byte cursor. An
+unavailable access retains the snapshot and exact progress for a later retry;
+faulted or malformed work becomes terminal after any required cursor publication.
+
+The command processor and PCI SDMA block only adapt queue creation, producer
+doorbells, retry scheduling, interrupts, and reset into that shared runner. MES
+may supply the initial device cursor captured from an MQD. KFD supplies the zero
+cursor it establishes during queue creation. A legacy or restored queue without
+an explicit device cursor initializes from its published read pointer. These
+front ends must not duplicate ring fetch, packet decoding, or cursor-publication
+state in their own models.
 
 ---
 
@@ -245,6 +305,13 @@ is no separate lazy retirement pass). When a CU has no resident
 wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
+
+Completion-signal and queue-inactive writes are durable per-queue journals.
+An unavailable translated backing pauses admission and advancement only for
+the queue whose journal is incomplete; the CP continues fetching, dispatching,
+and retiring independent queues. A later retry resumes at the first uncommitted
+publication stage, so callbacks, signal updates, mailbox writes, and interrupts
+are not replayed.
 
 ---
 
