@@ -3,7 +3,8 @@
     "GIN / rocSHMEM test matrix for run-gin-ci.sh (baremetal translation of",
     "docker_build_test.bash). Each test runs as:",
     "  mpirun -np $NP <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
-    "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>",
+    "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>;",
+    "'fixtures' -> $RCCL_FIXTURES_BIN_DIR/<bin> (single-process gtest, no mpirun)",
     "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
     "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility).",
     "debug_env: -x added to every test only when RCCL_CI_DEBUG=1.",
@@ -36,6 +37,20 @@
       "bin": "alltoall_perf",
       "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0" ,"NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6"],
       "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    },
+    {
+      "name": "rccl-gin-fixtures-anvil-gda",
+      "kind": "fixtures",
+      "bin": "rccl-UnitTestsFixtures",
+      "env": ["NCCL_DEBUG=WARN"],
+      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:GinAnvilIpcDeviceTest.*"
+    },
+    {
+      "name": "rccl-gin-rocshmem-sdma-internal",
+      "kind": "rccl-tests",
+      "bin": "alltoall_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2"
     }
   ]
 }

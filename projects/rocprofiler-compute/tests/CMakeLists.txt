@@ -55,6 +55,8 @@ set_target_properties(
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
 
+add_subdirectory(../sample/conjugate_gradient conjugate_gradient)
+
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
 set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})

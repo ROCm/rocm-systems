@@ -48,9 +48,9 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
+from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
-    get_build_in_vars,
-    parse_counters_text,
+    extract_counters_and_variables,
 )
 from vendored import yaml  # noqa: E402
 
@@ -75,34 +75,12 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     return by_ip
 
 
-def parse_counters(config_text: str, gpu_series: str) -> set[str]:
-    """Extract all hardware counters from config text.
-
-    Args:
-        config_text: Metric formula text
-        gpu_series: GPU series for resolving built-in vars
-    """
-    hw_counters, variables = parse_counters_text(config_text)
-    build_in_vars = get_build_in_vars(gpu_series)
-
-    while variables:
-        subvariables: set[str] = set()
-        for var in variables:
-            if var in build_in_vars:
-                hw_new, var_new = parse_counters_text(build_in_vars[var])
-                hw_counters.update(hw_new)
-                subvariables.update(var_new)
-        variables = subvariables - variables
-
-    return hw_counters
-
-
 def iter_yaml_metrics(
     config_dir: Path,
-    arch: str,
+    gpu_arch: str,
 ) -> Iterator[tuple[str, Any, int, str, str]]:
     """Iterate over all metrics in analysis YAML files."""
-    config_root = config_dir / arch
+    config_root = config_dir / canonical_config_arch(gpu_arch)
     if not config_root.is_dir():
         return
 
@@ -333,11 +311,14 @@ def generate_bucket_metrics(
     total_metrics = 0
 
     gpu_series = mi_gpu_specs.get_gpu_series(arch)
+    config_arch = canonical_config_arch(arch)
     for file_id, panel_id, metric_idx, metric_name, metric_yaml in iter_yaml_metrics(
         config_dir, arch
     ):
         total_metrics += 1
-        hardware_counters = parse_counters(metric_yaml, gpu_series)
+        hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
+            metric_yaml, gpu_series, include_supported_denom=False
+        )
         buckets: set[str] = set()
         for formula_counter in hardware_counters:
             bucket_label = counter_to_bucket.get(formula_counter)
@@ -376,7 +357,7 @@ def generate_bucket_metrics(
         "least one formula counter is in this plan's collection and those "
         "counters map to 2+ buckets in the layout above.\n"
     )
-    buf.write(f"Config tree: {config_dir / arch}\n")
+    buf.write(f"Config tree: {config_dir / config_arch}\n")
 
     if multi_rows:
         # Calculate column widths
@@ -400,7 +381,7 @@ def generate_bucket_metrics(
             buf.write(pipe_line(row) + "\n")
     else:
         buf.write(
-            "(none listed — in-collection counters stay in one bucket per metric)\n"
+            "(none listed: in-collection counters stay in one bucket per metric)\n"
         )
 
     buf.write("\n")
@@ -435,7 +416,7 @@ def generate_bucket_metrics(
             buf.write(pipe_line(row) + "\n")
     else:
         buf.write(
-            "(none listed — no metric has in-collection PMCs confined to one bucket)\n"
+            "(none listed: no metric has in-collection PMCs confined to one bucket)\n"
         )
     buf.write("\n")
 
@@ -603,9 +584,12 @@ Examples:
     if not perfmon_config:
         console_error(f"Error: No perfmon config found for architecture: {arch}")
 
-    config_arch = config_dir / arch
-    if not config_arch.is_dir():
-        console_error(f"Error: Architecture config directory not found: {config_arch}")
+    config_arch_name = canonical_config_arch(arch)
+    config_arch_path = config_dir / config_arch_name
+    if not config_arch_path.is_dir():
+        console_error(
+            f"Error: Architecture config directory not found: {config_arch_path}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)

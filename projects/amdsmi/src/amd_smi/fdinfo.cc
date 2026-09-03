@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <dirent.h>
 #include <string.h>
@@ -37,10 +18,18 @@
 
 extern "C" {
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+#endif
+// Using known extension, array designators
 static const char* container_type_name[AMDSMI_MAX_CONTAINER_TYPE] = {
     [AMDSMI_CONTAINER_LXC] = "lxc",
     [AMDSMI_CONTAINER_DOCKER] = "docker",
 };
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   DIR* d;
@@ -205,7 +194,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   //        In case the other info fail, get at least something.
   char exe_realpath[PATH_MAX] = {0};
   ssize_t len = readlink(name_path.c_str(), exe_realpath, sizeof(exe_realpath) - 1);
-  std::string name = (len > 0) ? std::string(exe_realpath, len) : "N/A";
+  std::string name = (len > 0) ? std::string(exe_realpath, static_cast<size_t>(len)) : "N/A";
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 

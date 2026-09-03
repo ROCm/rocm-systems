@@ -20,11 +20,29 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
+
+/// @brief A GPU memory violation, as the driver reports it to the runtime.
+///
+/// @details Mirrors the fields of kfd_hsa_memory_exception_data that this
+/// driver can populate, without pulling the KFD uapi into every consumer of
+/// this header. Hardware raises a VM fault; KFD turns it into an event of type
+/// KFD_IOC_EVENT_MEMORY carrying the offending address, and the runtime decides
+/// what to do about it. Modelling the report rather than inventing a policy is
+/// what lets an invalid GPU access surface the same way it would on silicon.
+struct MemoryFault {
+  uint64_t va = 0;         ///< Faulting GPU virtual address.
+  uint32_t gpu_id = 0;     ///< KFD gpu_id of the device that faulted.
+  bool not_present = true; ///< Address has no mapping, or none the GPU may use.
+  bool read_only = false;  ///< Write to a mapping that permits only reads.
+  /// Neither bit set reports a refusal whose cause could not be established.
+  /// `imprecise` stays clear regardless: the faulting address is exact.
+};
 
 /// @brief KFD event subsystem state.
 ///
@@ -74,9 +92,9 @@ public:
   /// @details Idempotent, subsequent calls after the first are no-ops.
   void adopt_page(void *ptr, size_t size);
 
-  /// @brief If @p ptr is the adopted event page, clear page/page_size and return true.
+  /// @brief If @p ptr is the adopted event page, clear page_/page_size_ and return true.
   /// @details Clears the fields under mutex_ so the CP interrupt thread (which
-  /// reads page/page_size under the same lock in signal_interrupt) can never race
+  /// reads page_/page_size_ under the same lock in signal_interrupt) can never race
   /// a concurrent munmap tearing the mapping down.
   [[nodiscard]] bool release_page(void *ptr);
 
@@ -86,6 +104,14 @@ public:
   ///          real KFD's kfd_signal_event_interrupt(pasid, 0, 0) broadcast.
   void signal_interrupt(uint32_t event_id);
 
+  /// @brief Deliver a memory violation to this process's memory-exception event.
+  /// @details Finds the process's KFD_IOC_EVENT_MEMORY event -- the runtime
+  /// creates exactly one and parks a handler thread on it -- records @p fault as
+  /// its payload for the next WAIT_EVENTS to collect, and wakes its waiters.
+  /// @returns false when the process registered no such event, in which case the
+  ///          violation has nowhere to go and the caller should say so itself.
+  bool signal_memory_fault(const MemoryFault &fault);
+
   /// @brief Wake all event waiters for driver shutdown.
   /// @details Sets the closing flag and notifies every registered waiter
   ///          across all events.
@@ -93,8 +119,21 @@ public:
 
   /// @brief Write sentinel values to all event page slots for shutdown.
   /// @details Writes KFD_SIGNAL_EVENT_LIMIT to every slot, allowing ROCR's
-  ///          userspace polling to detect that events will no longer fire.
+  ///          userspace polling to detect that events will no longer fire. Takes
+  ///          mutex_ so it cannot race a concurrent release_page()/munmap tearing
+  ///          the mapping down.
   void signal_page_shutdown();
+
+  /// @brief Non-destructively release parked waiters so their caller can unwind.
+  /// @details The teardown-probe counterpart of notify_closing(): sets a
+  ///          cancellation flag and wakes every registered waiter, so a blocking
+  ///          WAIT_EVENTS returns a benign KFD_IOC_WAIT_RESULT_TIMEOUT (rc 0) and
+  ///          drops the driver snapshot that would otherwise keep the object alive.
+  ///          Mutates NO event, slot, or page state. A spurious TIMEOUT is a
+  ///          legal KFD outcome every caller already re-polls on; -EBADF (which
+  ///          notify_closing() causes) is not, which is why teardown probing must
+  ///          use this and only real teardown may close. Idempotent.
+  void begin_wait_cancel();
 
   /// @brief Reset closing state for driver re-open.
   void reset();
@@ -102,11 +141,34 @@ public:
   /// @brief Check if the driver is shutting down.
   bool is_closing() const;
 
-  int memfd = -1;       ///< memfd backing the KFD signal event page.
-  void *page = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
-  size_t page_size = 0; ///< Size of the mapped event page in bytes.
+  /// @brief Return the stable event-page backing fd, creating it exactly once.
+  /// @details The check-and-create runs under mutex_, so concurrent event-page
+  /// mmaps cannot each build a backing and hand different fds to different callers
+  /// — which would leave one polling an object that never receives event updates.
+  /// @param length Size to pass to @p create_backing.
+  /// @param create_backing Builds the backing and returns its fd, or -1 on failure.
+  ///        Called at most once per EventState, with mutex_ held.
+  /// @returns The backing fd, or -1 if creation failed.
+  int ensure_backing(size_t length, const std::function<int(size_t)> &create_backing);
+
+  /// @brief The backing fd, or -1 if none has been created. Takes mutex_.
+  [[nodiscard]] int backing_fd() const;
+
+  /// @brief Number of waiters currently registered on @p event_id.
+  /// @details Test seam for deterministically observing that a waiter has parked,
+  /// so a test need not sleep and hope. Takes mutex_.
+  [[nodiscard]] size_t waiter_count(uint32_t event_id) const;
+
+  /// @brief True if an event page is currently adopted.
+  /// @details Takes mutex_, so it cannot race a concurrent release_page()/munmap
+  /// the way a direct read of the `page_` field can.
+  [[nodiscard]] bool has_page() const;
 
 private:
+  int memfd_ = -1;       ///< memfd backing the KFD signal event page.
+  void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
+  size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
+
   /// @brief Internal event representation.
   struct GpuEvent {
     uint32_t event_id = 0;   ///< KFD event ID (1-based, matches slot index).
@@ -114,13 +176,17 @@ private:
     bool auto_reset = false; ///< If true, signaled clears after wakeup.
     bool signaled = false;   ///< True when the event has been signaled.
     uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
+    /// Payload for the most recent violation on a memory-exception event.
+    MemoryFault fault;
     std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
 
-  std::mutex mutex_;                              ///< Protects all mutable event state.
+  mutable std::mutex mutex_;                      ///< Protects all mutable event state.
   std::unordered_map<uint32_t, GpuEvent> events_; ///< Event table keyed by event_id.
   uint32_t next_event_id_ = 1;                    ///< Next event ID to allocate.
   std::atomic<bool> closing_{false};              ///< Set by notify_closing() for shutdown.
+  /// @brief Set by begin_wait_cancel() to release waiters without closing.
+  std::atomic<bool> wait_cancelled_{false};
 };
 
 } // namespace rocjitsu

@@ -4,9 +4,11 @@
 """Unit tests for the gfx1250 memory-chart renderer."""
 
 import re
+from pathlib import Path
 
 from utils import mem_chart_gfx1250
 from utils.mem_chart_common import strip_ansi
+from vendored import yaml
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
@@ -30,7 +32,7 @@ class TestGetSampleMetrics:
 
 
 class TestPlotMemChartGfx1250:
-    """Tests for gfx1250 plot_mem_chart - Instinct MI350 memory chart generation."""
+    """Tests for gfx1250 CDNA5 memory chart generation."""
 
     def test_returns_string(self):
         metrics = mem_chart_gfx1250.get_sample_metrics()
@@ -105,6 +107,18 @@ class TestPlotMemChartGfx1250:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    def test_unavailable_hbm_bandwidth_does_not_abort_chart(self):
+        metrics = mem_chart_gfx1250.get_sample_metrics()
+        metrics["DRAM Read Bandwidth"] = "N/A"
+
+        result = strip_ansi(
+            mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        )
+
+        assert "HBM" in result
+        assert "N/A" in result
+        assert "896.0 GB/s" not in result
+
     def test_normalize_mem_chart_metrics_flat_ordered(self):
         """Metrics are flattened to panel YAML order; extras dropped; missing None."""
         raw = {"ICache Requests": 42.0, "noise_key": 99}
@@ -147,6 +161,24 @@ class TestDefaultSampleMetricsGfx1250:
         assert any("GL1" in k for k in metrics)
         assert any("GL2" in k for k in metrics)
         assert any("DRAM" in k for k in metrics)
+
+    def test_keys_match_memory_chart_panel(self):
+        project_root = Path(__file__).parents[3]
+        config_path = (
+            project_root
+            / "src/rocprof_compute_soc/analysis_configs/gfx1250"
+            / "0300_memory_chart.yaml"
+        )
+        with config_path.open(encoding="utf-8") as config_file:
+            panel_config = yaml.safe_load(config_file)["Panel Config"]
+
+        panel_metric_keys = tuple(
+            metric_name
+            for table in panel_config["data source"]
+            for metric_name in table["metric_table"]["metric"]
+        )
+
+        assert mem_chart_gfx1250.MEM_CHART_PANEL_METRIC_KEYS == panel_metric_keys
 
 
 # =============================================================================

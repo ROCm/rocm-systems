@@ -34,6 +34,7 @@ from utils.mem_chart_common import (
     mem_chart_cli_main,
     metric_line,
     render_chart_to_string,
+    safe_float_sum,
 )
 
 # ---------------------------------------------------------------------------
@@ -42,12 +43,21 @@ from utils.mem_chart_common import (
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
+    ("ICache Utilization", 60.0),
     ("ICache Hit Rate", 98.5),
+    ("ICache Latency", 20.0),
+    ("ICache Request Stall Rate", 2.0),
     ("ICache-GL1 Read Bandwidth", 57.6e9),
+    ("ICache-GL1 Request Latency", 50.0),
     # Table 302: Scalar Data Cache
     ("Dcache Requests", 225),
+    ("Dcache Utilization", 50.0),
     ("Dcache Hit Rate", 95.3),
+    ("Dcache Latency", 30.0),
+    ("Dcache Request Stall Rate", 3.0),
+    ("Dcache Request Bandwidth", 10e9),
     ("Dcache-GL1 Read Bandwidth", 28.8e9),
+    ("Dcache-GL1 Request Latency", 60.0),
     # Table 303: GL0 Cache
     ("GL0 Utilization", 72.4),
     ("GL0 Read Requests", 875_000),
@@ -55,13 +65,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL0 Atomic Requests", 62_500),
     ("GL0 Hit Rate", 87.2),
     # Table 304: LDS
-    ("LDS Utilization", 65.8),
-    ("LDS Bank Conflict Stall Rate", 5.2),
     ("LDS Load Requests", 1_250),
     ("LDS Store Requests", 625),
     ("LDS Atomic Requests", 1_250),
     ("Async Load Requests", 250),
     ("Async Store Requests", 1_000),
+    ("LDS Utilization", 65.8),
+    ("LDS Bank Conflict Stall Rate", 5.2),
     ("LDS Load Bandwidth", 268.7e9),
     ("LDS Store Bandwidth", 134.2e9),
     ("LDS Atomic Bandwidth", 16e9),
@@ -95,7 +105,6 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL2-EA Atomic Bandwidth", 25.2e9),
     # Table 308: EA to HBM/IO/HDM/GMI
     ("EA Utilization", 65.8),
-    ("EA Stall Rate", 15.2),
     ("DRAM Read Bandwidth", 512e9),
     ("DRAM Write Bandwidth", 384e9),
     ("IO Read Bandwidth", 32e9),
@@ -104,6 +113,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("HDM Write Bandwidth", 96e9),
     ("GMI Read Bandwidth", 256e9),
     ("GMI Write Bandwidth", 192e9),
+    ("EA Stall Rate", 15.2),
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
@@ -264,7 +274,7 @@ def _build_sqc_panel(
             "%",
             COLORS["hit"],
         ),
-        title=(f"[bold {COLORS['block']}]Scalar data Cache[/bold {COLORS['block']}]"),
+        title=(f"[bold {COLORS['block']}]Scalar Data Cache[/bold {COLORS['block']}]"),
         border_style=COLORS["block"],
         width=_SQC_W - 4,
         height=5,
@@ -286,7 +296,13 @@ def _build_downstream(
 
     hbm_read_bw = m.get("DRAM Read Bandwidth")
     hbm_write_bw = m.get("DRAM Write Bandwidth")
-    total_bw = (hbm_read_bw or 0) + (hbm_write_bw or 0)
+    numeric_hbm_read_bw = safe_float_sum(hbm_read_bw)
+    numeric_hbm_write_bw = safe_float_sum(hbm_write_bw)
+    total_bw = (
+        numeric_hbm_read_bw + numeric_hbm_write_bw
+        if numeric_hbm_read_bw is not None and numeric_hbm_write_bw is not None
+        else None
+    )
 
     dram_edges = build_bw_edges(
         [
@@ -730,11 +746,12 @@ def plot_mem_chart(
     gpu_arch: Optional[str] = None,
 ) -> str:
     """Render the gfx1250 memory chart and return as string."""
-    return f"{chart_title}\n" + render_chart_to_string(
+    return render_chart_to_string(
         create_mem_chart_diagram,
         metric_dict,
         normalize_mem_chart_metrics,
         console_width=_CONSOLE_WIDTH,
+        chart_title=chart_title,
         gpu_arch=gpu_arch,
     )
 

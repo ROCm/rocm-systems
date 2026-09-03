@@ -213,7 +213,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
         return ""
 
 
-def get_kernel_csv_query(config) -> str:
+def get_kernel_csv_query(importData, config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
     if config.kernel_rename:
@@ -221,14 +221,18 @@ def get_kernel_csv_query(config) -> str:
     else:
         kernel_name = "name"
 
+    # check if graph_launch is supported and add new fields:
+    hip_graph_fields = ()
+    if "graph_launch" in importData.supported_features:
+        hip_graph_fields = ("graph_exec_id", "graph_node_id")
+
     select_columns = [
         "guid",
         "'KERNEL_DISPATCH' AS Kind",
         f"{agent_id} AS Agent_Id",
         "queue_id",
         "stream_id",
-        "graph_exec_id AS Graph_Exec_Id",
-        "graph_node_id AS Graph_Node_Id",
+        *hip_graph_fields,
         "tid AS Thread_Id",
         "dispatch_id",
         "kernel_Id",
@@ -262,7 +266,7 @@ def get_kernel_csv_query(config) -> str:
 
 
 def write_kernel_csv(importData, config) -> None:
-    query = get_kernel_csv_query(config)
+    query = get_kernel_csv_query(importData, config)
     write_sql_query_to_csv(importData, config, query, "kernel")
 
 
@@ -271,14 +275,21 @@ def write_memory_copy_csv(importData, config) -> None:
     src_agent_id = build_agent_id_string(config.agent_index_value, "src")
     dst_agent_id = build_agent_id_string(config.agent_index_value, "dst")
 
+    # check if graph_launch is supported and add new fields:
+    hip_graph_fields = ()
+    if "graph_launch" in importData.supported_features:
+        hip_graph_fields = (
+            "graph_exec_id",
+            "graph_node_id",
+        )
+
     query = f"""
         SELECT
             guid,
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id,
-            graph_exec_id AS Graph_Exec_Id,
-            graph_node_id AS Graph_Node_Id,
+            {(','.join(hip_graph_fields) + ',') if hip_graph_fields else ''}
             {src_agent_id} AS Source_Agent_Id,
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
@@ -484,13 +495,18 @@ def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
-    write_graph_launch_csv(importData, config)
-    write_spm_counters_csv(importData, config)
     write_kernel_csv(importData, config)
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+
+    # graph launch was not introduced until schema version 3.0.2
+    if "graph_launch" in importData.supported_features:
+        write_graph_launch_csv(importData, config)
+
+    if "spm_counters" in importData.supported_features:
+        write_spm_counters_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):

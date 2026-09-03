@@ -124,6 +124,104 @@ automatically based on the services your tool enables.
         path (counter collection, ATT, or PC sampling) is registered, the SDK
         logs a warning and falls back to the legacy path anyway.
 
+Kernel dispatch timestamp source
+--------------------------------
+
+.. list-table::
+    :header-rows: 1
+    :widths: 30 15 55
+
+    * - Variable
+      - Default
+      - Description
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIZE_KB``
+      - ``10240``
+      - Size in KiB of the firmware dispatch-log ring, as an integer from ``1`` to
+        ``4194303``. Defaults to 10 MiB. A non-integer, empty, zero, or
+        out-of-range value is ignored with a warning and the default is used. If
+        the firmware laps the reader the SDK logs an overrun warning and the
+        affected signal-less dispatches emit no record (their firmware records were
+        overwritten before the reader copied them); raising this value gives the
+        reader more headroom.
+
+        The driver only accepts ring sizes of ``80 * 2^k`` bytes (80 KiB, 160 KiB,
+        320 KiB, ... up to the 640 MiB maximum), so the requested size is rounded
+        DOWN to the nearest accepted size, and a size below 80 KiB or above
+        640 MiB is clamped. The effective size is logged whenever it differs from
+        the requested one.
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_POLL_TIMEOUT_MS``
+      - ``10``
+      - Timeout in milliseconds, as an integer from ``1`` to ``2147483647``, that
+        the dispatch-log reader passes to ``poll()``. The reader wakes on a
+        firmware notification and drains; if none arrives it wakes on this timeout
+        and does a full scan anyway, so this value bounds how long a sparse or
+        lost-interrupt tail can sit undrained. It is the only timer -- there is no
+        separate watchdog thread. A non-integer, empty, zero, or out-of-range
+        value is ignored with a warning and the default is used. Lowering it
+        shortens sparse-tail latency at the cost of more idle wakeups; raising it
+        does the reverse.
+
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_CLOSE_DRAIN_MS``
+      - ``250``
+      - Internal/advanced. Per-queue close-drain budget in milliseconds: how long
+        ``destroy_queue`` waits for the hardware to finish a signal-less queue's
+        in-flight dispatches before it stops draining and closes the queue. A
+        negative value is clamped to ``0``. This is a per-queue budget only; there
+        is no aggregate teardown ceiling. Most tools should leave this at the
+        default.
+
+    * - ``ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS``
+      - ``false``
+      - Boolean. The master switch for the entire KFD dispatch-log feature. When
+        unset (the default) the SDK does not probe the KFD dispatch-log interface
+        and every dispatch uses ``hsa_amd_profiling_get_dispatch_time``. When set,
+        the SDK probes the interface and, on GPUs that support it, both reports
+        kernel dispatch ``start_timestamp``/``end_timestamp`` from the firmware
+        dispatch log (taken at the true hardware dispatch boundaries, so tighter
+        than the HSA signal-based interval) and opts in to signal-less
+        completion.
+
+        Under signal-less completion, a dispatch batch that qualifies is published
+        with its AQL packet **untouched** -- the SDK allocates no completion signal
+        and does not modify the application's -- and the dispatch completes from the
+        firmware dispatch-log record instead of a signal. A batch that does not
+        qualify keeps the signal path, so the two coexist. Firmware timestamps
+        require inline queue interposition, so enabling a service that only the
+        legacy interception path supports (counter collection, advanced thread
+        trace, or PC sampling) puts every dispatch on the HSA timestamps.
+
+        A batch qualifies only when the dispatch log is live for that GPU, the
+        reader is healthy, and every packet's doorbell slot has exactly one live
+        owning queue; a doorbell collision (two live queues sharing a slot) retires
+        that slot to the signal path. A queue destroy does **not** retire the slot:
+        a later queue that reuses the doorbell opens a fresh owner window and its
+        records are attributed by dispatch time, so a queue-churning workload (for
+        example a HIP stream pool) keeps using signal-less. If the firmware ring
+        overruns, an end-of-pipe record observed under the overrun cannot be trusted
+        to belong to any specific dispatch, so it is not attributed: those
+        dispatches emit no firmware record, and a warning names the counts.
+        Signal-less is **not** disabled -- later, loss-free dispatches keep using
+        it. As a current limitation, such un-attributed dispatches keep their
+        correlation-id references until process teardown rather than being retired
+        eagerly.
+
+        One limitation is inherent to the doorbell-slot design: attribution
+        requires that no two live queues on the same GPU share a page-relative
+        doorbell slot at the same time. The doorbell allocator makes this rare, but
+        if it does occur the slot is treated as ambiguous and its dispatches fall
+        back to the signal path rather than risk a misattribution.
+
+        **Experimental, and gfx950-only today.** This feature and its
+        ``ROCPROFILER_KFD_DISPATCH_LOG_*`` variables are experimental and may change
+        or be replaced by context/service API options. Signal-less completion is
+        validated and enabled only on gfx950 (MI350), the one SKU whose GPU clock
+        domain has passed the per-SKU T-CLK screen; on every other GPU those
+        dispatches use the HSA signal path regardless of this setting.
+
+        Disabled by default. Enabling it changes when dispatch records are
+        delivered relative to the application observing its own completion
+        signal, so it is opt-in.
+
 Beta-feature opt-in
 -------------------
 

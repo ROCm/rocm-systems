@@ -25,7 +25,7 @@
 | Binary translation rule or expansion | `lib/rocjitsu/src/rocjitsu/code/dbt/` |
 | Binary instrumentation pass | `lib/rocjitsu/src/rocjitsu/code/patch/` |
 | Code object loading or ELF mutation | `lib/rocjitsu/src/rocjitsu/code/` |
-| Register liveness or def-use analysis | `lib/rocjitsu/src/rocjitsu/analysis/` |
+| Register liveness or def-use analysis | `lib/rocjitsu/src/rocjitsu/code/analysis/` |
 | Simulation engine (events, topology, PDES) | `lib/simdojo/` |
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |

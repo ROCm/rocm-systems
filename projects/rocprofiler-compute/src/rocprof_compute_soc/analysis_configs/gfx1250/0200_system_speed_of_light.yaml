@@ -110,7 +110,7 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 131072 / 1000
           pct_of_peak: true
         Active WGPs:
-          value: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM_sum) / SUM(SQG_CYCLES_sum)
+          value: SUM(SQG_LEVEL_WGP_ACTIVE_ACCUM) / SUM(SQG_CYCLES_sum)
           unit: WGPs per Cycle
           peak: $cu_per_gpu
           pct_of_peak: true

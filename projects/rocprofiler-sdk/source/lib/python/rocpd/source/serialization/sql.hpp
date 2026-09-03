@@ -50,10 +50,11 @@ class SQLite3InputArchive
 , public traits::TextArchive
 {
 public:
-    SQLite3InputArchive(sqlite3*         conn,
-                        std::string_view query,
-                        int64_t          len       = 0,
-                        int64_t          chunk_len = 0);
+    SQLite3InputArchive(sqlite3*               conn,
+                        std::string_view       query,
+                        std::optional<int64_t> len                = std::nullopt,
+                        int64_t                chunk_len          = 0,
+                        bool                   expect_valid_query = true);
 
     ~SQLite3InputArchive() CEREAL_NOEXCEPT override
     {
@@ -83,7 +84,7 @@ public:
     void loadSize(size_type& size) const;
 
     int64_t search(std::string_view);
-    int64_t search(std::string_view, std::nothrow_t);
+    int64_t search(std::string_view, std::nothrow_t, bool quiet = false);
 
     void set_chunk_index(size_t idx);
 
@@ -281,12 +282,36 @@ epilogue(SQLite3InputArchive&, std::basic_string<CharT, Traits, Alloc> const&)
 // Common SQLite3Archive serialization functions
 // ######################################################################
 //! Serializing NVP types to SQLite3
-template <class T>
+template <typename Tp>
 inline void
-CEREAL_LOAD_FUNCTION_NAME(SQLite3InputArchive& ar, NameValuePair<T>& t)
+CEREAL_LOAD_FUNCTION_NAME(SQLite3InputArchive& ar, NameValuePair<Tp>& t)
 {
-    ar.setNextName(t.name);
-    ar(t.value);
+    namespace mpl                       = ::rocprofiler::common::mpl;
+    constexpr auto nvp_type_is_optional = mpl::is_optional<Tp>::value;
+
+    if constexpr(nvp_type_is_optional)
+    {
+        if(auto col = ar.search(t.name, std::nothrow, true); col >= 0)
+        {
+            using optional_type = mpl::unqualified_type_t<Tp>;
+            using value_type    = typename optional_type::value_type;
+
+            ar.setNextName(t.name);
+            auto _value = value_type{};
+            ar(_value);
+            t.value = optional_type{_value};
+        }
+        else
+        {
+            ROCP_TRACE << fmt::format(
+                "Column '{}' not found for optional value of type {}", t.name, typeid(Tp).name());
+        }
+    }
+    else
+    {
+        ar.setNextName(t.name);
+        ar(t.value);
+    }
 }
 
 //! Loading nullptr from SQLite3

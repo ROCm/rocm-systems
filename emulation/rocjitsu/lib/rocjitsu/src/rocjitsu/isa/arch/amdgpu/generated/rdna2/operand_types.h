@@ -12,9 +12,11 @@ namespace rdna2 {
 
 enum class OperandType {
   OPR_ATTR,
+  OPR_CLAUSE,
   OPR_DSMEM,
   OPR_EXEC,
   OPR_FLAT_SCRATCH,
+  OPR_GPUMEM,
   OPR_HWREG,
   OPR_LABEL,
   OPR_PARAM,
@@ -92,6 +94,10 @@ enum OpSelExec {
 
 enum OpSelFlatScratch {
   OPR_FLAT_SCRATCH_FLAT_SCRATCH = 0,
+};
+
+enum OpSelGpumem {
+  OPR_GPUMEM_GPUMEM = 0,
 };
 
 enum OpSelParam {

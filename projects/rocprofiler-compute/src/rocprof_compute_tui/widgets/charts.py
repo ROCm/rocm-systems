@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import math
-import sys
 import traceback
-from io import StringIO
 from typing import Any, Optional
 
 import pandas as pd
@@ -15,6 +13,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textual.widgets import Static
 
+from utils.mem_chart_common import format_mem_chart_heading
 from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
 from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
 from utils.mem_chart_gfx1250 import plot_mem_chart as plot_mem_chart_gfx1250
@@ -31,6 +30,22 @@ WIDTH_THRESHOLD_TINY = 1
 HEIGHT_THRESHOLD_SMALL = 20
 HEIGHT_THRESHOLD_TINY = 0.5
 DEFAULT_WIDTH_OFFSET = 40
+
+
+def _render_memory_chart(metric_dict: dict[str, Any], gpu_arch: str) -> str:
+    """Render memory-chart metrics with the architecture-specific renderer."""
+    heading = format_mem_chart_heading("per_kernel")
+    if is_gfx9(gpu_arch):
+        return plot_mem_chart_gfx9(
+            metric_dict,
+            chart_title=heading,
+            gpu_arch=gpu_arch,
+        )
+    if is_gfx115x(gpu_arch):
+        return plot_mem_chart_gfx11(metric_dict, chart_title=heading)
+    if is_gfx1250(gpu_arch):
+        return plot_mem_chart_gfx1250(metric_dict, chart_title=heading)
+    raise ValueError("Memory chart not supported by this architecture.")
 
 
 def simple_bar(df: pd.DataFrame, title: Optional[str] = None) -> Optional[str]:
@@ -128,10 +143,10 @@ def simple_box(
         df.fillna(0).replace("", 0).replace(float("inf"), -1).replace(float("-inf"), -1)
     )
     for _, row in t_df.iterrows():
-        column_name = row.get("Metric") or row.get("Channel")
+        column_name = row.get("Metric")
 
         if column_name is None:
-            raise KeyError("Neither 'Metric' nor 'Channel' column found")
+            raise KeyError("No 'Metric' column found")
 
         labels.append(column_name)
         # TODO: need better fix for horizontal overflow
@@ -318,29 +333,8 @@ class MemoryChart(Static):
             # Route to arch-specific chart renderer
             mspec = getattr(self.app, "mspec", None)
             gpu_arch = mspec.gpu_arch if mspec else ""
-            if is_gfx9(gpu_arch):
-                plot_func = plot_mem_chart_gfx9
-            elif is_gfx115x(gpu_arch):
-                plot_func = plot_mem_chart_gfx11
-            elif is_gfx1250(gpu_arch):
-                plot_func = plot_mem_chart_gfx1250
-            else:
-                self.update("Error: Memory chart not supported by this architecture.")
-                return
-
-            original_stdout = sys.stdout
-            try:
-                with StringIO() as string_buffer:
-                    sys.stdout = string_buffer
-                    result = plot_func("per_kernel", metric_dict)
-                    stdout_output = string_buffer.getvalue()
-            finally:
-                sys.stdout = original_stdout
-
-            plot_str = next(
-                (x for x in [stdout_output, str(result) if result else None] if x),
-                "No chart data generated",
-            )
+            result = _render_memory_chart(metric_dict, gpu_arch)
+            plot_str = str(result) if result else "No chart data generated"
             self.update(plot_str)
 
         except Exception as e:

@@ -55,7 +55,7 @@ def is_gfx115x(gpu_arch: Optional[str]) -> bool:
 
 def is_gfx1250(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx1250 architecture."""
-    return bool(gpu_arch and gpu_arch.startswith("gfx1250"))
+    return gpu_arch == "gfx1250"
 
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
@@ -88,7 +88,6 @@ SUPPORTED_FIELD: list[str] = [
     "Expression",
     "Percent of Peak",
     # Special keywords for L2 channel
-    "Channel",
     "L2 Cache Hit Rate",
     "Requests",
     "L2 Read",

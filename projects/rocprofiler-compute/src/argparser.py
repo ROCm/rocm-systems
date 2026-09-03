@@ -348,7 +348,7 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tShould be used only when profiling PyTorch applications."
+            "\t\t\tRequires PyTorch 2.13 or 2.14."
         ),
     )
     profile_group.add_argument(
@@ -1014,16 +1014,6 @@ Examples:
         "--dependency",
         action="store_true",
         help="\t\tList the installation dependency.",
-    )
-    analyze_advanced_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help="\t\tSpecify Kernel Name verbose level 1-5. "
-        "Lower the level, shorter the kernel name. "
-        "(DEFAULT: 5) (DISABLE: 5)",
-        default=5,
-        type=int,
     )
     analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS

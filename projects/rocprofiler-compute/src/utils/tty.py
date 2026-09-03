@@ -13,9 +13,6 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
-from utils.kernel_name_shortener import (
-    kernel_name_shortener,
-)
 from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
@@ -40,6 +37,13 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 
 KERNEL_NAME_WRAP_WIDTH = 40
+
+PC_SAMPLING_TABLE_ID = "21.1"
+
+PC_SAMPLING_STALL_REASON_REFERENCE = (
+    "Stall reason definitions: https://rocm.docs.amd.com/projects/"
+    "rocprofiler-sdk/en/latest/how-to/cdna3-cdna4-pc-sampling.html#stall-reasons"
+)
 
 
 def wrap_kernel_name(name: str) -> str:
@@ -240,8 +244,6 @@ def is_roofline_shown(
             )
 
             kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-            if not kernel_top_df.empty:
-                kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
             # Display roofline metrics
             for kernel_id, metrics in workload.roofline_metrics.items():
@@ -760,7 +762,7 @@ def format_table_output(
 
     # Do not print the table if any column is empty. PC sampling table 21.1 is
     # exempt: its source column is all N/A when the workload lacks debug info.
-    if is_empty_columns_exist and table_id_str != "21.1":
+    if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
@@ -772,6 +774,9 @@ def format_table_output(
     ) == "mem_chart" and not _tty_view_is_table(args)
     if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
+
+    if table_id_str == PC_SAMPLING_TABLE_ID:
+        content += f"{PC_SAMPLING_STALL_REASON_REFERENCE}\n"
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -789,15 +794,11 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For single run and gfx11+, format BW metrics (Bytes/s) to human-readable
+    # For a single run, format Bytes/s metrics with human-readable units.
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
-    if (
-        is_single_run
-        and (is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
-        and "Unit" in df.columns
-    ):
+    if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
@@ -1044,7 +1045,7 @@ def show_all(
                     gpu_arch,
                 )
 
-        # Emit merged gfx115x mem_chart for the panel
+        # Emit the merged memory chart for the panel.
         if mem_chart_data and not _tty_view_is_table(args):
             heading = format_mem_chart_heading(
                 args.normal_unit,
@@ -1058,15 +1059,6 @@ def show_all(
                     )
                     + "\n"
                 )
-            elif is_gfx9(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                        gpu_arch=gpu_arch,
-                    )
-                    + "\n"
-                )
             elif is_gfx1250(gpu_arch):
                 panel_content += (
                     mem_chart_gfx1250.plot_mem_chart(
@@ -1076,7 +1068,14 @@ def show_all(
                     + "\n"
                 )
             else:
-                pass
+                panel_content += (
+                    mem_chart_gfx9.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                        gpu_arch=gpu_arch,
+                    )
+                    + "\n"
+                )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.

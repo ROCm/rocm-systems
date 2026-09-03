@@ -10,7 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Thread
+from typing import Set
 from unittest.mock import Mock
+
+from utils import csv_compression, schema
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -57,7 +60,7 @@ def check_file_pattern(pattern, file_path):
     """Check if the given pattern exists in the file.
 
     Callers pass compressed counter artifacts as well as plain files such as
-    pmc_perf.csv and profiling_config.yaml, so the reader follows the name.
+    sysinfo.csv and profiling_config.yaml, so the reader follows the name.
     """
     if str(file_path).endswith(".gz"):
         opener = gzip.open(file_path, "rt", encoding="utf-8")
@@ -66,6 +69,24 @@ def check_file_pattern(pattern, file_path):
     with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def pmc_perf_path(workload_dir):
+    """Path of the merged counter intermediate analyze writes and reads back."""
+    name = f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    return csv_compression.compressed_name(Path(workload_dir) / name)
+
+
+def write_gzip_csv(path, text):
+    """Write text to a gzip CSV through the interface the source uses."""
+    with csv_compression.open_gzip_csv_write(path) as f:
+        f.write(text)
+    return Path(path)
+
+
+def write_pmc_perf(workload_dir, text):
+    """Write the merged counter intermediate into workload_dir."""
+    return write_gzip_csv(pmc_perf_path(workload_dir), text)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -194,3 +215,16 @@ def patch_console(monkeypatch, module, *names, **overrides):
         monkeypatch.setattr(f"{module}.console_{name}", mock)
         mocks[name] = mock
     return mocks
+
+
+_KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
+
+
+def normalize_kernel_name(name: str) -> str:
+    """Return ``name`` without trailing ``.kd`` or ``[clone ...]`` suffixes."""
+    return _KERNEL_SUFFIX_RE.sub("", name).strip()
+
+
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Return the normalized form of each name in ``names``."""
+    return {normalize_kernel_name(name) for name in names}

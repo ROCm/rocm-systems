@@ -102,6 +102,27 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     )
     assert content != ""
     assert "v_mov" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
+
+
+def test_format_table_output_scales_bytes_per_second_for_gfx9() -> None:
+    df = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [1e9],
+        "Unit": ["Bytes/s"],
+    })
+
+    content = format_table_output(
+        make_args(),
+        {"id": 300, "title": "Memory Chart"},
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch="gfx942",
+    )
+
+    assert "GB/s" in content
+    assert "1000000000" not in content
 
 
 def test_has_time_data_detection() -> None:
@@ -376,6 +397,79 @@ def test_show_all_membw_analysis_panel_gate(
 
     assert "30. Memory Bandwidth Analysis" in output_lines
     assert "30.13 EA Interface" in output_lines
+
+
+def test_show_all_dispatches_gfx1250_memory_chart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = argparse.Namespace(
+        decimal=2,
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=False,
+        normal_unit="per_wave",
+        path=[["fixture"]],
+        time_unit="ns",
+        view=None,
+    )
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [512e9],
+        "Unit": ["Bytes/s"],
+    })
+    table_config = {
+        "id": 301,
+        "title": "Instruction Cache",
+        "cli_style": "mem_chart",
+        "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            300: {
+                "id": 300,
+                "title": "Memory Chart",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={301: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx1250"}]),
+        )
+    }
+    calls: list[tuple[dict, str]] = []
+
+    monkeypatch.setattr(
+        "utils.tty.process_table_data",
+        lambda *_args, **_kwargs: metric_dataframe,
+    )
+
+    def gfx1250_stub(mem_data: dict, *, chart_title: str) -> str:
+        calls.append((mem_data, chart_title))
+        return "rendered gfx1250 memory chart"
+
+    monkeypatch.setattr(
+        "utils.tty.mem_chart_gfx1250.plot_mem_chart",
+        gfx1250_stub,
+    )
+    rendered_output = StringIO()
+
+    show_all(
+        args,
+        runs,
+        arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    assert calls == [
+        (
+            {"DRAM Read Bandwidth": 512e9},
+            "3. Memory Chart (Normalization: per_wave)",
+        )
+    ]
+    assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
 
 
 def test_edge_cases_and_error_handling() -> None:

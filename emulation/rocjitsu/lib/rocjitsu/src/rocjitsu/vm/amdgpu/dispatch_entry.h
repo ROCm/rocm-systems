@@ -14,9 +14,12 @@
 
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <deque>
+#include <memory>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -54,6 +57,43 @@ enum class DispatchPacketKind : uint8_t {
   Kernel,
   /// @brief A packet that runs no shader: barrier, barrier-value, PM4 IB.
   NonKernel,
+};
+
+/// @brief Grid-wide retirement state shared by every shard of one dispatch.
+///
+/// @details When a dispatch is fanned out, each participating XCD retires its own
+/// share independently, but the dispatch's completion signal must fire once, after
+/// the last workgroup anywhere on the device. Each XCD flushes its own caches and
+/// then publishes its share here; the owning XCD fires the signal only once the
+/// published total covers the grid. Publishing releases and the owner's check
+/// acquires, so every XCD's flush is visible before the signal is written.
+struct GridCompletion {
+  /// Workgroups retired across all participating XCDs.
+  std::atomic<uint32_t> completed_wgs{0};
+  /// Workgroups in the whole grid.
+  uint32_t grid_wgs = 0;
+  /// Cleared by the first XCD to place a workgroup, so the dispatch reports that
+  /// it began exactly once however the grid is split. An XCD whose share is empty
+  /// never places anything, so this cannot be tied to the XCD that read the packet.
+  std::atomic_flag execution_begun{};
+
+  /// @brief Add one XCD's retired workgroups to the grid total.
+  /// @returns True for the single caller whose contribution completed the grid, so
+  /// the follow-on wake happens exactly once rather than once per racing XCD.
+  [[nodiscard]] bool publish_share(uint32_t wgs) {
+    uint32_t before = completed_wgs.fetch_add(wgs, std::memory_order_acq_rel);
+    return before < grid_wgs && before + wgs >= grid_wgs;
+  }
+
+  /// @returns True once every XCD has published its share.
+  [[nodiscard]] bool grid_retired() const {
+    return completed_wgs.load(std::memory_order_acquire) >= grid_wgs;
+  }
+
+  /// @returns True for the first caller only.
+  [[nodiscard]] bool claim_execution_begin() {
+    return !execution_begun.test_and_set(std::memory_order_relaxed);
+  }
 };
 
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
@@ -137,9 +177,42 @@ struct DispatchEntry {
   bool host_signal = false;
   bool barrier_bit = false;
   bool execution_begun = false;
+  /// The packet carried an acquire fence of at least agent scope. Recorded on the
+  /// entry so that every XCD running part of the grid can invalidate its own caches
+  /// on its own thread, not just the one that read the packet.
+  bool acquire_invalidate = false;
+
+  /// Grid-wide retirement state, shared by every shard of a fanned-out dispatch.
+  /// Null when this entry owns the whole grid by itself.
+  std::shared_ptr<GridCompletion> grid_completion{};
+  /// True on the shards handed to peer XCDs. The shard left on the XCD that read
+  /// the packet keeps the completion signal and the dispatch-level callbacks.
+  bool fanout_peer = false;
+  /// Set once this shard has published its retired workgroups to grid_completion,
+  /// so a repeated drain cannot double-count them.
+  bool grid_share_published = false;
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
+
+  /// @returns Workgroups in the whole grid, as opposed to total_wgs which after
+  /// a fan-out counts only this XCD's share. Anything sized or indexed against the
+  /// grid -- scratch backing, whose per-wave offset comes from the grid-wide
+  /// workgroup id -- must use this and not total_wgs.
+  [[nodiscard]] uint32_t grid_total_wgs() const {
+    return grid_completion ? grid_completion->grid_wgs : total_wgs;
+  }
+
+  /// @returns True when the dispatch has finished everywhere, not merely on this
+  /// XCD. The AQL barrier bit means "no later packet starts until every preceding
+  /// packet has completed", which for a fanned-out dispatch is a property of the
+  /// whole grid: this XCD finishing its share says nothing about the others.
+  [[nodiscard]] bool grid_fully_completed() const {
+    if (grid_completion)
+      return grid_completion->grid_retired();
+    return fully_completed();
+  }
+
   /// @returns True for packets that run no shader at all (barrier, barrier-value,
   /// PM4 IB). Deliberately a stored kind rather than `total_wgs == 0`: a kernel
   /// dispatch split across XCDs can legitimately leave one XCD an empty share,
@@ -224,7 +297,9 @@ struct DispatchEntry {
   }
 
   /// @brief Chunk the grid walk advances by: a cluster, else a single workgroup.
-  uint32_t dispatch_chunk_wgs() const { return has_workgroup_clusters() ? cluster_size() : 1u; }
+  [[nodiscard]] uint32_t dispatch_chunk_wgs() const {
+    return has_workgroup_clusters() ? cluster_size() : 1u;
+  }
 
   /// @brief Grid-wide chunk ordinal for this entry's @p shard_chunk_index -th chunk.
   ///
@@ -236,7 +311,7 @@ struct DispatchEntry {
   /// workgroup that does not exist. Bound it here, where the share size is known.
   /// @param shard_chunk_index Zero-based chunk index within this entry's share.
   /// @returns The chunk's ordinal in the whole grid.
-  uint32_t chunk_ordinal_for(uint32_t shard_chunk_index) const {
+  [[nodiscard]] uint32_t chunk_ordinal_for(uint32_t shard_chunk_index) const {
     assert(static_cast<uint64_t>(shard_chunk_index) * dispatch_chunk_wgs() < total_wgs &&
            "chunk index is shard-local and must lie within this entry's share");
     return shard.nth_owned_chunk(shard_chunk_index);
@@ -361,9 +436,34 @@ struct HwQueueState {
 
   Status status = Status::IDLE;
   std::deque<DispatchEntry> entries;
+  /// @brief Total entries accepted by this queue, for tests.
+  /// @details A replica's entry list is otherwise unobservable after its packets
+  /// retire. Recording acceptance at the queue's single ordered push site lets a
+  /// test verify delivery AFTER the run without depending on how many entries
+  /// happened to coexist in the queue or reaching into a running peer CP.
+  size_t accepted_entries = 0;
+  /// @brief Kinds of the first two accepted entries, for tests.
+  /// @details Bounded because the replication-order test needs only the submitted
+  /// kernel and the non-kernel packet behind it; production queues must not retain
+  /// an unbounded history after entries retire.
+  std::array<DispatchPacketKind, 2> first_accepted_entry_kinds{};
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
   uint64_t queue_desc_va = 0;
+  /// True on a peer XCD's replica of a fanned-out queue. Such a replica never
+  /// reads the ring and never owns the queue's idle signal; it only receives
+  /// dispatch shards from the XCD that does.
+  bool fanout_replica = false;
+
+  /// @brief Append an entry, maintaining accepted_entries.
+  /// @details The single ordered push site, so the acceptance count tracks the number
+  /// of pushed entries. Callers already hold the CP's queue mutex.
+  void push_entry(DispatchEntry entry) {
+    if (accepted_entries < first_accepted_entry_kinds.size())
+      first_accepted_entry_kinds[accepted_entries] = entry.kind;
+    entries.push_back(std::move(entry));
+    ++accepted_entries;
+  }
 };
 
 } // namespace amdgpu

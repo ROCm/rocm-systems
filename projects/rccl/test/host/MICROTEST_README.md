@@ -32,12 +32,28 @@ If you just want to *run* it, jump to [Running and rebuilding](#running-and-rebu
 
 ## Units under test
 
-Each production `.cc` gets its own binary so that `#include`-ing it cannot
-collide with another unit's file-scope state (`static` globals, `std::once_flag`,
-translation-unit anonymous namespaces):
+Units sharing a binary must be `#include`d from *different* test TUs and must not
+export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
-- **`rccl-UnitTestsMicro`** — `p2p.cc` (via `P2P_CC_PATH`); suites `P2pMicrotest.*`,
-  `FreshRegistration*`.
+- **`rccl-UnitTestsMicro`** — one unit per test TU:
+  - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
+    `FreshRegistration*`.
+  - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
+    `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
+    (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
+    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
+    covered yet.
+- **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
+  `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
+  test; several fixtures are reused by later groups, so the order within the file
+  matters. `enqueue.cc:28` pulls in the device header `src/device/common.h`,
+  which cannot compile host-only; the TU pre-sets that header's include guard and
+  supplies the six `ncclDevKernel_Generic_N` kernels as host surrogates (their
+  addresses are stored in a table, never launched). Two shared `nccl_stubs.cc`
+  entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
+  because `enqueue.cc` defines them itself. See
+  `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**) — `init.cc` (via `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
   `HIP_HOST_UNCACHED_MEMORY`/`HIP_UNCACHED_MEMORY` to cover the alternate host-alloc
@@ -104,20 +120,24 @@ The unit-under-test is the production `.cc` that the test TU `#include`s via a
 build-time path macro (e.g. `P2P_CC_PATH` → the hipified `p2p.cc`). To add a
 test:
 
-1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d
-   (currently `p2p.cc` or `init.cc`), skip to step 3. Otherwise add a new path
+1. **Pick the unit.** If it lives in a `.cc` that is already `#include`d (see
+   [Units under test](#units-under-test)), skip to step 3. Otherwise add a new path
    macro in `CMakeLists.txt` (mirror `P2P_CC_PATH`/`INIT_CC_PATH`) pointing at the
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
 2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` — both the in-build source list and the standalone
-   list for that target. If you add a new gtest suite, add its pattern to the
+   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
+   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
-3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls
-   `ResetP2pFakes()` so hooks do not leak between tests. Install per-test
-   behaviour by overwriting a `std::function` hook (see the `ScopedHook`
-   helper in `p2p-test.cc`) rather than editing a fake's default.
+3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
+   unit's reset entry point (`ResetP2pFakes()`, `ResetEnqueueFakes()`, ...) so
+   hooks do not leak between tests. Install per-test behaviour by overwriting a
+   `std::function` hook rather than editing a fake's default. Prefer the
+   `ScopedHook` helper in `ScopedHook.h` (see
+   [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
+   which installs the hook, counts calls, and restores the previous behaviour
+   automatically on scope exit.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
    reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
    link error, a wrongly
@@ -138,6 +158,76 @@ test:
 > `rccl-HostUnitTests`, is likewise hermetic and does not provide `hip::host`
 > either — "host-only" means *where code runs*; the microtest additionally means
 > *no HIP-runtime linkage*.)
+
+## Where a fake belongs
+
+**A fakes file is named after the production TU that DEFINES the symbol, never
+after the test target that first needed it.** A fake can only ever replace an
+*external*, so "the unit under test owns it" is never the reason a symbol is in
+a file — if it were owned by the UUT there would be nothing to fake. Filing by
+target instead produces the same symbol faked three times in three files, each
+slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
+had become before this map existed.
+
+| Production TU | Fakes file |
+|---|---|
+| `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
+| `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| `src/dev_runtime.cc` | `fakes/dev_runtime_fakes.cc` |
+| `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| `src/init.cc` comm lifecycle | `fakes/comm_fakes.cc` |
+| `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
+| `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
+| `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/os/linux.cc` | `fakes/os_fakes.cc` |
+| `src/proxy.cc` | `fakes/proxy_fakes.cc` |
+| `src/rccl_wrap.cc` | `fakes/rccl_wrap_fakes.cc` |
+| `src/recorder.cc` | `fakes/recorder_fakes.cc` |
+| `src/register/*.cc` | `fakes/register_stubs.cc` |
+| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
+| `src/transport/*` | `fakes/transport_stubs.cc` |
+| core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
+| reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
+| HIP runtime | `fakes/hip_fakes.cc` |
+
+**`_fakes.cc` versus `_stubs.cc`.** The suffix records what the file mostly *is*, not a rule the
+build enforces: `_fakes` for a file whose point is controllable seams, `_stubs` for one whose point
+is a fail-loud floor. Several files are honestly both — `transport_stubs.cc` is a floor that also
+owns one driven seam, and `os_fakes.cc` holds working implementations with no seam at all. Do not
+read the suffix as a guarantee; read the file's header comment, which states what it owns. If you
+add a file, pick the suffix matching its majority content and say so at the top.
+
+**`// UNDRIVEN`.** A seam carrying this marker is declared so the binary links and so an accidental
+call is visible, NOT because its path is covered. It is a link-floor entry with a chosen default,
+and that default silently selects which production arm runs. Driving a seam means deleting its
+marker. The marker travels with the declaration rather than a block comment so it cannot drift from
+what it describes. Call *counters* do not take the marker unless the counter itself is unread.
+
+Three things do NOT follow the TU-per-file rule, deliberately:
+
+- `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
+  pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
+  It therefore cannot link into the enqueue target and stays target-shaped.
+- `ncclStrongStreamAcquire` / `Release` stay in `nccl_fakes.cc` rather than
+  `strongstream_stubs.cc`: they carry `ASSERT_HOOK_MATCHES_PROD` drift
+  assertions and moving those is a larger change.
+- `src/os/*.cc` is only partly consolidated. `os_fakes.cc` owns the `linux.cc`
+  allocation shims, but `ncclOsCpuCount`, `ncclOsSetAffinity` and
+  `ncclOsTopoGetStrFromSys` are still split between `collective_stubs.cc` and
+  `nccl_stubs.cc`. That predates this map; the row below is where they *should*
+  live, not where all of them do.
+
+`<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
+the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
+that chains their per-TU resets. It defines no seams itself.
+
+**`RCCL_STUBS_OMIT_<symbol>` is only for a symbol the unit under test defines**,
+where the omission exists purely to avoid a duplicate at link time. If a target
+instead needs a real *value* where the shared floor aborts, that symbol wants a
+seam in its owning TU's fakes file, which serves every target at once. Reaching
+for an omit macro plus a private replacement file is how `rcclUseAinic` ended up
+faked in two places.
 
 ## Adding more controllable seams
 
@@ -168,6 +258,109 @@ is:
 This is preferable to e.g. `LD_PRELOAD` or `--wrap` because the seam
 is explicit, greppable, and visible in code review.
 
+### Factor each default into a named `Default*` function
+
+A hook's default behaviour is needed in two places — the hook's
+initialiser and the fakes file's `Reset*()` function. Do **not** write
+the lambda body out twice; the two copies drift. Instead put each
+default in a named free function prefixed `Default` and reference it
+from both. `fakes/hip_fakes.cc` and `fakes/rma_fakes.cc` follow this
+pattern:
+
+```cpp
+// One definition of the behaviour...
+static ncclResult_t DefaultRmaDestroyDesc(struct ncclComm*,
+                                          struct ncclRmaProxyDesc** desc) {
+    *desc = nullptr;
+    return ncclSuccess;
+}
+
+// ...used for the hook's initial value...
+std::function<ncclResult_t(struct ncclComm*, struct ncclRmaProxyDesc**)>
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+
+// ...and reused by the reset, no duplicated body.
+void ResetRmaFakes() {
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+}
+```
+
+### Installing per-test behaviour with `ScopedHook`
+
+Once a seam is a `std::function` hook, install per-test behaviour with the
+`ScopedHook` RAII helper (`test/host/ScopedHook.h`) instead of assigning the
+global directly and remembering to reset it. `ScopedHook` does three things:
+
+1. installs the test's behaviour on construction,
+2. counts calls automatically via its `.calls` member, and
+3. restores the previous behaviour in its destructor — so a hook can't leak
+   into the next test even if you forget the fixture's `TearDown` reset.
+
+Class template argument deduction picks up the signature from the hook
+variable, so call sites don't spell it out:
+
+```cpp
+#include "ScopedHook.h"
+
+TEST_F(P2pMicrotest, IpcRegisterBuffer_UsesBaseAddr) {
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pb, std::size_t* ps, hipDeviceptr_t) {
+            if (pb) *pb = /* canned base addr */;
+            if (ps) *ps = /* canned size */;
+            return hipSuccess;
+        });
+
+    // ... call the unit under test ...
+
+    EXPECT_EQ(memGet.calls, 1);
+    // memGet's destructor restores g_hipMemGetAddressRange here.
+}
+```
+
+`ScopedHook` is intentionally non-copyable and non-movable (the installed
+lambda captures `this` to bump the counter), so declare it as a local; C++17
+guaranteed copy elision lets helper factories still return it by value.
+
+### Naming a reusable seam behaviour with a lambda factory
+
+When the *same* seam behaviour is needed by many tests — e.g. "make this param
+return non-zero so control reaches branch X" — don't copy-paste the lambda into
+every test. Wrap it in a small **lambda-factory helper**: a function that
+*returns a lambda* whose signature matches the seam. This keeps the "what value
+must this seam return, and why" knowledge in one named, commented place.
+
+```cpp
+// Returns a hook lambda that reports the buffer as legacy-IPC-capable, so the
+// `else if (legacyIpcCap)` arm of ipcRegisterBuffer is reachable.
+auto ForceLegacyIpcCapable()
+{
+    return [](void* data, hipPointer_attribute attribute,
+              hipDeviceptr_t) -> hipError_t {
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
+            *static_cast<int*>(data) = 1;
+        return hipSuccess;
+    };
+}
+```
+
+Return a **plain lambda, not a pre-wrapped `ScopedHook`**, so call sites stay
+free to compose the recipe into whichever installation form they need:
+
+```cpp
+// As a ScopedHook local (CTAD deduces the signature from the hook variable):
+ScopedHook pointerAttr(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
+
+// Or into an optional/emplace form owned by a shared fixture:
+pointerAttr.emplace(g_hipPointerGetAttribute, ForceLegacyIpcCapable());
+```
+
+Name the factory after the *state it forces* (`ForceLegacyIpcCapable`,
+`ForceLegacyCudaRegister`), not after the seam it drives — the point is that a
+test reads as "force this precondition, then call the unit under test". Where a
+single branch depends on HIP version (only one arm is live per build, but the
+test can't know which at authoring time), pair the factories that drive each
+version's arm so the test passes regardless of the toolchain — see
+`ForceLegacyCudaRegister` + `ForceLegacyIpcCapable` in `p2p-test.cc`.
 
 ## Dealing with each kind of dependency
 
@@ -304,9 +497,20 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
-can be configured **directly** to build the host binaries — `rccl-HostUnitTests`
-and `rccl-UnitTestsMicro` — **without configuring/building all of librccl**. It
-compiles just the tests + fakes + the hipified unit-under-test sources.
+can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached]` and
+`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
+librccl**. It compiles just the tests + fakes + the hipified unit-under-test
+sources.
+
+Two of those names are preprocessor variants, not duplicates. `init.cc` gates
+part of its allocation path on `HIP_*_UNCACHED_MEMORY` and `enqueue.cc` gates
+`rcclShmemDynamicSize` on `RCCL_DEVICE_LINKER`, both at the **preprocessor**, so
+one compile can only ever reach one arm. The in-RCCL-build path inherits
+`RCCL_DEVICE_LINKER` from the `rccl` target's compile definitions
+(`ENABLE_DEVICE_LINKER` defaults ON, so the device-linker arm is the one that
+ships); this standalone project has no `rccl` target to inherit from, which is
+why it builds the `-devlinker` variant explicitly.
 
 **ROCm is a prerequisite.** Per epic AICOMRCCL-1661 ("ROCm toolchain is
 available"), this build uses `hipcc` in host-only mode (`--offload-host-only`)
@@ -323,8 +527,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
+./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
+./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-HostUnitTests
 ```
 
-Disable coverage instrumentation for the standalone micro-test with
-`-DMICRO_COVERAGE=OFF`.
+Disable coverage instrumentation for the standalone host-only test binaries
+with `-DHOST_TEST_COVERAGE=OFF`.

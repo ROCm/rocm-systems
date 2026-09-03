@@ -9,8 +9,6 @@ isolation this layout exists to provide.
 """
 
 import shutil
-import subprocess
-import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
@@ -46,18 +44,6 @@ def gpu_arch(gpu_soc_info):
 def soc(gpu_soc_info):
     """GPU model string, e.g. 'MI300'."""
     return gpu_soc_info[1]
-
-
-@pytest.fixture(autouse=True)
-def skip_monkeypatch_with_binary(request):
-    """Skip monkeypatch tests under --call-binary (patches don't cross processes)."""
-    if (
-        request.config.getoption("--call-binary")
-        and "monkeypatch" in request.fixturenames
-    ):
-        pytest.skip(
-            "Test uses monkeypatch which is incompatible with --call-binary mode"
-        )
 
 
 @pytest.fixture
@@ -111,50 +97,58 @@ def binary_handler_profile_rocprof_compute(request):
                     request.config.getoption("--rocprofiler-sdk-tool-path"),
                 ],
             )
-        if request.config.getoption("--call-binary"):
-            baseline_opts = [
-                "./rocprof-compute.bin",
-                "profile",
-                "-VVV",
+        baseline_opts = [
+            "rocprof-compute",
+            "profile",
+            "-VVV",
+        ]
+        if not skip_app_name:
+            baseline_opts.extend(["-n", app_name])
+        if not roof:
+            baseline_opts.append("--no-roof")
+
+        command_rocprof_compute = baseline_opts + options
+
+        if workload_dir_type == "output_directory":
+            command_rocprof_compute = command_rocprof_compute + [
+                "--output-directory",
+                workload_dir,
             ]
-            if not skip_app_name:
-                baseline_opts.extend(["-n", app_name])
-            if not roof:
-                baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options
-
-            if workload_dir_type == "output_directory":
+        if not attach_detach_para:
+            command_rocprof_compute = (
+                command_rocprof_compute + ["--"] + config[app_name]
+            )
+        else:
+            command_rocprof_compute = command_rocprof_compute + [
+                "--attach-pid",
+                str(attach_detach_para["attach_pid"]),
+            ]
+            if attach_detach_para["attach-duration-msec"]:
                 command_rocprof_compute = command_rocprof_compute + [
-                    "--output-directory",
-                    workload_dir,
+                    "--attach-duration-msec",
+                    str(attach_detach_para["attach-duration-msec"]),
                 ]
 
-            if not attach_detach_para:
-                command_rocprof_compute = (
-                    command_rocprof_compute + ["--"] + config[app_name]
-                )
-            else:
-                command_rocprof_compute = command_rocprof_compute + [
-                    "--attach-pid",
-                    str(attach_detach_para["attach_pid"]),
-                ]
-                if attach_detach_para["attach-duration-msec"]:
-                    command_rocprof_compute = command_rocprof_compute + [
-                        "--attach-duration-msec",
-                        str(attach_detach_para["attach-duration-msec"]),
-                    ]
+        # For multi-rank, use mpirun to run the command
+        if num_ranks > 1:
+            # Use rocprof_compute_script_path instead of rocprof-compute
+            command_rocprof_compute[0] = rocprof_compute_script_path
+            command_rocprof_compute = inject_mpirun(command_rocprof_compute, num_ranks)
 
-            # Wrap with mpirun if num_ranks > 1
-            if num_ranks > 1:
-                command_rocprof_compute = inject_mpirun(
-                    command_rocprof_compute, num_ranks
-                )
+        # For capture_output or multi-rank, run the command with subprocess
+        if capture_output or num_ranks > 1:
+            # Use rocprof_compute_script_path instead of rocprof-compute
+            if num_ranks == 1:
+                command_rocprof_compute[0] = rocprof_compute_script_path
 
             process = common.run_subprocess(
-                command_rocprof_compute, capture_output=True, stream=stream
+                command_rocprof_compute,
+                capture_output=capture_output,
+                stream=stream,
             )
-            # verify run status
+
+            # Verify run status
             if check_success:
                 assert process.returncode == 0
 
@@ -163,93 +157,29 @@ def binary_handler_profile_rocprof_compute(request):
                 return process.returncode, process.stdout, process.stderr
 
             return process.returncode
-        else:
-            # Non-binary mode: use Python module directly or subprocess
-            baseline_opts = [
-                "rocprof-compute",
-                "profile",
-                "-VVV",
-            ]
-            if not skip_app_name:
-                baseline_opts.extend(["-n", app_name])
-            if not roof:
-                baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options
-
-            if workload_dir_type == "output_directory":
-                command_rocprof_compute = command_rocprof_compute + [
-                    "--output-directory",
-                    workload_dir,
-                ]
-
-            if not attach_detach_para:
-                command_rocprof_compute = (
-                    command_rocprof_compute + ["--"] + config[app_name]
-                )
-            else:
-                command_rocprof_compute = command_rocprof_compute + [
-                    "--attach-pid",
-                    str(attach_detach_para["attach_pid"]),
-                ]
-                if attach_detach_para["attach-duration-msec"]:
-                    command_rocprof_compute = command_rocprof_compute + [
-                        "--attach-duration-msec",
-                        str(attach_detach_para["attach-duration-msec"]),
-                    ]
-
-            # For multi-rank, use mpirun to run the command
-            if num_ranks > 1:
-                # Use rocprof_compute_script_path instead of rocprof-compute
-                command_rocprof_compute[0] = rocprof_compute_script_path
-                command_rocprof_compute = inject_mpirun(
-                    command_rocprof_compute, num_ranks
-                )
-
-            # For capture_output or multi-rank, run the command with subprocess
-            if capture_output or num_ranks > 1:
-                # Use rocprof_compute_script_path instead of rocprof-compute
-                if num_ranks == 1:
-                    command_rocprof_compute[0] = rocprof_compute_script_path
-
-                process = common.run_subprocess(
-                    command_rocprof_compute,
-                    capture_output=capture_output,
-                    stream=stream,
-                )
-
-                # Verify run status
-                if check_success:
-                    assert process.returncode == 0
-
-                # Return output tuple if capture_output is enabled
-                if capture_output:
-                    return process.returncode, process.stdout, process.stderr
-
-                return process.returncode
-
-            # Default single-rank mode: patch sys.argv and call main() directly
-            # Guard imports during profile execution (test-time enforcement)
-            with pytest.raises(SystemExit) as e:
-                with patch(
-                    "sys.argv",
-                    command_rocprof_compute,
-                ):
-                    with ProfileModeImportGuard():
-                        rocprof_compute = SourceFileLoader(
-                            "rocprof-compute", rocprof_compute_script_path
-                        ).load_module()
-                        rocprof_compute.main()
-            # verify run status
-            if check_success:
-                assert e.value.code == 0
-            return e.value.code
+        # Default single-rank mode: patch sys.argv and call main() directly
+        # Guard imports during profile execution (test-time enforcement)
+        with pytest.raises(SystemExit) as e:
+            with patch(
+                "sys.argv",
+                command_rocprof_compute,
+            ):
+                with ProfileModeImportGuard():
+                    rocprof_compute = SourceFileLoader(
+                        "rocprof-compute", rocprof_compute_script_path
+                    ).load_module()
+                    rocprof_compute.main()
+        # verify run status
+        if check_success:
+            assert e.value.code == 0
+        return e.value.code
 
     return _handler
 
 
 @pytest.fixture
-def binary_handler_analyze_rocprof_compute(request):
+def binary_handler_analyze_rocprof_compute():
     """
     Fixture to run rocprof-compute analyze command.
 
@@ -261,29 +191,16 @@ def binary_handler_analyze_rocprof_compute(request):
     """
 
     def _handler(arguments):
-        if request.config.getoption("--call-binary"):
-            process = subprocess.run(
-                ["./rocprof-compute.bin", *arguments],
-                text=True,
-                capture_output=True,
-            )
-            # Print output so capsys can capture it
-            if process.stdout:
-                print(process.stdout, end="")
-            if process.stderr:
-                print(process.stderr, end="", file=sys.stderr)
-            return process.returncode
-        else:
-            with pytest.raises(SystemExit) as e:
-                with patch(
-                    "sys.argv",
-                    ["rocprof-compute", *arguments],
-                ):
-                    # Load module (no guard needed for analyze mode)
-                    rocprof_compute = SourceFileLoader(
-                        "rocprof-compute", rocprof_compute_script_path
-                    ).load_module()
-                    rocprof_compute.main()
-            return e.value.code
+        with pytest.raises(SystemExit) as e:
+            with patch(
+                "sys.argv",
+                ["rocprof-compute", *arguments],
+            ):
+                # Load module (no guard needed for analyze mode)
+                rocprof_compute = SourceFileLoader(
+                    "rocprof-compute", rocprof_compute_script_path
+                ).load_module()
+                rocprof_compute.main()
+        return e.value.code
 
     return _handler

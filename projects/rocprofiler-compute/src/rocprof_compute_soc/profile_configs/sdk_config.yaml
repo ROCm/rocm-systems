@@ -12316,19 +12316,6 @@ rocprofiler-sdk:
       - gfx950
       - gfx1250
       expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
-  - name: SQ_INST_LEVEL_LDS_ACCUM_sum
-    description: Accumulate SQ_INST_LEVEL_LDS
-    properties: []
-    definitions:
-    - architectures:
-      - gfx908
-      - gfx90a
-      - gfx940
-      - gfx941
-      - gfx942
-      - gfx950
-      - gfx1250
-      expression: reduce(SQ_INST_LEVEL_LDS_ACCUM, sum)
   - name: SQ_INST_LEVEL_SMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_SMEM
     properties: []
@@ -12405,13 +12392,13 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: accumulate(SQC_DCACHE_TC_INFLIGHT_LEVEL, HIGH_RES)
-  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM_sum
-    description: Accumulated SQG_LEVEL_WGP_ACTIVE (sum across SQG instances).
+  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM
+    description: Accumulated SQG_LEVEL_WGP_ACTIVE.
     properties: []
     definitions:
     - architectures:
       - gfx1250
-      expression: reduce(accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES),sum)
+      expression: accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES)
   - name: TCC_PROBE_EVICT_sum
     description: Number of evictions/invalidations due to probes. Not windowable. Sum over TCC instances.
     properties: []
