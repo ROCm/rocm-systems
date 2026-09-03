@@ -858,6 +858,59 @@ TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
     Barrier();
 }
 
+// The third and last send path: ncclRmaIbProxyIPutSignal posts two chained work
+// requests, payload then signal. Both land on qps[0] of the vNIC, so a fused
+// device has to leave the ordering between them intact as well as the data.
+TEST_F(RmaMPIFusedNicTest, IPutSignalOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    void* sigBuf  = AllocBuf(kSignalSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+    ASSERT_NE(sigBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0x3C);
+    }
+
+    void *sendMh = nullptr, *recvMh = nullptr, *sigMh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kSize, &sendMh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kSize, &recvMh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf, kSignalSize, &sigMh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  IPutSignal(/*context=*/0,
+                             /*srcOff=*/0, sendMh, kSize,
+                             /*dstOff=*/0, recvMh,
+                             /*peerRank=*/1,
+                             /*signalOff=*/0, sigMh,
+                             /*signalValue=*/0, // unused for INC
+                             NCCL_NET_SIGNAL_OP_INC,
+                             &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x3C));
+        EXPECT_EQ(ReadSignal(sigBuf), 1u);
+    }
+}
+
 } // namespace RCCLRmaTests
 
 #else // !RCCL_HAS_RMA_IB_PROXY
