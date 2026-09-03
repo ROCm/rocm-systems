@@ -13,6 +13,7 @@
 
 #include <rccl/rccl.h>
 
+#include <cstdlib>
 #include <cstring>
 
 #include "comm.h"
@@ -32,9 +33,9 @@ inline void CreateMockComm(
     int                    nRanks
 )
 {
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
+    // Heap calloc: `new ncclComm()` value-inits a MAXCHANNELS-sized object on the
+    // stack (~13MB) and SIGSEGVs the default 8MB thread stack on gfx1250.
+    mockComm = static_cast<ncclComm_t>(std::calloc(1, sizeof(ncclComm)));
 
     // Initialize basic communicator fields
     mockComm->nRanks = nRanks;
@@ -68,7 +69,7 @@ inline void CleanupMockComm(ncclComm_t& mockComm)
 {
     if(mockComm)
     {
-        delete mockComm;
+        std::free(mockComm);
         mockComm = nullptr;
     }
 }
