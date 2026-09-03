@@ -1,31 +1,36 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/defines.h"
 #include "common/env_vars.hpp"
-#include "common/units.hpp"
+#include "common/environment.hpp"
 #include "core/categories.hpp"
-#include "core/config.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
-#include <cstdint>
+#include "logger/debug.hpp"
 
 #include <timemory/log/color.hpp>
+#include <timemory/process/process.hpp>
 #include <timemory/signals/types.hpp>
 #include <timemory/unwind/backtrace.hpp>
 
-#include "logger/debug.hpp"
-
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <future>
+#include <pthread.h>
+#include <signal.h>
 #include <sstream>
+#include <sys/types.h>
 #include <thread>
+#include <utility>
 
-namespace rocprofsys
+namespace rocprofsys::timeout
 {
-namespace timeout
-{
+
 void
 setup() ROCPROFSYS_INTERNAL_API;
 
@@ -35,124 +40,150 @@ namespace unwind  = ::tim::unwind;
 namespace signals = ::tim::signals;
 namespace log     = ::tim::log;
 
-constexpr auto timeout_signal   = signals::sys_signal::Hangup;
-constexpr auto timeout_signal_v = static_cast<int>(timeout_signal);
+constexpr auto k_factor              = 3.0;
+constexpr auto k_factor_divider      = 1.25;
+constexpr auto k_max_iteration_count = 50;
+constexpr auto k_timeout_signal      = signals::sys_signal::Hangup;
+constexpr auto k_timeout_signal_v    = static_cast<int>(k_timeout_signal);
 
-auto                       main_thread_native_handle         = pthread_self();
-bool                       ci_timeout_active                 = false;
-auto                       ci_timeout_mutex                  = locking::atomic_mutex{};
-std::uint64_t              ci_timeout_backtrace_global_count = 1;
-std::uint64_t              ci_timeout_backtrace_global_done  = 0;
-thread_local std::uint64_t ci_timeout_backtrace_local_count  = 0;
+auto                       g_main_thread_native_handle         = pthread_self();
+bool                       g_ci_timeout_active                 = false;
+auto                       g_ci_timeout_mutex                  = locking::atomic_mutex{};
+std::uint64_t              g_ci_timeout_backtrace_global_count = 1;
+std::uint64_t              g_ci_timeout_backtrace_global_done  = 0;
+thread_local std::uint64_t g_ci_timeout_backtrace_local_count  = 0;
 
 void
 ci_timeout_backtrace(int)
 {
-    if(ci_timeout_backtrace_local_count >= ci_timeout_backtrace_global_count) return;
-    ++ci_timeout_backtrace_local_count;
+    if(g_ci_timeout_backtrace_local_count >= g_ci_timeout_backtrace_global_count)
+    {
+        return;
+    }
+    ++g_ci_timeout_backtrace_local_count;
 
-    auto _err            = std::stringstream{};
-    auto _cfg            = unwind::detailed_backtrace_config{};
-    _cfg.proc_pid_maps   = false;
-    _cfg.unwind_lineinfo = false;
-    _cfg.force_color     = !log::monochrome();
+    auto err            = std::stringstream{};
+    auto cfg            = unwind::detailed_backtrace_config{};
+    cfg.proc_pid_maps   = false;
+    cfg.unwind_lineinfo = false;
+    cfg.force_color     = !log::monochrome();
 
-    unwind::detailed_backtrace<0>(_err, _cfg);
+    unwind::detailed_backtrace<0>(err, cfg);
 
-    static auto _mutex = locking::atomic_mutex{};
-    auto        _lk    = locking::atomic_lock{ _mutex };
-    LOG_INFO("{}", _err.str());
+    static auto s_mutex = locking::atomic_mutex{};
+    const auto  lock    = locking::atomic_lock{ s_mutex };
+    LOG_INFO("{}", err.str());
 
-    ++ci_timeout_backtrace_global_done;
+    ++g_ci_timeout_backtrace_global_done;
+}
+
+// pthread_t comes from <pthread.h>; include-cleaner attributes it to
+// <bits/pthreadtypes.h>, which the check-includes CI job forbids
+void
+log_pthread_kill_failure(pthread_t handle)  // NOLINT(misc-include-cleaner)
+{
+    const auto& info = thread_info::get(handle);
+    // NOLINTBEGIN
+    if(info.has_value())
+    {
+        LOG_WARNING("pthread_kill({}, {}) failed for thread {} (info: {})",
+                    static_cast<std::size_t>(handle), k_timeout_signal_v,
+                    info->index_data->sequent_value, info->as_string());
+        return;
+    }
+    // NOLINTEND
+
+    LOG_WARNING("pthread_kill({}, {}) failed. executing generic kill({}, {})...", handle,
+                k_timeout_signal_v, process::get_id(), k_timeout_signal_v);
 }
 
 void
-ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
-                            std::promise<void> _ci_timeout_ready)
+emit_backtrace_for_thread(pthread_t handle, std::chrono::duration<double> pause)
 {
-    _ci_timeout_ready.set_value();
+    const auto done_v = g_ci_timeout_backtrace_global_done;
+    if(::pthread_kill(handle, k_timeout_signal_v) != 0)
+    {
+        log_pthread_kill_failure(handle);
+        ::kill(process::get_id(), k_timeout_signal_v);
+    }
+
+    // wait until ci_timeout_backtrace increments the global done count (or the
+    // iteration cap is hit) so that the backtraces do not overlap in the output
+    auto iteration = 0;
+    while(g_ci_timeout_backtrace_global_done == done_v &&
+          iteration++ < k_max_iteration_count)
+    {
+        std::this_thread::sleep_for(pause);
+    }
+}
+
+void
+emit_backtrace_for_all_threads(double ci_timeout_seconds, double factor)
+{
+    auto       tids  = pthread_gotcha::get_native_handles();
+    const auto pause = std::chrono::duration<double>(factor) / (3 * (tids.size() + 1));
+
+    tids.erase(g_main_thread_native_handle);
+    LOG_WARNING("Timeout after {} seconds... Generating backtraces for "
+                "{} threads...",
+                ci_timeout_seconds, tids.size() + 1);
+
+    for(const auto itr : tids)
+    {
+        emit_backtrace_for_thread(itr, pause);
+    }
+
+    emit_backtrace_for_thread(g_main_thread_native_handle, pause);
+}
+
+void
+ensure_ci_timeout_backtrace(double             ci_timeout_seconds,
+                            std::promise<void> ci_timeout_ready)
+{
+    ci_timeout_ready.set_value();
 
     thread_info::init(true);
-    auto _thread_state_guard = state::thread::scoped(state::thread::Disabled);
+    const auto thread_state_guard = state::thread::scoped(state::thread::Disabled);
 
-    auto _factor = 3.0;
-    while(_ci_timeout_seconds <= _factor)
-        _factor /= 1.25;
+    auto factor = k_factor;
+    while(ci_timeout_seconds <= factor)
+    {
+        factor /= k_factor_divider;
+    }
 
-    std::uint64_t      _ci_timeout_nitr    = 0;
-    const std::int64_t _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
-    auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
+    std::uint64_t      ci_timeout_nitr = 0;
+    const std::int64_t ci_timeout_nanosec =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::duration<double>{ ci_timeout_seconds - factor })
+            .count();
+    const auto ci_timeout_total_count =
+        get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
     const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
     while(state::process::get() < state::process::Finalized &&
-          _ci_timeout_nitr < _ci_timeout_total_count)
+          ci_timeout_nitr < ci_timeout_total_count)
     {
         // sleep until timeout reached
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _ci_timeout_nanosec });
+        std::this_thread::sleep_for(std::chrono::nanoseconds{ ci_timeout_nanosec });
 
         // guard against thread in fork
         if(process::get_id() != root_pid)
         {
-            ci_timeout_active = false;
+            g_ci_timeout_active = false;
             setup();
             return;
         }
 
-        auto               _tids = pthread_gotcha::get_native_handles();
-        const std::int64_t _ci_timeout_pause =
-            (_factor * units::sec) / (3 * (_tids.size() + 1));
-        auto _kill_thread = [_ci_timeout_pause](auto _handle) {
-            // execute the pthread_kill and wait until ci_timeout_backtrace increments
-            // ci_timeout_backtrace_global_done (or 50 iterations pass) to avoid
-            // the backtraces overlapping output
-            auto _n      = 0;
-            auto _done_v = ci_timeout_backtrace_global_done;
-            if(::pthread_kill(_handle, timeout_signal_v) != 0)
-            {
-                const auto& _info = thread_info::get(_handle);
-                if(_info)
-                {
-                    LOG_WARNING("pthread_kill({}, {}) failed for thread {} (info: {})",
-                                static_cast<size_t>(_handle), timeout_signal_v,
-                                _info->index_data->sequent_value, _info->as_string());
-                }
-                else
-                {
-                    LOG_WARNING("pthread_kill({}, {}) failed. executing generic "
-                                "kill({}, {})...",
-                                _handle, timeout_signal_v, process::get_id(),
-                                timeout_signal_v);
-                }
+        emit_backtrace_for_all_threads(ci_timeout_seconds, factor);
 
-                ::kill(process::get_id(), timeout_signal_v);
-            }
-
-            // wait until the signal has been delivered
-            while(ci_timeout_backtrace_global_done == _done_v && _n++ < 50)
-                std::this_thread::sleep_for(
-                    std::chrono::nanoseconds{ _ci_timeout_pause });
-        };
-
-        _tids.erase(main_thread_native_handle);
-        LOG_WARNING("Timeout after {} seconds... Generating backtraces for "
-                    "{} threads...",
-                    _ci_timeout_seconds, _tids.size() + 1);
-
-        for(auto itr : _tids)
-            _kill_thread(itr);
-
-        _kill_thread(main_thread_native_handle);
-
-        if(++_ci_timeout_nitr >= _ci_timeout_total_count)
+        if(++ci_timeout_nitr >= ci_timeout_total_count)
         {
             // use SIGQUIT because it will generate a core dump
             ::kill(process::get_id(), SIGQUIT);
             return;
         }
-        else
-        {
-            ++ci_timeout_backtrace_global_count;
-        }
+
+        ++g_ci_timeout_backtrace_global_count;
     }
 
     LOG_WARNING("Timeout thread exiting...");
@@ -163,48 +194,51 @@ void
 setup()
 {
     // make sure there isn't any datarace for ci_timeout_active
-    auto _lk = locking::atomic_lock{ ci_timeout_mutex };
+    auto lock = locking::atomic_lock{ g_ci_timeout_mutex };
 
-    if(ci_timeout_active) return;
+    if(g_ci_timeout_active)
+    {
+        return;
+    }
 
     // in CI mode, if ROCPROFSYS_CI_TIMEOUT or ROCPROFSYS_CI_TIMEOUT_OVERRIDE is
     // set, start a thread that will print out the backtrace for each thread
     // before the timeout is hit (i.e. killed by CTest) so we can potentially
     // diagnose where the code is stuck
-    auto _ci = get_env(env_vars::CI, false);
-    if(_ci)
+    const auto is_ci = get_env(env_vars::CI, false);
+    if(is_ci)
     {
         // set by CTest
-        auto _ci_timeout_default = get_env(env_vars::CI_TIMEOUT, -1.0);
+        const auto ci_timeout_default = get_env(env_vars::CI_TIMEOUT, -1.0);
         // allow override by user
-        auto _ci_timeout_seconds =
-            get_env(env_vars::CI_TIMEOUT_OVERRIDE, _ci_timeout_default);
+        const auto ci_timeout_seconds =
+            get_env(env_vars::CI_TIMEOUT_OVERRIDE, ci_timeout_default);
 
-        if(_ci_timeout_seconds > 0.0)
+        if(ci_timeout_seconds > 0.0)
         {
             // lock served its purpose after setting to true
-            ci_timeout_active = true;
-            _lk.unlock();
+            g_ci_timeout_active = true;
+            lock.unlock();
 
-            auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+            const auto thread_state_guard =
+                state::thread::scoped(state::thread::Internal);
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             // enable the signal handler for when the timeout is reached
-            struct sigaction _action = {};
-            sigemptyset(&_action.sa_mask);
-            _action.sa_flags   = SA_RESTART;
-            _action.sa_handler = ci_timeout_backtrace;
-            sigaction(timeout_signal_v, &_action, nullptr);
+            struct sigaction action = {};
+            sigemptyset(&action.sa_mask);
+            action.sa_flags   = SA_RESTART;
+            action.sa_handler = ci_timeout_backtrace;
+            sigaction(k_timeout_signal_v, &action, nullptr);
 
             // start a background thread that handles waiting for the timeout
-            auto _ci_timeout_ready = std::promise<void>{};
-            auto _ci_timeout_wait  = _ci_timeout_ready.get_future();
-            std::thread{ ensure_ci_timeout_backtrace, _ci_timeout_seconds,
-                         std::move(_ci_timeout_ready) }
+            auto       ci_timeout_ready = std::promise<void>{};
+            const auto ci_timeout_wait  = ci_timeout_ready.get_future();
+            std::thread{ ensure_ci_timeout_backtrace, ci_timeout_seconds,
+                         std::move(ci_timeout_ready) }
                 .detach();
-            _ci_timeout_wait.wait_for(std::chrono::seconds{ 1 });
+            ci_timeout_wait.wait_for(std::chrono::seconds{ 1 });
         }
     }
 }
-}  // namespace timeout
-}  // namespace rocprofsys
+}  // namespace rocprofsys::timeout

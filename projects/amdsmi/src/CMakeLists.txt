@@ -334,16 +334,16 @@ install(
     COMPONENT dev
 )
 
-# Test-only impl headers (those with "_test" in the name: the CPER read seam and
-# the internal test helpers/flags) are build-only. Production and the unit tests
-# include them from the source tree, but their symbols are hidden from
-# libamd_smi.so by the version script (cper_set_read_fn_for_testing has no
-# amdsmi_ prefix; amdsmi_test_sleep is a C++ symbol the amdsmi_* export glob does
-# not match), so a dev-package consumer that included them would hit a link
-# error. Build them, but keep them out of the installed dev headers.
+# Impl headers declaring nothing libamd_smi.so exports are build-only: a
+# dev-package consumer that included one would hit a link error. Production and
+# the unit tests include them from the source tree instead. The version script
+# exports the amdsmi_* glob, which matches neither an unprefixed symbol
+# (cper_set_read_fn_for_testing) nor a mangled C++ one (amdsmi_test_sleep, and
+# both of amd_smi_cper.h's declarations).
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_container_id_parser")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_cper")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
 install(FILES ${INSTALL_IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)

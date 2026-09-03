@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -58,9 +59,10 @@ std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavef
   return targets;
 }
 
-void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes) {
+void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_lane_bytes,
+                               uint64_t write_mask) {
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if ((d.lane_mask & (1ULL << lane)) == 0)
+    if ((write_mask & (1ULL << lane)) == 0)
       continue;
     uint32_t data_offset = lane * per_lane_bytes;
     if (data_offset + per_lane_bytes > d.response_data.size()) {
@@ -112,7 +114,9 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes);
+    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
+    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
 
