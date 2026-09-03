@@ -437,9 +437,9 @@ hipError_t hipMalloc(void** p, size_t) { if (p) *p = nullptr; return hipErrorInv
 hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorInvalidValue; }
 hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
-// init.cc's hipGetDeviceProperties call binds to hipGetDevicePropertiesR0600
-// after hipify; the ROCm header remaps the unversioned name to this symbol.
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device)
+// Define the versioned symbol: newer clr headers define the unversioned name
+// as a static inline forwarding here, so faking that name is a redefinition.
+hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
