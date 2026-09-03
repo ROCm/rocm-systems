@@ -136,11 +136,6 @@ class Change:
     def task_done_count(self) -> int:
         return sum(p.done_count for p in self.phases)
 
-    @property
-    def touched(self) -> "List[str]":
-        """Capability ids this change adds, modifies or removes."""
-        return [d.cid for d in self.deltas]
-
 
 @dataclass
 class Project:

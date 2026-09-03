@@ -504,10 +504,7 @@ def render_change(chg: Change, inline: Inline, A: Anchors, gmap: Dict[str, str],
 
 def _baseline_link(cid: str, site: Site, anchors: Dict[str, str]) -> str:
     """Point a delta at the baseline capability it revises, if there is one."""
-    try:
-        target = site.resolve(cid)
-    except Exception:
-        target = None
+    target = site.resolve(cid)
     if not target or target == cid:
         return ""
     owner = site.capability_owner(target)
