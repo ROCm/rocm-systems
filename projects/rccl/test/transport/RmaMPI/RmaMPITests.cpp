@@ -821,6 +821,43 @@ TEST_F(RmaMPIFusedNicTest, IPutOverFusedVNic)
     }
 }
 
+// RDMA_READ rather than RDMA_WRITE: ncclRmaIbProxyIGet builds its own work
+// request and takes the remote rkey from the peer's handle, so a fused vNIC
+// exercises a second addressing path that IPutOverFusedVNic does not reach.
+TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* buf = AllocBuf(kSize);
+    ASSERT_NE(buf, nullptr);
+    if(worldRank_ == 1)
+    {
+        FillBuf(buf, kSize, /*seed=*/0xD4);
+    }
+
+    void* mh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(buf, kSize, &mh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, /*context=*/0,
+                             /*remoteOff=*/0, mh, kSize,
+                             /*localOff=*/0, mh,
+                             /*peerRank=*/1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+        EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
+    }
+    Barrier();
+}
+
 } // namespace RCCLRmaTests
 
 #else // !RCCL_HAS_RMA_IB_PROXY
