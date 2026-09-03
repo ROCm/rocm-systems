@@ -9,7 +9,10 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 
 from typing import Any, NamedTuple, Optional
 
+import numpy as np
 import pandas as pd
+
+from utils.logger import console_warning
 
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 PC_SAMPLING_INST_TYPE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
@@ -37,11 +40,20 @@ NORMALIZED_RECORD_COLUMNS = [
     "dispatch_id",
     "kernel_id",
     "wave_issued",
+    "exec_mask",
+    "wave_cnt",
     "stall_reason",
     "inst_type",
 ]
 
 SOURCE_LINE_MISSING = "N/A"
+
+MAX_ACTIVE_THREAD_PERCENT = 100.0
+
+# A kernel built for wave64 running on a device that reports a wave size of 32
+# sets more lanes than that size. Nothing in the sampled data says which wave
+# size a kernel was built for, so the percentage is capped and warned about once.
+WAVE_SIZE_CLAMP_WARNED = False
 
 
 class InstructionLineRecord(NamedTuple):
@@ -56,6 +68,8 @@ class InstructionLineRecord(NamedTuple):
     stall_count: Optional[int]
     stall_reasons: dict[str, int]
     inst_types: dict[str, int]
+    active_thread_percent: Optional[float]
+    wave_occupancy_percent: Optional[float]
 
 
 class CodeObjectRecord(NamedTuple):
@@ -111,16 +125,23 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "dispatch_id": dispatch_id,
             "kernel_id": dispatch_to_kernel_id.get(dispatch_id),
             "wave_issued": record.get("wave_issued"),
+            "exec_mask": record.get("exec_mask"),
+            "wave_cnt": record.get("wave_cnt"),
             "stall_reason": record.get("snapshot", {}).get("stall_reason"),
             "inst_type": record.get("inst_type"),
         })
 
-    return pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
+    df = pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
+    # A column holding both integers and missing values is inferred as float64,
+    # which cannot hold a 64-bit mask exactly. UInt64 keeps every bit.
+    df["exec_mask"] = pd.array([row["exec_mask"] for row in rows], dtype="UInt64")
+    return df
 
 
 def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
+    sys_info: dict[str, Any],
 ) -> pd.DataFrame:
     """Group normalized records into per-group counts, stall reasons, inst types."""
     # inst_index and kernel_id are constant within a group; carry the first when
@@ -137,25 +158,61 @@ def aggregate_pc_sample_records(
                 "count_stalled",
                 "stall_reason",
                 "inst_type",
+                "active_thread_percent",
+                "wave_occupancy_percent",
                 *carried,
             ]
         )
 
+    records_with_active_lanes = records_df.assign(
+        active_lanes=_count_set_bits(records_df["exec_mask"])
+    )
     aggregations = {
         "count": ("inst_index", "size"),
         "count_issued": ("wave_issued", _aggregate_count_issued),
         "count_stalled": ("wave_issued", _aggregate_count_stalled),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
         "inst_type": ("inst_type", _aggregate_inst_type),
+        # mean skips missing values, so a sample without the field does not
+        # count against the ones that have it.
+        "active_thread_percent": ("active_lanes", "mean"),
+        "wave_occupancy_percent": ("wave_cnt", "mean"),
     }
     for column in carried:
         aggregations[column] = (column, "first")
 
     # dropna=False keeps samples whose kernel_id is unmapped (None) instead of
     # silently dropping them from the all-kernel view.
-    return records_df.groupby(group_by, as_index=False, dropna=False).agg(
-        **aggregations
+    aggregated = records_with_active_lanes.groupby(
+        group_by, as_index=False, dropna=False
+    ).agg(**aggregations)
+
+    # A spec missing from sysinfo.csv reads as NaN, which carries through the
+    # division and leaves that percentage unknown.
+    wave_size = pd.to_numeric(sys_info.get("wave_size"), errors="coerce")
+    max_waves_per_cu = pd.to_numeric(sys_info.get("max_waves_per_cu"), errors="coerce")
+    active_thread_percent = aggregated["active_thread_percent"] / wave_size * 100
+
+    global WAVE_SIZE_CLAMP_WARNED
+    if (
+        not WAVE_SIZE_CLAMP_WARNED
+        and (active_thread_percent > MAX_ACTIVE_THREAD_PERCENT).any()
+    ):
+        WAVE_SIZE_CLAMP_WARNED = True
+        console_warning(
+            "PC sampling: some instructions set more lanes than the wave size "
+            "reported for this machine, so their active thread percent was "
+            f"capped at {MAX_ACTIVE_THREAD_PERCENT:.0f}."
+        )
+
+    # An unknown percentage stays unknown rather than becoming a capped one.
+    aggregated["active_thread_percent"] = np.minimum(
+        active_thread_percent, MAX_ACTIVE_THREAD_PERCENT
     )
+    aggregated["wave_occupancy_percent"] = (
+        aggregated["wave_occupancy_percent"] / max_waves_per_cu * 100
+    )
+    return aggregated
 
 
 def enrich_with_metadata(
@@ -194,7 +251,10 @@ def enrich_with_metadata(
     return df
 
 
-def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRecord]:
+def load_aggregated_pc_sampling(
+    tool_data: dict[str, Any],
+    sys_info: dict[str, Any],
+) -> list[CodeObjectRecord]:
     """Build the normalized code-object tree the analysis DB inserts.
 
     Runs load -> aggregate -> enrich, grouping samples by
@@ -205,6 +265,7 @@ def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRec
     aggregated_df = aggregate_pc_sample_records(
         records_df,
         group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info=sys_info,
     )
     aggregated_df = enrich_with_metadata(
         aggregated_df,
@@ -244,7 +305,29 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
         stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
         inst_types={} if pd.isna(row.inst_type) else row.inst_type,
+        active_thread_percent=(
+            None
+            if pd.isna(row.active_thread_percent)
+            else float(row.active_thread_percent)
+        ),
+        wave_occupancy_percent=(
+            None
+            if pd.isna(row.wave_occupancy_percent)
+            else float(row.wave_occupancy_percent)
+        ),
     )
+
+
+def _count_set_bits(exec_masks: pd.Series) -> pd.Series:
+    """Count the set lanes of every mask, leaving missing masks missing."""
+    set_bits = pd.Series(pd.NA, index=exec_masks.index, dtype="Float64")
+    present = exec_masks.notna()
+    masks = np.asarray(exec_masks[present], dtype=np.uint64)
+    if masks.size:
+        # One byte per column, so each row unpacks to the 64 bits of one mask.
+        bits = np.unpackbits(masks.view(np.uint8).reshape(-1, 8), axis=1)
+        set_bits[present] = bits.sum(axis=1)
+    return set_bits
 
 
 def _aggregate_count_issued(wave_issued: pd.Series) -> Optional[int]:
