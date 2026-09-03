@@ -7,6 +7,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
 - [Python 3.8 Compatible Syntax](#python-38-compatible-syntax)
+- [Docstrings](#docstrings)
 - [I/O and Computation Separation](#io-and-computation-separation)
 - [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
@@ -169,6 +170,37 @@ def compressed_name(path: Path | None) -> Path:
     ...
 ```
 
+## Docstrings
+
+Docstrings are read in the editor and in `help()`. This project publishes no Sphinx site, so reStructuredText markup renders nowhere and only makes the text harder to read.
+
+Write docstrings as plain sentences and name other functions, classes, and constants directly.
+
+### Rules
+
+- Never use reStructuredText markup in docstrings: no `:func:`, `:data:`, `:class:`, `:meth:`, `:mod:`, `:param:`, `:returns:`, or `:raises:`.
+- Never use double-backtick literals.
+- Keep the existing `Args:` / `Returns:` block style where a function needs one.
+
+### Example
+
+**Good:** Plain sentence naming the constant directly
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
+```
+
+**Bad:** reStructuredText markup
+
+```python
+def counter_to_block(counter: str) -> str:
+    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`.
+
+    Unlike :func:`parse_counters_text`, returns a single ``str``.
+    """
+```
+
 ## I/O and Computation Separation
 
 I/O — reading files, sockets, environment variables, or command-line arguments — depends on external state and is hard to test in isolation. Computation transforms inputs into outputs deterministically. Mixing the two in one function makes the computation impossible to reuse without paying the I/O cost, and impossible to verify without staging external state.
@@ -215,6 +247,7 @@ Text-mode file I/O should be deterministic across machines. Bare `open()` picks 
 
 - Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
 - Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+- In Python comments and docstrings, use the plain ASCII hyphen `-` instead of the Unicode em dash or en dash.
 
 ### Example
 
