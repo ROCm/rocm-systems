@@ -23,7 +23,7 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
-#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"

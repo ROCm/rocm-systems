@@ -7,7 +7,7 @@
 #include "lowering_commit_test_support.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"

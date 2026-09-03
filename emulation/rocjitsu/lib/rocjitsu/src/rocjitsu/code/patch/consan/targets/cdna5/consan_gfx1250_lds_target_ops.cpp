@@ -4,7 +4,7 @@
 /// @file consan_gfx1250_lds_target_ops.cpp
 /// @brief gfx1250 normalized LDS access recipes.
 
-#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"

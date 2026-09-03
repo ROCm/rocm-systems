@@ -4,7 +4,7 @@
 /// @file consan_validation_gfx9_cdna_target_ops.cpp
 /// @brief Independent gfx9 CDNA descriptor-resource proof.
 
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"

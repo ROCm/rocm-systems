@@ -4,7 +4,7 @@
 /// @file consan_validation_target_ops.cpp
 /// @brief Narrow registry for independent encoded-mutation validation.
 
-#include "rocjitsu/code/patch/consan/consan_validation_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
 #include "rocjitsu/code/patch/consan/consan.h"
 

@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 
 namespace rocjitsu::consan_sc_target_detail {
 

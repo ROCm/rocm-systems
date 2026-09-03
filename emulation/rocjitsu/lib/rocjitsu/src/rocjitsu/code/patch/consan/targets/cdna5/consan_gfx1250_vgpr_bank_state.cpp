@@ -4,7 +4,7 @@
 /// @file consan_gfx1250_vgpr_bank_state.cpp
 /// @brief gfx1250 selectable-VGPR-bank instruction state.
 
-#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 
 #include <cstring>
 

@@ -12,7 +12,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_pipeline.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
-#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 
 #include <algorithm>
 #include <cstddef>

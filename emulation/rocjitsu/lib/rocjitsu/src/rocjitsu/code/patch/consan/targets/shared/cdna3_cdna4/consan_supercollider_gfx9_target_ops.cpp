@@ -4,7 +4,7 @@
 /// @file consan_supercollider_gfx9_target_ops.cpp
 /// @brief GFX9 CDNA3/CDNA4 recipes consumed by SuperCollider.
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"

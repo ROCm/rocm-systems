@@ -133,13 +133,7 @@ foreach(_source IN LISTS _contract_sources)
     )
 endforeach()
 
-file(GLOB _target_component_sources "${_consan_dir}/*target_ops.cpp")
-list(
-    APPEND
-    _target_component_sources
-    "${_consan_dir}/consan_gfx1250_lds_target_ops.cpp"
-    "${_consan_dir}/consan_gfx1250_vgpr_bank_state.cpp"
-)
+file(GLOB_RECURSE _target_component_sources "${_consan_dir}/targets/*.cpp")
 foreach(_file IN LISTS _target_component_sources)
     _consan_assert_no_match(
         "${_file}"
@@ -895,7 +889,7 @@ endif()
 # Inline visible-evidence facets travel with that jump through owner-local
 # assignment, the broad operating point, and narrow mode projections. Do not
 # restore independently optional router fragments.
-file(GLOB _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "${_consan_dir}/*.inc")
+file(GLOB_RECURSE _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "${_consan_dir}/*.inc")
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
@@ -1297,7 +1291,7 @@ _consan_assert_no_match(
 )
 file(READ "${_consan_dir}/consan_capability_contract.h"
      _visible_evidence_target_contract)
-file(READ "${_consan_dir}/consan_gfx9_cdna_target_profile.h.inc"
+file(READ "${_consan_dir}/targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc"
      _gfx9_visible_evidence_profile)
 file(READ "${_consan_dir}/consan_moi_dynamic_record_emission.cpp"
      _visible_evidence_mechanism)
@@ -1357,16 +1351,19 @@ _consan_assert_no_match(
     "kTtmp"
     "concrete command-processor TTMP indices belong to gfx-named target profiles"
 )
-foreach(_target_profile IN ITEMS gfx1201 gfx1250)
+foreach(_target_profile IN ITEMS
+    targets/rdna4/consan_gfx1201_target_profile.h.inc
+    targets/cdna5/consan_gfx1250_target_profile.h.inc
+)
     file(
         READ
-        "${_consan_dir}/consan_${_target_profile}_target_profile.h.inc"
+        "${_consan_dir}/${_target_profile}"
         _workgroup_identity_profile
     )
     if(NOT _workgroup_identity_profile MATCHES
        "command_processor_workgroup_identity")
         message(FATAL_ERROR
-            "ConSan ${_target_profile} profile lost its target-owned workgroup ABI"
+            "ConSan ${_target_profile} lost its target-owned workgroup ABI"
         )
     endif()
 endforeach()
@@ -2230,7 +2227,7 @@ foreach(_wait_semantic_consumer IN ITEMS
         "wait semantic consumers must not recognize target-native wait mnemonics"
     )
 endforeach()
-file(READ "${_consan_dir}/consan_program_analysis_target_ops.h"
+file(READ "${_consan_dir}/targets/consan_program_analysis_target_ops.h"
      _program_analysis_normalized_contract)
 if(NOT _program_analysis_normalized_contract MATCHES "workgroup_acquire_ordering")
     message(FATAL_ERROR
@@ -2291,7 +2288,7 @@ foreach(_scope_semantic_only_consumer IN ITEMS
         "semantic scope consumers must not depend on retained raw target scope"
     )
 endforeach()
-file(READ "${_consan_dir}/consan_program_analysis_gfx12_target_ops.h"
+file(READ "${_consan_dir}/targets/shared/gfx12/consan_program_analysis_gfx12_target_ops.h"
      _gfx12_program_analysis_contract)
 if(NOT _gfx12_program_analysis_contract MATCHES "normalize_gfx12_memory_scope")
     message(FATAL_ERROR
@@ -2325,7 +2322,7 @@ _consan_assert_no_match(
     "ConSanWaitCounterFamily|wait_counter_family|build_s_wait_flat_load0"
     "SuperCollider flat lowering must consume its target-owned completion-wait operation"
 )
-file(READ "${_consan_dir}/consan_supercollider_target_ops.h" _sc_target_operations)
+file(READ "${_consan_dir}/targets/consan_supercollider_target_ops.h" _sc_target_operations)
 if(NOT _sc_target_operations MATCHES "consan_sc_build_guest_flat_completion_wait")
     message(FATAL_ERROR
         "ConSan SuperCollider target operations lost guest-flat completion-wait ownership"
@@ -2778,7 +2775,7 @@ if(NOT _fault_target_operation_consumer MATCHES "rewrite_consan_atomic_fault_add
         "ConSan atomic fault mutation lost its target-owned rewrite operations"
     )
 endif()
-file(READ "${_consan_dir}/consan_fault_gfx12_target_ops.cpp" _gfx12_fault_target_owner)
+file(READ "${_consan_dir}/targets/shared/gfx12/consan_fault_gfx12_target_ops.cpp" _gfx12_fault_target_owner)
 if(NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_address" OR
    NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_scope_to_wave" OR
    NOT _gfx12_fault_target_owner MATCHES "rdna4::VdsMachineInst" OR
@@ -2984,12 +2981,12 @@ foreach(_source IN ITEMS consan_moi_barrier.inc consan_moi_sync_emission.cpp)
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_program_analysis_target_ops.cpp"
+    "${_consan_dir}/targets/consan_program_analysis_target_ops.cpp"
     "consan_program_analysis_target_detail::"
     "common program-analysis dispatch must consume the target-owned operations product"
 )
 _consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_program_analysis_target_ops.cpp"
+    "${_consan_dir}/targets/consan_program_analysis_target_ops.cpp"
     "ROCJITSU_CODE_ARCH_"
     5
     "program-analysis target selection must remain one narrow registry"
@@ -3097,7 +3094,7 @@ if(NOT _final_validation_decoder_count EQUAL 1 OR
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_validation_target_ops.h"
+    "${_consan_dir}/targets/consan_validation_target_ops.h"
     "validate_consan_(ordinary_global|atomic)"
     "encoded mutation validation must remain one operation over a typed semantic kind"
 )
@@ -3107,7 +3104,7 @@ _consan_assert_no_match(
     "common validation must consume target-owned descriptor resource proof"
 )
 file(
-    GLOB _consan_sources
+    GLOB_RECURSE _consan_sources
     "${_consan_dir}/*.cpp"
     "${_consan_dir}/*.h"
     "${_consan_dir}/*.inc"
@@ -3355,7 +3352,7 @@ endforeach()
 # mode policy. Concrete generated types remain behind the family/member
 # implementations and their one narrow registry.
 set(_program_analysis_target_contract
-    "${_consan_dir}/consan_program_analysis_target_ops.h")
+    "${_consan_dir}/targets/consan_program_analysis_target_ops.h")
 _consan_assert_no_match(
     "${_program_analysis_target_contract}"
     "ConSanMoiEngine|isa/arch/amdgpu/generated/|ROCJITSU_CODE_ARCH_|(cdna[0-9_]*|rdna[0-9_]*)::"
@@ -3402,21 +3399,21 @@ endforeach()
 # grow another mixed table of raw product identities.
 set(
     _target_profile_fragments
-    consan_gfx9_cdna_target_profile.h.inc
-    consan_rdna_target_profile.h.inc
-    consan_gfx942_target_profile.h.inc
-    consan_gfx950_target_profile.h.inc
-    consan_gfx1100_target_profile.h.inc
-    consan_gfx1201_target_profile.h.inc
-    consan_gfx1250_target_profile.h.inc
+    targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc
+    targets/shared/rdna3_rdna4/consan_rdna_target_profile.h.inc
+    targets/cdna3/consan_gfx942_target_profile.h.inc
+    targets/cdna4/consan_gfx950_target_profile.h.inc
+    targets/rdna3/consan_gfx1100_target_profile.h.inc
+    targets/rdna4/consan_gfx1201_target_profile.h.inc
+    targets/cdna5/consan_gfx1250_target_profile.h.inc
 )
 set(
     _concrete_target_profile_fragments
-    consan_gfx942_target_profile.h.inc
-    consan_gfx950_target_profile.h.inc
-    consan_gfx1100_target_profile.h.inc
-    consan_gfx1201_target_profile.h.inc
-    consan_gfx1250_target_profile.h.inc
+    targets/cdna3/consan_gfx942_target_profile.h.inc
+    targets/cdna4/consan_gfx950_target_profile.h.inc
+    targets/rdna3/consan_gfx1100_target_profile.h.inc
+    targets/rdna4/consan_gfx1201_target_profile.h.inc
+    targets/cdna5/consan_gfx1250_target_profile.h.inc
 )
 set(
     _concrete_target_profile_ids

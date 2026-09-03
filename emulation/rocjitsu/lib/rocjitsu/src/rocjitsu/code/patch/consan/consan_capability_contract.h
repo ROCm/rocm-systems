@@ -408,14 +408,14 @@ inline constexpr uint16_t kConSanCdnaSemanticFormMask =
     kConSanCommonSemanticFormMask |
     consan_capability_form_bit(ConSanCapabilityForm::RelaxedLdsAtomicAccess);
 
-#include "rocjitsu/code/patch/consan/consan_gfx9_cdna_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/consan_rdna_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/shared/rdna3_rdna4/consan_rdna_target_profile.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_gfx1100_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/consan_gfx1201_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/consan_gfx1250_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/consan_gfx942_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/consan_gfx950_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/rdna3/consan_gfx1100_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/rdna4/consan_gfx1201_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/cdna5/consan_gfx1250_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/cdna3/consan_gfx942_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/cdna4/consan_gfx950_target_profile.h.inc"
 
 /// The production target-admission map and documentation iteration order.
 /// Concrete architectural facts live in the gfx-named profile owners above.

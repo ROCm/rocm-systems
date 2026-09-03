@@ -4,7 +4,7 @@
 /// @file consan_fault_gfx12_target_ops.cpp
 /// @brief GFX12 fault-classification and mutation recipes.
 
-#include "rocjitsu/code/patch/consan/consan_fault_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops_internal.h"
 
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"

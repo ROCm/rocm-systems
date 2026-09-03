@@ -4,9 +4,9 @@
 /// @file consan_program_analysis_gfx1100_target_ops.cpp
 /// @brief gfx1100 raw program-analysis decoding.
 
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops_internal.h"
 
-#include "rocjitsu/code/patch/consan/consan_program_analysis_pregfx12_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/shared/pregfx12/consan_program_analysis_pregfx12_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 
 namespace rocjitsu::consan_program_analysis_target_detail {

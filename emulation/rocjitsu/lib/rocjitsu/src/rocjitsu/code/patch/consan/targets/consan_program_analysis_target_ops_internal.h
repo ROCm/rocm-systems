@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 namespace rocjitsu {

@@ -6,7 +6,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
-#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
 namespace rocjitsu {
 namespace {

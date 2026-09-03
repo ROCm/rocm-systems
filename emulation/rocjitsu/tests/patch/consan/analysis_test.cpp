@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"

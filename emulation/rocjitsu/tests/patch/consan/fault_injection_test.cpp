@@ -3,7 +3,7 @@
 
 #include "consan_test_support.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
-#include "rocjitsu/code/patch/consan/consan_fault_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 
 namespace rocjitsu {

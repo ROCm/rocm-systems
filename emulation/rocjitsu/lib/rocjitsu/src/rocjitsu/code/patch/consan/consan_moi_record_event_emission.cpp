@@ -11,7 +11,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
-#include "rocjitsu/code/patch/consan/consan_vgpr_bank_state.h"
+#include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 

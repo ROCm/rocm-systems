@@ -4,7 +4,7 @@
 /// @file consan_fault_gfx9_target_ops.cpp
 /// @brief GFX9 CDNA fault-classification recipes.
 
-#include "rocjitsu/code/patch/consan/consan_fault_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops_internal.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 

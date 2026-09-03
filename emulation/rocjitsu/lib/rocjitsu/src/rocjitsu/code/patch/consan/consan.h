@@ -32,7 +32,7 @@
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dispatch_prologue_effect.h"
 #include "rocjitsu/code/patch/consan/consan_moi_entry_scalar_backup.h"
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/planning_work.h"
 #include "rocjitsu/code/rj_code.h"
 

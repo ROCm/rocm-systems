@@ -16,7 +16,7 @@
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 #include "rocjitsu/isa/decoder.h"

@@ -4,7 +4,7 @@
 /// @file consan_supercollider_rdna3_target_ops.cpp
 /// @brief RDNA3 recipes consumed by SuperCollider.
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"

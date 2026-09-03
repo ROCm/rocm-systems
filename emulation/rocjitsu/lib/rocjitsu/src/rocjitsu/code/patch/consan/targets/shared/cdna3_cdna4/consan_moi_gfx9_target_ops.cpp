@@ -4,7 +4,7 @@
 /// @file consan_moi_gfx9_target_ops.cpp
 /// @brief GFX9 CDNA3/CDNA4 recipes shared by MOI engines.
 
-#include "rocjitsu/code/patch/consan/consan_moi_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_moi_target_ops.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"

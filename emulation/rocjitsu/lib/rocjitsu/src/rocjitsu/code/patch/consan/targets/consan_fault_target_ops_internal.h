@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/patch/consan/consan_fault_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 
 namespace rocjitsu::consan_fault_target_detail {
 

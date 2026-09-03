@@ -4,7 +4,7 @@
 /// @file consan_supercollider_gfx11_gfx12_target_ops.cpp
 /// @brief Family-shared GFX11/GFX12 recipes consumed by SuperCollider.
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
 namespace rocjitsu::consan_sc_target_detail {
 

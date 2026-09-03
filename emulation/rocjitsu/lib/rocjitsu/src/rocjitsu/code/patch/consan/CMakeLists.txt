@@ -24,28 +24,27 @@ rj_add_object_library(
 
 rj_add_object_library(
     rocjitsu_consan_targets
-        consan_fault_gfx12_target_ops.cpp
-        consan_fault_gfx9_target_ops.cpp
-        consan_fault_target_ops.cpp
-        consan_gfx1250_lds_target_ops.cpp
-        consan_gfx1250_vgpr_bank_state.cpp
-        consan_moi_gfx9_target_ops.cpp
-        consan_program_analysis_gfx9_cdna_target_ops.cpp
-        consan_program_analysis_gfx1100_target_ops.cpp
-        consan_program_analysis_gfx1201_target_ops.cpp
-        consan_program_analysis_gfx1250_target_ops.cpp
-        consan_program_analysis_target_ops.cpp
-        consan_relay_target_ops.cpp
-        consan_supercollider_gfx11_gfx12_target_ops.cpp
-        consan_supercollider_gfx1250_target_ops.cpp
-        consan_supercollider_gfx9_target_ops.cpp
-        consan_supercollider_rdna3_target_ops.cpp
-        consan_supercollider_rdna4_target_ops.cpp
-        consan_supercollider_target_ops.cpp
-        consan_validation_gfx11_target_ops.cpp
-        consan_validation_gfx12_target_ops.cpp
-        consan_validation_gfx9_cdna_target_ops.cpp
-        consan_validation_target_ops.cpp
+        targets/consan_fault_target_ops.cpp
+        targets/consan_program_analysis_target_ops.cpp
+        targets/consan_relay_target_ops.cpp
+        targets/consan_supercollider_target_ops.cpp
+        targets/consan_validation_target_ops.cpp
+        targets/rdna3/consan_program_analysis_gfx1100_target_ops.cpp
+        targets/rdna3/consan_supercollider_rdna3_target_ops.cpp
+        targets/rdna4/consan_program_analysis_gfx1201_target_ops.cpp
+        targets/rdna4/consan_supercollider_rdna4_target_ops.cpp
+        targets/cdna5/consan_gfx1250_lds_target_ops.cpp
+        targets/cdna5/consan_gfx1250_vgpr_bank_state.cpp
+        targets/cdna5/consan_program_analysis_gfx1250_target_ops.cpp
+        targets/cdna5/consan_supercollider_gfx1250_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_fault_gfx9_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_moi_gfx9_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_program_analysis_gfx9_cdna_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_supercollider_gfx9_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_validation_gfx9_cdna_target_ops.cpp
+        targets/shared/gfx11_gfx12/consan_supercollider_gfx11_gfx12_target_ops.cpp
+        targets/shared/gfx12/consan_fault_gfx12_target_ops.cpp
+        targets/shared/gfx12/consan_validation_gfx12_target_ops.cpp
 )
 target_link_libraries(rocjitsu_consan_targets PRIVATE rocjitsu_consan_contracts)
 
@@ -169,7 +168,7 @@ list(LENGTH _consan_unique_component_sources _consan_unique_component_source_cou
 if(NOT _consan_component_source_count EQUAL _consan_unique_component_source_count)
     message(FATAL_ERROR "a ConSan source belongs to more than one component")
 endif()
-file(GLOB _consan_production_sources RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cpp")
+file(GLOB_RECURSE _consan_production_sources RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cpp")
 list(REMOVE_ITEM _consan_production_sources consan_lowerer.cpp)
 list(SORT _consan_production_sources)
 list(SORT _consan_unique_component_sources)

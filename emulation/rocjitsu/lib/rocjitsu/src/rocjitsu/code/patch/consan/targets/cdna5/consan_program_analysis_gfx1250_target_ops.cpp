@@ -4,9 +4,9 @@
 /// @file consan_program_analysis_gfx1250_target_ops.cpp
 /// @brief gfx1250 raw pointer-provenance decoding.
 
-#include "rocjitsu/code/patch/consan/consan_program_analysis_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops_internal.h"
 
-#include "rocjitsu/code/patch/consan/consan_program_analysis_gfx12_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/shared/gfx12/consan_program_analysis_gfx12_target_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 

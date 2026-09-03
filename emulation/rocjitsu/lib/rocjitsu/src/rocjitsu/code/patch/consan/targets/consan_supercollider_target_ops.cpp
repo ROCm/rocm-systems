@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops_internal.h"
-#include "rocjitsu/code/patch/consan/consan_target_lds_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
 #include <climits>

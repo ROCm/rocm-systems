@@ -4,7 +4,7 @@
 /// @file consan_supercollider_gfx1250_target_ops.cpp
 /// @brief gfx1250 recipes consumed by SuperCollider.
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_target_ops_internal.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
