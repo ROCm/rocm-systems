@@ -1570,7 +1570,7 @@ public:
   }
 
 private:
-  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  rj_code_arch_t arch_;
   uint16_t limit_ = 0u;
   std::span<const consan_detail::ScalarOwnerContextSummary> owner_contexts_;
   const RegisterSet *unavailable_ = nullptr;

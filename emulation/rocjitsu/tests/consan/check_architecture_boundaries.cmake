@@ -2824,6 +2824,16 @@ _consan_assert_no_match(
     "ROCJITSU_CODE_ARCH_"
     "common placement must consume typed target facts"
 )
+if(NOT _moi_placement_contract MATCHES "validate_moi_scalar_state")
+    message(FATAL_ERROR
+        "ConSan scalar placement lost its unified validation transaction"
+    )
+endif()
+_consan_assert_no_match(
+    "${_consan_dir}/consan_moi_placement_contracts.h"
+    "validate_moi_(dispatch_id_sgprs|ordinary_scalar_state)|struct MoiSgprRange"
+    "scalar placement must not restore split validation or a duplicate range type"
+)
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_placement.inc"
     "MoiResourcePlanSite(Key|Index)"
