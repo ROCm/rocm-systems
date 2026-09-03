@@ -16,7 +16,7 @@
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
 
-// By default, use ncclIbRequestMatchingScheme::BY_INDEX matching scheme.
+// Default -2: BY_INDEX. 0=BY_INDEX, 1=BY_ID, 2=BY_ORDER (software CTS; CTS offload forces BY_ORDER).
 NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
 
@@ -549,11 +549,13 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   //  - The status of all posted Send Request is considered unknown
   //
   // slot == devIndex - When writing to CTS FIFO slot N, and this QP lives on device index N, it should send signalled.
-  // This works out that each CTS posting QP gets drained
-  if (comm->useCtsOffload && (slot == ctsQp->ctsQpSlot)) {
-    wr.send_flags |= IBV_SEND_SIGNALED;
-    wr.wr_id = (req - req->base->reqs);
-    IbCastAddEvent(req, ctsQp->devIndex);
+  if (comm->base.recvMatchingScheme == BY_ORDER) {
+    bool signalCts = comm->useCtsOffload ? (slot == ctsQp->ctsQpSlot) : (slot == ctsQp->devIndex);
+    if (signalCts) {
+      wr.send_flags |= IBV_SEND_SIGNALED;
+      wr.wr_id = (req - req->base->reqs);
+      IbCastAddEvent(req, ctsQp->devIndex);
+    }
   } else if (!comm->useCtsOffload && (slot == ctsQp->devIndex || comm->base.resiliency)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
@@ -898,8 +900,11 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   if (commBase->isSend) {
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)commBase;
     req = sendComm->sendReqs[wc->wr_id & 0xff][0];
+  } else if (wc->opcode == IBV_WC_RDMA_READ) {
+    NCCLCHECK(IbCastRequestRetrieveAsIndex(commBase->reqs, (uint32_t)(wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET),
+                                           &req));
   } else {
-    req = &(commBase->reqs[wc->wr_id]);
+    NCCLCHECK(IbCastRequestRetrieveAsIndex(commBase->reqs, (uint32_t)wc->wr_id, &req));
   }
 
   if (req == NULL) {
