@@ -902,3 +902,35 @@ patch/lowering publication across the five emulated targets. Existing
 exact-byte, corruption, resource-pressure, and architecture-boundary tests are
 the differential oracle; any uncovered behavior defect receives a regression
 test. The cutover gate remains the complete nonphysical RocJitsu matrix.
+
+The attempt was stopped and reverted after complete synchronization convergence
+and an additional access-emitter convergence both failed the stated economics.
+The experiment did establish one normalized route record and one compiled
+dispatcher/host/island/anchor transaction, and migrated Sampled barriers,
+Sampled atomics, InlineShadow atomics, the shared Record/Replay/InlineShadow
+barrier path, and the already-common dense-access emitter. The focused 79-test
+dense/far routing matrix passed at the maximal checkpoint across S_CALL_B64,
+S_CALL_I64, explicit-key, tagged-SCC, spill-backed, host-relocation, and all
+five emulated-target cases.
+
+That complete experiment changed six production files by 515 physical
+additions and 665 deletions. The governing counter moved only from 84,536 to
+84,389 implementation lines: **147 net lines removed**, less than one third of
+the 500-line abort floor and far below the 550-line thesis. The unexpectedly
+small result is substantive evidence. Most of the apparent 1,250-line region
+is not repeated relay mechanics: it is different site admission, late scalar
+tuple requalification, evidence-body construction, access-dispatcher reuse,
+placement-planner interaction, lowering publication, and fallback policy. The
+normalized transaction itself needed to represent call-return, derived-key,
+clone-local, explicit-key, tagged-SCC, dependency-wait, direct-target, and
+relocated-host variants. Pulling the remaining policy behind that boundary
+would therefore add the mode-aware callbacks or union-shaped protocol that the
+thesis explicitly forbids.
+
+All three experimental code commits were reverted; no route record, dispatcher
+helper, alternate emitter, adapter, or duplicated authority remains. The
+post-revert build and the same 79 focused tests pass. Production returns to the
+Macro-slice 5 total of **84,536 implementation lines**, so the campaign remains
+at **3,479 net implementation lines removed** from baseline. This negative
+result rejects dense synchronization routing as a current macro-replacement
+candidate and returns selection to the whole production tree.
