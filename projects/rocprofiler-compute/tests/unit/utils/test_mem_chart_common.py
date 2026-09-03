@@ -82,6 +82,22 @@ class TestProgressBar:
         assert mem_chart_common.progress_bar(pct, 10) == "█" * filled + "░" * empty
 
 
+class TestSafeFloat:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (1.5, 1.5),
+            (0, 0.0),
+            ("10", 10.0),
+            (None, None),
+            ("N/A", None),
+            (float("nan"), None),
+        ],
+    )
+    def test_parse(self, value, expected):
+        assert mem_chart_common.safe_float(value) == expected
+
+
 class TestSafeFloatSum:
     @pytest.mark.parametrize(
         "args, expected",

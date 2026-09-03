@@ -798,6 +798,12 @@ def format_table_output(
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
+    # Capture raw metric values before human-readable BW scaling so the chart
+    # renderer still receives Bytes/s floats.
+    raw_chart_values: Optional[dict[str, Any]] = None
+    if "Metric" in df.columns and "Value" in df.columns:
+        raw_chart_values = dict(zip(df["Metric"], df["Value"]))
+
     if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
@@ -817,13 +823,7 @@ def format_table_output(
         if mem_data_override is not None:
             mem_data = mem_data_override
         else:
-            mem_data = (
-                pd
-                .DataFrame([df["Metric"], df["Value"]])
-                .transpose()
-                .set_index("Metric")
-                .to_dict()["Value"]
-            )
+            mem_data = raw_chart_values or {}
 
         if is_gfx115x(gpu_arch):
             content += (

@@ -107,17 +107,27 @@ def progress_bar(percent: Optional[float], width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def safe_float(
+    value: Union[int, float, str, None],
+) -> Optional[float]:
+    """Parse a numeric metric. None for None/NaN/unparseable."""
+    try:
+        numeric = float(value)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return None
+    if math.isnan(numeric):
+        return None
+    return numeric
+
+
 def safe_float_sum(
     *values: Union[int, float, str, None],
 ) -> Optional[float]:
     """Sum numeric values, skipping None/NaN/unparseable. None if all invalid."""
     terms: list[float] = []
     for value in values:
-        try:
-            numeric = float(value)  # type: ignore[arg-type]
-        except (ValueError, TypeError):
-            continue
-        if not math.isnan(numeric):
+        numeric = safe_float(value)
+        if numeric is not None:
             terms.append(numeric)
     return sum(terms) if terms else None
 

@@ -34,6 +34,7 @@ DEFAULT_WIDTH_OFFSET = 40
 
 def _render_memory_chart(metric_dict: dict[str, Any], gpu_arch: str) -> str:
     """Render memory-chart metrics with the architecture-specific renderer."""
+    # TUI has no normalization picker; the heading always uses per_kernel.
     heading = format_mem_chart_heading("per_kernel")
     if is_gfx9(gpu_arch):
         return plot_mem_chart_gfx9(

@@ -57,6 +57,9 @@ class TestPlotMemChartGfx1250:
             "GL2",
             "EA/DF",
             "HBM",
+            "IO",
+            "HDM",
+            "GMI",
         )
         for component in expected_components:
             assert component in output, f"Missing gfx1250 component: {component}"
@@ -207,6 +210,7 @@ class TestIntegrationGfx1250:
             "DRAM Write Bandwidth": 384e9,
         }
         chart = mem_chart_gfx1250.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
+        # GL0-GL1 R/W, GL2-EA R/W, DRAM R/W edges plus the HBM total.
         assert chart.count("GB/s") >= 5
 
 

@@ -125,6 +125,48 @@ def test_format_table_output_scales_bytes_per_second_for_gfx9() -> None:
     assert "1000000000" not in content
 
 
+def test_format_table_output_mem_chart_uses_unscaled_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, dict] = {}
+
+    def gfx9_stub(
+        mem_data: dict,
+        *,
+        chart_title: str,
+        gpu_arch: str = "",
+    ) -> str:
+        calls["gfx9"] = {
+            "mem_data": mem_data,
+            "chart_title": chart_title,
+            "gpu_arch": gpu_arch,
+        }
+        return "rendered CDNA memory chart"
+
+    monkeypatch.setattr("utils.tty.mem_chart_gfx9.plot_mem_chart", gfx9_stub)
+    df = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [1e9],
+        "Unit": ["Bytes/s"],
+    })
+
+    content = format_table_output(
+        make_args(),
+        {
+            "id": 300,
+            "title": "Memory Chart",
+            "cli_style": "mem_chart",
+        },
+        df,
+        "metric_table",
+        runs={"only": object()},
+        gpu_arch="gfx942",
+    )
+
+    assert calls["gfx9"]["mem_data"] == {"DRAM Read Bandwidth": 1e9}
+    assert content == "rendered CDNA memory chart\n"
+
+
 def test_has_time_data_detection() -> None:
     """has_time_data is True only when a 'ns' Unit column is present."""
     assert has_time_data(_sample_time_data())

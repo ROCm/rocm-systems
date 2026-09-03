@@ -34,7 +34,7 @@ from utils.mem_chart_common import (
     mem_chart_cli_main,
     metric_line,
     render_chart_to_string,
-    safe_float_sum,
+    safe_float,
 )
 
 # ---------------------------------------------------------------------------
@@ -296,8 +296,8 @@ def _build_downstream(
 
     hbm_read_bw = m.get("DRAM Read Bandwidth")
     hbm_write_bw = m.get("DRAM Write Bandwidth")
-    numeric_hbm_read_bw = safe_float_sum(hbm_read_bw)
-    numeric_hbm_write_bw = safe_float_sum(hbm_write_bw)
+    numeric_hbm_read_bw = safe_float(hbm_read_bw)
+    numeric_hbm_write_bw = safe_float(hbm_write_bw)
     total_bw = (
         numeric_hbm_read_bw + numeric_hbm_write_bw
         if numeric_hbm_read_bw is not None and numeric_hbm_write_bw is not None
@@ -434,7 +434,12 @@ def create_mem_chart_diagram(
     chart_title: str = "",
     gpu_arch: Optional[str] = None,
 ) -> None:
-    """Render the gfx1250 memory diagram to *console*."""
+    """Render the gfx1250 memory diagram to *console*.
+
+    ``show_debug`` and ``gpu_arch`` match the shared CLI scaffold used by
+    gfx9/gfx11; gfx1250 does not branch on either today.
+    """
+    del show_debug, gpu_arch
     m = metric_dict
 
     # --- Heading ---
