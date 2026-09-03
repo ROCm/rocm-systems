@@ -87,8 +87,8 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
 
 // Legacy CDNA uses the all-ones wait operand as both its no-wait encoding and
 // the maximum number of outstanding counter tokens.
-static constexpr int kLegacyLgkmcntCapacity = 15;
-static constexpr int kLegacyVmcntCapacity = 63;
+static constexpr int kCdnaLgkmcntCapacity = 15;
+static constexpr int kCdnaVmcntCapacity = 63;
 
 __global__ void vmcnt_no_wait_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -97,7 +97,7 @@ __global__ void vmcnt_no_wait_race_kernel(const float *src, float *dst) {
       "global_load_dword %[value], %[address], off\n"
       "s_waitcnt vmcnt(%c[no_wait])\n"
       : [value] "=v"(val)
-      : [address] "v"(&src[tid]), [no_wait] "n"(kLegacyVmcntCapacity));
+      : [address] "v"(&src[tid]), [no_wait] "n"(kCdnaVmcntCapacity));
   dst[tid] = val;
 }
 
@@ -112,7 +112,7 @@ __global__ void lgkmcnt_no_wait_race_kernel(int *dst) {
       "ds_read_b32 %[value], %[address]\n"
       "s_waitcnt lgkmcnt(%c[no_wait])\n"
       : [value] "=v"(val)
-      : [address] "v"(tid * 4), [no_wait] "n"(kLegacyLgkmcntCapacity)
+      : [address] "v"(tid * 4), [no_wait] "n"(kCdnaLgkmcntCapacity)
       : "memory");
   dst[tid] = val;
 }
@@ -197,27 +197,27 @@ static constexpr RaceExpectation kVmcntBelowCapacityRaceExpectation{
 };
 
 TEST_F(Gfx950RaceTest, lgkmcnt_capacity_boundary) {
-  lgkmcnt_capacity_kernel<kLegacyLgkmcntCapacity><<<1, 64>>>(alloc<int>(64));
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity><<<1, 64>>>(alloc<int>(64));
   sync();
   ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, lgkmcnt_below_capacity_race) {
-  lgkmcnt_capacity_kernel<kLegacyLgkmcntCapacity - 1><<<1, 64>>>(alloc<int>(64));
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1><<<1, 64>>>(alloc<int>(64));
   sync();
   ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
 }
 
 TEST_F(Gfx950RaceTest, vmcnt_capacity_boundary) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
-  vmcnt_capacity_kernel<kLegacyVmcntCapacity><<<1, 64>>>(src, dst);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity><<<1, 64>>>(src, dst);
   sync();
   ExpectNoRace();
 }
 
 TEST_F(Gfx950RaceTest, vmcnt_below_capacity_race) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
-  vmcnt_capacity_kernel<kLegacyVmcntCapacity - 1><<<1, 64>>>(src, dst);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity - 1><<<1, 64>>>(src, dst);
   sync();
   ExpectRace(kVmcntBelowCapacityRaceExpectation);
 }

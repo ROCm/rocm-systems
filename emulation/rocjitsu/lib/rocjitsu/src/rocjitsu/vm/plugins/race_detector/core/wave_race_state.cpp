@@ -19,9 +19,8 @@ struct ProfileScope {
 } // namespace
 
 WaveRaceState::WaveRaceState(int vgprCount, int sgprCount, WaveId waveId, RaceDetector *detector,
-                             int vmcntNoWait, int lgkmcntNoWait, bool modelCounterBackpressure)
-    : vmcntNoWait(vmcntNoWait), lgkmcntNoWait(lgkmcntNoWait),
-      modelCounterBackpressure(modelCounterBackpressure), waveId(waveId), detector(detector) {
+                             CounterCapacities counterCapacities)
+    : counterCapacities(counterCapacities), waveId(waveId), detector(detector) {
   vgprMemoryEvents.resize(vgprCount);
   sgprMemoryEvents.resize(sgprCount);
   sgprEventCount.resize(sgprCount, 0);
@@ -110,16 +109,22 @@ void WaveRaceState::registerEventWithIntervals(uint64_t pc, MemoryEventType type
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, int increment) {
-  const int capacity = modeledCapacity(type);
-  if (capacity <= 0 || increment <= 0)
+void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type) {
+  const int capacity = type == amdgpu::WaitCounterType::VMCNT     ? counterCapacities.vmcnt
+                       : type == amdgpu::WaitCounterType::LGKMCNT ? counterCapacities.lgkmcnt
+                                                                  : 0;
+  if (capacity <= 0)
+    return;
+
+  // The total event count is an inexpensive upper bound for either counter.
+  // Below that bound, the common path returns without scanning any events.
+  if (static_cast<int>(waveMemoryEvents.size()) < capacity)
     return;
 
   // An instruction cannot issue if adding its counter tokens would overflow
   // the finite counter. Immediately before it reads its operands, hardware has
   // therefore established the same upper bound as an implicit partial wait.
-  applyCounterConstraint(type, std::max(0, capacity - increment),
-                         /*includeUnordered=*/false);
+  applyCounterConstraint(type, capacity - 1, /*includeUnordered=*/false);
 }
 
 void WaveRaceState::registerLdsEvent(uint64_t pc, MemoryEventType type,
@@ -244,39 +249,23 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   }
 }
 
-int WaveRaceState::noWaitValue(amdgpu::WaitCounterType type) const {
+int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
   switch (type) {
   case amdgpu::WaitCounterType::VMCNT:
-    return vmcntNoWait;
+    return counterCapacities.vmcnt;
   case amdgpu::WaitCounterType::LGKMCNT:
-    return lgkmcntNoWait;
+    return counterCapacities.lgkmcnt;
   case amdgpu::WaitCounterType::EXPCNT:
     return amdgpu::WaitCounters::EXPCNT_MAX;
-  case amdgpu::WaitCounterType::KMCNT:
-    return amdgpu::WaitCounters::KMCNT_MAX;
   case amdgpu::WaitCounterType::VSCNT:
-  case amdgpu::WaitCounterType::LOADCNT:
-  case amdgpu::WaitCounterType::STORECNT:
-  case amdgpu::WaitCounterType::DSCNT:
-  case amdgpu::WaitCounterType::TENSORCNT:
-  case amdgpu::WaitCounterType::ASYNCCNT:
-    return 63;
+    return kSixBitCounterCapacity;
+  default:
+    return kSixBitCounterCapacity;
   }
-  return -1;
-}
-
-int WaveRaceState::modeledCapacity(amdgpu::WaitCounterType type) const {
-  if (!modelCounterBackpressure)
-    return 0;
-  if (type == amdgpu::WaitCounterType::VMCNT)
-    return vmcntNoWait;
-  if (type == amdgpu::WaitCounterType::LGKMCNT)
-    return lgkmcntNoWait;
-  return 0;
 }
 
 void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold) {
-  if (threshold < 0 || threshold == noWaitValue(type))
+  if (threshold < 0 || threshold == doNotWaitValue(type))
     return;
 
   if (threshold == 0) {
@@ -284,15 +273,16 @@ void WaveRaceState::applyWaitCounter(amdgpu::WaitCounterType type, int threshold
     return;
   }
 
-  if (modelCounterBackpressure &&
+  const bool usesCdnaCounterModel = counterCapacities.lgkmcnt == kFourBitCounterCapacity;
+  if (usesCdnaCounterModel &&
       (type == amdgpu::WaitCounterType::VMCNT || type == amdgpu::WaitCounterType::LGKMCNT)) {
     applyCounterConstraint(type, threshold, /*includeUnordered=*/false);
     return;
   }
 
   // Preserve the established split-counter behavior outside the CDNA model.
-  // Scalar-memory events are unordered, while the legacy combined LGKM wait
-  // can partially retire only native DS operations.
+  // Scalar-memory events are unordered, while the combined LGKM wait can
+  // partially retire only native DS operations.
   if (type == amdgpu::WaitCounterType::LGKMCNT || type == amdgpu::WaitCounterType::KMCNT) {
     if (type == amdgpu::WaitCounterType::LGKMCNT)
       for (MemoryEventType dsType : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS})

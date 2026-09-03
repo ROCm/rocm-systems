@@ -43,19 +43,19 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
   return ExecutionPlugin::kFullByteMask;
 }
 
-int lgkmcnt_no_wait_value(rj_code_arch_t arch) {
+CounterCapacities counter_capacities(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
   case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return 15;
+    return kCdnaCounterCapacities;
   default:
-    return 63;
+    return {.vmcnt = kSixBitCounterCapacity, .lgkmcnt = kSixBitCounterCapacity};
   }
 }
 
-bool models_cdna_counter_backpressure(rj_code_arch_t arch) {
+bool uses_cdna_combined_counters(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
@@ -93,7 +93,7 @@ MemoryOrderClass memory_order_for(const Instruction &inst, rj_code_arch_t arch) 
 
   // CDNA has one ordered non-FLAT VMEM stream, including loads, stores,
   // atomics, image operations, and direct-to-LDS loads.
-  if (models_cdna_counter_backpressure(arch) &&
+  if (uses_cdna_combined_counters(arch) &&
       (mnemonic.starts_with("global_") || mnemonic.starts_with("scratch_") ||
        mnemonic.starts_with("buffer_") || mnemonic.starts_with("tbuffer_") ||
        mnemonic.starts_with("image_"))) {
@@ -112,7 +112,7 @@ MemoryOrderClass memory_order_for(const Instruction &inst, rj_code_arch_t arch) 
 
 void apply_issue_backpressure(const Instruction &inst, amdgpu::Wavefront &wavefront,
                               WaveRaceState &state) {
-  if (!models_cdna_counter_backpressure(wavefront.cu().arch()))
+  if (!uses_cdna_combined_counters(wavefront.cu().arch()))
     return;
 
   const std::string_view mnemonic = inst.mnemonic();
@@ -352,8 +352,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
       static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
-      /*vmcntNoWait=*/63, lgkmcnt_no_wait_value(wavefronts.front()->cu().arch()),
-      models_cdna_counter_backpressure(wavefronts.front()->cu().arch()));
+      counter_capacities(wavefronts.front()->cu().arch()));
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];

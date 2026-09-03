@@ -201,15 +201,39 @@ even when the new instruction is scalar memory or GDS. Mixed-class pressure
 that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
+For example, CDNA cannot issue the final scalar load below while all 15 earlier
+LGKM tokens remain outstanding:
+
+```asm
+ds_read_b32 v0, v16
+ds_read_b32 v1, v16
+; ... 13 more ordered LDS reads, through v14 ...
+s_load_dword s4, s[2:3], 0
+```
+
+The scalar load can issue only after the LGKMCNT value drops below its
+four-bit capacity. Because all preceding operations are ordered LDS reads, this
+proves that the oldest read into `v0` completed. If those pending operations
+belonged to different or unordered classes, the capacity stall would not prove
+which individual event completed.
+
 The detector records the target-specific wait-counter family on every event.
-It handles combined and standalone legacy waits as well as the supported split
-counter instructions. Counter-capacity backpressure is currently modeled for
-CDNA's legacy VMCNT and LGKMCNT domains.
+It handles both the combined wait fields and the standalone counter forms on
+supported targets, for example:
+
+```asm
+s_waitcnt vmcnt(0) lgkmcnt(0)  ; combined fields
+s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
+s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
+```
+
+Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
+CDNA1 through CDNA4.
 
 The same completion-order distinction is used for nonzero partial waits; a
-zero wait still completes every event on the selected counter. On the supported
-pre-GFX12 targets, the detector also uses these classes to determine whether
-two asynchronous writes to the same VGPR are ordered.
+zero wait still completes every event on the selected counter. The detector
+also uses these classes to determine whether two asynchronous writes to the
+same VGPR are ordered.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS

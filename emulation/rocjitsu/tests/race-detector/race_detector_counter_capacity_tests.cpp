@@ -15,11 +15,11 @@ constexpr int kLane = 0;
 constexpr int kScalarRegisters = 8;
 constexpr int kDwordBytes = 4;
 
-// For legacy CDNA counters, the all-ones no-wait encoding is also the maximum
-// number of outstanding tokens. Issuing another token forces older work to
-// complete before the new operation can issue.
-constexpr int kLgkmcntCapacity = 15;
-constexpr int kVmcntCapacity = 63;
+// For CDNA1-CDNA4 combined counters, the all-ones no-wait encoding is also the
+// maximum number of outstanding tokens. Issuing another token forces older
+// work to complete before the new operation can issue.
+constexpr int kLgkmcntCapacity = kCdnaCounterCapacities.lgkmcnt;
+constexpr int kVmcntCapacity = kCdnaCounterCapacities.vmcnt;
 constexpr int kLgkmcntOverflow = 5;
 constexpr int kVmcntOverflow = 7;
 constexpr int kClearlyBelowCapacity = 10;
@@ -32,18 +32,6 @@ RaceTestBuilder makeLgkmcntTest() {
 RaceTestBuilder makeVmcntTest() {
   return RaceTestBuilder(/*numWaves=*/1, /*vgprs=*/kVmcntCapacity + kVmcntOverflow,
                          /*sgprs=*/kScalarRegisters);
-}
-
-RaceTestBuilder makeSyntheticLgkmcntOverflowTest() {
-  return RaceTestBuilder(/*numWaves=*/1, /*vgprs=*/kLgkmcntCapacity + kLgkmcntOverflow,
-                         /*sgprs=*/kScalarRegisters, /*waveSize=*/64, /*wgId=*/Dim3d(0),
-                         /*modelCounterBackpressure=*/false);
-}
-
-RaceTestBuilder makeSyntheticVmcntOverflowTest() {
-  return RaceTestBuilder(/*numWaves=*/1, /*vgprs=*/kVmcntCapacity + kVmcntOverflow,
-                         /*sgprs=*/kScalarRegisters, /*waveSize=*/64, /*wgId=*/Dim3d(0),
-                         /*modelCounterBackpressure=*/false);
 }
 
 void issueOrderedLdsReads(RaceTestBuilder &builder, int count, int firstVgpr = 0) {
@@ -104,25 +92,9 @@ TEST(RaceDetector, CounterCapacity_LgkmcntAllOnesWaitIsNoOpBelowCapacity) {
   expectVgprPending(builder, /*vgpr=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_LgkmcntAllOnesWaitDoesNotTrimSyntheticOverflow) {
-  auto builder = makeSyntheticLgkmcntOverflowTest();
-  issueOrderedLdsReads(builder, kLgkmcntCapacity + kLgkmcntOverflow);
-
-  builder.waitcnt(kWave, /*vmcnt=*/-1, /*lgkmcnt=*/kLgkmcntCapacity);
-  expectVgprPending(builder, /*vgpr=*/0);
-}
-
 TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitIsNoOpBelowCapacity) {
   auto builder = makeVmcntTest();
   issueOrderedVmemLoads(builder, kClearlyBelowCapacity);
-
-  builder.waitcnt(kWave, /*vmcnt=*/kVmcntCapacity, /*lgkmcnt=*/-1);
-  expectVgprPending(builder, /*vgpr=*/0);
-}
-
-TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitDoesNotTrimSyntheticOverflow) {
-  auto builder = makeSyntheticVmcntOverflowTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity + kVmcntOverflow);
 
   builder.waitcnt(kWave, /*vmcnt=*/kVmcntCapacity, /*lgkmcnt=*/-1);
   expectVgprPending(builder, /*vgpr=*/0);
@@ -284,7 +256,7 @@ TEST(RaceDetector, CounterCapacity_PartialVmcntRetiresNextOrderedLoad) {
 
 // ---- Other VMCNT producers ----
 
-TEST(RaceDetector, CounterCapacity_LegacyVmemStoresAdvanceVmcntCapacity) {
+TEST(RaceDetector, CounterCapacity_CombinedVmemStoresAdvanceVmcntCapacity) {
   RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/kScalarRegisters);
   builder.globalLoad(kWave, /*vgprBase=*/0, /*numRegs=*/1);
   issueOrderedVmemStores(builder, kVmcntCapacity);
@@ -292,7 +264,7 @@ TEST(RaceDetector, CounterCapacity_LegacyVmemStoresAdvanceVmcntCapacity) {
   expectVgprReady(builder, /*vgpr=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_LegacyVmemLoadRemainsPendingBeforeStoreCapacity) {
+TEST(RaceDetector, CounterCapacity_CombinedVmemLoadRemainsPendingBeforeStoreCapacity) {
   RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/kScalarRegisters);
   builder.globalLoad(kWave, /*vgprBase=*/0, /*numRegs=*/1);
   issueOrderedVmemStores(builder, kVmcntCapacity - 1);

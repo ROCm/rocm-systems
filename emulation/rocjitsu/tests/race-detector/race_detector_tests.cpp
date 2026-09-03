@@ -70,8 +70,11 @@ TEST(RaceDetectorPlugin, KeepsCompletionOrderSeparateFromWaitCounterDomain) {
             MemoryOrderClass::UNORDERED);
   EXPECT_EQ(memoryOrderForRaceDetector(scalarLoad, ROCJITSU_CODE_ARCH_CDNA4),
             MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(memoryOrderForRaceDetector(bufferLoad, ROCJITSU_CODE_ARCH_RDNA4),
-            MemoryOrderClass::UNORDERED);
+}
+
+TEST(RaceDetectorDefaults, RejectsInvalidMemoryEventType) {
+  EXPECT_THROW(defaultWaitCounterType(MemoryEventType::N), std::invalid_argument);
+  EXPECT_THROW(defaultMemoryOrder(MemoryEventType::N), std::invalid_argument);
 }
 
 // ---- VGPR races (vmcnt) ----

@@ -34,9 +34,11 @@ class RaceDetector {
   friend class Workgroup;
 
 public:
+  /// Architecture-neutral core callers use CDNA capacities by default. The
+  /// runtime plugin passes capacities selected from the executing target.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler, int vmcntNoWait = 63,
-               int lgkmcntNoWait = 15, bool modelCounterBackpressure = true);
+               std::function<void(RaceViolation)> raceHandler,
+               CounterCapacities = kCdnaCounterCapacities);
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,

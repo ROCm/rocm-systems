@@ -51,7 +51,7 @@ __global__ void vgpr_race_kernel(const float *src, float *dst) {
   dst[tid] = val;
 }
 
-// --- Standalone split wait instructions ---
+// --- GFX11.5 standalone wait-counter instructions ---
 
 __global__ void standalone_vmcnt_waits_for_vmem_kernel(const float *src, float *dst) {
   int tid = threadIdx.x;

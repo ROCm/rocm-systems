@@ -20,12 +20,10 @@ namespace rocjitsu::plugins::race_detector {
 
 class RaceTestBuilder {
 public:
-  RaceTestBuilder(int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
-                  bool modelCounterBackpressure = true)
+  RaceTestBuilder(int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
-        numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
-        /*vmcntNoWait=*/63, /*lgkmcntNoWait=*/15, modelCounterBackpressure);
+        numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); });
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
@@ -107,8 +105,8 @@ public:
 
   /// Apply the issue-time backpressure for a memory operation before checking
   /// any of that operation's register or LDS accesses.
-  void prepareCounterIncrement(int wave, amdgpu::WaitCounterType counter, int increment = 1) {
-    waves_[wave]->prepareForCounterIncrement(counter, increment);
+  void prepareCounterIncrement(int wave, amdgpu::WaitCounterType counter) {
+    waves_[wave]->prepareForCounterIncrement(counter);
   }
 
   /// Register an LDS write and validate against outstanding reads.
