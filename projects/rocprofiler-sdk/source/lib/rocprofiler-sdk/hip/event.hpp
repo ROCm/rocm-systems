@@ -55,8 +55,14 @@ template <typename TableT>
 void
 update_table(TableT* table);
 
-// Single gate for the queue interceptor fast paths: true when a HIP event API call is
-// active on this thread or any deferred wait is outstanding. Independent of the gates for
+// Records whether any tool has configured a HIP_EVENT service. Set when the callback or
+// buffer tracing service is configured; gates the fast path in is_active().
+void
+set_service_configured(bool enabled);
+
+// Single gate for the queue interceptor fast paths. True only when a HIP_EVENT service is
+// configured, at least one context tracing it is started, and either a HIP event API call
+// is active on this thread or a deferred wait is outstanding. Independent of the gates for
 // other tracing features, which remain separately testable.
 bool
 is_active();

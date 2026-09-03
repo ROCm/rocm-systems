@@ -202,6 +202,9 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         claimed_replay = false;
     }
 
+    if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_EVENT)
+        rocprofiler::hip::event::set_service_configured(true);
+
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

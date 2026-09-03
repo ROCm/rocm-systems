@@ -3833,7 +3833,8 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 
     // OMPT, rocSHMEM, hipFILE, and HIP_EVENT do not produce direct CSV/stats output. OMPT is
     // rocpd-only (not emitted to JSON either), while rocSHMEM is emitted directly only to JSON
-    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is
+    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. HIP_EVENT is handled by
+    // csv.py, the libpyrocpd Perfetto writer, and otf2.py. The record count above is
     // still tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&

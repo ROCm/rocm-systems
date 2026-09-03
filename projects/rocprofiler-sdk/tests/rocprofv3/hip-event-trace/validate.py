@@ -42,7 +42,24 @@ import pytest
 HIP_EVENT_RECORD = 1
 HIP_EVENT_WAIT = 2
 
+# hipStreamWaitEvent calls in the app that provably cannot produce a completion: the three
+# same-stream waits (one on stream0, one while the record barrier is still in flight, and
+# one on the default stream). CLR's Event::streamWait returns early when the wait targets
+# the recording stream, so no barrier is dispatched and no dependency is ever created.
+#
+# Deliberately excludes the destroyed-event wait: measurement shows CLR does dispatch a
+# barrier for it, which is intercepted directly and legitimately yields a record. Only
+# waits CLR is documented to short-circuit belong here.
+SUPPRESSED_WAIT_CALLS = 3
+
 BUFFER_TRACING_HIP_EVENT = 38
+
+# Records produced on the legacy default stream carry stream_id 0: get_stream_id in
+# hip/stream.cpp resolves hipStreamLegacy to nullptr and looks it up in the stream map,
+# which only ever holds streams passed to hipStreamCreate. The app records default_event
+# twice on the default stream, so exactly that many records may carry a zero stream_id.
+DEFAULT_STREAM_RECORDS = 2
+
 
 HIP_EVENT_API_NAMES = {
     "hipEventRecord",
@@ -80,11 +97,16 @@ def test_hip_event_record_count(json_data):
     - hipStreamWaitEvent on the same stream, already-complete event, or during
       graph capture produces no barrier (no completion)
 
+    The app makes three same-stream hipStreamWaitEvent calls that CLR short-circuits, so
+    the bound subtracts them rather than allowing the full API call count. A plain "<="
+    bound against the raw call count passes even when a spurious completion replaces a
+    legitimately dropped one, so it cannot detect the same-stream case regressing.
+
     We verify:
     - RECORD completions > 0
     - RECORD completions <= hipEventRecord API call count (never more than calls)
     - WAIT completions > 0
-    - WAIT completions <= hipStreamWaitEvent API call count
+    - WAIT completions <= hipStreamWaitEvent API calls - SUPPRESSED_WAIT_CALLS
     """
     data = json_data["rocprofiler-sdk-tool"]
     records = data["buffer_records"]["hip_event"]
@@ -110,9 +132,10 @@ def test_hip_event_record_count(json_data):
         f"({api_record_count})"
     )
     assert wait_count > 0, "No WAIT completions found"
-    assert wait_count <= api_wait_count, (
-        f"WAIT completions ({wait_count}) > hipStreamWaitEvent API calls "
-        f"({api_wait_count})"
+    assert wait_count <= api_wait_count - SUPPRESSED_WAIT_CALLS, (
+        f"WAIT completions ({wait_count}) exceed hipStreamWaitEvent API calls "
+        f"({api_wait_count}) less the {SUPPRESSED_WAIT_CALLS} same-stream calls that "
+        f"cannot produce one"
     )
 
 
@@ -146,8 +169,15 @@ def test_hip_event_fields(json_data):
         assert r.agent_id.handle > 0
         assert r.queue_id.handle > 0
         assert r.hip_event_handle > 0
-        assert r.stream_id.handle > 0
         assert r.correlation_id.internal > 0
+
+    # stream_id is checked separately: zero is legitimate for the default stream.
+    zero_stream = [r for r in records if r.stream_id.handle == 0]
+    assert len(zero_stream) <= DEFAULT_STREAM_RECORDS, (
+        f"{len(zero_stream)} records carry stream_id 0, more than the "
+        f"{DEFAULT_STREAM_RECORDS} default-stream records the app produces"
+    )
+    assert len(zero_stream) < len(records), "every record carries stream_id 0"
 
 
 def test_hip_event_cross_stream(json_data):
@@ -382,15 +412,31 @@ def test_hip_event_no_same_stream_wait(json_data):
 
 
 def test_hip_event_destroy_cleanup(json_data):
-    """Verify that destroying an event with a pending wait does not leak.
+    """Verify destroying an event with an outstanding wait neither leaks nor misattributes.
 
-    The test binary records destroy_event on stream0, calls
-    hipStreamWaitEvent(stream1, destroy_event) to register a pending wait,
-    then destroys the event before any kernel on stream1 consumes it. The
-    pending wait should be cleaned up by erase_event_info. We verify:
-    - At least one event handle has RECORD completions but zero WAIT completions
-      (the destroyed event's wait was cleaned up, not consumed)
-    - The process exits cleanly (implicit: no hang from leaked ref counts)
+    The binary records destroy_event on stream0, calls
+    hipStreamWaitEvent(stream1, destroy_event) to register a pending wait, then destroys
+    the event before the following kernel on stream1 could consume it.
+
+    Whether that wait yields a WAIT completion is CLR's choice, not the profiler's: if it
+    dispatches a standalone barrier the wait is intercepted directly and a completion is
+    correct, whereas if it folds the dependency into the next dispatch the pending entry
+    is dropped by erase_event_info and no completion appears. Both are valid, so the count
+    is deliberately not asserted here. What must hold regardless:
+
+    - Every handle carrying a WAIT completion also carries a RECORD completion, i.e. no
+      completion is emitted for an event never observed being recorded. This catches
+      bookkeeping that outlives its event, such as an entry surviving a destroy and being
+      matched after a new event is allocated at the same address.
+    - The correlation ID references the pending wait took are released. A leak is fatal
+      during finalization ("retired dangling correlation IDs"), which aborts the process
+      before results are written, so reaching this assertion at all is the leak check.
+
+    Note this does not detect a wait matched against a recycled signal belonging to a
+    different tracked event: the emitted record would carry that other event's handle and
+    source queue, both self-consistent and both backed by a RECORD. Detecting that needs
+    exact per-handle expectations, which CLR's freedom to defer or dispatch a wait makes
+    unstable.
     """
     records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
 
@@ -401,11 +447,12 @@ def test_hip_event_destroy_cleanup(json_data):
         r.hip_event_handle for r in records if r.operation == HIP_EVENT_WAIT
     )
 
-    record_only = record_handles - wait_handles
-    assert len(record_only) >= 1, (
-        f"Expected at least one event handle with RECORD but no WAIT completions "
-        f"(destroy_event scenario). record_handles={record_handles}, "
-        f"wait_handles={wait_handles}"
+    orphan_waits = wait_handles - record_handles
+    assert not orphan_waits, (
+        f"WAIT completions reference {len(orphan_waits)} event handle(s) with no RECORD "
+        f"completion: {orphan_waits}. This indicates a pending wait was matched against a "
+        f"recycled completion signal and attributed to the wrong event. "
+        f"record_handles={record_handles}, wait_handles={wait_handles}"
     )
 
 
@@ -459,6 +506,21 @@ def test_rocpd_hip_events_cross_stream(rocpd_data):
     ).fetchone()[0]
 
     assert cross_stream > 0, "No cross-stream WAIT records in rocpd"
+
+
+def test_otf2_data(otf2_data, json_data):
+    """Cross-check the OTF2 conversion against the JSON records.
+
+    rocpd convert had no hip_event handling, so this format silently dropped every HIP
+    event record. The shared helper compares the named domains between the two outputs.
+    """
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_otf2_data(
+        otf2_data,
+        json_data,
+        ("hip_event",),
+    )
 
 
 if __name__ == "__main__":

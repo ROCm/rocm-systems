@@ -27,6 +27,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
@@ -64,6 +65,9 @@ struct active_event_context_t
     rocprofiler_hip_event_operation_t operation        = ROCPROFILER_HIP_EVENT_NONE;
     uint64_t                          hip_event_handle = 0;
     bool                              barrier_captured = false;
+    // Stream this hipEventRecord targets, as supplied by the caller. Carried so it can be
+    // stored alongside the record info and compared against a later wait's stream.
+    hipStream_t record_stream = nullptr;
 };
 
 struct event_record_info_t
@@ -71,6 +75,10 @@ struct event_record_info_t
     rocprofiler_queue_id_t queue_id        = {.handle = 0};
     rocprofiler_agent_id_t agent_id        = {.handle = 0};
     uint64_t               original_signal = 0;
+    // Stream the event was recorded on, exactly as the caller supplied it. CLR
+    // short-circuits a wait issued on this same stream, so a wait matching it produces no
+    // GPU dependency to trace. Stored unnormalized: see register_deferred_wait.
+    hipStream_t record_stream = nullptr;
     // Set when the record barrier for this generation completes on the GPU. Reset by
     // record_event_info when the event is re-recorded.
     bool completed = false;
@@ -236,17 +244,17 @@ barrier_complete(tracing::tracing_data&                        tracing_data_v,
 
     if(!tracing_data_v.buffered_contexts.empty())
     {
-        auto record = hip_event_record_t{sizeof(hip_event_record_t),
-                                         ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
-                                         operation,
-                                         rocprofiler_async_correlation_id_t{},
-                                         tid,
-                                         callback_record.start_timestamp,
-                                         callback_record.end_timestamp,
-                                         callback_record.agent_id,
-                                         callback_record.queue_id,
-                                         callback_record.hip_event_handle,
-                                         callback_record.source_queue_id};
+        auto record = common::init_public_api_struct(hip_event_record_t{},
+                                                     ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                                     operation,
+                                                     rocprofiler_async_correlation_id_t{},
+                                                     tid,
+                                                     callback_record.start_timestamp,
+                                                     callback_record.end_timestamp,
+                                                     callback_record.agent_id,
+                                                     callback_record.queue_id,
+                                                     callback_record.hip_event_handle,
+                                                     callback_record.source_queue_id);
 
         tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
                                                tid,
@@ -275,6 +283,11 @@ get_stream_is_capturing_fn()
     return _v;
 }
 
+// The map accessors below can return nullptr. Each caches a reference to the
+// static_object's pointer, which destroy_static_objects() nulls at teardown, and nothing
+// unwraps our HIP dispatch table entries. After rocprofiler_register_detach the process
+// keeps running with the wrappers still installed, so an application hipEventRecord can
+// reach these accessors once the maps are gone. Every dereference is guarded.
 auto*
 get_event_info_map()
 {
@@ -299,6 +312,26 @@ get_pending_wait_map()
 
 std::atomic<uint32_t> g_pending_wait_count{0};
 
+// Process-global fast-path gate: false until a tool configures a HIP_EVENT service. Lets
+// is_active() (called from WriteInterceptor on every packet batch) skip the active-context
+// walk entirely when HIP event tracing is never used.
+std::atomic<bool>&
+hip_event_service_configured_flag()
+{
+    static auto*& _v = common::static_object<std::atomic<bool>>::construct(false);
+    return *_v;
+}
+
+bool
+context_has_hip_event(const tracing::context_t* ctx)
+{
+    return (CHECK_NOTNULL(ctx) &&
+            ((ctx->callback_tracer &&
+              ctx->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT)) ||
+             (ctx->buffered_tracer &&
+              ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_HIP_EVENT))));
+}
+
 // Waits claimed during the packet batch currently being processed on this thread. Always
 // emptied by bind_staged_waits or flush_staged_waits before the interceptor returns.
 thread_local pending_wait_array_t g_staged_waits = {};
@@ -307,6 +340,10 @@ thread_local pending_wait_array_t g_staged_waits = {};
 // handle. The handle is unique for the lifetime of the submission because a pooled signal
 // is not returned to the pool until after its completion handler has run.
 using bound_wait_map_t = std::unordered_map<uint64_t, pending_wait_array_t>;
+
+// Number of waits currently bound to an in-flight submission. Lets emit_bound_waits skip the
+// map lock on every completed dispatch batch when no deferred wait is outstanding.
+std::atomic<uint32_t> g_bound_wait_count{0};
 
 auto*
 get_bound_wait_map()
@@ -318,7 +355,10 @@ get_bound_wait_map()
 void
 register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 {
-    get_pending_wait_map()->wlock([&](auto& map) {
+    auto* map_v = get_pending_wait_map();
+    if(!map_v) return;
+
+    map_v->wlock([&](auto& map) {
         map.emplace(signal_handle, std::move(pw));
         g_pending_wait_count.fetch_add(1, std::memory_order_release);
     });
@@ -327,8 +367,11 @@ register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 pending_wait_t
 consume_pending_wait(uint64_t signal_handle)
 {
-    auto result = pending_wait_t{};
-    get_pending_wait_map()->wlock([&](auto& map) {
+    auto  result = pending_wait_t{};
+    auto* map_v  = get_pending_wait_map();
+    if(!map_v) return result;
+
+    map_v->wlock([&](auto& map) {
         auto it = map.find(signal_handle);
         if(it != map.end())
         {
@@ -343,8 +386,11 @@ consume_pending_wait(uint64_t signal_handle)
 pending_wait_t
 consume_pending_wait_for_handle(uint64_t signal_handle, uint64_t hip_event_handle)
 {
-    auto result = pending_wait_t{};
-    get_pending_wait_map()->wlock([&](auto& map) {
+    auto  result = pending_wait_t{};
+    auto* map_v  = get_pending_wait_map();
+    if(!map_v) return result;
+
+    map_v->wlock([&](auto& map) {
         auto [begin, end] = map.equal_range(signal_handle);
         for(auto it = begin; it != end; ++it)
         {
@@ -364,17 +410,19 @@ bool
 is_stream_capturing(hipStream_t stream)
 {
     if(!get_stream_is_capturing_fn()) return false;
-    // Normalize nullptr and hipStreamLegacy to hipStreamPerThread: _spt variants
-    // resolve both via PER_THREAD_DEFAULT_STREAM, and the per-thread stream may
-    // itself be in capture mode.
-    auto* resolved = (stream == nullptr || stream == hipStreamLegacy) ? hipStreamPerThread : stream;
-    auto  status   = hipStreamCaptureStatusNone;
-    auto  err      = get_stream_is_capturing_fn()(resolved, &status);
+
+    // Pass the caller's stream through unmodified. The saved function is the non-_spt
+    // hipStreamIsCapturing, whose common path already reports CaptureStatusNone for
+    // nullptr and hipStreamLegacy. Remapping them to hipStreamPerThread here would be
+    // doing the _spt variant's PER_THREAD_DEFAULT_STREAM substitution on behalf of an
+    // entry point that does not perform it, and would answer for a different stream.
+    auto status = hipStreamCaptureStatusNone;
+    auto err    = get_stream_is_capturing_fn()(stream, &status);
     return (err == hipSuccess && status == hipStreamCaptureStatusActive);
 }
 
 void
-check_coalesced_record(uint64_t hip_event_handle)
+check_coalesced_record(uint64_t hip_event_handle, hipStream_t stream)
 {
     if(g_active_event_ctx.barrier_captured) return;
 
@@ -386,6 +434,11 @@ check_coalesced_record(uint64_t hip_event_handle)
                                ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
                                hip_event_tracing_data);
     if(hip_event_tracing_data.empty()) return;
+
+    // Deferred until every cheaper rejection above has passed: this calls back into the HIP
+    // runtime, and it is only needed once a record is actually going to be emitted. Placed
+    // before the correlation id is retained below so a captured stream takes no references.
+    if(is_stream_capturing(stream)) return;
 
     auto*                    corr_id      = context::get_latest_correlation_id();
     context::correlation_id* corr_id_self = nullptr;
@@ -413,16 +466,16 @@ check_coalesced_record(uint64_t hip_event_handle)
 
     auto event_info = lookup_event_info(hip_event_handle);
 
-    auto pending            = coalesce_pending_t{};
-    pending.tracing_data    = std::move(hip_event_tracing_data);
-    pending.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
-        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
-        rocprofiler_timestamp_t{0},
-        rocprofiler_timestamp_t{0},
-        event_info.agent_id,
-        event_info.queue_id,
-        hip_event_handle,
-        event_info.queue_id};
+    auto pending         = coalesce_pending_t{};
+    pending.tracing_data = std::move(hip_event_tracing_data);
+    pending.callback_record =
+        common::init_public_api_struct(rocprofiler_callback_tracing_hip_event_data_t{},
+                                       rocprofiler_timestamp_t{0},
+                                       rocprofiler_timestamp_t{0},
+                                       event_info.agent_id,
+                                       event_info.queue_id,
+                                       hip_event_handle,
+                                       event_info.queue_id);
     pending.tid              = thr_id;
     pending.internal_corr_id = corr_id->internal;
     pending.ancestor_corr_id = corr_id->ancestor;
@@ -485,11 +538,11 @@ template <event_record_fn_t saved_table_t::*SavedField>
 hipError_t
 event_record_impl(hipEvent_t event, hipStream_t stream)
 {
-    g_active_event_ctx = {ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-    auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
-    auto ret           = (get_saved_table().*SavedField)(event, stream);
-    if(ret == hipSuccess && !is_stream_capturing(stream))
-        check_coalesced_record(reinterpret_cast<uint64_t>(event));
+    g_active_event_ctx = {
+        ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
+    auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
+    auto ret      = (get_saved_table().*SavedField)(event, stream);
+    if(ret == hipSuccess) check_coalesced_record(reinterpret_cast<uint64_t>(event), stream);
     return ret;
 }
 
@@ -497,11 +550,11 @@ event_record_impl(hipEvent_t event, hipStream_t stream)
 hipError_t
 event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int flags)
 {
-    g_active_event_ctx = {ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-    auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
-    auto ret           = get_saved_table().hipEventRecordWithFlags_fn(event, stream, flags);
-    if(ret == hipSuccess && !is_stream_capturing(stream))
-        check_coalesced_record(reinterpret_cast<uint64_t>(event));
+    g_active_event_ctx = {
+        ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
+    auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
+    auto ret      = get_saved_table().hipEventRecordWithFlags_fn(event, stream, flags);
+    if(ret == hipSuccess) check_coalesced_record(reinterpret_cast<uint64_t>(event), stream);
     return ret;
 }
 #endif
@@ -522,10 +575,28 @@ discard_pending_wait(uint64_t signal_handle, uint64_t hip_event_handle)
 
 // Returns the signal handle of the registered entry, or 0 if nothing was registered.
 uint64_t
-register_deferred_wait(uint64_t hip_event_handle)
+register_deferred_wait(uint64_t hip_event_handle, hipStream_t wait_stream)
 {
     auto event_info = lookup_event_info(hip_event_handle);
     if(event_info.original_signal == 0) return 0;
+
+    // CLR returns early from Event::streamWait when the wait targets the stream the event
+    // was recorded on, so no GPU dependency is created and nothing will ever claim an
+    // entry registered here. Registering one anyway strands it until the event is
+    // re-recorded or destroyed, retaining a correlation id that finalization reports as
+    // dangling.
+    //
+    // Compares the caller-supplied stream values as-is, deliberately without collapsing
+    // nullptr onto a default-stream sentinel. nullptr denotes the per-thread default
+    // stream through the _spt entry points and the legacy default stream otherwise, and
+    // those are different streams; treating them as interchangeable could suppress a wait
+    // that really does cross streams, losing a record. Failing open costs at most a
+    // stranded entry, which is bounded and recovered at re-record or destroy, so the
+    // comparison only suppresses when the two are unambiguously the same stream.
+    //
+    // Also narrower than CLR, which compares event_->command().queue(): two distinct
+    // streams backed by one queue are not caught here.
+    if(event_info.record_stream == wait_stream) return 0;
 
     // CLR skips completed signals when it assembles a barrier's dependency list, so a
     // wait issued after the record barrier finished produces no GPU work to trace.
@@ -590,7 +661,7 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
     // Pre-register the pending wait BEFORE calling CLR. This ensures the entry
     // is in the map before CLR can enqueue any barrier carrying the dep_signal,
     // even if another thread concurrently submits work to the waiting stream.
-    const auto registered_signal = register_deferred_wait(hip_event_handle);
+    const auto registered_signal = register_deferred_wait(hip_event_handle, stream);
 
     auto ret = (get_saved_table().*SavedField)(stream, event, flags);
 
@@ -627,11 +698,17 @@ get_active_event_context()
 void
 record_event_info(uint64_t hip_event_handle, event_record_info_t info)
 {
+    auto* info_map = get_event_info_map();
+    if(!info_map) return;
+
     auto old_signal = uint64_t{0};
-    get_event_info_map()->wlock([&](auto& map) {
-        auto it = map.find(hip_event_handle);
-        if(it != map.end()) old_signal = it->second.original_signal;
-        map[hip_event_handle] = info;
+    info_map->wlock([&](auto& map) {
+        // Single lookup: operator[] default-constructs a fresh entry when the event has no
+        // prior generation, and original_signal is zero there, which is the same value the
+        // previous find()-then-insert produced for a miss.
+        auto& slot = map[hip_event_handle];
+        old_signal = slot.original_signal;
+        slot       = info;
     });
 
     // A new record supersedes the previous generation. Completion signals are pooled and
@@ -655,7 +732,10 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info)
 void
 mark_event_completed(uint64_t hip_event_handle)
 {
-    get_event_info_map()->wlock([&](auto& map) {
+    auto* map_v = get_event_info_map();
+    if(!map_v) return;
+
+    map_v->wlock([&](auto& map) {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) it->second.completed = true;
     });
@@ -664,7 +744,10 @@ mark_event_completed(uint64_t hip_event_handle)
 event_record_info_t
 lookup_event_info(uint64_t hip_event_handle)
 {
-    return get_event_info_map()->rlock([&](const auto& map) -> event_record_info_t {
+    auto* map_v = get_event_info_map();
+    if(!map_v) return event_record_info_t{};
+
+    return map_v->rlock([&](const auto& map) -> event_record_info_t {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) return it->second;
         return event_record_info_t{};
@@ -674,7 +757,10 @@ lookup_event_info(uint64_t hip_event_handle)
 void
 store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group)
 {
-    get_coalesce_group_map()->wlock([&](auto& map) { map[hip_event_handle] = std::move(group); });
+    auto* map_v = get_coalesce_group_map();
+    if(!map_v) return;
+
+    map_v->wlock([&](auto& map) { map[hip_event_handle] = std::move(group); });
 }
 
 void
@@ -683,34 +769,55 @@ erase_event_info(uint64_t hip_event_handle)
     // Release every pending wait for this event, including any left under the signal of
     // an earlier record generation. Matching on the event handle rather than the signal
     // keeps waits owned by another event that holds a recycled signal handle intact.
-    get_pending_wait_map()->wlock([&](auto& map) {
-        for(auto it = map.begin(); it != map.end();)
-        {
-            if(it->second.hip_event_handle == hip_event_handle)
-            {
-                if(it->second.corr_id_ref)
-                {
-                    it->second.corr_id_ref->sub_kern_count();
-                    it->second.corr_id_ref->sub_ref_count();
-                }
-                it = map.erase(it);
-                g_pending_wait_count.fetch_sub(1, std::memory_order_release);
-            }
-            else
-            {
-                ++it;
-            }
-        }
-    });
+    //
+    // Correlation ids are collected under the lock and released after it is dropped.
+    // sub_ref_count can retire the id, which emplaces a retirement record; a lossless
+    // buffer or one at its watermark then flushes and invokes the tool's callback. A tool
+    // making a wrapped HIP call from that callback re-enters this map, so holding the
+    // write lock across the decrement would deadlock against ourselves. Every other site
+    // that releases a pending wait already drops the lock first.
+    auto released = common::container::small_vector<context::correlation_id*, 4>{};
 
-    get_event_info_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
-    get_coalesce_group_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
+    // The scan below is linear in the whole map, so destroying M events would otherwise be
+    // O(N*M). Nothing can be registered for this event when the global count is zero, and
+    // the count is only ever raised while a wait is registered, so skipping is exact.
+    auto* wait_map = has_pending_waits() ? get_pending_wait_map() : nullptr;
+    if(wait_map)
+        wait_map->wlock([&](auto& map) {
+            for(auto it = map.begin(); it != map.end();)
+            {
+                if(it->second.hip_event_handle == hip_event_handle)
+                {
+                    if(it->second.corr_id_ref) released.emplace_back(it->second.corr_id_ref);
+                    it = map.erase(it);
+                    g_pending_wait_count.fetch_sub(1, std::memory_order_release);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        });
+
+    for(auto* corr_id : released)
+    {
+        corr_id->sub_kern_count();
+        corr_id->sub_ref_count();
+    }
+
+    if(auto* info_map = get_event_info_map())
+        info_map->wlock([&](auto& map) { map.erase(hip_event_handle); });
+    if(auto* group_map = get_coalesce_group_map())
+        group_map->wlock([&](auto& map) { map.erase(hip_event_handle); });
 }
 
 coalesce_group_ptr_t
 lookup_coalesce_group(uint64_t hip_event_handle)
 {
-    return get_coalesce_group_map()->rlock([&](const auto& map) -> coalesce_group_ptr_t {
+    auto* map_v = get_coalesce_group_map();
+    if(!map_v) return nullptr;
+
+    return map_v->rlock([&](const auto& map) -> coalesce_group_ptr_t {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) return it->second;
         return nullptr;
@@ -723,9 +830,26 @@ has_pending_waits()
     return g_pending_wait_count.load(std::memory_order_acquire) > 0;
 }
 
+void
+set_service_configured(bool enabled)
+{
+    // Skip during finalization: the flag is a static_object that may already be destroyed.
+    if(registration::get_fini_status() > 0) return;
+    hip_event_service_configured_flag().store(enabled, std::memory_order_relaxed);
+}
+
 bool
 is_active()
 {
+    // Skip during finalization: the flag and the context registry are static_objects that may be
+    // destroyed by then, and WriteInterceptor can still call this from HIP/HSA teardown.
+    if(registration::get_fini_status() > 0) return false;
+    // Cheap common-case rejection: if no HIP_EVENT service was ever configured, skip the walk.
+    if(!hip_event_service_configured_flag().load(std::memory_order_relaxed)) return false;
+    // Stopped contexts take the fast path too: with none started there is nothing to record for,
+    // so the interceptor should bail rather than build a snapshot it will find empty later.
+    if(context::get_active_contexts(context_has_hip_event).empty()) return false;
+
     return get_active_event_context() != nullptr || has_pending_waits();
 }
 
@@ -745,11 +869,13 @@ struct barrier_data_t
 
 struct barrier_info_session_t
 {
-    hsa::Queue&                                        queue;
-    rocprofiler_thread_id_t                            tid            = common::get_tid();
-    rocprofiler_timestamp_t                            enqueue_ts     = 0;
-    context::correlation_id*                           correlation_id = nullptr;
-    common::container::small_vector<barrier_data_t, 4> barrier_data   = {};
+    hsa::Queue&              queue;
+    rocprofiler_thread_id_t  tid            = common::get_tid();
+    rocprofiler_timestamp_t  enqueue_ts     = 0;
+    context::correlation_id* correlation_id = nullptr;
+    // One inline slot: plan_barrier performs the sole insertion, so four slots cost an
+    // extra 1344 bytes per intercepted barrier for capacity that is never used.
+    common::container::small_vector<barrier_data_t, 1> barrier_data = {};
 };
 
 // Event barriers get their own session type and completion handler rather than riding on
@@ -910,24 +1036,25 @@ plan_barrier(hsa::Queue&                    queue,
     auto source_queue = queue.get_id();
     if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
     {
-        record_event_info(
-            event_ctx->hip_event_handle,
-            event_record_info_t{
-                queue.get_id(), queue.get_agent().get_rocp_agent()->id, original_signal_handle});
+        record_event_info(event_ctx->hip_event_handle,
+                          event_record_info_t{queue.get_id(),
+                                              queue.get_agent().get_rocp_agent()->id,
+                                              original_signal_handle,
+                                              event_ctx->record_stream});
     }
     else if(event_ctx->operation == ROCPROFILER_HIP_EVENT_WAIT)
     {
         source_queue = lookup_event_info(event_ctx->hip_event_handle).queue_id;
     }
 
-    _barrier_data.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
-        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
-        rocprofiler_timestamp_t{0},
-        rocprofiler_timestamp_t{0},
-        queue.get_agent().get_rocp_agent()->id,
-        queue.get_id(),
-        event_ctx->hip_event_handle,
-        source_queue};
+    _barrier_data.callback_record =
+        common::init_public_api_struct(rocprofiler_callback_tracing_hip_event_data_t{},
+                                       rocprofiler_timestamp_t{0},
+                                       rocprofiler_timestamp_t{0},
+                                       queue.get_agent().get_rocp_agent()->id,
+                                       queue.get_id(),
+                                       event_ctx->hip_event_handle,
+                                       source_queue);
 
     // ENTER/EXIT bracket the barrier enqueue moment (CPU-side, no GPU timestamps yet).
     // The PHASE_NONE completion callback fires later from BarrierAsyncSignalHandler when
@@ -993,7 +1120,7 @@ plan_barrier(hsa::Queue&                    queue,
         _barrier_data.coalesce_group = group;
     }
 
-    auto barrier_session_data = common::container::small_vector<barrier_data_t, 4>{};
+    auto barrier_session_data = common::container::small_vector<barrier_data_t, 1>{};
     barrier_session_data.emplace_back(std::move(_barrier_data));
 
     auto barrier_session = barrier_info_session_t{.queue          = queue,
@@ -1004,7 +1131,10 @@ plan_barrier(hsa::Queue&                    queue,
 
     auto shared = std::make_shared<barrier_info_session_t>(std::move(barrier_session));
 
-    const auto raw_signal = shared->barrier_data.back().pooled_signal->get().value;
+    // Read the signal from the barrier data rather than through pooled_signal:
+    // Queue::create_signal returns a null pool object whenever the pool is unavailable, while
+    // still writing a usable raw signal to the out parameter that completion_signal holds.
+    const auto raw_signal = shared->barrier_data.back().completion_signal;
 
     queue.async_started();
 
@@ -1032,6 +1162,8 @@ emit_bound_waits(const hsa::Queue&       queue,
                  hsa_signal_t            completion_signal,
                  rocprofiler_timestamp_t enqueue_ts)
 {
+    if(g_bound_wait_count.load(std::memory_order_acquire) == 0) return;
+
     auto* map_v = get_bound_wait_map();
     if(!map_v) return;
 
@@ -1042,6 +1174,7 @@ emit_bound_waits(const hsa::Queue&       queue,
         {
             claimed = std::move(it->second);
             map.erase(it);
+            g_bound_wait_count.fetch_sub(claimed.size(), std::memory_order_release);
         }
     });
 
@@ -1050,14 +1183,14 @@ emit_bound_waits(const hsa::Queue&       queue,
         auto wait_time = profiling_time{
             .status = HSA_STATUS_SUCCESS, .start = enqueue_ts, .end = common::timestamp_ns()};
 
-        auto callback_record = rocprofiler_callback_tracing_hip_event_data_t{
-            sizeof(rocprofiler_callback_tracing_hip_event_data_t),
-            rocprofiler_timestamp_t{0},
-            rocprofiler_timestamp_t{0},
-            queue.get_agent().get_rocp_agent()->id,
-            queue.get_id(),
-            pw.hip_event_handle,
-            pw.source_info.queue_id};
+        auto callback_record =
+            common::init_public_api_struct(rocprofiler_callback_tracing_hip_event_data_t{},
+                                           rocprofiler_timestamp_t{0},
+                                           rocprofiler_timestamp_t{0},
+                                           queue.get_agent().get_rocp_agent()->id,
+                                           queue.get_id(),
+                                           pw.hip_event_handle,
+                                           pw.source_info.queue_id);
 
         barrier_complete(pw.tracing_data,
                          pw.tid,
@@ -1114,6 +1247,13 @@ claim_deferred_wait(uint64_t dep_signal_handle)
 {
     if(dep_signal_handle == 0) return;
 
+    // Cheap rejection before taking the pending-wait lock. This runs per dependency signal on
+    // every barrier packet whenever any queue-intercepting service is active, so the common case
+    // of "no deferred waits outstanding" must not cost a lock acquisition. A wait is always
+    // registered before the CLR call that creates the GPU dependency, and CLR serializes stream
+    // submission, so a dependency visible here implies the increment is already visible.
+    if(!has_pending_waits()) return;
+
     auto pw = consume_pending_wait(dep_signal_handle);
     if(pw.corr_id_ref) g_staged_waits.emplace_back(std::move(pw));
 }
@@ -1142,13 +1282,6 @@ claim_deferred_waits(const hsa::rocprofiler_packet& pkt, uint32_t packet_type, b
         claim_deferred_wait(vpkt.signal.handle);
     }
 }
-
-bool
-has_staged_waits()
-{
-    return !g_staged_waits.empty();
-}
-
 void
 bind_staged_waits(hsa_signal_t completion_signal)
 {
@@ -1161,6 +1294,7 @@ bind_staged_waits(hsa_signal_t completion_signal)
         auto& dst = map[completion_signal.handle];
         for(auto& pw : staged)
             dst.emplace_back(std::move(pw));
+        g_bound_wait_count.fetch_add(staged.size(), std::memory_order_release);
     });
 }
 
@@ -1207,15 +1341,6 @@ submission_complete(const hsa::Queue&       queue,
     emit_bound_waits(queue, completion_signal, enqueue_ts);
 }
 
-namespace api
-{
-struct hipEventRecord;
-struct hipEventRecord_spt;
-struct hipEventRecordWithFlags;
-struct hipStreamWaitEvent;
-struct hipStreamWaitEvent_spt;
-}  // namespace api
-
 namespace
 {
 template <auto AbiOffset>
@@ -1244,6 +1369,13 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
         if(!table_fn || table_fn == wrapper) return;
         ROCP_TRACE << "hip::event wrapping table entry at ABI offset " << abi_offset;
         saved_fn = table_fn;
+        // Publish the wrapper only after the saved pointer is visible. late.cpp
+        // re-propagates API tables into a running process during attach, so an application
+        // thread can be calling through this entry while it is being replaced. The two
+        // stores are independent, so without this fence the compiler or a weakly ordered
+        // CPU could publish the wrapper first and the thread would call a null saved
+        // pointer.
+        std::atomic_thread_fence(std::memory_order_release);
         table_fn = wrapper;
     };
 

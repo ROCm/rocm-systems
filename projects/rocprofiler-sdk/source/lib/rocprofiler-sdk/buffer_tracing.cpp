@@ -208,6 +208,9 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
         }
     }
 
+    if(kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+        rocprofiler::hip::event::set_service_configured(true);
+
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

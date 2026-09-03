@@ -22,12 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import os
 import json
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 from rocprofiler_sdk.pytest_utils.rocpd_reader import RocpdReader
+from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
 
 def pytest_addoption(parser):
@@ -40,6 +42,13 @@ def pytest_addoption(parser):
         "--rocpd-input",
         action="store",
         help="Path to rocpd SQLite3 database file.",
+    )
+
+    parser.addoption(
+        "--otf2-input",
+        action="store",
+        default="hip-event-trace/hip-events-trace/out_results.otf2",
+        help="Input OTF2",
     )
 
 
@@ -58,3 +67,11 @@ def rocpd_data(request):
     if filename is None:
         pytest.fail("--rocpd-input argument is required but was not provided")
     return RocpdReader(filename).read()[0]
+
+
+@pytest.fixture
+def otf2_data(request):
+    filename = request.config.getoption("--otf2-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("hip event tracing unavailable")
+    return OTF2Reader(filename).read()[0]

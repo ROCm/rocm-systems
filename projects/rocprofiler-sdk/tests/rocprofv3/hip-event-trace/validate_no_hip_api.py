@@ -33,6 +33,12 @@ HIP_EVENT_RECORD = 1
 HIP_EVENT_WAIT = 2
 BUFFER_TRACING_HIP_EVENT = 38
 
+# Records produced on the legacy default stream carry stream_id 0: get_stream_id in
+# hip/stream.cpp resolves hipStreamLegacy to nullptr and looks it up in the stream map,
+# which only ever holds streams passed to hipStreamCreate. The app records default_event
+# twice on the default stream, so exactly that many records may carry a zero stream_id.
+DEFAULT_STREAM_RECORDS = 2
+
 
 def test_no_hip_api_records_present(json_data):
     """Verify HIP API records are absent (confirming HIP API tracing is off)."""
@@ -71,8 +77,15 @@ def test_no_hip_api_fields(json_data):
         assert r.agent_id.handle > 0
         assert r.queue_id.handle > 0
         assert r.hip_event_handle > 0
-        assert r.stream_id.handle > 0
         assert r.correlation_id.internal > 0
+
+    # stream_id is checked separately: zero is legitimate for the default stream.
+    zero_stream = [r for r in records if r.stream_id.handle == 0]
+    assert len(zero_stream) <= DEFAULT_STREAM_RECORDS, (
+        f"{len(zero_stream)} records carry stream_id 0, more than the "
+        f"{DEFAULT_STREAM_RECORDS} default-stream records the app produces"
+    )
+    assert len(zero_stream) < len(records), "every record carries stream_id 0"
 
 
 def test_no_hip_api_timestamps(json_data):
@@ -151,17 +164,22 @@ def test_no_hip_api_graph_capture_exclusion(json_data):
         r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
     )
 
-    # The binary uses 4 non-capture events (event0, event1, coalesce_event, destroy_event)
-    # plus 1 capture event that should be excluded. If capture is excluded correctly,
-    # we see exactly 4 handles. If graph capture fails, we would see 5.
-    assert len(record_handles) <= 4, (
-        f"Expected at most 4 unique RECORD handles (capture_event should be excluded). "
+    # The binary creates 7 events; 6 are recorded outside graph capture (event0, event1,
+    # destroy_event, default_event, same_stream_event, coalesce_event) and capture_event
+    # must be excluded. The observed count can be lower than 6: hipEventDestroy frees an
+    # address that a later hipEventCreate can reuse, so two distinct events may report the
+    # same handle. Only the upper bound is meaningful -- exceeding it means a record was
+    # emitted for the captured event.
+    assert len(record_handles) <= 6, (
+        f"Expected at most 6 unique RECORD handles (capture_event should be excluded). "
         f"Found {len(record_handles)}: {record_handles}. "
-        f"If 5 handles, graph capture exclusion may have failed."
+        f"If 7 handles, graph capture exclusion may have failed."
     )
+    # Loose floor: handle reuse makes an exact count unreliable, but tracing being
+    # broken entirely would show far fewer than this.
     assert len(record_handles) >= 4, (
-        f"Expected at least 4 unique RECORD handles (event0, event1, coalesce_event, "
-        f"destroy_event). Found {len(record_handles)}: {record_handles}."
+        f"Expected at least 4 unique RECORD handles. Found {len(record_handles)}: "
+        f"{record_handles}."
     )
 
 

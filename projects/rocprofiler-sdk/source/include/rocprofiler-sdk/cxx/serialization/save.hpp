@@ -879,6 +879,19 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_allocation_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_callback_tracing_hip_event_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(queue_id);
+    ROCP_SDK_SAVE_DATA_FIELD(hip_event_handle);
+    ROCP_SDK_SAVE_DATA_FIELD(source_queue_id);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_event_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);

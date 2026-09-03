@@ -338,11 +338,13 @@ def write_hip_event_csv(importData, config) -> None:
             {agent_id} AS Agent_Id,
             queue_id,
             stream_id,
+            tid AS Thread_Id,
             hip_event_handle AS Event_Handle,
             source_queue_id AS Source_Queue_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp
+            end AS End_Timestamp,
+            duration AS Duration
         FROM "hip_events"
         ORDER BY
             guid ASC, start ASC, end DESC

@@ -44,6 +44,27 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-event-trace)
 
+# Direct otf2 output from rocprofv3 goes through the deprecated C++ generator; the
+# supported path is rocpd convert, which is what otf2.py implements.
+set(rocprofv3-hip-event-rocpd-env
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
+
+find_package(Python3 REQUIRED)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-hip-event-trace-otf2-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f otf2 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace -o out -i
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-hip-event-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-hip-event-trace-otf2
+    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace)
+
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-hip-event-trace
     TEST_PATHS validate.py
@@ -51,9 +72,10 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.json
          --rocpd-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.db
+         --otf2-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.otf2
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace)
+    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace rocprofv3-test-hip-event-trace-otf2)
 
 # Test hip event tracing without HIP API tracing enabled, exercising the correlation ID
 # self-construction path.
