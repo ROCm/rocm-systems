@@ -2447,20 +2447,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   uint16_t device_id = 0;
   uint16_t subsystem_id = 0;
   char temp_market_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-  smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH, temp_market_name);
-  info->market_name[0] = '\0';
-  info->vendor_id = std::numeric_limits<uint32_t>::max();
-  info->vendor_name[0] = '\0';
-  info->subvendor_id = std::numeric_limits<uint32_t>::max();
-  info->device_id = std::numeric_limits<uint64_t>::max();
-  info->rev_id = std::numeric_limits<uint16_t>::max();
-  info->asic_serial[0] = '\0';
-  info->oam_id = std::numeric_limits<uint32_t>::max();
-  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
-  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-  info->subsystem_id = std::numeric_limits<uint32_t>::max();
-  info->flags = 0;
-  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
 
   std::ostringstream ss;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
@@ -2491,13 +2477,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
     }
   }
 
+  init_asic_info_defaults(info);
+
   /**
    * For other sysfs related information, get from rocm-smi
    */
 
-  // Ensure asic_serial defaults to an unsupported value
-  std::string max_uint64_str = "ffffffffffffffff";
-  smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
   uint64_t asic_serial_id = 0;
   amdsmi_status_t status =
       rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0, &asic_serial_id);
@@ -2560,7 +2545,6 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->device_id = static_cast<uint64_t>(device_id);
   }
-  info->rev_id = dev_info.pci_rev;
   status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0, &vendor_id);
   if (status == AMDSMI_STATUS_SUCCESS) {
     info->vendor_id = vendor_id;
@@ -2652,6 +2636,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
   info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
   info->flags = static_cast<uint64_t>(dev_info.ids_flags);
+  info->chip_rev_id = static_cast<uint32_t>(dev_info.chip_rev);
+  info->external_rev_id = static_cast<uint32_t>(dev_info.external_rev);
   libdrm.unload();
 
   ss << __PRETTY_FUNCTION__ << " | info->market_name: " << info->market_name << "\n"
@@ -2668,6 +2654,12 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
      << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
      << " | info->rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->rev_id
      << "\n"
+     << " | info->chip_rev_id (dec): " << std::dec << info->chip_rev_id << "\n"
+     << " | info->chip_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->chip_rev_id << "\n"
+     << " | info->external_rev_id (dec): " << std::dec << info->external_rev_id << "\n"
+     << " | info->external_rev_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0')
+     << info->external_rev_id << "\n"
      << " | info->asic_serial: 0x" << info->asic_serial << "\n"
      << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
      << " | info->oam_id (hex): 0x" << std::hex << std::setw(4) << std::setfill('0') << info->oam_id
@@ -5163,27 +5155,33 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
+  // gpu_metrics marks an unavailable clock with UINT16_MAX. Widen it to the uint32
+  // marker the DF case returns, so every clk_type reports unavailable the same way.
+  auto widen_unavailable = [](uint16_t clk) -> uint32_t {
+    return clk == UINT16_MAX ? UINT32_MAX : static_cast<uint32_t>(clk);
+  };
+
   switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:
-      info->clk = metrics.current_gfxclk;
+      info->clk = widen_unavailable(metrics.current_gfxclk);
       break;
     case AMDSMI_CLK_TYPE_MEM:
-      info->clk = metrics.current_uclk;
+      info->clk = widen_unavailable(metrics.current_uclk);
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
-      info->clk = metrics.current_vclk0;
+      info->clk = widen_unavailable(metrics.current_vclk0);
       break;
     case AMDSMI_CLK_TYPE_VCLK1:
-      info->clk = metrics.current_vclk1;
+      info->clk = widen_unavailable(metrics.current_vclk1);
       break;
     case AMDSMI_CLK_TYPE_DCLK0:
-      info->clk = metrics.current_dclk0;
+      info->clk = widen_unavailable(metrics.current_dclk0);
       break;
     case AMDSMI_CLK_TYPE_DCLK1:
-      info->clk = metrics.current_dclk1;
+      info->clk = widen_unavailable(metrics.current_dclk1);
       break;
     case AMDSMI_CLK_TYPE_SOC:
-      info->clk = metrics.current_socclk;
+      info->clk = widen_unavailable(metrics.current_socclk);
       break;
     // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to
     // be valid
