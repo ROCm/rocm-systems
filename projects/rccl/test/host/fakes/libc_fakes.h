@@ -81,7 +81,8 @@ extern std::vector<int> g_closedFds;    // fds passed to close(), in order
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;
 extern int g_nextSocketFd;              // what the default socket() hands back (-1 to fail it)
-extern int g_socketFailErrno;           // errno the default socket() sets when g_nextSocketFd is -1
+extern int g_socketFailErrno;           // errno the default socket() sets when g_nextSocketFd is -1; no test drives it
+                                        // yet, since the one socket-failure test needs per-call behaviour and hooks
 extern int g_lastSetsockoptOptname;     // SO_SNDTIMEO / SO_RCVTIMEO of the last setsockopt
 extern struct timeval g_lastSetsockoptTimeval;
 extern int g_getaddrinfoResult;         // non-zero makes the default getaddrinfo fail with that code

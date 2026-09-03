@@ -11,8 +11,9 @@
 test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
-    # gtest's '*' does not match across the literal '.', so every suite name in the
-    # binary needs its own pattern here or it never runs under CTest.
+    # A trailing '.*' anchors the end of the suite name: "RasClientMicrotest.*" cannot reach
+    # RasClientMicrotestGetStatus, so that suite needs its own pattern or it never runs under CTest.
+    # Dropping the dot widens instead ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"

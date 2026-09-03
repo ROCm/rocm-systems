@@ -50,7 +50,7 @@ const char* micro_gai_strerror(int);
 size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_exit(int) __attribute__((noreturn));
-}
+}  // extern "C"
 
 #define write micro_write
 #define read micro_read

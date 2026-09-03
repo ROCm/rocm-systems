@@ -6,6 +6,12 @@
 
 #include "fakes/libc_fakes.h"
 
+// Puts the seam's 13 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
+// cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
+#include "fakes/libc_seam.h"
+#include "fakes/libc_seam_undef.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -94,6 +100,11 @@ static int DefaultSetsockopt(int, int, int optname, const void* optval, socklen_
 
 // Builds g_addrinfoCount single-linked IPv4 entries. Paired with
 // DefaultFreeaddrinfo; a test that overrides one must override both.
+// Deliberately unlike getaddrinfo(3) in one respect: g_addrinfoCount == 0
+// returns success with an empty list, where the real call returns EAI_NONAME.
+// That is how a test reaches a caller's address-walk with no candidate at all
+// (see ConnectFailLabel_SockNeverOpened_...); set g_getaddrinfoResult for the
+// resolver-failed path instead.
 static int DefaultGetaddrinfo(const char*, const char*, const struct addrinfo*, struct addrinfo** res) {
   if (g_getaddrinfoResult != 0) return g_getaddrinfoResult;
   struct addrinfo* head = nullptr;
@@ -132,8 +143,13 @@ static void DefaultFreeaddrinfo(struct addrinfo* ai) {
   }
 }
 
-static int DefaultGetnameinfo(const struct sockaddr* sa, socklen_t, char* host, socklen_t hostlen, char* serv,
+// IPv4 only, and says so rather than guessing: on an AF_INET6 address sin_addr overlays sin6_flowinfo, so an
+// unconditional cast would report success with a bogus dotted quad to the next unit that hands this seam a v6 sockaddr.
+static int DefaultGetnameinfo(const struct sockaddr* sa, socklen_t salen, char* host, socklen_t hostlen, char* serv,
                               socklen_t servlen, int) {
+  if (sa == nullptr || sa->sa_family != AF_INET || salen < static_cast<socklen_t>(sizeof(struct sockaddr_in))) {
+    return EAI_FAMILY;
+  }
   const auto* in = reinterpret_cast<const struct sockaddr_in*>(sa);
   if (host && hostlen > 0) {
     if (!inet_ntop(AF_INET, &in->sin_addr, host, hostlen)) return EAI_OVERFLOW;
@@ -248,8 +264,10 @@ int micro_fflush(FILE* stream) { return g_fflush(stream); }
 
 // noreturn: the default throws MicroExit. If a hook ever returns normally
 // the unit would fall through a path production treats as unreachable, so make
-// that a loud abort rather than silent corruption.
-void micro_exit(int status) {
+// that a loud abort rather than silent corruption. The attribute is spelled
+// here as well as on the seam's declaration; the two merge, but a reader of
+// either one should not have to check the other.
+__attribute__((noreturn)) void micro_exit(int status) {
   g_exit(status);
   std::abort();
 }
