@@ -27,7 +27,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   const auto* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   const int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
-
+  
   if (!bCalcPotentialBlkSz) {
     if (inputBlockSize <= 0) {
       return hipErrorInvalidValue;
@@ -41,7 +41,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   } else if (inputBlockSize > maxWorkGroupSize || inputBlockSize <= 0) {
     inputBlockSize = maxWorkGroupSize;
   }
-
+  
   // Find wave occupancy per CU => simd_per_cu * GPR usage
   // Limited by SPI 32 per CU, hence 8 per SIMD
   const size_t MaxWavesPerSimd = (device.isa().versionMajor() <= 9) ? 8 : 16;
@@ -214,7 +214,7 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
                            const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid,
                            dim3* blockDim, dim3* gridDim, int* wSize) {
   auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
-
+  
   static const bool enable_deferred_loading = []() {
     const char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) != 0 : true;
@@ -231,7 +231,7 @@ void __hipRegisterFunction(void** modules, const void* hostFunction, char* devic
 
   if (!enable_deferred_loading) {
     HIP_INIT_VOID();
-
+    
     for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
       hipFunction_t hfunc = nullptr;
       hipError_t hip_error = platform.StatCO().GetFunc(&hfunc, hostFunction, dev_idx);
@@ -479,7 +479,7 @@ hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memor
     LogPrintfError("Cannot get Device Function for module: 0x%x", hmod);
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-
+  
   // Find the global Symbols
   if (!dev_program->createGlobalVarObj(amd_mem_obj, dptr, bytes, name)) {
     LogPrintfError("Cannot create Global Var obj for symbol: %s", name);
@@ -524,7 +524,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
   const int maxDynamicSharedSizeBytes = wrkGrpInfo->maxDynamicSharedSizeBytes_;
   const int maxNumBlocks = prop.maxThreadsPerMultiProcessor / blockSize;
-  const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor -
+  const int maxSharedMemoryPerMultiProcessor = prop.maxSharedMemoryPerMultiProcessor - 
       staticSharedMemoryUsage * std::min(numBlocks, maxNumBlocks);
   const int maxDynamicSmemSize = std::min(maxSharedMemoryPerMultiProcessor / maxNumBlocks,
                                           maxDynamicSharedSizeBytes);
