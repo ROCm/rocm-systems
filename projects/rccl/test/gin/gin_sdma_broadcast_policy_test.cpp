@@ -151,22 +151,43 @@ TEST(BcastScatterAllgather, RequiresCountAtLeastNRanks) {
 // -------------------------------- bcastUseRing -------------------------------
 
 TEST(BcastUseRing, DisabledWhenRingMinZero) {
-  EXPECT_FALSE(bcastUseRing(64u << 20, 16u << 20, 8, 0));
+  EXPECT_FALSE(bcastUseRing(64u << 20, 16u << 20, 8, 8, 0));
 }
 
 TEST(BcastUseRing, RequiresAtLeastTwoRanks) {
-  EXPECT_FALSE(bcastUseRing(64u << 20, 16u << 20, 1, kBroadcastRingMinDefault));
+  EXPECT_FALSE(bcastUseRing(64u << 20, 16u << 20, 1, 1, kBroadcastRingMinDefault));
 }
 
 TEST(BcastUseRing, EngagesAtOrAboveMin) {
   const size_t ringMin = kBroadcastRingMinDefault;  // 32 MiB
-  EXPECT_FALSE(bcastUseRing(ringMin - 1, 16u << 20, 8, ringMin));
-  EXPECT_TRUE(bcastUseRing(ringMin, 16u << 20, 8, ringMin));
+  EXPECT_FALSE(bcastUseRing(ringMin - 1, 16u << 20, 8, 8, ringMin));
+  EXPECT_TRUE(bcastUseRing(ringMin, 16u << 20, 8, 8, ringMin));
 }
 
 TEST(BcastUseRing, RequiresCountAtLeastNRanks) {
-  EXPECT_FALSE(bcastUseRing(64u << 20, 7, 8, kBroadcastRingMinDefault));
-  EXPECT_TRUE(bcastUseRing(64u << 20, 8, 8, kBroadcastRingMinDefault));
+  EXPECT_FALSE(bcastUseRing(64u << 20, 7, 8, 8, kBroadcastRingMinDefault));
+  EXPECT_TRUE(bcastUseRing(64u << 20, 8, 8, 8, kBroadcastRingMinDefault));
+}
+
+// The ring forwards with direct peer stores addressed by WORLD rank index
+// (ncclGetLsaPointer(recvwin, off, nextRank)) and syncs on an LSA-team barrier,
+// so it is only correct when the LSA team is the whole world. Anything smaller
+// -- multi-node being the ordinary case -- means the index handed to the LSA API
+// is not an LSA peer index at all.
+TEST(BcastUseRing, RequiresLsaTeamToCoverTheWorld) {
+  const size_t ringMin = kBroadcastRingMinDefault;
+  const size_t bytes = 64u << 20;
+  const size_t count = 16u << 20;
+  // Single node: LSA team == world, so world and LSA indices coincide.
+  EXPECT_TRUE(bcastUseRing(bytes, count, 8, 8, ringMin));
+  // Two nodes of 8: every size/shape condition still holds, and the ring is
+  // still refused, because nextRank would address outside the LSA team.
+  EXPECT_FALSE(bcastUseRing(bytes, count, 16, 8, ringMin));
+  // A single off-team rank is enough to break the index correspondence.
+  EXPECT_FALSE(bcastUseRing(bytes, count, 9, 8, ringMin));
+  // An lsaSize larger than the world is not a topology we know how to reason
+  // about; require exact agreement rather than lsaSize >= nRanks.
+  EXPECT_FALSE(bcastUseRing(bytes, count, 8, 16, ringMin));
 }
 
 // ------------------------------ bcastLargeTier -------------------------------
@@ -180,9 +201,9 @@ TEST(BcastLargeTier, RingWinsWhereBothPredicatesHold) {
   const size_t bytes = 64u << 20;
   const size_t count = bytes / 4;
   // Both gates are open here; precedence -- not the predicates -- picks the ring.
-  ASSERT_TRUE(bcastUseRing(bytes, count, 8, ringMin));
+  ASSERT_TRUE(bcastUseRing(bytes, count, 8, 8, ringMin));
   ASSERT_TRUE(bcastUseScatterAllgather(bytes, count, 8, sagMin));
-  EXPECT_EQ(bcastLargeTier(bytes, count, 8, ringMin, sagMin),
+  EXPECT_EQ(bcastLargeTier(bytes, count, 8, 8, ringMin, sagMin),
             BcastLargeTier::Ring);
 }
 
@@ -190,7 +211,7 @@ TEST(BcastLargeTier, BoundariesSelectEachTier) {
   const size_t ringMin = kBroadcastRingMinDefault;             // 32 MiB
   const size_t sagMin = kBroadcastScatterAgMinDefault;         // 2 MiB
   auto tier = [&](size_t bytes) {
-    return bcastLargeTier(bytes, bytes / 4, 8, ringMin, sagMin);
+    return bcastLargeTier(bytes, bytes / 4, 8, 8, ringMin, sagMin);
   };
   // Below the SAG cutover: neither large tier, so the flat/LSA/LL kernel runs.
   EXPECT_EQ(tier(1u << 20), BcastLargeTier::None);
@@ -206,11 +227,42 @@ TEST(BcastLargeTier, RingOptOutFallsBackToScatterAllgather) {
   // NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES=0 disables the ring; SAG must take over
   // rather than the message silently dropping to the flat tier.
   const size_t sagMin = kBroadcastScatterAgMinDefault;
-  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 0, sagMin),
+  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 8, 0, sagMin),
             BcastLargeTier::ScatterAG);
   // Both disabled -> flat.
-  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 0, 0),
+  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 8, 8, 0, 0),
             BcastLargeTier::None);
+}
+
+// Ring is checked first, so without the LSA condition every message at or above
+// the ring cutover would take a tier that cannot reach an off-team peer. SAG
+// moves data with gin.put over the world team, so it is the correct fallback on
+// a world the LSA team does not cover, and it sits directly behind the ring.
+TEST(BcastLargeTier, MultiNodeFallsBackToScatterAllgatherNotRing) {
+  const size_t ringMin = kBroadcastRingMinDefault;      // 32 MiB
+  const size_t sagMin = kBroadcastScatterAgMinDefault;  // 2 MiB
+  const size_t count = 16u << 20;
+  auto tier = [&](size_t bytes, int nRanks, int lsaSize) {
+    return bcastLargeTier(bytes, count, nRanks, lsaSize, ringMin, sagMin);
+  };
+  // 2x8 ranks, well above the ring cutover: SAG, not Ring.
+  EXPECT_EQ(tier(64u << 20, 16, 8), BcastLargeTier::ScatterAG);
+  EXPECT_EQ(tier(4ull << 30, 16, 8), BcastLargeTier::ScatterAG);
+  // The same sizes on one node still choose the ring, so the gate costs the
+  // single-node path nothing.
+  EXPECT_EQ(tier(64u << 20, 8, 8), BcastLargeTier::Ring);
+  EXPECT_EQ(tier(4ull << 30, 8, 8), BcastLargeTier::Ring);
+  // Below the ring cutover the LSA team is irrelevant: SAG either way.
+  EXPECT_EQ(tier(sagMin, 16, 8), BcastLargeTier::ScatterAG);
+  EXPECT_EQ(tier(sagMin, 8, 8), BcastLargeTier::ScatterAG);
+}
+
+// With the ring disabled by env AND an LSA team that does not cover the world,
+// the outcome must still be SAG rather than a silent drop to the flat tier.
+TEST(BcastLargeTier, MultiNodeWithRingDisabledStillSelectsScatterAllgather) {
+  EXPECT_EQ(bcastLargeTier(64u << 20, 16u << 20, 16, 8, 0,
+                           kBroadcastScatterAgMinDefault),
+            BcastLargeTier::ScatterAG);
 }
 
 // ------------------------------- bcastRingChunks -----------------------------
