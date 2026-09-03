@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/process_sampler.hpp"
-#include "common/units.hpp"
 #include "core/config.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
@@ -11,6 +10,7 @@
 #include "logger/debug.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -78,9 +78,8 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
     const bool _has_duration = (_duration > 0.0);
 
     auto _now = std::chrono::steady_clock::now();
-    auto _end =
-        _now +
-        std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
+    auto _end = _now + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::duration<double>{ _duration });
     while(_state && _state->load() < state::process::Finalized &&
           state::process::get() < state::process::Finalized)
     {
@@ -140,9 +139,9 @@ sampler::setup()
 
     polling_finished = std::make_unique<promise_t>();
 
-    const auto _freq = get_process_sampling_freq();
-    const auto _interval =
-        nsec_t{ static_cast<std::uint64_t>((1.0 / _freq) * units::sec) };
+    const auto _freq     = get_process_sampling_freq();
+    const auto _interval = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / _freq });
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 

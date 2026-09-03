@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/env_vars.hpp"
-#include "common/units.hpp"
 #include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -79,8 +78,11 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     while(_ci_timeout_seconds <= _factor)
         _factor /= 1.25;
 
-    std::uint64_t      _ci_timeout_nitr    = 0;
-    const std::int64_t _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
+    std::uint64_t      _ci_timeout_nitr = 0;
+    const std::int64_t _ci_timeout_nanosec =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::duration<double>{ _ci_timeout_seconds - _factor })
+            .count();
     auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
     const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
@@ -98,9 +100,9 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
             return;
         }
 
-        auto               _tids = pthread_gotcha::get_native_handles();
-        const std::int64_t _ci_timeout_pause =
-            (_factor * units::sec) / (3 * (_tids.size() + 1));
+        auto       _tids = pthread_gotcha::get_native_handles();
+        const auto _ci_timeout_pause =
+            std::chrono::duration<double>{ _factor } / (3 * (_tids.size() + 1));
         auto _kill_thread = [_ci_timeout_pause](auto _handle) {
             // execute the pthread_kill and wait until ci_timeout_backtrace increments
             // ci_timeout_backtrace_global_done (or 50 iterations pass) to avoid
@@ -129,8 +131,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
 
             // wait until the signal has been delivered
             while(ci_timeout_backtrace_global_done == _done_v && _n++ < 50)
-                std::this_thread::sleep_for(
-                    std::chrono::nanoseconds{ _ci_timeout_pause });
+                std::this_thread::sleep_for(_ci_timeout_pause);
         };
 
         _tids.erase(main_thread_native_handle);

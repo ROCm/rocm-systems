@@ -9,7 +9,6 @@
 #include "binary/scope_filter.hpp"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
-#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -489,14 +488,14 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     double _duration_sec =
         config::get_setting_value<double>(std::string{ env_vars::CAUSAL_DURATION })
             .value_or(0.0);
-    auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
+    auto _duration_nsec = std::chrono::duration_cast<duration_nsec_t>(
+        std::chrono::duration<double>{ _duration_sec });
 
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        const std::uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
+        std::this_thread::sleep_for(std::chrono::duration<double>{ _delay_sec });
     }
 
     auto _impl_count        = 0;

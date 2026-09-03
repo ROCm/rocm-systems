@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-#include "common/units.hpp"
-
 #include "logger/debug.hpp"
 
+#include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace perf
+using namespace std::chrono_literals;
+
+namespace rocprofsys::perf
 {
 
 event_type
@@ -156,7 +155,8 @@ void
 config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
                          double _freq)
 {
-    auto _period = (1.0 / _freq) * units::sec;
+    const auto _period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / _freq });
 
     _pe.type = static_cast<int>(perf::get_event_type(_event));
     switch(_pe.type)
@@ -189,12 +189,11 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
     if(_pe.type == PERF_TYPE_SOFTWARE &&
        (_pe.config == PERF_COUNT_SW_CPU_CLOCK || _pe.config == PERF_COUNT_SW_TASK_CLOCK))
     {
-        _pe.sample_period = static_cast<std::uint64_t>(_period);
+        _pe.sample_period = static_cast<std::uint64_t>(_period.count());
     }
     else
     {
         _pe.sample_period = static_cast<std::uint64_t>(_freq);
     }
 }
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

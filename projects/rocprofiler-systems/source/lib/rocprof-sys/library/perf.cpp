@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/perf.hpp"
-#include "common/units.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -16,6 +15,7 @@
 #include "logger/debug.hpp"
 
 #include <asm/unistd.h>
+#include <chrono>
 #include <ctime>
 #include <fcntl.h>
 #include <linux/perf_event.h>
@@ -47,10 +47,21 @@ namespace perf
 {
 namespace
 {
+/// sysconf(_SC_PAGESIZE) returns -1 on failure; falling back to the common
+/// 4 KiB page size avoids that -1 becoming SIZE_MAX and overflowing the mmap
+/// size computation below.
+size_t
+get_page_size() noexcept
+{
+    constexpr long fallback_page_size = 4096;
+    const long     page_size          = ::sysconf(_SC_PAGESIZE);
+    return static_cast<size_t>(page_size > 0 ? page_size : fallback_page_size);
+}
+
 struct SizeParams
 {
     const size_t num_pages = 2;
-    const size_t page      = units::get_page_size();
+    const size_t page      = get_page_size();
     const size_t data      = num_pages * page;
     const size_t mmap      = data + page;
 };
@@ -160,8 +171,8 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     // If sampling, map the perf event file
     if(_pe.sample_type != 0 && _pe.sample_period != 0)
     {
-        void* ring_buffer =
-            mmap(nullptr, sizes.mmap, PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, 0);
+        void* ring_buffer = mmap(nullptr, sizes.mmap, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<int>(m_fd), 0);
 
         ROCPROFSYS_RETURN_ERROR_MSG(
             ring_buffer == MAP_FAILED,
@@ -178,8 +189,11 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 std::optional<std::string>
 perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
 {
-    auto _thread_state_guard       = state::thread::scoped(state::thread::Internal);
-    const std::uint64_t    _period = (1.0 / _freq) * units::sec;
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const std::uint64_t _period =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::duration<double>{ 1.0 / _freq })
+                                       .count());
     struct perf_event_attr _pe;
 
     if(_batch_size > 0)
