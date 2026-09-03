@@ -114,6 +114,12 @@ public:
   /// @brief Device this host serves, for the protocol callbacks to dispatch to.
   [[nodiscard]] simdojo::PciDevice &device() { return device_; }
 
+  /// @brief Record a reset requested from inside libvfio-user dispatch.
+  /// @details The serving loop performs the reset after leaving the library and
+  /// releasing @ref vfu_mutex_, so draining device work cannot deadlock with a
+  /// worker already waiting to enter the transport.
+  void request_reset(simdojo::ResetKind kind);
+
   /// @brief Ask for @p work to run on the serving thread, one request at a time.
   ///
   /// @details The device is otherwise touched only by protocol callbacks, which
@@ -173,14 +179,30 @@ public:
   [[nodiscard]] bool trigger(uint32_t vector) override;
   [[nodiscard]] bool read(uint64_t guest_phys, std::span<std::byte> dst) override;
   [[nodiscard]] bool write(uint64_t guest_phys, std::span<const std::byte> src) override;
+  [[nodiscard]] simdojo::DmaAccessOutcome read_outcome(uint64_t guest_phys,
+                                                       std::span<std::byte> dst) override;
+  [[nodiscard]] simdojo::DmaAccessOutcome write_outcome(uint64_t guest_phys,
+                                                        std::span<const std::byte> src) override;
+  [[nodiscard]] simdojo::DmaAtomicLoadResult atomic_load(uint64_t guest_phys,
+                                                         uint32_t width) override;
+  [[nodiscard]] simdojo::DmaAccessOutcome atomic_store(uint64_t guest_phys, uint32_t width,
+                                                       uint64_t value) override;
+  [[nodiscard]] simdojo::DmaAtomicCompareExchangeResult compare_exchange(uint64_t guest_phys,
+                                                                         uint32_t width,
+                                                                         uint64_t expected,
+                                                                         uint64_t desired) override;
 
 private:
-  bool copy_guest_memory(uint64_t guest_phys, void *data, std::size_t length, bool to_guest);
+  simdojo::DmaAccessOutcome copy_guest_memory(uint64_t guest_phys, void *data, std::size_t length,
+                                              bool to_guest);
   bool copy_one_segment(uint64_t guest_phys, void *data, std::size_t length, bool to_guest);
   bool copy_by_region(uint64_t guest_phys, void *data, std::size_t length, bool to_guest);
   bool transfer_one_sg(dma_sg *sg, void *data, uint64_t guest_phys, std::size_t length,
                        bool to_guest);
   [[nodiscard]] std::size_t bytes_until_region_end(uint64_t guest_phys) const;
+  [[nodiscard]] bool
+  finish_session_reset(simdojo::ResetKind kind,
+                       std::shared_ptr<simdojo::PciTransportSession> closing_session) noexcept;
 
   const std::string socket_path_;
   simdojo::PciDevice &device_;
@@ -197,7 +219,21 @@ private:
   /// @brief Set while the serving thread is running a request it already took.
   bool asked_running_ = false;
   vfu_ctx *ctx_ = nullptr;
+  /// @brief Whether a *client* is attached to the socket.
   bool attached_ = false;
+  std::optional<simdojo::ResetKind> pending_reset_;
+  /// @brief The sinks this host offers, published to the device as one object.
+  ///
+  /// @details Lives here so its lifetime is the host's: the device holds a
+  /// pointer to it for as long as it is attached.
+  simdojo::PciDevice::Transport transport_;
+  std::shared_ptr<simdojo::PciTransportSession> client_session_;
+  /// @brief Whether this host is the transport the device is attached to.
+  ///
+  /// @details Distinct from @ref attached_, which is about the client on the
+  /// other end of the socket. This one records whether the constructor won the
+  /// device, and a host that did not must neither serve it nor detach it.
+  bool owns_device_ = false;
 
   /// @brief Whether serving ends when the client disconnects.
   ///

@@ -456,8 +456,9 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  // Serving a VMM needs the device's identity, not a simulated machine, so this
-  // is dispatched before the parse that builds one.
+  // Serving a VMM builds its own machine, with the PCI function inside it, so
+  // this is dispatched before the parse that builds one here -- not because no
+  // machine is needed, but because the one it needs is assembled differently.
   if (vfio_socket != nullptr) {
     if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
       std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "

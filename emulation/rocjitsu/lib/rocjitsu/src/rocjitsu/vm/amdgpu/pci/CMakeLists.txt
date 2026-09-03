@@ -17,7 +17,14 @@ set(RJ_PCI_SOURCES
     bar_access_trace.cpp
     scratch_pci_device.cpp
     gpu_pci_device_spec.cpp
+    graphics_block_model.cpp
     register_aperture.cpp
+    ip_block_model.cpp
+    interrupt_block_model.cpp
+    mes_block_model.cpp
+    memory_hub_block_model.cpp
+    physical_memory_access.cpp
+    sdma_block_model.cpp
 )
 
 # The GPU model shares its video memory with a guest through a file descriptor,

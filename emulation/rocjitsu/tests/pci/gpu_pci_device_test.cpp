@@ -1,21 +1,30 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/vm/amdgpu/command_processor_queue_backend.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
+#include "rocjitsu/vm/amdgpu/pci/physical_memory_access.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
+#include "rocjitsu/vm/soc.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <map>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 namespace {
 
@@ -35,6 +44,13 @@ rocjitsu::GpuPciDeviceSpec configured_spec() {
   device.device_id = 0x1250;
   device.pci_revision_id = 0x5a;
   device.local_mem_size = kVramBytes;
+  device.num_shader_engines = 2;
+  device.num_shader_arrays_per_engine = 2;
+  device.num_cu_per_sh = 8;
+  device.wave_front_size = 32;
+  device.max_waves_per_simd = 16;
+  device.max_slots_scratch_cu = 32;
+  device.lds_size_kb = 320;
   return rocjitsu::gpu_pci_spec_from_config(device, {});
 }
 
@@ -42,7 +58,9 @@ class GpuDevice : public ::testing::Test {
 protected:
   rocjitsu::RegisterSymbols symbols_;
   rocjitsu::BarAccessTrace trace_{symbols_};
-  rocjitsu::GpuPciDevice device_{"gpu", configured_spec(), &trace_};
+  rocjitsu::amdgpu::GpuMemory memory_{"memory"};
+  rocjitsu::SoC soc_{"soc", &memory_};
+  rocjitsu::GpuPciDevice device_{"gpu", configured_spec(), &trace_, &soc_};
 
   [[nodiscard]] uint32_t read_register(rocjitsu::MmioRegister reg) {
     std::array<std::byte, 4> raw{};
@@ -98,16 +116,16 @@ protected:
 // million times, and only that one: a GFXHUB flush returns before touching any
 // register while the graphics block is unpowered, which holds for as long as
 // this device does not bring that block up, so every stalled flush was MMHUB's.
-TEST_F(GpuDevice, ReportsEveryVmInvalidationAlreadyComplete) {
+TEST_F(GpuDevice, PublishesVmidZeroBeforeAcknowledgingItsInvalidation) {
   ASSERT_TRUE(device_.usable());
 
-  EXPECT_EQ(read_register_at(0xa368), 0xffffffffu) << "GFXHUB engine 17 never acknowledges";
-  EXPECT_EQ(read_register_at(0x696a8), 0xffffffffu) << "MMHUB engine 17 never acknowledges";
+  EXPECT_EQ(read_register_at(0xa368), 0u);
+  EXPECT_EQ(read_register_at(0x696a8), 0u);
 
   // Engine 0 and the last engine, since the driver reaches engines by stride
   // and modelling only the one it happens to use today would break silently.
-  EXPECT_EQ(read_register_at((0x1a000 + 0x0599) * 4), 0xffffffffu);
-  EXPECT_EQ(read_register_at((0x1a000 + 0x0599 + 17) * 4), 0xffffffffu);
+  EXPECT_EQ(read_register_at((0x1a000 + 0x0599) * 4), 0u);
+  EXPECT_EQ(read_register_at((0x1a000 + 0x0599 + 17) * 4), 0u);
 
   // The request is written rather than read, so what is checked is that the
   // device models it at all: an unmodelled register drops the write and reads
@@ -117,6 +135,81 @@ TEST_F(GpuDevice, ReportsEveryVmInvalidationAlreadyComplete) {
   write_register_at(kMmHubRequest17, 0x1);
   EXPECT_EQ(read_register_at(kMmHubRequest17), 0x1u)
       << "MMHUB engine 17's request was dropped as unmodelled";
+  EXPECT_EQ(read_register_at(0x696a8) & 1u, 1u);
+
+  constexpr uint64_t kGcBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kGcBase + reg) * 4; };
+  constexpr uint64_t kPageTable = 0x10000;
+  constexpr uint64_t kGartStart = 0x100000000ULL;
+  write_register_at(absolute(0x169f), static_cast<uint32_t>(kPageTable));
+  write_register_at(absolute(0x16a0), static_cast<uint32_t>(kPageTable >> 32));
+  write_register_at(absolute(0x16bf), static_cast<uint32_t>(kGartStart >> 12));
+  write_register_at(absolute(0x16c0), static_cast<uint32_t>(kGartStart >> 44));
+  write_register_at(absolute(0x16df), static_cast<uint32_t>((kGartStart + 0xfff) >> 12));
+  write_register_at(absolute(0x16e0), static_cast<uint32_t>((kGartStart + 0xfff) >> 44));
+
+  const rocjitsu::amdgpu::AddressSpaceHandle gart = soc_.gpu_vm().gart_address_space();
+  ASSERT_TRUE(gart);
+  const uint64_t old_epoch = soc_.gpu_vm().lookup(gart)->translation_epoch;
+  write_register_at(absolute(0x1657 + 17), 1);
+
+  EXPECT_EQ(read_register_at(0xa368) & 1u, 1u);
+  ASSERT_TRUE(soc_.gpu_vm().lookup(gart));
+  EXPECT_EQ(soc_.gpu_vm().lookup(gart)->translation_epoch, old_epoch + 1);
+  const auto translated =
+      soc_.gpu_vm().translate(gart, kGartStart, 1, rocjitsu::amdgpu::VmAccessKind::Read);
+  EXPECT_EQ(translated.outcome, rocjitsu::amdgpu::VmAccessOutcome::Unavailable)
+      << "the published GART did not preserve the absent transport as a typed outcome";
+}
+
+TEST_F(GpuDevice, ReportsAReadOnlyAddressConfigurationMatchingItsTopology) {
+  ASSERT_TRUE(device_.usable());
+  constexpr uint64_t kGbAddrConfigRead = (0x1260 + 0x13e2) * 4;
+  constexpr uint32_t kTwoEnginesAndTwoBackendsPerEngine = 0x04080000;
+
+  ASSERT_EQ(read_register_at(kGbAddrConfigRead), kTwoEnginesAndTwoBackendsPerEngine);
+  write_register_at(kGbAddrConfigRead, 0xffffffff);
+  EXPECT_EQ(read_register_at(kGbAddrConfigRead), kTwoEnginesAndTwoBackendsPerEngine);
+}
+
+TEST_F(GpuDevice, CompletesFirmwareFreeComputeCacheInvalidation) {
+  ASSERT_TRUE(device_.usable());
+  constexpr uint64_t kComputeDataCacheOperation = (0xA000 + 0x290c) * 4;
+  constexpr uint64_t kComputeInstructionCacheOperation = (0xA000 + 0x297a) * 4;
+
+  for (const uint64_t operation : {kComputeDataCacheOperation, kComputeInstructionCacheOperation}) {
+    ASSERT_EQ(read_register_at(operation), 0x2u);
+    write_register_at(operation, 0x3u);
+    EXPECT_EQ(read_register_at(operation), 0x2u)
+        << "the trigger write cleared the already-complete status";
+  }
+}
+
+TEST_F(GpuDevice, ReportsFirmwareFreeSdmaMicrocodeStartupComplete) {
+  ASSERT_TRUE(device_.usable());
+  constexpr uint64_t kSdmaStatuses[] = {
+      (0x1260 + 0x0024) * 4,
+      (0x1260 + 0x0024 + 0x0600) * 4,
+  };
+  constexpr uint64_t kInstructionCacheOperations[] = {
+      (0xA000 + 0x589d) * 4,
+      (0xA000 + 0x589d + 0x0030) * 4,
+  };
+
+  for (std::size_t engine = 0; engine < std::size(kSdmaStatuses); ++engine) {
+    const uint64_t status = kSdmaStatuses[engine];
+    const uint64_t operation = kInstructionCacheOperations[engine];
+    EXPECT_EQ(read_register_at(status) & 0x08000001u, 0x08000001u);
+    ASSERT_EQ(read_register_at(operation) & 0x20u, 0x20u);
+
+    // The driver's read-modify-write sets PRIME_ICACHE. Completion remains set
+    // in the same register so its following poll observes a primed cache.
+    write_register_at(operation, read_register_at(operation) | 0x10u);
+    EXPECT_EQ(read_register_at(operation) & 0x30u, 0x30u);
+
+    write_register_at(status, 0);
+    EXPECT_EQ(read_register_at(status) & 0x08000001u, 0x08000001u);
+  }
 }
 
 // Covers the older flush path, which brackets a flush with an acquire of the
@@ -168,20 +261,20 @@ TEST_F(GpuDevice, ReadsBackTheInterruptRingTheDriverProgrammed) {
   // these are bus addresses (2 at bit 28).
   write_register_at(0x4480, (16u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
 
-  const rocjitsu::GpuPciDevice::InterruptRing ring = device_.interrupt_ring();
+  const rocjitsu::InterruptRing ring = device_.interrupt_ring();
   EXPECT_EQ(ring.base, kRingBase);
   EXPECT_EQ(ring.wptr_address, kWptrAddress);
   EXPECT_EQ(ring.bytes, 256u * 1024) << "the size field is a logarithm of a dword count";
   EXPECT_TRUE(ring.enabled);
   EXPECT_TRUE(ring.raises_messages);
-  EXPECT_EQ(ring.space, rocjitsu::GpuPciDevice::InterruptRingSpace::BusAddress);
+  EXPECT_EQ(ring.space, rocjitsu::InterruptRingSpace::BusAddress);
 
   // The same registers with the space the driver uses when it loads firmware
   // through the security processor: the addresses are then translated, and
   // acting on them as if they were bus addresses would write somewhere real
   // and wrong.
   write_register_at(0x4480, (16u << 1) | (1u << 0) | (1u << 17) | (4u << 28));
-  EXPECT_EQ(device_.interrupt_ring().space, rocjitsu::GpuPciDevice::InterruptRingSpace::GpuVirtual);
+  EXPECT_EQ(device_.interrupt_ring().space, rocjitsu::InterruptRingSpace::GpuVirtual);
 }
 
 // programmed() is what decides whether the shutdown diagnostic says anything,
@@ -209,7 +302,7 @@ TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
     ASSERT_FALSE(device_.interrupt_ring().programmed()) << "reset did not clear the ring";
 
     write_register_at(partial.reg, partial.value);
-    const rocjitsu::GpuPciDevice::InterruptRing ring = device_.interrupt_ring();
+    const rocjitsu::InterruptRing ring = device_.interrupt_ring();
     EXPECT_TRUE(ring.programmed()) << partial.what << " was reported as nothing programmed";
     EXPECT_EQ(ring.base, 0u) << partial.what;
     EXPECT_FALSE(ring.enabled) << partial.what;
@@ -259,11 +352,32 @@ TEST(GpuDeviceFlushes, RefusesASegmentThatWrapsIntoTheAperture) {
 class RecordingTransport : public simdojo::DmaEngine, public simdojo::IrqSink {
 public:
   [[nodiscard]] bool read(uint64_t guest_phys, std::span<std::byte> dst) override {
+    {
+      std::unique_lock lock(read_mutex_);
+      if (blocked_read_address_.has_value() && *blocked_read_address_ == guest_phys) {
+        read_is_blocked_ = true;
+        read_state_changed_.notify_all();
+        read_state_changed_.wait(lock, [this]() { return release_blocked_read_; });
+        blocked_read_address_.reset();
+        read_is_blocked_ = false;
+        release_blocked_read_ = false;
+      }
+    }
     for (std::size_t i = 0; i < dst.size(); ++i) {
       const auto found = memory.find(guest_phys + i);
       dst[i] = found == memory.end() ? std::byte{0} : found->second;
     }
     return true;
+  }
+
+  simdojo::DmaAccessOutcome read_outcome(uint64_t guest_phys, std::span<std::byte> dst) override {
+    if (next_read_outcome && next_read_outcome->first == guest_phys) {
+      const simdojo::DmaAccessOutcome outcome = next_read_outcome->second;
+      next_read_outcome.reset();
+      return outcome;
+    }
+    return read(guest_phys, dst) ? simdojo::DmaAccessOutcome::Complete
+                                 : simdojo::DmaAccessOutcome::Faulted;
   }
 
   [[nodiscard]] bool write(uint64_t guest_phys, std::span<const std::byte> src) override {
@@ -280,6 +394,37 @@ public:
     return true;
   }
 
+  simdojo::DmaAccessOutcome write_outcome(uint64_t guest_phys,
+                                          std::span<const std::byte> src) override {
+    if (next_write_outcome && next_write_outcome->first == guest_phys) {
+      const simdojo::DmaAccessOutcome outcome = next_write_outcome->second;
+      next_write_outcome.reset();
+      return outcome;
+    }
+    return write(guest_phys, src) ? simdojo::DmaAccessOutcome::Complete
+                                  : simdojo::DmaAccessOutcome::Faulted;
+  }
+
+  simdojo::DmaAtomicLoadResult atomic_load(uint64_t guest_phys, uint32_t width) override {
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || guest_phys % width != 0)
+      return {.outcome = simdojo::DmaAccessOutcome::Malformed};
+    std::array<std::byte, sizeof(uint64_t)> bytes{};
+    const simdojo::DmaAccessOutcome outcome =
+        read_outcome(guest_phys, std::span(bytes).first(width));
+    uint64_t value = 0;
+    if (outcome == simdojo::DmaAccessOutcome::Complete)
+      std::memcpy(&value, bytes.data(), width);
+    return {.outcome = outcome, .value = value};
+  }
+
+  simdojo::DmaAccessOutcome atomic_store(uint64_t guest_phys, uint32_t width,
+                                         uint64_t value) override {
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || guest_phys % width != 0)
+      return simdojo::DmaAccessOutcome::Malformed;
+    const auto bytes = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(value);
+    return write_outcome(guest_phys, std::span(bytes).first(width));
+  }
+
   [[nodiscard]] bool trigger(uint32_t vector) override {
     triggered.push_back(vector);
     return !refuse_trigger;
@@ -291,6 +436,24 @@ public:
     return std::bit_cast<uint32_t>(raw);
   }
 
+  void block_next_read_at(uint64_t guest_phys) {
+    const std::lock_guard lock(read_mutex_);
+    blocked_read_address_ = guest_phys;
+    read_is_blocked_ = false;
+    release_blocked_read_ = false;
+  }
+
+  void wait_for_blocked_read() {
+    std::unique_lock lock(read_mutex_);
+    read_state_changed_.wait(lock, [this]() { return read_is_blocked_; });
+  }
+
+  void release_read() {
+    const std::lock_guard lock(read_mutex_);
+    release_blocked_read_ = true;
+    read_state_changed_.notify_all();
+  }
+
   std::map<uint64_t, std::byte> memory;
   /// @brief Every write, as address and length, so a transfer that overran can
   /// be told apart from a legitimate one to the address it overran into.
@@ -300,7 +463,2065 @@ public:
   bool refuse_trigger = false;
   /// @brief Writes to accept before refusing, or negative for no limit.
   int writes_before_refusing = -1;
+  std::optional<std::pair<uint64_t, simdojo::DmaAccessOutcome>> next_read_outcome;
+  std::optional<std::pair<uint64_t, simdojo::DmaAccessOutcome>> next_write_outcome;
+
+private:
+  std::mutex read_mutex_;
+  std::condition_variable read_state_changed_;
+  std::optional<uint64_t> blocked_read_address_;
+  bool read_is_blocked_ = false;
+  bool release_blocked_read_ = false;
 };
+
+class SessionTestDevice final : public simdojo::PciDevice {
+public:
+  SessionTestDevice() : PciDevice("session-test", {}) {}
+
+  [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override { return {}; }
+  [[nodiscard]] int64_t bar_access(int, std::span<std::byte>, uint64_t, bool) override {
+    return -1;
+  }
+  void dma_map(const simdojo::DmaRegion &) override {}
+  void dma_unmap(const simdojo::DmaRegion &) override {}
+
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession> capture_session() const {
+    return transport_session();
+  }
+};
+
+class OutcomeTransport final : public simdojo::DmaEngine, public simdojo::IrqSink {
+public:
+  bool read(uint64_t guest_phys, std::span<std::byte> dst) override {
+    return read_outcome(guest_phys, dst) == simdojo::DmaAccessOutcome::Complete;
+  }
+  bool write(uint64_t guest_phys, std::span<const std::byte> src) override {
+    return write_outcome(guest_phys, src) == simdojo::DmaAccessOutcome::Complete;
+  }
+  simdojo::DmaAccessOutcome read_outcome(uint64_t, std::span<std::byte> dst) override {
+    ++reads;
+    std::ranges::fill(dst, std::byte{0x5a});
+    return outcome;
+  }
+  simdojo::DmaAccessOutcome write_outcome(uint64_t, std::span<const std::byte>) override {
+    ++writes;
+    return outcome;
+  }
+  bool trigger(uint32_t) override { return true; }
+
+  simdojo::DmaAccessOutcome outcome = simdojo::DmaAccessOutcome::Complete;
+  uint32_t reads = 0;
+  uint32_t writes = 0;
+};
+
+class SessionBackedMemory final : public rocjitsu::PciMemoryAccess {
+public:
+  explicit SessionBackedMemory(std::shared_ptr<simdojo::PciTransportSession> session)
+      : session_(std::move(session)) {}
+
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession>
+  capture_transport_session() const override {
+    return session_;
+  }
+  bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
+    if (offset > vram.size() || bytes.size() > vram.size() - offset)
+      return false;
+    std::ranges::copy(std::span(vram).subspan(offset, bytes.size()), bytes.begin());
+    return true;
+  }
+  bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
+    if (offset > vram.size() || bytes.size() > vram.size() - offset)
+      return false;
+    std::ranges::copy(bytes, vram.begin() + static_cast<std::ptrdiff_t>(offset));
+    return true;
+  }
+  rocjitsu::amdgpu::AtomicLoadResult atomic_load_vram(uint64_t offset, uint32_t width) override {
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0 ||
+        offset > vram.size() || width > vram.size() - offset) {
+      return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+    }
+    uint64_t value = 0;
+    std::memcpy(&value, vram.data() + offset, width);
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete, .value = value};
+  }
+  rocjitsu::amdgpu::VmAccessOutcome atomic_store_vram(uint64_t offset, uint32_t width,
+                                                      uint64_t value) override {
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0 ||
+        offset > vram.size() || width > vram.size() - offset) {
+      return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
+    std::memcpy(vram.data() + offset, &value, width);
+    return rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  }
+  rocjitsu::amdgpu::AtomicCompareExchangeResult compare_exchange_vram(uint64_t offset,
+                                                                      uint32_t width,
+                                                                      uint64_t expected,
+                                                                      uint64_t desired) override {
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || offset % width != 0 ||
+        offset > vram.size() || width > vram.size() - offset) {
+      return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+    }
+    uint64_t observed = 0;
+    std::memcpy(&observed, vram.data() + offset, width);
+    const uint64_t mask = width == sizeof(uint64_t) ? UINT64_MAX : UINT32_MAX;
+    if ((observed & mask) == (expected & mask))
+      std::memcpy(vram.data() + offset, &desired, width);
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
+            .observed = observed,
+            .exchanged = (observed & mask) == (expected & mask)};
+  }
+  bool read_register(uint64_t, uint32_t &) override { return false; }
+  bool write_register(uint64_t, uint32_t) override { return false; }
+  bool deliver_interrupt(const rocjitsu::InterruptEntry &) override { return false; }
+
+  std::array<std::byte, 16> vram{};
+
+private:
+  std::shared_ptr<simdojo::PciTransportSession> session_;
+};
+
+// Models the ownership shape of GpuPciDevice: the object that supplies local
+// memory also owns the transport session captured by retained VM bindings.
+class LifetimeBoundMemory final : public simdojo::PciDevice, public rocjitsu::PciMemoryAccess {
+public:
+  LifetimeBoundMemory() : PciDevice("lifetime-bound-memory", {}) {}
+  ~LifetimeBoundMemory() override { shutdown_transport(); }
+
+  [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override { return {}; }
+  [[nodiscard]] int64_t bar_access(int, std::span<std::byte>, uint64_t, bool) override {
+    return -1;
+  }
+  void dma_map(const simdojo::DmaRegion &) override {}
+  void dma_unmap(const simdojo::DmaRegion &) override {}
+
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession>
+  capture_transport_session() const override {
+    return transport_session();
+  }
+  bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
+    if (offset > vram_.size() || bytes.size() > vram_.size() - offset)
+      return false;
+    std::ranges::copy(std::span(vram_).subspan(offset, bytes.size()), bytes.begin());
+    return true;
+  }
+  bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
+    if (offset > vram_.size() || bytes.size() > vram_.size() - offset)
+      return false;
+    std::ranges::copy(bytes, vram_.begin() + static_cast<std::ptrdiff_t>(offset));
+    return true;
+  }
+  rocjitsu::amdgpu::AtomicLoadResult atomic_load_vram(uint64_t, uint32_t) override {
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+  }
+  rocjitsu::amdgpu::VmAccessOutcome atomic_store_vram(uint64_t, uint32_t, uint64_t) override {
+    return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+  }
+  rocjitsu::amdgpu::AtomicCompareExchangeResult compare_exchange_vram(uint64_t, uint32_t, uint64_t,
+                                                                      uint64_t) override {
+    return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted};
+  }
+  bool read_register(uint64_t, uint32_t &) override { return false; }
+  bool write_register(uint64_t, uint32_t) override { return false; }
+  bool deliver_interrupt(const rocjitsu::InterruptEntry &) override { return false; }
+
+private:
+  std::array<std::byte, 16> vram_{};
+};
+
+TEST(PciBackingSession, StaleGenerationCannotReachReattachedTransport) {
+  SessionTestDevice device;
+  OutcomeTransport first;
+  OutcomeTransport second;
+  simdojo::PciDevice::Transport first_endpoints{.irq = &first, .dma = &first};
+  simdojo::PciDevice::Transport second_endpoints{.irq = &second, .dma = &second};
+
+  ASSERT_TRUE(device.attach_transport(&first_endpoints));
+  std::shared_ptr<simdojo::PciTransportSession> first_session = device.capture_session();
+  ASSERT_NE(first_session, nullptr);
+  const uint64_t first_generation = first_session->generation();
+
+  std::shared_ptr<simdojo::PciTransportSession> closing =
+      device.revoke_transport_session(&first_endpoints);
+  ASSERT_EQ(closing, first_session);
+  closing->wait_until_drained();
+  ASSERT_TRUE(device.detach_transport(&first_endpoints));
+
+  ASSERT_TRUE(device.attach_transport(&second_endpoints));
+  std::shared_ptr<simdojo::PciTransportSession> second_session = device.capture_session();
+  ASSERT_NE(second_session, nullptr);
+  EXPECT_NE(second_session->generation(), first_generation);
+
+  std::array<std::byte, 4> bytes{};
+  EXPECT_FALSE(first_session->acquire());
+  EXPECT_EQ(first.reads, 0u);
+  EXPECT_EQ(second.reads, 0u);
+  auto second_lease = second_session->acquire();
+  ASSERT_TRUE(second_lease);
+  EXPECT_EQ(second_lease.read(0x1000, bytes), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(second.reads, 1u);
+  second_lease = {};
+  EXPECT_TRUE(device.detach_transport(&second_endpoints));
+}
+
+TEST(PciBackingSession, RevokeRefusesNewOperationsAndDetachWaitsForAdmittedOne) {
+  SessionTestDevice device;
+  OutcomeTransport transport;
+  simdojo::PciDevice::Transport endpoints{.irq = &transport, .dma = &transport};
+  ASSERT_TRUE(device.attach_transport(&endpoints));
+  std::shared_ptr<simdojo::PciTransportSession> session = device.capture_session();
+  auto admitted = session->acquire();
+  ASSERT_TRUE(admitted);
+
+  std::future<bool> detached =
+      std::async(std::launch::async, [&]() { return device.detach_transport(&endpoints); });
+  for (int attempt = 0;
+       attempt < 100 && session->state() == simdojo::PciTransportSession::State::Open; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_EQ(session->state(), simdojo::PciTransportSession::State::Closing);
+  EXPECT_FALSE(session->acquire()) << "revocation admitted a new endpoint operation";
+  EXPECT_EQ(detached.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
+      << "detach returned while an admitted operation still held endpoint lifetime";
+
+  admitted = {};
+  EXPECT_TRUE(detached.get());
+  EXPECT_EQ(session->state(), simdojo::PciTransportSession::State::Revoked);
+}
+
+TEST(PciPhysicalMemoryAccess, PreservesTypedOutcomesAndRejectsARevokedGeneration) {
+  SessionTestDevice device;
+  OutcomeTransport transport;
+  simdojo::PciDevice::Transport endpoints{.irq = &transport, .dma = &transport};
+  ASSERT_TRUE(device.attach_transport(&endpoints));
+  std::shared_ptr<simdojo::PciTransportSession> session = device.capture_session();
+  SessionBackedMemory memory(session);
+  rocjitsu::PciPhysicalMemoryAccess physical(memory);
+  std::array<std::byte, 4> bytes{};
+
+  for (const simdojo::DmaAccessOutcome transport_outcome :
+       {simdojo::DmaAccessOutcome::Complete, simdojo::DmaAccessOutcome::Unavailable,
+        simdojo::DmaAccessOutcome::Faulted, simdojo::DmaAccessOutcome::Malformed}) {
+    transport.outcome = transport_outcome;
+    const rocjitsu::amdgpu::VmAccessOutcome expected = [&]() {
+      switch (transport_outcome) {
+      case simdojo::DmaAccessOutcome::Complete:
+        return rocjitsu::amdgpu::VmAccessOutcome::Complete;
+      case simdojo::DmaAccessOutcome::Unavailable:
+        return rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+      case simdojo::DmaAccessOutcome::Faulted:
+        return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+      case simdojo::DmaAccessOutcome::Malformed:
+        return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+      }
+      return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+    }();
+    EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::System, 0x2000, bytes), expected);
+  }
+
+  EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::Local, memory.vram.size(), bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::Compatibility, 0, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Malformed);
+
+  transport.outcome = simdojo::DmaAccessOutcome::Complete;
+  EXPECT_EQ(physical.atomic_store(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, sizeof(uint32_t),
+                                  0x01020304),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  const auto local_load =
+      physical.atomic_load(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, sizeof(uint32_t));
+  EXPECT_EQ(local_load.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(local_load.value, 0x01020304u);
+  const auto local_cas = physical.compare_exchange(rocjitsu::amdgpu::VmMemoryDomain::Local, 0,
+                                                   sizeof(uint32_t), 0x01020304, 0x12345678);
+  EXPECT_EQ(local_cas.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_TRUE(local_cas.exchanged);
+  const auto system_cas = physical.compare_exchange(rocjitsu::amdgpu::VmMemoryDomain::System,
+                                                    0x2000, sizeof(uint32_t), 0, 1);
+  EXPECT_EQ(system_cas.outcome, rocjitsu::amdgpu::VmAccessOutcome::Faulted)
+      << "the fake DMA engine does not claim atomicity via read/write synthesis";
+
+  std::shared_ptr<simdojo::PciTransportSession> closing =
+      device.revoke_transport_session(&endpoints);
+  ASSERT_NE(closing, nullptr);
+  closing->wait_until_drained();
+  EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::System, 0x2000, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_EQ(physical.read(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_EQ(
+      physical.atomic_load(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, sizeof(uint32_t)).outcome,
+      rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(device.detach_transport(&endpoints));
+}
+
+TEST(PciPhysicalMemoryAccess, DeviceDestructionRevokesRetainedBackingBeforeOwnerDies) {
+  OutcomeTransport transport;
+  simdojo::PciDevice::Transport endpoints{.irq = &transport, .dma = &transport};
+  std::unique_ptr<rocjitsu::PciPhysicalMemoryAccess> physical;
+  std::shared_ptr<simdojo::PciTransportSession> session;
+  {
+    auto memory = std::make_unique<LifetimeBoundMemory>();
+    ASSERT_TRUE(memory->attach_transport(&endpoints));
+    session = memory->capture_transport_session();
+    ASSERT_NE(session, nullptr);
+    physical = std::make_unique<rocjitsu::PciPhysicalMemoryAccess>(*memory);
+
+    std::array<std::byte, 4> bytes{};
+    EXPECT_EQ(physical->read(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, bytes),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
+
+  EXPECT_EQ(session->state(), simdojo::PciTransportSession::State::Revoked);
+  std::array<std::byte, 4> bytes{};
+  EXPECT_EQ(physical->read(rocjitsu::amdgpu::VmMemoryDomain::Local, 0, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_EQ(physical->read(rocjitsu::amdgpu::VmMemoryDomain::System, 0, bytes),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+}
+
+TEST(VramStoreAtomics, PerformsStrongAlignedOperationsWithoutReadWriteSynthesis) {
+  rocjitsu::VramStore vram("atomic-vram", 0x2000, 0x1000);
+  ASSERT_TRUE(vram.usable());
+
+  ASSERT_TRUE(vram.atomic_store(0x100, sizeof(uint64_t), 7));
+  const auto loaded = vram.atomic_load(0x100, sizeof(uint64_t));
+  ASSERT_TRUE(loaded.has_value());
+  EXPECT_EQ(loaded->value, 7u);
+
+  const auto exchanged = vram.compare_exchange(0x100, sizeof(uint64_t), 7, 11);
+  ASSERT_TRUE(exchanged.has_value());
+  EXPECT_EQ(exchanged->observed, 7u);
+  EXPECT_TRUE(exchanged->exchanged);
+
+  const auto mismatch = vram.compare_exchange(0x100, sizeof(uint64_t), 7, 13);
+  ASSERT_TRUE(mismatch.has_value());
+  EXPECT_EQ(mismatch->observed, 11u);
+  EXPECT_FALSE(mismatch->exchanged);
+  EXPECT_FALSE(vram.atomic_load(0x101, sizeof(uint64_t)).has_value());
+  EXPECT_FALSE(vram.atomic_store(0x2000, sizeof(uint64_t), 1));
+}
+
+class AlwaysAvailableAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator,
+                                          public rocjitsu::amdgpu::PhysicalMemoryAccess {
+public:
+  rocjitsu::amdgpu::VmTranslationResult
+  translate(uint64_t address, std::size_t size,
+            rocjitsu::amdgpu::VmAccessKind /*access*/) const override {
+    return {
+        .outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
+                        .address = address,
+                        .contiguous_bytes = size,
+                        .mtype = rocjitsu::amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t,
+                                         std::span<std::byte> bytes) override {
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System)
+      return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+    std::ranges::fill(bytes, std::byte{0});
+    return rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t,
+                                          std::span<const std::byte>) override {
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System)
+      return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+    return rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  }
+};
+
+// MES submits fixed 64-dword API frames through a VMID-0 ring in GART. The
+// device has to walk the GART PTEs, execute both the requested operation and
+// the query-status frame appended behind it, and publish all three pieces of
+// progress: the API status, the ring fence, and the queue read pointer.
+class GpuDeviceMes : public GpuDevice {
+protected:
+  static constexpr uint64_t kPageTable = 0x10000;
+  static constexpr uint64_t kGartStart = 0x100000000ULL;
+  static constexpr uint64_t kRingGpu = kGartStart;
+  static constexpr uint64_t kReadPointerGpu = kGartStart + 0x1000;
+  static constexpr uint64_t kApiStatusGpu = kGartStart + 0x2000;
+  static constexpr uint64_t kRingFenceGpu = kGartStart + 0x3000;
+  static constexpr uint64_t kSchedulerMqdGpu = kGartStart + 0x4000;
+  static constexpr uint64_t kSchedulerRingGpu = kGartStart + 0x5000;
+  static constexpr uint64_t kSchedulerReadPointerGpu = kGartStart + 0x6000;
+  static constexpr uint64_t kSchedulerApiStatusGpu = kGartStart + 0x7000;
+  static constexpr uint64_t kSchedulerRingFenceGpu = kGartStart + 0x8000;
+  static constexpr uint64_t kRingPhysical = 0x200000;
+  static constexpr uint64_t kReadPointerPhysical = 0x210000;
+  static constexpr uint64_t kApiStatusPhysical = 0x220000;
+  static constexpr uint64_t kRingFencePhysical = 0x230000;
+  static constexpr uint64_t kSchedulerMqdPhysical = 0x240000;
+  static constexpr uint64_t kSchedulerRingPhysical = 0x250000;
+  static constexpr uint64_t kSchedulerReadPointerPhysical = 0x260000;
+  static constexpr uint64_t kSchedulerApiStatusPhysical = 0x270000;
+  static constexpr uint64_t kSchedulerRingFencePhysical = 0x280000;
+
+  RecordingTransport transport_;
+  simdojo::PciDevice::Transport attached_{.irq = &transport_, .dma = &transport_};
+
+  void SetUp() override {
+    ASSERT_TRUE(device_.attach_transport(&attached_));
+
+    configure_gart();
+  }
+
+  void configure_gart() {
+    constexpr uint64_t kGcBase = 0x1260;
+    const auto absolute = [](uint64_t reg) { return (kGcBase + reg) * 4; };
+    write_register_at(absolute(0x169f), static_cast<uint32_t>(kPageTable));
+    write_register_at(absolute(0x16a0), static_cast<uint32_t>(kPageTable >> 32));
+    write_register_at(absolute(0x16bf), static_cast<uint32_t>(kGartStart >> 12));
+    write_register_at(absolute(0x16c0), static_cast<uint32_t>(kGartStart >> 44));
+    write_register_at(absolute(0x16df), static_cast<uint32_t>((kGartStart + 0x8fff) >> 12));
+    write_register_at(absolute(0x16e0), static_cast<uint32_t>((kGartStart + 0x8fff) >> 44));
+
+    for (const auto [page, physical] :
+         {std::pair{0u, kRingPhysical}, std::pair{1u, kReadPointerPhysical},
+          std::pair{2u, kApiStatusPhysical}, std::pair{3u, kRingFencePhysical},
+          std::pair{4u, kSchedulerMqdPhysical}, std::pair{5u, kSchedulerRingPhysical},
+          std::pair{6u, kSchedulerReadPointerPhysical}, std::pair{7u, kSchedulerApiStatusPhysical},
+          std::pair{8u, kSchedulerRingFencePhysical}}) {
+      const uint64_t pte = physical | 0x3;
+      auto raw = std::bit_cast<std::array<std::byte, 8>>(pte);
+      ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kVramBar, raw,
+                                   kPageTable + page * sizeof(uint64_t), /*write=*/true),
+                8);
+    }
+
+    // Configuration writes are pending state. The VMID-0 identity changes
+    // translator only when the hub invalidation publishes the snapshot.
+    write_register_at(absolute(0x1657 + 17), 1);
+
+    write_register_at(absolute(0x1fb1), static_cast<uint32_t>(kRingGpu >> 8));
+    write_register_at(absolute(0x1fb2), static_cast<uint32_t>(kRingGpu >> 40));
+    write_register_at(absolute(0x1fb4), static_cast<uint32_t>(kReadPointerGpu));
+    write_register_at(absolute(0x1fb5), static_cast<uint32_t>(kReadPointerGpu >> 32));
+    write_register_at(absolute(0x1fb8), 0x40000060);
+    write_register_at(absolute(0x1fba), 9);
+    write_register_at(absolute(0x1fab), 1);
+  }
+
+  void TearDown() override { EXPECT_TRUE(device_.detach_transport(&attached_)); }
+
+  void store_dword(uint64_t physical, uint32_t value) {
+    const auto raw = std::bit_cast<std::array<std::byte, 4>>(value);
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      transport_.memory[physical + i] = raw[i];
+    }
+  }
+
+  void store_qword(uint64_t physical, uint64_t value) {
+    const auto raw = std::bit_cast<std::array<std::byte, 8>>(value);
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      transport_.memory[physical + i] = raw[i];
+    }
+  }
+
+  void store_vram_qword(uint64_t offset, uint64_t value) {
+    auto raw = std::bit_cast<std::array<std::byte, 8>>(value);
+    ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kVramBar, raw, offset,
+                                 /*write=*/true),
+              8);
+  }
+
+  void store_vram_dword(uint64_t offset, uint32_t value) {
+    auto raw = std::bit_cast<std::array<std::byte, 4>>(value);
+    ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kVramBar, raw, offset,
+                                 /*write=*/true),
+              4);
+  }
+
+  [[nodiscard]] uint32_t vram_dword_at(uint64_t offset) {
+    std::array<std::byte, 4> raw{};
+    EXPECT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kVramBar, raw, offset,
+                                 /*write=*/false),
+              4);
+    return std::bit_cast<uint32_t>(raw);
+  }
+
+  template <std::size_t N> void ring_doorbell(uint64_t offset, std::array<std::byte, N> &value) {
+    ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, value, offset,
+                                 /*write=*/true),
+              static_cast<int64_t>(N));
+    device_.drain_doorbell_inbox_for_test();
+  }
+};
+
+TEST_F(GpuDeviceMes, ExecutesTheKernelQueueAndPublishesBothCompletionFences) {
+  // SET_HW_RESOURCES: status begins at dword 50 in its 64-dword frame.
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  // QUERY_SCHEDULER_STATUS follows it and carries the ring fence at dword 2.
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 7);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u)
+      << "a transport callback executed semantic doorbell work inline";
+
+  device_.drain_doorbell_inbox_for_test();
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 7u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u);
+}
+
+TEST_F(GpuDeviceMes, DropsADoorbellQueuedByARevokedTransportGeneration) {
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  const uint64_t old_generation = device_.transport_session_generation();
+  ASSERT_NE(old_generation, 0u);
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  ASSERT_TRUE(device_.detach_transport(&attached_));
+  ASSERT_TRUE(device_.attach_transport(&attached_));
+  ASSERT_NE(device_.transport_session_generation(), old_generation);
+  device_.drain_doorbell_inbox_for_test();
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u)
+      << "work captured for the old peer generation reached its replacement";
+}
+
+TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  const uint64_t generation = device_.transport_session_generation();
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  device_.reset(simdojo::ResetKind::FunctionLevel);
+  ASSERT_EQ(device_.transport_session_generation(), generation);
+  device_.drain_doorbell_inbox_for_test();
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u)
+      << "pre-reset semantic work crossed the reset epoch";
+}
+
+TEST_F(GpuDeviceMes, RetainsADoorbellQueuedWhileAnEarlierNotificationIsDraining) {
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 7);
+
+  transport_.block_next_read_at(kRingPhysical);
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  auto draining =
+      std::async(std::launch::async, [this]() { device_.drain_doorbell_inbox_for_test(); });
+  transport_.wait_for_blocked_read();
+
+  doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  EXPECT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+  transport_.release_read();
+  EXPECT_EQ(draining.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  draining.get();
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 7u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u)
+      << "a notification accepted during a drain was lost";
+}
+
+TEST_F(GpuDeviceMes, ResetWaitsForAnAdmittedDoorbellObserver) {
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  transport_.block_next_read_at(kRingPhysical);
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  auto draining =
+      std::async(std::launch::async, [this]() { device_.drain_doorbell_inbox_for_test(); });
+  transport_.wait_for_blocked_read();
+  auto resetting = std::async(std::launch::async,
+                              [this]() { device_.reset(simdojo::ResetKind::FunctionLevel); });
+
+  EXPECT_EQ(resetting.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
+      << "reset did not wait for the admitted observer";
+  transport_.release_read();
+  EXPECT_EQ(draining.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_EQ(resetting.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  draining.get();
+  resetting.get();
+}
+
+TEST_F(GpuDeviceMes, HonorsTheAlignedStatusInSetHardwareResourcesOne) {
+  // The second-generation resource packet puts its first 64-bit member after
+  // a four-byte header, so the ABI inserts one dword of padding before status.
+  store_dword(kRingPhysical, 0x00040131);
+  store_qword(kRingPhysical + 2 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 4 * 4, 1);
+
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 8);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 8u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u);
+}
+
+TEST_F(GpuDeviceMes, InvalidatingAPasidAdvancesItsGpuVmTranslationEpoch) {
+  constexpr uint32_t kPasid = 5;
+  auto access = std::make_shared<AlwaysAvailableAddressSpace>();
+  const rocjitsu::amdgpu::AddressSpaceHandle address_space =
+      soc_.gpu_vm().register_translated(kPasid, access, access);
+  ASSERT_TRUE(address_space);
+  const uint64_t old_epoch = soc_.gpu_vm().lookup(address_space)->translation_epoch;
+
+  // INV_TLBS puts its API status at dword 2 and the packed selector at dword 6.
+  // inv_sel=0 selects a PASID; inv_sel_id occupies the high 16 bits.
+  store_dword(kRingPhysical, 0x00040141);
+  store_qword(kRingPhysical + 2 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 4 * 4, 0x31);
+  store_dword(kRingPhysical + 6 * 4, kPasid << 16);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, doorbell);
+
+  ASSERT_TRUE(soc_.gpu_vm().lookup(address_space));
+  EXPECT_EQ(soc_.gpu_vm().lookup(address_space)->translation_epoch, old_epoch + 1);
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0x31u);
+}
+
+TEST_F(GpuDeviceMes, UpdatingRootPreservesAddressSpaceIdentityAndRedirectsExistingQueues) {
+  constexpr uint32_t kPasid = 3;
+  constexpr uint64_t kProcessContext = 0x12345000;
+  constexpr uint64_t kVirtualAddress = 0x10000;
+  constexpr uint64_t kRootA = 0x30000;
+  constexpr uint64_t kPdb2A = 0x31000;
+  constexpr uint64_t kPdb1A = 0x32000;
+  constexpr uint64_t kPdb0A = 0x33000;
+  constexpr uint64_t kPtbA = 0x34000;
+  constexpr uint64_t kRootB = 0x35000;
+  constexpr uint64_t kPdb2B = 0x36000;
+  constexpr uint64_t kPdb1B = 0x37000;
+  constexpr uint64_t kPdb0B = 0x38000;
+  constexpr uint64_t kPtbB = 0x39000;
+  constexpr uint64_t kPhysicalA = 0x2a0000;
+  constexpr uint64_t kPhysicalB = 0x2b0000;
+
+  const auto program_root = [&](uint64_t root, uint64_t pdb2, uint64_t pdb1, uint64_t pdb0,
+                                uint64_t ptb, uint64_t physical) {
+    store_vram_qword(root, pdb2 | 1);
+    store_vram_qword(pdb2, pdb1 | 1);
+    store_vram_qword(pdb1, pdb0 | 1);
+    store_vram_qword(pdb0, ptb | 1);
+    store_vram_qword(ptb + 0x10 * sizeof(uint64_t), physical | 0x63);
+  };
+  program_root(kRootA, kPdb2A, kPdb1A, kPdb0A, kPtbA, kPhysicalA);
+  program_root(kRootB, kPdb2B, kPdb1B, kPdb0B, kPtbB, kPhysicalB);
+  store_dword(kPhysicalA, 0xaaaaaaaa);
+  store_dword(kPhysicalB, 0xbbbbbbbb);
+
+  store_dword(kRingPhysical, 0x00040021);
+  store_dword(kRingPhysical + 1 * 4, kPasid);
+  store_qword(kRingPhysical + 2 * 4, kRootA);
+  store_qword(kRingPhysical + 10 * 4, kProcessContext);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 1);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 0);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kVirtualAddress >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kVirtualAddress >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kVirtualAddress));
+  store_dword(kSchedulerMqdPhysical + 140 * 4, static_cast<uint32_t>(kVirtualAddress >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x900);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, doorbell);
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> address_space =
+      soc_.gpu_vm().find_vmid(kPasid);
+  ASSERT_TRUE(address_space);
+  const uint64_t old_epoch = soc_.gpu_vm().lookup(*address_space)->translation_epoch;
+  std::array<std::byte, sizeof(uint32_t)> value{};
+  ASSERT_EQ(soc_.gpu_vm().read(*address_space, kVirtualAddress, value),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(std::bit_cast<uint32_t>(value), 0xaaaaaaaau);
+
+  constexpr uint64_t kUpdate = kRingPhysical + 64 * 4;
+  store_dword(kUpdate, 0x000400f1);
+  store_qword(kUpdate + 2 * 4, kRootB);
+  store_qword(kUpdate + 4 * 4, kProcessContext);
+  store_qword(kUpdate + 6 * 4, kRingFenceGpu);
+  store_qword(kUpdate + 8 * 4, 0x44);
+
+  doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, doorbell);
+
+  ASSERT_TRUE(soc_.gpu_vm().lookup(*address_space));
+  EXPECT_EQ(soc_.gpu_vm().lookup(*address_space)->translation_epoch, old_epoch + 1);
+  ASSERT_EQ(soc_.gpu_vm().read(*address_space, kVirtualAddress, value),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(std::bit_cast<uint32_t>(value), 0xbbbbbbbbu);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0x44u);
+}
+
+TEST_F(GpuDeviceMes, RemoveQueueStopsAFormerSchedulerDoorbell) {
+  // Map a scheduler queue, then remove the same doorbell in the following MES
+  // frame. The remove API carries the doorbell in dword units.
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 1 * 4, 0x58 / sizeof(uint32_t));
+  store_qword(kRemove + 6 * 4, kRingFenceGpu);
+  store_qword(kRemove + 8 * 4, 2);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 2u);
+
+  store_dword(kSchedulerRingPhysical, 0x000400b1);
+  store_qword(kSchedulerRingPhysical + 2 * 4, kSchedulerApiStatusGpu);
+  store_qword(kSchedulerRingPhysical + 4 * 4, 3);
+  auto scheduler_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x58, scheduler_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+}
+
+TEST_F(GpuDeviceMes, RetriesRemoveQueueCompletionWithoutReplayingRemoval) {
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 1 * 4, 0x58 / sizeof(uint32_t));
+  store_qword(kRemove + 6 * 4, kRingFenceGpu);
+  store_qword(kRemove + 8 * 4, 2);
+
+  store_dword(kSchedulerRingPhysical, 0x000400b1);
+  store_qword(kSchedulerRingPhysical + 2 * 4, kSchedulerApiStatusGpu);
+  store_qword(kSchedulerRingPhysical + 4 * 4, 3);
+
+  transport_.writes.clear();
+  transport_.next_write_outcome =
+      std::pair{kRingFencePhysical, simdojo::DmaAccessOutcome::Unavailable};
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 2u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u)
+      << "the transient completion failure required another guest doorbell";
+  EXPECT_EQ(
+      std::ranges::count_if(transport_.writes,
+                            [](const auto &write) { return write.first == kRingFencePhysical; }),
+      1u);
+
+  auto scheduler_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x58, scheduler_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u)
+      << "retry replayed the already-committed REMOVE_QUEUE semantic";
+}
+
+TEST_F(GpuDeviceMes, RetriesUnavailableAddQueueMqdBeforeCommittingTheQueue) {
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  constexpr uint64_t kMqdFirstDword = 130;
+  transport_.next_read_outcome =
+      std::pair{kSchedulerMqdPhysical + kMqdFirstDword * sizeof(uint32_t),
+                simdojo::DmaAccessOutcome::Unavailable};
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
+      << "the transient MQD read required another guest doorbell";
+
+  store_dword(kSchedulerRingPhysical, 0x000400b1);
+  store_qword(kSchedulerRingPhysical + 2 * 4, kSchedulerApiStatusGpu);
+  store_qword(kSchedulerRingPhysical + 4 * 4, 3);
+  auto scheduler_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x58, scheduler_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 3u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
+}
+
+TEST_F(GpuDeviceMes, RetriesRemoveQueueReadPointerWithoutReplayingRemovalOrCompletion) {
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 1 * 4, 0x58 / sizeof(uint32_t));
+  store_qword(kRemove + 6 * 4, kRingFenceGpu);
+  store_qword(kRemove + 8 * 4, 2);
+
+  transport_.writes.clear();
+  transport_.next_write_outcome =
+      std::pair{kReadPointerPhysical, simdojo::DmaAccessOutcome::Unavailable};
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 2u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+  EXPECT_EQ(
+      std::ranges::count_if(transport_.writes,
+                            [](const auto &write) { return write.first == kRingFencePhysical; }),
+      1u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 2u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u)
+      << "the transient read-pointer failure required another guest doorbell";
+  EXPECT_EQ(
+      std::ranges::count_if(transport_.writes,
+                            [](const auto &write) { return write.first == kRingFencePhysical; }),
+      1u)
+      << "retry replayed an already-published completion";
+}
+
+TEST_F(GpuDeviceMes, TerminalRemoveQueueCompletionFailureDoesNotRetryOrReplayRemoval) {
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 1 * 4, 0x58 / sizeof(uint32_t));
+  store_qword(kRemove + 6 * 4, kRingFenceGpu);
+  store_qword(kRemove + 8 * 4, 2);
+
+  transport_.writes.clear();
+  transport_.next_write_outcome = std::pair{kRingFencePhysical, simdojo::DmaAccessOutcome::Faulted};
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
+      << "a terminal completion failure was retried";
+
+  ring_doorbell(0x60, mes_doorbell);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
+      << "a terminal journal replayed the committed REMOVE_QUEUE semantic";
+
+  store_dword(kSchedulerRingPhysical, 0x000400b1);
+  store_qword(kSchedulerRingPhysical + 2 * 4, kSchedulerApiStatusGpu);
+  store_qword(kSchedulerRingPhysical + 4 * 4, 3);
+  auto scheduler_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x58, scheduler_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u)
+      << "REMOVE_QUEUE did not commit before its terminal completion failure";
+}
+
+TEST_F(GpuDeviceMes, ResetInvalidatesScheduledRemoveQueueRetry) {
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  constexpr uint64_t kRemove = kRingPhysical + 64 * 4;
+  store_dword(kRemove, 0x00040031);
+  store_dword(kRemove + 1 * 4, 0x58 / sizeof(uint32_t));
+  store_qword(kRemove + 6 * 4, kRingFenceGpu);
+  store_qword(kRemove + 8 * 4, 2);
+
+  transport_.next_write_outcome =
+      std::pair{kRingFencePhysical, simdojo::DmaAccessOutcome::Unavailable};
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
+
+  device_.reset(simdojo::ResetKind::FunctionLevel);
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
+      << "a retry scheduled before reset crossed the reset epoch";
+}
+
+TEST_F(GpuDeviceMes, MapsAndExecutesTheSchedulerQueueCreatedByAddQueue) {
+  // ADD_QUEUE maps the scheduler queue from its MQD. Its status follows the
+  // queue metadata at dword 38.
+  store_dword(kRingPhysical, 0x00040021);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 3);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4,
+              static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, 0x40000058);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 9);
+
+  // Queue the scheduler work before ADD_QUEUE has been observed. FIFO delivery
+  // is load-bearing: reversing or coalescing these notifications would ring an
+  // unmapped scheduler queue and lose its work.
+  store_dword(kSchedulerRingPhysical, 0x00040001);
+  store_qword(kSchedulerRingPhysical + 50 * 4, kSchedulerApiStatusGpu);
+  store_qword(kSchedulerRingPhysical + 52 * 4, 1);
+
+  constexpr uint64_t kSchedulerQuery = kSchedulerRingPhysical + 64 * 4;
+  store_dword(kSchedulerQuery, 0x000400b1);
+  store_qword(kSchedulerQuery + 2 * 4, kSchedulerRingFenceGpu);
+  store_qword(kSchedulerQuery + 4 * 4, 10);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x58,
+                               /*write=*/true),
+            8);
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 9u);
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 1u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerRingFencePhysical), 10u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 128u);
+}
+
+TEST_F(GpuDeviceMes, ExecutesTheFirmwareFreeComputeStartupRingTest) {
+  constexpr uint64_t kGcControlBase = 0xa000;
+  constexpr uint64_t kScratchRegister = (kGcControlBase + 0x2040) * 4;
+  constexpr uint64_t kComputeDoorbell = 0x900;
+  constexpr uint64_t kComputeRingGpu = 0x10000;
+  constexpr uint64_t kComputeReadPointerGpu = 0x11ff0;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+  constexpr uint64_t kProcessPdb2 = 0x31000;
+  constexpr uint64_t kProcessPdb1 = 0x32000;
+  constexpr uint64_t kProcessPdb0 = 0x33000;
+  constexpr uint64_t kProcessPtb = 0x34000;
+  constexpr uint64_t kComputeRingPhysical = 0x290000;
+  constexpr uint64_t kComputeSecondPagePhysical = 0x2a0000;
+
+  write_register_at(kScratchRegister, 0xcafedead);
+
+  // GC 12.1 uses five 9-bit page-table levels. The test queue spans virtual
+  // pages 0x10 and 0x11, both backed by guest system memory.
+  store_vram_qword(kProcessPageTable, kProcessPdb2 | 1);
+  store_vram_qword(kProcessPdb2, kProcessPdb1 | 1);
+  store_vram_qword(kProcessPdb1, kProcessPdb0 | 1);
+  store_vram_qword(kProcessPdb0, kProcessPtb | 1);
+  store_vram_qword(kProcessPtb + 0x10 * sizeof(uint64_t), kComputeRingPhysical | 0x63);
+  store_vram_qword(kProcessPtb + 0x11 * sizeof(uint64_t), kComputeSecondPagePhysical | 0x63);
+
+  // ADD_QUEUE classifies this MQD as a compute queue and maps its doorbell.
+  store_dword(kRingPhysical, 0x00040021);
+  store_dword(kRingPhysical + 1 * 4, 3);
+  store_qword(kRingPhysical + 2 * 4, kProcessPageTable);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 1);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 0);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kComputeRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kComputeRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kComputeReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4, static_cast<uint32_t>(kComputeReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, kComputeDoorbell);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 11);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, doorbell);
+
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 11u);
+
+  // The shipping self-test emits SET_UCONFIG_REG followed by special one-dword
+  // NOPs until the compute ring reaches its 256-dword alignment.
+  store_dword(kComputeRingPhysical, 0xc0017900);
+  store_dword(kComputeRingPhysical + 4, 0x40);
+  store_dword(kComputeRingPhysical + 8, 0xdeadbeef);
+  for (uint32_t dword = 3; dword < 256; ++dword) {
+    store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+  }
+
+  auto split_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{256});
+  ring_doorbell(kComputeDoorbell, split_doorbell);
+
+  EXPECT_EQ(read_register_at(kScratchRegister), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kComputeSecondPagePhysical + 0xff0), 256u);
+}
+
+TEST_F(GpuDeviceMes, RetriesUnavailableComputeRingFetchWithoutAnotherDoorbell) {
+  constexpr uint64_t kGcControlBase = 0xa000;
+  constexpr uint64_t kScratchRegister = (kGcControlBase + 0x2040) * 4;
+  constexpr uint64_t kComputeDoorbell = 0x900;
+  constexpr uint64_t kComputeRingGpu = 0x10000;
+  constexpr uint64_t kComputeReadPointerGpu = 0x11ff0;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+  constexpr uint64_t kProcessPdb2 = 0x31000;
+  constexpr uint64_t kProcessPdb1 = 0x32000;
+  constexpr uint64_t kProcessPdb0 = 0x33000;
+  constexpr uint64_t kProcessPtb = 0x34000;
+  constexpr uint64_t kComputeRingPhysical = 0x290000;
+  constexpr uint64_t kComputeSecondPagePhysical = 0x2a0000;
+
+  write_register_at(kScratchRegister, 0xcafedead);
+  store_vram_qword(kProcessPageTable, kProcessPdb2 | 1);
+  store_vram_qword(kProcessPdb2, kProcessPdb1 | 1);
+  store_vram_qword(kProcessPdb1, kProcessPdb0 | 1);
+  store_vram_qword(kProcessPdb0, kProcessPtb | 1);
+  store_vram_qword(kProcessPtb + 0x10 * sizeof(uint64_t), kComputeRingPhysical | 0x63);
+  store_vram_qword(kProcessPtb + 0x11 * sizeof(uint64_t), kComputeSecondPagePhysical | 0x63);
+
+  store_dword(kRingPhysical, 0x00040021);
+  store_dword(kRingPhysical + 1 * 4, 3);
+  store_qword(kRingPhysical + 2 * 4, kProcessPageTable);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 1);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 0);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kComputeRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kComputeRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kComputeReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4, static_cast<uint32_t>(kComputeReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, kComputeDoorbell);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+
+  store_dword(kComputeRingPhysical, 0xc0017900);
+  store_dword(kComputeRingPhysical + 4, 0x40);
+  store_dword(kComputeRingPhysical + 8, 0xdeadbeef);
+  for (uint32_t dword = 3; dword < 256; ++dword)
+    store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+
+  transport_.next_read_outcome =
+      std::pair{kComputeRingPhysical, simdojo::DmaAccessOutcome::Unavailable};
+  auto compute_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{256});
+  ring_doorbell(kComputeDoorbell, compute_doorbell);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0xcafedeadu);
+  EXPECT_EQ(transport_.dword_at(kComputeSecondPagePhysical + 0xff0), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(read_register_at(kScratchRegister), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kComputeSecondPagePhysical + 0xff0), 256u);
+}
+
+TEST_F(GpuDeviceMes, RetriesComputeReadPointerWithoutReplayingRegisterWrites) {
+  constexpr uint64_t kGcControlBase = 0xa000;
+  constexpr uint64_t kScratchRegister = (kGcControlBase + 0x2040) * 4;
+  constexpr uint64_t kComputeDoorbell = 0x900;
+  constexpr uint64_t kComputeRingGpu = 0x10000;
+  constexpr uint64_t kComputeReadPointerGpu = 0x11ff0;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+  constexpr uint64_t kProcessPdb2 = 0x31000;
+  constexpr uint64_t kProcessPdb1 = 0x32000;
+  constexpr uint64_t kProcessPdb0 = 0x33000;
+  constexpr uint64_t kProcessPtb = 0x34000;
+  constexpr uint64_t kComputeRingPhysical = 0x290000;
+  constexpr uint64_t kComputeSecondPagePhysical = 0x2a0000;
+  constexpr uint32_t kAfterExecutionSentinel = 0x13579bdf;
+
+  store_vram_qword(kProcessPageTable, kProcessPdb2 | 1);
+  store_vram_qword(kProcessPdb2, kProcessPdb1 | 1);
+  store_vram_qword(kProcessPdb1, kProcessPdb0 | 1);
+  store_vram_qword(kProcessPdb0, kProcessPtb | 1);
+  store_vram_qword(kProcessPtb + 0x10 * sizeof(uint64_t), kComputeRingPhysical | 0x63);
+  store_vram_qword(kProcessPtb + 0x11 * sizeof(uint64_t), kComputeSecondPagePhysical | 0x63);
+
+  store_dword(kRingPhysical, 0x00040021);
+  store_dword(kRingPhysical + 1 * 4, 3);
+  store_qword(kRingPhysical + 2 * 4, kProcessPageTable);
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kRingPhysical + 28 * 4, 1);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 0);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kComputeRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kComputeRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kComputeReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4, static_cast<uint32_t>(kComputeReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, kComputeDoorbell);
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+
+  store_dword(kComputeRingPhysical, 0xc0017900);
+  store_dword(kComputeRingPhysical + 4, 0x40);
+  store_dword(kComputeRingPhysical + 8, 0xdeadbeef);
+  for (uint32_t dword = 3; dword < 256; ++dword)
+    store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+
+  transport_.next_write_outcome =
+      std::pair{kComputeSecondPagePhysical + 0xff0, simdojo::DmaAccessOutcome::Unavailable};
+  auto compute_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{256});
+  ring_doorbell(kComputeDoorbell, compute_doorbell);
+  ASSERT_EQ(read_register_at(kScratchRegister), 0xdeadbeefu);
+  ASSERT_EQ(transport_.dword_at(kComputeSecondPagePhysical + 0xff0), 0u);
+
+  write_register_at(kScratchRegister, kAfterExecutionSentinel);
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(read_register_at(kScratchRegister), kAfterExecutionSentinel)
+      << "retry replayed an already-executed PM4 register write";
+  EXPECT_EQ(transport_.dword_at(kComputeSecondPagePhysical + 0xff0), 256u);
+}
+
+TEST_F(GpuDeviceMes, SdmaToComputeSameDoorbellReplacesThePriorBackend) {
+  constexpr uint64_t kSdmaDoorbell = 0x4808;
+  constexpr uint64_t kSdmaRingGpu = 0x20000;
+  constexpr uint64_t kSdmaReadPointerGpu = 0x21000;
+  constexpr uint64_t kSdmaWritePointerGpu = 0x22000;
+  constexpr uint64_t kSdmaDestinationGpu = 0x23000;
+  constexpr uint64_t kComputeRingGpu = 0x24000;
+  constexpr uint64_t kComputeReadPointerGpu = 0x25000;
+  constexpr uint64_t kGcControlBase = 0xa000;
+  constexpr uint64_t kScratchRegister = (kGcControlBase + 0x2040) * 4;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+  constexpr uint64_t kProcessPdb2 = 0x31000;
+  constexpr uint64_t kProcessPdb1 = 0x32000;
+  constexpr uint64_t kProcessPdb0 = 0x33000;
+  constexpr uint64_t kProcessPtb = 0x34000;
+  constexpr uint64_t kSdmaRingPhysical = 0x2b0000;
+  constexpr uint64_t kSdmaReadPointerPhysical = 0x2c0000;
+  constexpr uint64_t kSdmaWritePointerPhysical = 0x2d0000;
+  constexpr uint64_t kSdmaDestinationPhysical = 0x2e0000;
+  constexpr uint64_t kComputeRingPhysical = 0x2f0000;
+  constexpr uint64_t kComputeReadPointerPhysical = 0x300000;
+
+  store_vram_qword(kProcessPageTable, kProcessPdb2 | 1);
+  store_vram_qword(kProcessPdb2, kProcessPdb1 | 1);
+  store_vram_qword(kProcessPdb1, kProcessPdb0 | 1);
+  store_vram_qword(kProcessPdb0, kProcessPtb | 1);
+  for (const auto [page, physical] :
+       {std::pair{0x20u, kSdmaRingPhysical}, std::pair{0x21u, kSdmaReadPointerPhysical},
+        std::pair{0x22u, kSdmaWritePointerPhysical}, std::pair{0x23u, kSdmaDestinationPhysical},
+        std::pair{0x24u, kComputeRingPhysical}, std::pair{0x25u, kComputeReadPointerPhysical}}) {
+    store_vram_qword(kProcessPtb + page * sizeof(uint64_t), physical | 0x63);
+  }
+
+  // The v12.1 SDMA MQD starts at dword zero. MES supplies the byte doorbell,
+  // write-pointer address, and dword ring size separately in ADD_QUEUE.
+  store_dword(kRingPhysical, 0x00040021);
+  store_dword(kRingPhysical + 1 * 4, 3);
+  store_qword(kRingPhysical + 2 * 4, kProcessPageTable);
+  store_dword(kRingPhysical + 18 * 4, kSdmaDoorbell / sizeof(uint32_t));
+  store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+  store_qword(kRingPhysical + 22 * 4, kSdmaWritePointerGpu);
+  store_dword(kRingPhysical + 28 * 4, 2);
+  // KFD converts queue_size from bytes to dwords before MES sees it. This
+  // five-dword ring wraps after byte offset 20 because SDMA pointers are bytes.
+  store_dword(kRingPhysical + 30 * 4, 5);
+  store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 40 * 4, 1);
+
+  store_dword(kSchedulerMqdPhysical + 1 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 2 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 7 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 8 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 126 * 4, 1);
+  store_dword(kSchedulerMqdPhysical + 127 * 4, 7);
+
+  constexpr uint64_t kQuery = kRingPhysical + 64 * 4;
+  store_dword(kQuery, 0x000400b1);
+  store_qword(kQuery + 2 * 4, kRingFenceGpu);
+  store_qword(kQuery + 4 * 4, 12);
+
+  auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x60, mes_doorbell);
+  ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
+  ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 12u);
+  ASSERT_EQ(soc_.queue_service().active_queues(), 1u);
+
+  store_dword(kSdmaRingPhysical + 0 * 4, 2);
+  store_qword(kSdmaRingPhysical + 1 * 4, kSdmaDestinationGpu);
+  store_dword(kSdmaRingPhysical + 3 * 4, 0);
+  store_dword(kSdmaRingPhysical + 4 * 4, 0xdeadbeef);
+
+  auto sdma_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{20});
+  ring_doorbell(kSdmaDoorbell, sdma_doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kSdmaDestinationPhysical), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kSdmaReadPointerPhysical), 20u);
+
+  store_dword(kSdmaRingPhysical + 4 * 4, 0xcafebabe);
+  sdma_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{40});
+  ring_doorbell(kSdmaDoorbell, sdma_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSdmaDestinationPhysical), 0xcafebabeu)
+      << "the dword-sized ring did not wrap at its declared byte boundary";
+  EXPECT_EQ(transport_.dword_at(kSdmaReadPointerPhysical), 40u);
+
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> original_address_space =
+      soc_.gpu_vm().find_vmid(3);
+  ASSERT_TRUE(original_address_space);
+  const uint64_t original_epoch = soc_.gpu_vm().lookup(*original_address_space)->translation_epoch;
+
+  // ADD_QUEUE does not own an already-live PASID's root transition. Reject a
+  // replacement that tries to smuggle one in, and leave the old queue and its
+  // translation generation fully operational.
+  constexpr uint64_t kRejectedAdd = kRingPhysical + 128 * sizeof(uint32_t);
+  store_dword(kRejectedAdd, 0x00040021);
+  store_dword(kRejectedAdd + 1 * 4, 3);
+  store_qword(kRejectedAdd + 2 * 4, kProcessPageTable + 0x1000);
+  store_dword(kRejectedAdd + 18 * 4, kSdmaDoorbell / sizeof(uint32_t));
+  store_qword(kRejectedAdd + 20 * 4, kSchedulerMqdGpu);
+  store_qword(kRejectedAdd + 22 * 4, kSdmaWritePointerGpu);
+  store_dword(kRejectedAdd + 28 * 4, 2);
+  store_dword(kRejectedAdd + 30 * 4, 5);
+  store_qword(kRejectedAdd + 38 * 4, kApiStatusGpu);
+  store_qword(kRejectedAdd + 40 * 4, 2);
+
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+  ring_doorbell(0x60, mes_doorbell);
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 1u)
+      << "a rejected ADD_QUEUE published success";
+  EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 128u) << "a rejected ADD_QUEUE was retired";
+  EXPECT_EQ(soc_.queue_service().active_queues(), 1u)
+      << "a failed replacement detached the old backend";
+  EXPECT_EQ(soc_.gpu_vm().find_vmid(3), original_address_space);
+  ASSERT_TRUE(soc_.gpu_vm().lookup(*original_address_space));
+  EXPECT_EQ(soc_.gpu_vm().lookup(*original_address_space)->translation_epoch, original_epoch)
+      << "ADD_QUEUE changed an existing PASID's translation generation";
+
+  store_dword(kSdmaRingPhysical + 4 * 4, 0x87654321);
+  sdma_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{60});
+  ring_doorbell(kSdmaDoorbell, sdma_doorbell);
+  EXPECT_EQ(transport_.dword_at(kSdmaDestinationPhysical), 0x87654321u)
+      << "the old SDMA queue stopped after a failed replacement";
+  EXPECT_EQ(transport_.dword_at(kSdmaReadPointerPhysical), 60u);
+
+  // Replace the SDMA queue with a compute queue on the same doorbell.
+  // QueueService must detach the old SDMA backend exactly once; otherwise both
+  // engines keep observing the same write.
+  constexpr uint64_t kSecondAdd = kRejectedAdd;
+  store_dword(kSecondAdd, 0x00040021);
+  store_dword(kSecondAdd + 1 * 4, 3);
+  store_qword(kSecondAdd + 2 * 4, kProcessPageTable);
+  store_qword(kSecondAdd + 20 * 4, kSchedulerMqdGpu);
+  store_dword(kSecondAdd + 28 * 4, 1);
+  store_qword(kSecondAdd + 38 * 4, kApiStatusGpu);
+  store_qword(kSecondAdd + 40 * 4, 2);
+
+  store_dword(kSchedulerMqdPhysical + 130 * 4, 0);
+  store_dword(kSchedulerMqdPhysical + 136 * 4, static_cast<uint32_t>(kComputeRingGpu >> 8));
+  store_dword(kSchedulerMqdPhysical + 137 * 4, static_cast<uint32_t>(kComputeRingGpu >> 40));
+  store_dword(kSchedulerMqdPhysical + 139 * 4, static_cast<uint32_t>(kComputeReadPointerGpu));
+  store_dword(kSchedulerMqdPhysical + 140 * 4, static_cast<uint32_t>(kComputeReadPointerGpu >> 32));
+  store_dword(kSchedulerMqdPhysical + 143 * 4, static_cast<uint32_t>(kSdmaDoorbell));
+  store_dword(kSchedulerMqdPhysical + 145 * 4, 9);
+  store_dword(kSchedulerMqdPhysical + 181 * 4, 0);
+
+  mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{192});
+  ring_doorbell(0x60, mes_doorbell);
+  EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 2u);
+  EXPECT_EQ(soc_.queue_service().active_queues(), 0u);
+
+  write_register_at(kScratchRegister, 0);
+  store_dword(kComputeRingPhysical, 0xc0017900);
+  store_dword(kComputeRingPhysical + 4, 0x40);
+  store_dword(kComputeRingPhysical + 8, 0xfeedface);
+  for (uint32_t dword = 3; dword < 60; ++dword)
+    store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+  store_dword(kSdmaRingPhysical + 4 * 4, 0x12345678);
+  sdma_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{60});
+  ring_doorbell(kSdmaDoorbell, sdma_doorbell);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0xfeedfaceu);
+  EXPECT_EQ(transport_.dword_at(kSdmaDestinationPhysical), 0x87654321u)
+      << "the replaced SDMA backend still observed the shared doorbell";
+}
+
+TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
+  constexpr uint32_t kPasid = 3;
+  constexpr uint64_t kSdmaDoorbell = 0x4808;
+  constexpr uint64_t kSdmaRingGpu = 0x20000;
+  constexpr uint64_t kSdmaReadPointerGpu = 0x21000;
+  constexpr uint64_t kSdmaWritePointerGpu = 0x22000;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+
+  rocjitsu::amdgpu::CommandProcessor legacy_cp("legacy-cp");
+  const rocjitsu::amdgpu::AddressSpaceHandle legacy_address_space =
+      soc_.gpu_vm().register_legacy(9);
+  ASSERT_TRUE(legacy_address_space);
+  const rocjitsu::amdgpu::QueueHandle legacy_queue = soc_.queue_service().create({
+      .address_space = legacy_address_space,
+      .backend = rocjitsu::amdgpu::make_command_processor_queue_backend(legacy_cp),
+      .process_id = 9,
+      .queue_id = 77,
+      .ring_size = 4096,
+  });
+  ASSERT_TRUE(legacy_queue);
+
+  const auto submit_sdma_queue = [&]() {
+    store_qword(kReadPointerPhysical, 0);
+    store_dword(kApiStatusPhysical, 0);
+    store_dword(kRingPhysical, 0x00040021);
+    store_dword(kRingPhysical + 1 * 4, kPasid);
+    store_qword(kRingPhysical + 2 * 4, kProcessPageTable);
+    store_dword(kRingPhysical + 18 * 4, kSdmaDoorbell / sizeof(uint32_t));
+    store_qword(kRingPhysical + 20 * 4, kSchedulerMqdGpu);
+    store_qword(kRingPhysical + 22 * 4, kSdmaWritePointerGpu);
+    store_dword(kRingPhysical + 28 * 4, 2);
+    store_dword(kRingPhysical + 30 * 4, 16);
+    store_qword(kRingPhysical + 38 * 4, kApiStatusGpu);
+    store_qword(kRingPhysical + 40 * 4, 1);
+
+    store_dword(kSchedulerMqdPhysical + 1 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 8));
+    store_dword(kSchedulerMqdPhysical + 2 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 40));
+    store_dword(kSchedulerMqdPhysical + 7 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu));
+    store_dword(kSchedulerMqdPhysical + 8 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu >> 32));
+    store_dword(kSchedulerMqdPhysical + 126 * 4, 1);
+    store_dword(kSchedulerMqdPhysical + 127 * 4, 7);
+
+    auto mes_doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+    ring_doorbell(0x60, mes_doorbell);
+    return soc_.gpu_vm().find_vmid(kPasid);
+  };
+
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> first_address_space =
+      submit_sdma_queue();
+  ASSERT_TRUE(first_address_space);
+  ASSERT_EQ(soc_.queue_service().active_queues(), 2u);
+  const rocjitsu::amdgpu::AddressSpaceHandle gart = soc_.gpu_vm().gart_address_space();
+  ASSERT_TRUE(gart);
+  ASSERT_TRUE(soc_.gpu_vm().lookup(gart)->ready);
+
+  device_.reset(simdojo::ResetKind::LostConnection);
+
+  EXPECT_TRUE(soc_.queue_service().contains(legacy_queue));
+  EXPECT_EQ(soc_.queue_service().active_queues(), 1u);
+  EXPECT_EQ(soc_.gpu_vm().find_vmid(9), legacy_address_space);
+  EXPECT_FALSE(soc_.gpu_vm().find_vmid(kPasid));
+  ASSERT_TRUE(soc_.gpu_vm().lookup(gart));
+  EXPECT_FALSE(soc_.gpu_vm().lookup(gart)->ready);
+
+  ASSERT_TRUE(device_.detach_transport(&attached_));
+  ASSERT_TRUE(device_.attach_transport(&attached_));
+  configure_gart();
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> replacement_address_space =
+      submit_sdma_queue();
+  ASSERT_TRUE(replacement_address_space);
+  EXPECT_EQ(replacement_address_space->slot, first_address_space->slot);
+  EXPECT_NE(replacement_address_space->generation, first_address_space->generation);
+  EXPECT_EQ(soc_.queue_service().active_queues(), 2u);
+
+  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(soc_.queue_service().destroy(legacy_queue));
+  EXPECT_TRUE(soc_.gpu_vm().unregister_address_space(legacy_address_space));
+}
+
+TEST(GpuDeviceLifetime, ReplacementFrontendReusesPasidAndDoorbellAfterDestruction) {
+  constexpr uint32_t kPasid = 3;
+  constexpr uint64_t kPageTable = 0x10000;
+  constexpr uint64_t kGartStart = 0x100000000ULL;
+  constexpr uint64_t kMesRingGpu = kGartStart;
+  constexpr uint64_t kMesReadPointerGpu = kGartStart + 0x1000;
+  constexpr uint64_t kApiStatusGpu = kGartStart + 0x2000;
+  constexpr uint64_t kSdmaMqdGpu = kGartStart + 0x4000;
+  constexpr uint64_t kMesRingPhysical = 0x200000;
+  constexpr uint64_t kMesReadPointerPhysical = 0x210000;
+  constexpr uint64_t kApiStatusPhysical = 0x220000;
+  constexpr uint64_t kSdmaMqdPhysical = 0x240000;
+  constexpr uint64_t kProcessPageTable = 0x30000;
+  constexpr uint64_t kSdmaRingGpu = 0x20000;
+  constexpr uint64_t kSdmaReadPointerGpu = 0x21000;
+  constexpr uint64_t kSdmaWritePointerGpu = 0x22000;
+  constexpr uint64_t kSdmaDoorbell = 0x4808;
+  constexpr uint64_t kGcBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kGcBase + reg) * sizeof(uint32_t); };
+
+  rocjitsu::RegisterSymbols symbols;
+  rocjitsu::BarAccessTrace trace(symbols);
+  rocjitsu::amdgpu::GpuMemory memory("memory");
+  rocjitsu::SoC soc("soc", &memory);
+  RecordingTransport transport;
+  simdojo::PciDevice::Transport endpoints{.irq = &transport, .dma = &transport};
+
+  const auto write_register = [](rocjitsu::GpuPciDevice &device, uint64_t offset, uint32_t value) {
+    auto raw = std::bit_cast<std::array<std::byte, sizeof(value)>>(value);
+    return device.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, raw, offset, true) ==
+           static_cast<int64_t>(raw.size());
+  };
+  const auto write_vram_qword = [](rocjitsu::GpuPciDevice &device, uint64_t offset,
+                                   uint64_t value) {
+    auto raw = std::bit_cast<std::array<std::byte, sizeof(value)>>(value);
+    return device.bar_access(rocjitsu::GpuPciDevice::kVramBar, raw, offset, true) ==
+           static_cast<int64_t>(raw.size());
+  };
+  const auto store_dword = [&transport](uint64_t address, uint32_t value) {
+    const auto raw = std::bit_cast<std::array<std::byte, sizeof(value)>>(value);
+    for (std::size_t index = 0; index < raw.size(); ++index)
+      transport.memory[address + index] = raw[index];
+  };
+  const auto store_qword = [&transport](uint64_t address, uint64_t value) {
+    const auto raw = std::bit_cast<std::array<std::byte, sizeof(value)>>(value);
+    for (std::size_t index = 0; index < raw.size(); ++index)
+      transport.memory[address + index] = raw[index];
+  };
+  const auto configure_and_add_queue = [&](rocjitsu::GpuPciDevice &device) {
+    if (!write_register(device, absolute(0x169f), static_cast<uint32_t>(kPageTable)) ||
+        !write_register(device, absolute(0x16a0), static_cast<uint32_t>(kPageTable >> 32)) ||
+        !write_register(device, absolute(0x16bf), static_cast<uint32_t>(kGartStart >> 12)) ||
+        !write_register(device, absolute(0x16c0), static_cast<uint32_t>(kGartStart >> 44)) ||
+        !write_register(device, absolute(0x16df),
+                        static_cast<uint32_t>((kGartStart + 0x4fff) >> 12)) ||
+        !write_register(device, absolute(0x16e0),
+                        static_cast<uint32_t>((kGartStart + 0x4fff) >> 44))) {
+      return std::optional<rocjitsu::amdgpu::AddressSpaceHandle>{};
+    }
+    for (const auto [page, physical] :
+         {std::pair{0u, kMesRingPhysical}, std::pair{1u, kMesReadPointerPhysical},
+          std::pair{2u, kApiStatusPhysical}, std::pair{4u, kSdmaMqdPhysical}}) {
+      if (!write_vram_qword(device, kPageTable + page * sizeof(uint64_t), physical | 0x3))
+        return std::optional<rocjitsu::amdgpu::AddressSpaceHandle>{};
+    }
+    if (!write_register(device, absolute(0x1657 + 17), 1) ||
+        !write_register(device, absolute(0x1fb1), static_cast<uint32_t>(kMesRingGpu >> 8)) ||
+        !write_register(device, absolute(0x1fb2), static_cast<uint32_t>(kMesRingGpu >> 40)) ||
+        !write_register(device, absolute(0x1fb4), static_cast<uint32_t>(kMesReadPointerGpu)) ||
+        !write_register(device, absolute(0x1fb5),
+                        static_cast<uint32_t>(kMesReadPointerGpu >> 32)) ||
+        !write_register(device, absolute(0x1fb8), 0x40000060) ||
+        !write_register(device, absolute(0x1fba), 9) ||
+        !write_register(device, absolute(0x1fab), 1)) {
+      return std::optional<rocjitsu::amdgpu::AddressSpaceHandle>{};
+    }
+
+    store_qword(kMesReadPointerPhysical, 0);
+    store_dword(kApiStatusPhysical, 0);
+    store_dword(kMesRingPhysical, 0x00040021);
+    store_dword(kMesRingPhysical + 1 * 4, kPasid);
+    store_qword(kMesRingPhysical + 2 * 4, kProcessPageTable);
+    store_dword(kMesRingPhysical + 18 * 4, kSdmaDoorbell / sizeof(uint32_t));
+    store_qword(kMesRingPhysical + 20 * 4, kSdmaMqdGpu);
+    store_qword(kMesRingPhysical + 22 * 4, kSdmaWritePointerGpu);
+    store_dword(kMesRingPhysical + 28 * 4, 2);
+    store_dword(kMesRingPhysical + 30 * 4, 16);
+    store_qword(kMesRingPhysical + 38 * 4, kApiStatusGpu);
+    store_qword(kMesRingPhysical + 40 * 4, 1);
+    store_dword(kSdmaMqdPhysical + 1 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 8));
+    store_dword(kSdmaMqdPhysical + 2 * 4, static_cast<uint32_t>(kSdmaRingGpu >> 40));
+    store_dword(kSdmaMqdPhysical + 7 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu));
+    store_dword(kSdmaMqdPhysical + 8 * 4, static_cast<uint32_t>(kSdmaReadPointerGpu >> 32));
+    store_dword(kSdmaMqdPhysical + 126 * 4, 1);
+    store_dword(kSdmaMqdPhysical + 127 * 4, 7);
+
+    auto doorbell = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(uint64_t{64});
+    if (device.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60, true) !=
+        static_cast<int64_t>(doorbell.size())) {
+      return std::optional<rocjitsu::amdgpu::AddressSpaceHandle>{};
+    }
+    device.drain_doorbell_inbox_for_test();
+    return soc.gpu_vm().find_vmid(kPasid);
+  };
+
+  rocjitsu::amdgpu::AddressSpaceHandle first_address_space;
+  {
+    auto device =
+        std::make_unique<rocjitsu::GpuPciDevice>("first", configured_spec(), &trace, &soc);
+    ASSERT_TRUE(device->attach_transport(&endpoints));
+    const auto address_space = configure_and_add_queue(*device);
+    ASSERT_TRUE(address_space);
+    first_address_space = *address_space;
+    ASSERT_EQ(soc.queue_service().active_queues(), 1u);
+    ASSERT_TRUE(device->detach_transport(&endpoints));
+  }
+  EXPECT_EQ(soc.queue_service().active_queues(), 0u);
+  EXPECT_FALSE(soc.gpu_vm().find_vmid(kPasid));
+
+  {
+    auto device =
+        std::make_unique<rocjitsu::GpuPciDevice>("replacement", configured_spec(), &trace, &soc);
+    ASSERT_TRUE(device->attach_transport(&endpoints));
+    const auto address_space = configure_and_add_queue(*device);
+    ASSERT_TRUE(address_space);
+    EXPECT_EQ(address_space->slot, first_address_space.slot);
+    EXPECT_NE(address_space->generation, first_address_space.generation);
+    EXPECT_EQ(soc.queue_service().active_queues(), 1u);
+    ASSERT_TRUE(device->detach_transport(&endpoints));
+  }
+  EXPECT_EQ(soc.queue_service().active_queues(), 0u);
+  EXPECT_FALSE(soc.gpu_vm().find_vmid(kPasid));
+}
+
+TEST(GpuDeviceLifetime, ExplicitShutdownSurvivesCoreOwnerDestruction) {
+  rocjitsu::RegisterSymbols symbols;
+  rocjitsu::BarAccessTrace trace(symbols);
+  rocjitsu::amdgpu::GpuMemory memory("memory");
+  auto soc = std::make_unique<rocjitsu::SoC>("soc", &memory);
+  auto device =
+      std::make_unique<rocjitsu::GpuPciDevice>("gpu", configured_spec(), &trace, soc.get());
+  ASSERT_TRUE(device->usable());
+
+  EXPECT_TRUE(device->shutdown_frontend());
+  EXPECT_TRUE(device->shutdown_frontend()) << "explicit shutdown must be idempotent";
+
+  soc.reset();
+  device.reset();
+}
+
+class GpuDeviceSdma : public GpuDeviceMes {};
+
+TEST_F(GpuDeviceSdma, ExecutesTheFirmwareFreeStartupRingWrite) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0203), 0);
+  write_register_at(absolute(0x0204), 0);
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  // The shipping ring test emits one linear write followed by NOP padding to
+  // the ring's 16-dword alignment.
+  store_dword(kSchedulerRingPhysical, 2);
+  store_qword(kSchedulerRingPhysical + 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 12, 0);
+  store_dword(kSchedulerRingPhysical + 16, 0xdeadbeef);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
+  EXPECT_EQ(read_register_at(absolute(0x0203)), 64u);
+}
+
+TEST_F(GpuDeviceSdma, RetriesUnavailableRingFetchWithoutAnotherDoorbell) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  store_dword(kSchedulerRingPhysical, 2);
+  store_qword(kSchedulerRingPhysical + 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 12, 0);
+  store_dword(kSchedulerRingPhysical + 16, 0xdeadbeef);
+  transport_.next_read_outcome =
+      std::pair{kSchedulerRingPhysical, simdojo::DmaAccessOutcome::Unavailable};
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u)
+      << "the transient ring fetch required another guest doorbell";
+}
+
+TEST_F(GpuDeviceSdma, RetriesUnsatisfiedMemoryPollWithoutAnotherDoorbell) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  store_dword(kSchedulerApiStatusPhysical, 0);
+  store_dword(kSchedulerRingPhysical + 0 * 4, 0xb0000008);
+  store_qword(kSchedulerRingPhysical + 1 * 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 1);
+  store_dword(kSchedulerRingPhysical + 4 * 4, UINT32_MAX);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+
+  store_dword(kSchedulerApiStatusPhysical, 1);
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u)
+      << "the transient SDMA poll required another guest doorbell";
+}
+
+TEST_F(GpuDeviceSdma, RegisterBackedQueueRejectsANonSystemGartRingPage) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  // VMID-0 GART entries must select system memory. A merely valid local entry
+  // is not a different route to the same bytes, so the queue must remain at
+  // its old read pointer rather than consume a ring from guest RAM.
+  store_vram_qword(kPageTable + 5 * sizeof(uint64_t), kSchedulerRingPhysical | 0x1);
+  store_dword(kSchedulerRingPhysical, 2);
+  store_qword(kSchedulerRingPhysical + 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 12, 0);
+  store_dword(kSchedulerRingPhysical + 16, 0xdeadbeef);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+  EXPECT_EQ(read_register_at(absolute(0x0203)), 0u);
+}
+
+TEST_F(GpuDeviceSdma, RegisterBackedQueueRoutesOutsideGartToLocalVram) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kLocalRing = 0x40000;
+  constexpr uint64_t kLocalReadPointer = 0x41000;
+  constexpr uint64_t kLocalDestination = 0x42000;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kLocalRing >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kLocalRing >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kLocalReadPointer));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kLocalReadPointer >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  // The shared GART translator sends addresses outside the aperture to the
+  // local-memory domain. Exercise both the ring fetch and the packet's write
+  // through that route so PCI transport memory cannot accidentally satisfy it.
+  store_vram_dword(kLocalRing, 2);
+  store_vram_qword(kLocalRing + 4, kLocalDestination);
+  store_vram_dword(kLocalRing + 12, 0);
+  store_vram_dword(kLocalRing + 16, 0xdeadbeef);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(vram_dword_at(kLocalDestination), 0xdeadbeefu);
+  EXPECT_EQ(vram_dword_at(kLocalReadPointer), 64u);
+  EXPECT_EQ(transport_.dword_at(kLocalDestination), 0u);
+  EXPECT_EQ(transport_.dword_at(kLocalReadPointer), 0u);
+}
+
+TEST_F(GpuDeviceSdma, TerminalFaultSurvivesUnavailableReadPointerPublication) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kFaultSourceGpu = kGartStart + 0x7000;
+  constexpr uint64_t kLaterDestinationGpu = kGartStart + 0x8000;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  // A terminal copy fault retires the seven-dword packet. Its read-pointer
+  // publication stalls once, and the following valid write must remain
+  // unexecuted when publication is retried autonomously.
+  store_dword(kSchedulerRingPhysical + 0 * 4, 1);
+  store_dword(kSchedulerRingPhysical + 1 * 4, 0);
+  store_qword(kSchedulerRingPhysical + 3 * 4, kFaultSourceGpu);
+  store_qword(kSchedulerRingPhysical + 5 * 4, kLaterDestinationGpu);
+  store_dword(kSchedulerRingPhysical + 7 * 4, 2);
+  store_qword(kSchedulerRingPhysical + 8 * 4, kLaterDestinationGpu);
+  store_dword(kSchedulerRingPhysical + 10 * 4, 0);
+  store_dword(kSchedulerRingPhysical + 11 * 4, 0xdeadbeef);
+
+  transport_.next_read_outcome =
+      std::pair{kSchedulerApiStatusPhysical, simdojo::DmaAccessOutcome::Faulted};
+  transport_.next_write_outcome =
+      std::pair{kSchedulerReadPointerPhysical, simdojo::DmaAccessOutcome::Unavailable};
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{48});
+  ring_doorbell(0x800, doorbell);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerRingFencePhysical), 0u);
+
+  device_.drain_doorbell_inbox_for_test();
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 28u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerRingFencePhysical), 0u)
+      << "a terminal packet outcome was forgotten after publication retried";
+}
+
+TEST_F(GpuDeviceSdma, RegisterReconfigurationWithPendingPacketFailsClosed) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kPollGpu = kGartStart + 0x7000;
+  constexpr uint64_t kReplacementRingGpu = kGartStart + 0x8000;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  store_dword(kSchedulerApiStatusPhysical, 0);
+  store_dword(kSchedulerRingPhysical + 0 * 4, 0xb0000008);
+  store_qword(kSchedulerRingPhysical + 1 * 4, kPollGpu);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 1);
+  store_dword(kSchedulerRingPhysical + 4 * 4, UINT32_MAX);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{24});
+  ring_doorbell(0x800, doorbell);
+  ASSERT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+
+  // Repoint the MMIO queue while the unsatisfied poll is retained. Replacing
+  // that runtime would lose the old packet state and execute this new ring as
+  // though the old queue had reached a clean lifetime boundary.
+  store_dword(kSchedulerRingFencePhysical + 0 * 4, 2);
+  store_qword(kSchedulerRingFencePhysical + 1 * 4, kRingFenceGpu);
+  store_dword(kSchedulerRingFencePhysical + 3 * 4, 0);
+  store_dword(kSchedulerRingFencePhysical + 4 * 4, 0xdeadbeef);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kReplacementRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kReplacementRingGpu >> 40));
+
+  doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{20});
+  ring_doorbell(0x800, doorbell);
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 0u);
+}
+
+TEST_F(GpuDeviceSdma, ExecutesAnIndirectBufferAndSignalsItsFence) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kInterruptRing = 0x300000;
+  constexpr uint64_t kInterruptWritePointer = 0x301000;
+  constexpr uint64_t kHdpFlush = 0x44000;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  // The interrupt ring is in guest-physical memory. A trap after the fence must
+  // publish one SDMA entry and raise the device's sole MSI-X vector.
+  write_register_at(0x448c, static_cast<uint32_t>(kInterruptRing >> 8));
+  write_register_at(0x4490, static_cast<uint32_t>(kInterruptRing >> 40));
+  write_register_at(0x4498, static_cast<uint32_t>(kInterruptWritePointer));
+  write_register_at(0x4494, static_cast<uint32_t>(kInterruptWritePointer >> 32));
+  write_register_at(0x4480, (10u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
+  write_register_at(kHdpFlush, 0xfeedface);
+
+  // The IB writes the self-test sentinel and is padded to its required
+  // eight-dword boundary with one burst NOP packet.
+  store_dword(kApiStatusPhysical + 0 * 4, 2);
+  store_qword(kApiStatusPhysical + 1 * 4, kRingFenceGpu);
+  store_dword(kApiStatusPhysical + 3 * 4, 0);
+  store_dword(kApiStatusPhysical + 4 * 4, 0xdeadbeef);
+  store_dword(kApiStatusPhysical + 5 * 4, 2u << 16);
+
+  // A complete amdgpu IB submission begins with the driver's five-dword
+  // conditional envelope. The polling word is initialized to CONTINUE (one),
+  // so the following 27 dwords execute: the HDP register write, INDIRECT
+  // packet, cache request, fence, trap, and final alignment padding.
+  store_dword(kSchedulerRingFencePhysical, 1);
+  store_dword(kSchedulerRingPhysical + 0 * 4, 9);
+  store_qword(kSchedulerRingPhysical + 1 * 4, kSchedulerRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 1);
+  store_dword(kSchedulerRingPhysical + 4 * 4, 27);
+  store_dword(kSchedulerRingPhysical + 5 * 4, 14);
+  store_dword(kSchedulerRingPhysical + 6 * 4, kHdpFlush);
+  store_dword(kSchedulerRingPhysical + 7 * 4, 0);
+  store_dword(kSchedulerRingPhysical + 8 * 4, 1u << 16);
+  store_dword(kSchedulerRingPhysical + 10 * 4, 4);
+  store_qword(kSchedulerRingPhysical + 11 * 4, kApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 13 * 4, 8);
+  store_dword(kSchedulerRingPhysical + 16 * 4, 17);
+  store_dword(kSchedulerRingPhysical + 22 * 4, 5);
+  store_qword(kSchedulerRingPhysical + 23 * 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 25 * 4, 7);
+  store_dword(kSchedulerRingPhysical + 26 * 4, 6);
+  store_dword(kSchedulerRingPhysical + 28 * 4, 3u << 16);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0xdeadbeefu);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 7u);
+  EXPECT_EQ(read_register_at(kHdpFlush), 0u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 128u);
+  EXPECT_EQ(transport_.dword_at(kInterruptRing), 0x0000310au)
+      << "client 0x0a and source 49 identify the SDMA trap";
+  EXPECT_EQ(transport_.dword_at(kInterruptRing + 3 * sizeof(uint32_t)), 2u << 16)
+      << "node two identifies the first XCC to the shipping driver";
+  EXPECT_EQ(transport_.dword_at(kInterruptWritePointer), 32u);
+  ASSERT_EQ(transport_.triggered.size(), 1u);
+  EXPECT_EQ(transport_.triggered.front(), 0u);
+}
+
+TEST_F(GpuDeviceSdma, SkipsAConditionalRegionWhenTheReferenceDoesNotMatch) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  store_dword(kSchedulerRingFencePhysical, 0);
+  store_dword(kSchedulerRingPhysical + 0 * 4, 9);
+  store_qword(kSchedulerRingPhysical + 1 * 4, kSchedulerRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 1);
+  store_dword(kSchedulerRingPhysical + 4 * 4, 5);
+
+  // This first write is the skipped five-dword region. The second write must
+  // still execute, proving that COND_EXE resumes at the declared boundary.
+  store_dword(kSchedulerRingPhysical + 5 * 4, 2);
+  store_qword(kSchedulerRingPhysical + 6 * 4, kRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 8 * 4, 0);
+  store_dword(kSchedulerRingPhysical + 9 * 4, 0x11111111);
+  store_dword(kSchedulerRingPhysical + 10 * 4, 2);
+  store_qword(kSchedulerRingPhysical + 11 * 4, kRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 13 * 4, 0);
+  store_dword(kSchedulerRingPhysical + 14 * 4, 0x22222222);
+  store_dword(kSchedulerRingPhysical + 15 * 4, 0);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0x22222222u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
+}
+
+TEST_F(GpuDeviceSdma, CompletesSatisfiedRegisterAndMemoryPolls) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kHdpFlush = 0x44000;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  write_register_at(kHdpFlush, 0x5a);
+  store_dword(kRingFencePhysical, 0xa5);
+
+  // Function three is masked equality. The first packet polls MMIO and the
+  // second polls GPU memory; both are already satisfied in this synchronous
+  // model, as the driver's VM-flush and pipeline-sync packets require.
+  store_dword(kSchedulerRingPhysical + 0 * 4, 0x30000008);
+  store_dword(kSchedulerRingPhysical + 1 * 4, kHdpFlush);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 0x5a);
+  store_dword(kSchedulerRingPhysical + 4 * 4, 0xff);
+  store_dword(kSchedulerRingPhysical + 6 * 4, 0xb0000008);
+  store_qword(kSchedulerRingPhysical + 7 * 4, kRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 9 * 4, 0xa5);
+  store_dword(kSchedulerRingPhysical + 10 * 4, 0xff);
+  // Hardware accepts writes to registers outside this stage's behavioural
+  // model. Like a direct guest MMIO write, the packet is consumed and the
+  // absent register continues to read as zero rather than stalling the ring.
+  store_dword(kSchedulerRingPhysical + 12 * 4, 14);
+  store_dword(kSchedulerRingPhysical + 13 * 4, 0x4280);
+  store_dword(kSchedulerRingPhysical + 14 * 4, 0x12345678);
+  store_dword(kSchedulerRingPhysical + 15 * 4, 0);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
+}
+
+TEST_F(GpuDeviceSdma, FillsGpuMemoryWithARepeatedDword) {
+  constexpr uint64_t kSdmaBase = 0x1260;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  store_dword(kSchedulerRingPhysical + 0 * 4, 11);
+  store_qword(kSchedulerRingPhysical + 1 * 4, kRingFenceGpu);
+  store_dword(kSchedulerRingPhysical + 3 * 4, 0xa1b2c3d4);
+  store_dword(kSchedulerRingPhysical + 4 * 4, 15);
+  store_dword(kSchedulerRingPhysical + 5 * 4, 10u << 16);
+
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ring_doorbell(0x800, doorbell);
+
+  for (uint64_t offset = 0; offset < 16; offset += sizeof(uint32_t)) {
+    EXPECT_EQ(transport_.dword_at(kRingFencePhysical + offset), 0xa1b2c3d4u);
+  }
+  EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 64u);
+}
 
 // Delivering an interrupt is three things that mean nothing apart: the entry
 // goes into the ring, the write pointer is published so the driver knows it is
@@ -315,11 +2536,16 @@ protected:
   static constexpr uint64_t kInterruptEntryBytes = 32;
 
   RecordingTransport transport_;
+  simdojo::PciDevice::Transport attached_;
 
   void SetUp() override {
     ASSERT_TRUE(device_.usable());
-    device_.set_dma_engine(&transport_);
-    device_.set_irq_sink(&transport_);
+    attached_ = {.irq = &transport_, .dma = &transport_};
+    ASSERT_TRUE(device_.attach_transport(&attached_));
+    program_ring();
+  }
+
+  void program_ring() {
     // A 4 KiB ring above the 32-bit boundary, its write pointer published just
     // past it, switched on and at a bus address. 4 KiB is 1024 dwords, so the
     // size field is 10.
@@ -330,10 +2556,7 @@ protected:
     write_register_at(0x4480, (10u << 1) | (1u << 0) | (1u << 17) | (2u << 28));
   }
 
-  void TearDown() override {
-    device_.set_dma_engine(nullptr);
-    device_.set_irq_sink(nullptr);
-  }
+  void TearDown() override { device_.detach_transport(&attached_); }
 };
 
 TEST_F(GpuDeviceDelivery, PutsTheEntryInTheRingThenPointsAtItThenRaises) {
@@ -511,14 +2734,51 @@ TEST_F(GpuDeviceDelivery, DeclinesARingItCannotSafelyWriteTo) {
 // Without a transport there is no guest to reach and no line to raise, which is
 // the state between construction and being served.
 TEST_F(GpuDeviceDelivery, DeclinesWithNoTransportAttached) {
-  device_.set_dma_engine(nullptr);
+  // A transport that can raise a line but cannot reach memory, and then one
+  // that can reach memory but cannot raise a line. Neither can deliver, and
+  // neither may write a partial entry on the way to finding that out.
+  device_.detach_transport(&attached_);
+  simdojo::PciDevice::Transport no_engine{.irq = &transport_, .dma = nullptr};
+  ASSERT_TRUE(device_.attach_transport(&no_engine));
   EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
 
-  device_.set_dma_engine(&transport_);
-  device_.set_irq_sink(nullptr);
+  ASSERT_TRUE(device_.detach_transport(&no_engine));
+  simdojo::PciDevice::Transport no_sink{.irq = nullptr, .dma = &transport_};
+  ASSERT_TRUE(device_.attach_transport(&no_sink));
   EXPECT_FALSE(device_.deliver_interrupt({.client_id = 1, .source_id = 2}));
+  ASSERT_TRUE(device_.detach_transport(&no_sink));
+  ASSERT_TRUE(device_.attach_transport(&attached_));
 
   EXPECT_TRUE(transport_.memory.empty());
+}
+
+// A device serves one transport at a time. An unchecked store let a second one
+// take a live device from the first silently: the first kept its pointers and
+// its belief that it owned the function, while every interrupt the device
+// raised went to the second. The refusal is what makes that a reported error at
+// the moment it happens rather than a device that answers reads for a transport
+// nobody is behind.
+TEST_F(GpuDeviceDelivery, RefusesASecondTransportAndKeepsServingTheFirst) {
+  // SetUp already attached transport_, so the device is spoken for.
+  RecordingTransport interloper;
+  simdojo::PciDevice::Transport rival{.irq = &interloper, .dma = &interloper};
+  EXPECT_FALSE(device_.attach_transport(&rival))
+      << "a second transport was allowed to take an attached device";
+  EXPECT_FALSE(device_.detach_transport(&rival))
+      << "a transport that never won the device was allowed to release it";
+  EXPECT_TRUE(device_.transport_attached());
+
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_TRUE(interloper.memory.empty()) << "the refused transport was still reached";
+  EXPECT_TRUE(interloper.triggered.empty()) << "the refused transport was still raised";
+  EXPECT_FALSE(transport_.memory.empty()) << "the owning transport stopped being served";
+
+  // And the device is attachable again once its owner lets go, so a refusal is
+  // not a device permanently locked to a transport that has gone away.
+  EXPECT_TRUE(device_.detach_transport(&attached_));
+  EXPECT_FALSE(device_.transport_attached());
+  EXPECT_TRUE(device_.attach_transport(&rival));
+  EXPECT_TRUE(device_.detach_transport(&rival));
 }
 
 // The HDP flush is a write to a hole the bus reserves rather than to any block's
@@ -534,6 +2794,69 @@ TEST_F(GpuDevice, AcceptsTheHdpFlushTheDriverIssues) {
 
   EXPECT_EQ(read_register_at(kFlushHole), 0xdeadbeefu)
       << "the flush hole is not modelled, so the write was dropped";
+}
+
+// The pinned driver binds every NBIF revision from 7.11.0 through 7.11.3 to
+// the same implementation and remap. Exact matching therefore needs one row
+// for each supported revision rather than treating the .0 profile as a range.
+TEST(GpuDeviceHdpFlush, AnswersTheHoleForEverySupportedNbifRevision) {
+  for (const uint8_t revision : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
+    rocjitsu::GpuPciDeviceSpec spec = configured_spec();
+    bool changed_revision = false;
+    for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+      if (block.hardware_id == rocjitsu::IpHardwareId::Nbif) {
+        block.revision = revision;
+        changed_revision = true;
+      }
+    }
+    ASSERT_TRUE(changed_revision) << "the profile has no NBIF record to exercise";
+
+    rocjitsu::GpuPciDevice device("revision", spec, nullptr);
+    ASSERT_TRUE(device.usable());
+    constexpr uint64_t kFlushHole = 0x44000;
+    auto written = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xdeadbeef});
+    ASSERT_EQ(device.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, written, kFlushHole,
+                                /*write=*/true),
+              4);
+
+    std::array<std::byte, 4> read_back{};
+    ASSERT_EQ(device.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, read_back, kFlushHole,
+                                /*write=*/false),
+              4);
+    EXPECT_EQ(std::bit_cast<uint32_t>(read_back), 0xdeadbeefu)
+        << "NBIF 7.11." << static_cast<uint16_t>(revision);
+  }
+}
+
+// The driver's NBIF selection uses the complete IP version. It groups 7.11.0
+// through 7.11.3 under this remap, but a revision beyond those exact arms must
+// not silently inherit their flush hole.
+TEST(GpuDeviceHdpFlush, DoesNotAnswerAHoleForAnUnknownNbifRevision) {
+  rocjitsu::GpuPciDeviceSpec spec = configured_spec();
+  bool changed_revision = false;
+  for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+    if (block.hardware_id == rocjitsu::IpHardwareId::Nbif) {
+      ASSERT_EQ(block.revision, 0);
+      block.revision = 4;
+      changed_revision = true;
+    }
+  }
+  ASSERT_TRUE(changed_revision) << "the profile has no NBIF record to exercise";
+
+  rocjitsu::GpuPciDevice mismatched("mismatched", spec, nullptr);
+  ASSERT_TRUE(mismatched.usable()) << "an unknown bus hole does not invalidate the whole device";
+  constexpr uint64_t kFlushHole = 0x44000;
+  auto written = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xdeadbeef});
+  ASSERT_EQ(mismatched.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, written, kFlushHole,
+                                  /*write=*/true),
+            4);
+
+  std::array<std::byte, 4> read_back{};
+  ASSERT_EQ(mismatched.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, read_back, kFlushHole,
+                                  /*write=*/false),
+            4);
+  EXPECT_EQ(std::bit_cast<uint32_t>(read_back), 0u)
+      << "NBIF 7.11.4 was answered with the flush hole verified only through 7.11.3";
 }
 
 // The driver asks the bus for one vector of any kind and treats not getting one
@@ -861,6 +3184,37 @@ TEST(GpuDeviceFlushes, RefusesAHubVersionWithNoKnownRegisterLayout) {
       << "a hub version with no known layout was answered with another version's addresses";
 }
 
+// A revision is part of IP_VERSION too. The current rows were read from GC
+// 12.1.0 and MMHUB 4.1.0 headers, so accepting 12.1.1 or 4.1.1 would extend
+// those offsets to a version whose layout has not been established.
+TEST(GpuDeviceFlushes, RefusesHubRevisionsWithNoKnownRegisterLayout) {
+  for (const rocjitsu::IpHardwareId hardware_id :
+       {rocjitsu::IpHardwareId::Gc, rocjitsu::IpHardwareId::MmHub}) {
+    rocjitsu::config::KfdDeviceConfig device;
+    device.gfx_target_version = kModelledTarget;
+    device.local_mem_size = 8ULL * 1024 * 1024 * 1024;
+
+    rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
+    ASSERT_TRUE(rocjitsu::GpuPciDevice("baseline", spec, nullptr).usable())
+        << "the unmodified profile must be usable, or this proves nothing";
+
+    bool changed_revision = false;
+    for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+      if (block.hardware_id == hardware_id) {
+        ASSERT_EQ(block.revision, 0);
+        block.revision = 1;
+        changed_revision = true;
+      }
+    }
+    ASSERT_TRUE(changed_revision) << "the profile has no matching hub record to exercise";
+
+    const rocjitsu::GpuPciDevice mismatched("mismatched", spec, nullptr);
+    EXPECT_FALSE(mismatched.usable())
+        << "hardware id " << static_cast<uint16_t>(hardware_id)
+        << " revision 1 was answered with the layout verified only for revision 0";
+  }
+}
+
 // A hub whose registers fall outside the register aperture cannot be answered
 // at all. Publishing the table and reporting usable anyway makes the device
 // look correct right up until the driver waits on a flush.
@@ -1147,6 +3501,9 @@ TEST(GpuDeviceFromConfig, CapsTheDerivedApertureAtTheMemoryItHas) {
 
 // Reset returns everything a client could have changed to power-on state.
 TEST_F(GpuDevice, RestoresPowerOnRegisterStateOnReset) {
+  const rocjitsu::amdgpu::AddressSpaceHandle old_gart = soc_.gpu_vm().gart_address_space();
+  ASSERT_TRUE(old_gart);
+  const uint64_t old_gart_epoch = soc_.gpu_vm().lookup(old_gart)->translation_epoch;
   auto changed = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0});
   ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, changed,
                                rocjitsu::byte_offset_of(rocjitsu::MmioRegister::DriverScratch0),
@@ -1163,6 +3520,204 @@ TEST_F(GpuDevice, RestoresPowerOnRegisterStateOnReset) {
   EXPECT_EQ(read_register(rocjitsu::MmioRegister::DriverScratch1), 0u);
   EXPECT_NE(read_register(rocjitsu::MmioRegister::Mp0SmnC2pmsg33) & rocjitsu::kFirmwareInitDoneBit,
             0u);
+  const rocjitsu::amdgpu::AddressSpaceHandle new_gart = soc_.gpu_vm().gart_address_space();
+  EXPECT_TRUE(new_gart);
+  EXPECT_EQ(new_gart, old_gart);
+  ASSERT_TRUE(soc_.gpu_vm().lookup(new_gart));
+  EXPECT_FALSE(soc_.gpu_vm().lookup(new_gart)->ready);
+  EXPECT_EQ(soc_.gpu_vm().lookup(new_gart)->translation_epoch, old_gart_epoch + 1);
 }
 
 } // namespace
+
+// A block's registers move between versions of that block, and the driver binds
+// an entirely different implementation per version -- OSSSYS 7.1 gets ih_v7_0
+// while 4.4 gets vega20_ih. So answering one version's ring addresses for
+// another does not model the hardware slightly wrong; it programs registers the
+// device never reads, which presents as a GPU that accepts an interrupt ring and
+// then never reports anything through it. Refusing is what makes that a message
+// instead of a silence.
+TEST(GpuDeviceInterruptRing, RefusesAnOsssysVersionWithNoKnownLayout) {
+  rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
+  device.local_mem_size = 8ULL * 1024 * 1024 * 1024;
+
+  rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
+  ASSERT_TRUE(rocjitsu::GpuPciDevice("baseline", spec, nullptr).usable())
+      << "the unmodified profile must be usable, or this proves nothing";
+
+  for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+    if (block.hardware_id == rocjitsu::IpHardwareId::OssSys) {
+      // What gfx950 publishes, and what binds a different implementation.
+      block.major = 4;
+      block.minor = 4;
+    }
+  }
+
+  rocjitsu::GpuPciDevice mismatched("mismatched", spec, nullptr);
+  const rocjitsu::InterruptRing ring = mismatched.interrupt_ring();
+  EXPECT_FALSE(ring.programmed())
+      << "a ring was reported for an OSSSYS version whose registers were never modelled";
+  EXPECT_FALSE(mismatched.deliver_interrupt({.client_id = 1, .source_id = 2}))
+      << "an interrupt was delivered through a ring this device could not have located";
+}
+
+// Revision is part of the driver's OSSSYS implementation selection. A layout
+// verified for 7.1.0 must not be reused for 7.1.1 merely because its first two
+// version components happen to match.
+TEST(GpuDeviceInterruptRing, RefusesAnOsssysRevisionWithNoKnownLayout) {
+  rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
+  device.local_mem_size = 8ULL * 1024 * 1024 * 1024;
+
+  rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
+  ASSERT_TRUE(rocjitsu::GpuPciDevice("baseline", spec, nullptr).usable())
+      << "the unmodified profile must be usable, or this proves nothing";
+
+  bool changed_revision = false;
+  for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+    if (block.hardware_id == rocjitsu::IpHardwareId::OssSys) {
+      ASSERT_EQ(block.revision, 0);
+      block.revision = 1;
+      changed_revision = true;
+    }
+  }
+  ASSERT_TRUE(changed_revision) << "the profile has no OSSSYS record to exercise";
+
+  rocjitsu::GpuPciDevice mismatched("mismatched", spec, nullptr);
+  auto control = std::bit_cast<std::array<std::byte, 4>>(uint32_t{1});
+  ASSERT_EQ(mismatched.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, control, 0x4480,
+                                  /*write=*/true),
+            4);
+  const rocjitsu::InterruptRing ring = mismatched.interrupt_ring();
+  EXPECT_FALSE(ring.programmed())
+      << "OSSSYS 7.1.1 was answered with the ring layout verified only for 7.1.0";
+}
+
+// The ring holds a finite number of entries and the driver acknowledges them by
+// writing a doorbell. Until this was modelled the device never looked: it wrote
+// an entry and advanced the pointer regardless, so a ring filled faster than it
+// was drained overwrote entries the driver had not seen and said nothing about
+// it. Occasional deliveries survive that; a command processor producing
+// completions does not, and the failure would present as interrupts that were
+// raised and never handled.
+//
+// Real hardware reports it in the write pointer itself, and the driver already
+// knows how to read that: ih_v7_0_get_wptr checks the overflow bit in the copy
+// it reads from memory, confirms against the register, warns, and resumes from
+// wptr + 32 having accepted the loss.
+TEST_F(GpuDeviceDelivery, ReportsAnOverflowRatherThanSilentlyOverwriting) {
+  // Point the doorbell at index 4 of the doorbell page and enable it, which is
+  // how the driver says where it will publish what it has consumed.
+  constexpr uint32_t kDoorbellIndex = 4;
+  constexpr uint32_t kIhDoorbellEnable = 0x10000000;
+  constexpr uint32_t kIhRingControl = (10u << 1) | (1u << 0) | (1u << 17) | (2u << 28);
+  constexpr uint32_t kIhWritePointerOverflowClear = 1u << 31;
+  write_register_at(0x449c, kDoorbellIndex | kIhDoorbellEnable);
+
+  // The driver has read nothing, so the ring is empty at zero and fills after
+  // kRingBytes / kInterruptEntryBytes entries.
+  const auto acknowledge = [this](uint32_t byte_offset) {
+    auto raw = std::bit_cast<std::array<std::byte, 4>>(byte_offset);
+    ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, raw, kDoorbellIndex * 4,
+                                 /*write=*/true),
+              4);
+  };
+  acknowledge(0);
+
+  const auto entries = static_cast<uint32_t>(kRingBytes / kInterruptEntryBytes);
+  // One short of full: the pointers being equal is how empty is spelled, so a
+  // ring of N entries holds N-1 before it must report a loss.
+  for (uint32_t i = 0; i + 1 < entries; ++i) {
+    ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}))
+        << "entry " << i << " of a ring that is not yet full";
+    EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 0u)
+        << "an overflow was reported at entry " << i << ", before the ring was full";
+  }
+
+  // The one that closes the gap must say so, in the published pointer where the
+  // driver looks and in the register it confirms against.
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
+      << "the ring wrapped onto an unread entry and did not report an overflow";
+
+  // The indication is sticky until the driver explicitly clears it. A later
+  // delivery must not erase an overflow before the guest has had a chance to
+  // observe it, and making room in the ring is not the hardware's clear
+  // protocol.
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
+      << "a later delivery erased an overflow the driver had not acknowledged";
+
+  acknowledge(static_cast<uint32_t>(kInterruptEntryBytes * 8));
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
+      << "advancing the read pointer cleared overflow without the control-register handshake";
+
+  // ih_v7_0_get_wptr acknowledges the loss by pulsing
+  // IH_RB_CNTL.WPTR_OVERFLOW_CLEAR. The register indication clears immediately,
+  // and the next pointer publication no longer carries the bit.
+  write_register_at(0x4480, kIhRingControl | kIhWritePointerOverflowClear);
+  EXPECT_EQ(read_register_at(0x4488) & 1u, 0u)
+      << "the overflow-clear pulse left the write-pointer register latched";
+  write_register_at(0x4480, kIhRingControl);
+
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 0u)
+      << "the device kept reporting an overflow after the driver's clear handshake";
+}
+
+TEST_F(GpuDeviceDelivery, ResetClearsAnUnacknowledgedOverflow) {
+  constexpr uint32_t kDoorbellIndex = 4;
+  constexpr uint32_t kIhDoorbellEnable = 0x10000000;
+  write_register_at(0x449c, kDoorbellIndex | kIhDoorbellEnable);
+  auto read_pointer = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, read_pointer,
+                               kDoorbellIndex * 4, /*write=*/true),
+            4);
+
+  const auto entries = static_cast<uint32_t>(kRingBytes / kInterruptEntryBytes);
+  for (uint32_t i = 0; i < entries; ++i) {
+    ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  }
+  ASSERT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
+      << "the test did not establish a latched overflow before reset";
+
+  device_.reset(simdojo::ResetKind::FunctionLevel);
+  program_ring();
+  ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 0u)
+      << "reset carried the previous guest's overflow into the reprogrammed ring";
+}
+
+// Two blocks answering one register is silent damage: whichever model defined
+// it last wins, and the one that lost stalls the driver on a register reading
+// as somebody else's. It cannot be ruled out by inspection either, because
+// blocks legitimately share whole segments on this family -- GC and SDMA0
+// publish identical bases, as do the two management processors -- and stay
+// apart only in the offsets they claim inside them. So the device lays every
+// model's claims into one absolute-dword map at construction and refuses a
+// profile whose blocks collide.
+//
+// MMHUB's invalidation registers sit 0x575 dwords into its first segment and
+// GC's sit 0x1645 into its own, so a MMHUB segment of 0x1260 + 0x1645 - 0x575
+// puts the two engine-0 semaphores on the same dword.
+TEST(GpuDeviceFlushes, RefusesAProfileWhereTwoBlocksClaimTheSameRegister) {
+  rocjitsu::config::KfdDeviceConfig device;
+  device.gfx_target_version = kModelledTarget;
+  device.local_mem_size = 8ULL * 1024 * 1024 * 1024;
+
+  rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
+  ASSERT_TRUE(rocjitsu::GpuPciDevice("baseline", spec, nullptr).usable())
+      << "the unmodified profile must be usable, or this proves nothing";
+
+  for (rocjitsu::IpBlock &block : spec.discovery.blocks) {
+    if (block.hardware_id == rocjitsu::IpHardwareId::MmHub) {
+      block.register_bases.front() = 0x1260 + 0x1645 - 0x575;
+    }
+  }
+
+  const rocjitsu::GpuPciDevice colliding("colliding", spec, nullptr);
+  EXPECT_FALSE(colliding.usable())
+      << "two blocks were allowed to answer one register, and the later one won silently";
+}
