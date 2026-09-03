@@ -179,9 +179,14 @@ the second is the one that gets missed:
 1. A `void` helper that asserts internally returns from *the helper*, not the
    test. The caller carries on with whatever out-parameters the helper never
    filled in, and hands them to the code under test. Give such a helper a status
-   return instead, so ignoring it is a compile error rather than a review item
-   (`[[nodiscard]]` alone only warns — pair it with `-Werror=unused-result` on
-   the target).
+   return instead, so ignoring it is a compile error rather than a review item.
+   `[[nodiscard]]` alone only warns, and `WERROR` defaults to OFF, so pair it
+   with `-Werror=unused-result` — set on the sources that follow the rule, not
+   on the target. A shared target is the trap: `rccl-UnitTestsMPI` also carries
+   suites that discard `[[nodiscard]]` results of their own, and promoting the
+   warning there fails builds the change never touched. `test/CMakeLists.txt`
+   filters the NetIbMPI sources out of the target's source list and sets the
+   option on those alone, via `set_source_files_properties`.
 2. The caller may only assert on that status if the failure is *rank-agreed*.
    A helper that fails rank-locally — one node's device, one NIC — takes its
    rank out of the test while the others wait at the next collective, and
