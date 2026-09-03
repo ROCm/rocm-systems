@@ -135,7 +135,7 @@ def test_parse_launcher_options_defaults_capture_on_shapes():
     frameworks, capture_args, capture_arg_values, remaining = (
         launch.parse_launcher_options(["--frameworks", "torch", "--", "t.py", "-n"])
     )
-    assert frameworks == "torch"
+    assert frameworks == ["torch"]
     assert capture_args is True
     assert capture_arg_values is False
     assert remaining == ["t.py", "-n"]
@@ -147,7 +147,8 @@ def test_parse_launcher_options_parses_capture_flags():
     frameworks, capture_args, capture_arg_values, remaining = (
         launch.parse_launcher_options([
             "--frameworks",
-            "torch,triton",
+            "torch",
+            "triton",
             "--capture-args",
             "1",
             "--capture-arg-values",
@@ -156,7 +157,7 @@ def test_parse_launcher_options_parses_capture_flags():
             "t.py",
         ])
     )
-    assert frameworks == "torch,triton"
+    assert frameworks == ["torch", "triton"]
     assert capture_args is True
     assert capture_arg_values is True
     assert remaining == ["t.py"]
