@@ -570,6 +570,42 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
+    def test_power_cap_out_of_range_records_invalid_parameter_value(self):
+        """validate_and_set_power_cap owns its recording; the set_gpu handler
+        does none. Out of range must record and return a message rather than
+        raise, so a multi-GPU loop still tries devices with a different range.
+        """
+        from unittest import mock
+
+        import amdsmi_helpers
+
+        class _FakeLogger:
+            def is_json_format(self):
+                return False
+
+            def is_csv_format(self):
+                return False
+
+        helpers = amdsmi_helpers.AMDSMIHelpers()
+        helpers.get_gpu_id_from_device_handle = lambda *a, **k: 0
+        min_w, max_w, current_w = 200, 300, 250  # _PCAP_REQUEST_W sits below min_w
+        info = {
+            "min_power_cap": _watts(min_w),
+            "max_power_cap": _watts(max_w),
+            "power_cap": _watts(current_w),
+        }
+        with mock.patch.object(
+            amdsmi_helpers.amdsmi_interface, "amdsmi_get_power_cap_info", lambda *a, **k: info
+        ):
+            result = helpers.validate_and_set_power_cap(
+                "fake-gpu-handle", 0, "PPT0", _PCAP_REQUEST_W, _FakeLogger()
+            )
+
+        self.assertIn(f"must be between {min_w}W and {max_w}W", result)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.INVALID_PARAMETER_VALUE)
+        )
+
     # ---- rocm-smi compat exit-code contract ----
     def test_rocm_smi_compat_exit_codes_stay_binary(self):
         """The --rocm-smi shim intentionally follows rocm-smi's BINARY 0/1 exit
@@ -840,6 +876,12 @@ class _FakeGpuLogger:
     def store_output(self, device, key, value):
         self.stored.append((device, key, value))
 
+    def is_json_format(self):
+        return self.format == "json"
+
+    def is_csv_format(self):
+        return self.format == "csv"
+
     def print_output(self, multiple_device_enabled=False):
         pass
 
@@ -887,6 +929,22 @@ def _fake_bdf(handle):
 def _noop(*args, **kwargs):
     """Success-path stand-in: a patched amdsmi call that returns cleanly."""
     return None
+
+
+def _watts(value):
+    """Power caps cross the library boundary in micro-watts."""
+    return value * 1_000_000
+
+
+# Power-cap fixture: the request sits inside the range and differs from the
+# current cap, so the handler runs all the way to the set call.
+_PCAP_MIN_W = 50
+_PCAP_MAX_W = 300
+_PCAP_CURRENT_W = 200
+_PCAP_REQUEST_W = 100
+
+# Too short to be a CPER record, so the library rejects it rather than decoding.
+_JUNK_CPER_BYTES = b"\x00" * 64
 
 
 def _gpu_set_options(set_value):
@@ -1052,24 +1110,20 @@ def _build_set_specs(set_value):
         }
 
     def power_cap(cmd, mode):
-        # Delegates to a helper that owns its own error recording; emulate that
-        # helper's per-mode behavior so the handler wiring is exercised without a
-        # real power-cap validation flow.
+        # get_gpu_id_from_device_handle dereferences the handle as a c_void_p;
+        # incidental plumbing, not the validation logic under test.
+        cmd.helpers.get_gpu_id_from_device_handle = lambda *a, **k: 0
+        requested = PowerCap("ppt0", _PCAP_REQUEST_W)
         if mode == "fail":
-
-            def _delegate(*a, **k):
-                cmd.helpers.error_collector.record_library_error(
-                    amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-                )
-                return "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set power cap"
-
-        else:
-
-            def _delegate(*a, **k):
-                return "Successfully set power cap"
-
-        cmd.helpers.validate_and_set_power_cap = _delegate
-        return PowerCap("ppt0", 100), {}
+            return requested, {"amdsmi_get_power_cap_info": _raise_not_supported}
+        return requested, {
+            "amdsmi_get_power_cap_info": lambda *a, **k: {
+                "min_power_cap": _watts(_PCAP_MIN_W),
+                "max_power_cap": _watts(_PCAP_MAX_W),
+                "power_cap": _watts(_PCAP_CURRENT_W),
+            },
+            "amdsmi_set_power_cap": _noop,
+        }
 
     def clk_limit(cmd, mode):
         if mode == "fail":
@@ -1445,6 +1499,7 @@ class TestRasCperAfidExitCodes(unittest.TestCase):
     """
 
     ROW = ("2026-01-01 00:00:00", 0, "fatal", "fatal-1.cper", b"\x00\x01")
+    AFIDS = [11, 22, 33]
 
     def setUp(self):
         if _CLI_DRIVE_SKIP:
@@ -1491,8 +1546,8 @@ class TestRasCperAfidExitCodes(unittest.TestCase):
 
     def test_successful_decode_keeps_afids_a_list_and_records_nothing(self):
         """Control: afids stays a list so len() counts AFIDs, not characters."""
-        rows = self._drive("json", afids=[11, 22, 33])
-        self.assertEqual(rows[0]["afids"], [11, 22, 33])
+        rows = self._drive("json", afids=self.AFIDS)
+        self.assertEqual(rows[0]["afids"], self.AFIDS)
         self.assertFalse(rows[0]["decode_failed"])
         self.assertFalse(self.helpers.error_collector.has_errors)
 
@@ -1512,7 +1567,7 @@ class TestRasCperAfidExitCodes(unittest.TestCase):
         from amdsmi_helpers import AMDSMIHelpers
 
         helpers = AMDSMIHelpers()
-        raw = b"\x00" * 64  # not a valid CPER record, so the library rejects it
+        raw = _JUNK_CPER_BYTES
         entries = {0: {"error_severity": "fatal", "notify_type": "", "timestamp": "2026-01-01"}}
         cper_data = [{"bytes": raw, "size": len(raw)}]
         with tempfile.TemporaryDirectory() as folder:
@@ -1554,6 +1609,11 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
     error and left the exit code at 0, while their hwmon sibling recorded.
     """
 
+    OD_RANGE = (0, 100)  # (min, max) percent, as parse_gpu_od_fan_range returns
+    OD_RANGE_UNREADABLE = (None, None)
+    IN_RANGE_PERCENT = (50, True)  # (value, is_percentage)
+    ABOVE_RANGE_RAW = (250, False)
+
     def setUp(self):
         if _CLI_DRIVE_SKIP:
             self.skipTest(_CLI_DRIVE_SKIP)
@@ -1574,7 +1634,7 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
         """OD_RANGE unreadable: parse_gpu_od_fan_range swallows the OSError and
         returns (None, None), so there is no library status -- the CLI records
         DEVICE_INTERFACE_UNAVAILABLE (200) rather than exiting 0."""
-        collector = self._drive_fan((None, None), (50, True))
+        collector = self._drive_fan(self.OD_RANGE_UNREADABLE, self.IN_RANGE_PERCENT)
         self.assertTrue(collector.has_errors)
         self.assertEqual(
             collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.DEVICE_INTERFACE_UNAVAILABLE)
@@ -1584,7 +1644,7 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
         """Out-of-range value on gpu_od must resolve to the same code its legacy
         hwmon sibling records; the fan interface a GPU exposes must not change
         the exit code for identical user input."""
-        collector = self._drive_fan((0, 100), (250, False))
+        collector = self._drive_fan(self.OD_RANGE, self.ABOVE_RANGE_RAW)
         self.assertTrue(collector.has_errors)
         self.assertEqual(
             collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
@@ -1592,7 +1652,7 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
 
     def test_gpu_od_success_records_nothing(self):
         """Control: a value inside OD_RANGE still exits 0."""
-        collector = self._drive_fan((0, 100), (50, True))
+        collector = self._drive_fan(self.OD_RANGE, self.IN_RANGE_PERCENT)
         self.assertFalse(collector.has_errors)
 
 
