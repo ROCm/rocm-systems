@@ -300,9 +300,8 @@ if (${PC_SAMPLING_SUPPORT})
 endif()
 
 if (${AMDCUID_FOUND})
-  find_package(OpenSSL REQUIRED) # Required by CUID library
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
-  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB})
   set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
               BUILD_RPATH "${AMDCUID_ROOT}/lib"
               INSTALL_RPATH "${AMDCUID_ROOT}/lib")

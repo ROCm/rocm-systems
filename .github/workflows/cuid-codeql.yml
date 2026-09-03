@@ -83,46 +83,6 @@ jobs:
 
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Build and Install OpenSSL 3.0 (if needed)
-        run: |
-          set -e
-          # The openssl CLI's version doesn't guarantee the -dev headers CMake's
-          # find_package(OpenSSL) needs are installed, so install the dev package first
-          # (a no-op if already satisfied) before checking the version.
-          if command -v apt-get &> /dev/null; then
-              apt-get update
-              apt-get install -y libssl-dev
-          elif command -v dnf &> /dev/null; then
-              dnf install -y openssl-devel
-          elif command -v zypper &> /dev/null; then
-              zypper install -y libopenssl-devel
-          fi
-
-          OPENSSL_VER=$(openssl version | awk '{print $2}')
-          echo "Current OpenSSL version: $OPENSSL_VER"
-          if [[ "$OPENSSL_VER" == 3.* ]]; then
-             echo "OpenSSL 3.0+ dev package installed."
-             echo "OPENSSL_ROOT_DIR=/usr" >> $GITHUB_ENV
-          else
-             echo "Package manager did not provide OpenSSL 3.0+; building from source..."
-             if command -v apt-get &> /dev/null; then
-                 apt-get install -y wget build-essential zlib1g-dev perl
-             elif command -v dnf &> /dev/null; then
-                 dnf install -y wget make gcc perl zlib-devel perl-core
-             elif command -v zypper &> /dev/null; then
-                 zypper install -y wget make gcc perl zlib-devel perl-core
-             fi
-             cd /tmp
-             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.12/openssl-3.0.12.tar.gz
-             tar -xzvf openssl-3.0.12.tar.gz
-             cd openssl-3.0.12
-             ./config
-             make -j $(nproc)
-             make install
-             ldconfig
-             echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
-          fi
-
       # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
       - name: Create CodeQL database
         shell: bash
@@ -130,7 +90,7 @@ jobs:
           # Discard any stale CMakeCache from a previous run/environment to force a clean configure
           rm -rf "$PROJECT_DIR/build"
           ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=$PROJECT_DIR \
-          --command="cmake -S $PROJECT_DIR -B $PROJECT_DIR/build -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR" \
+          --command="cmake -S $PROJECT_DIR -B $PROJECT_DIR/build" \
           --command="cmake --build $PROJECT_DIR/build -j$(nproc)"
 
       - name: Perform CodeQL Analysis
