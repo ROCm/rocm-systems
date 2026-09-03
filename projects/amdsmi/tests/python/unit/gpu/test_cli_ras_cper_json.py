@@ -29,9 +29,15 @@ import tempfile
 import types
 import unittest
 
-from common.common import add_class_cleanup, amdsmi_path, find_cli_dir, stub_modules
+from common.common import (
+    add_class_cleanup,
+    amdsmi_path,
+    cli_search_order,
+    find_cli_dir,
+    stub_modules,
+)
 
-_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 _RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py") if _CLI_DIR else None
 
 # Modules imported (directly or transitively) when the source CLI loads against

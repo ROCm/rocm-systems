@@ -26,7 +26,11 @@ from common.common import amdsmi
 
 def _load_cli_exceptions():
     """The CLI's own exception module, from whichever amd-smi is under test."""
-    cli_dir = common.find_cli_dir(common.amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+    # These tests spawn the amd-smi binary from the install tree (see runcmd), so
+    # the exit codes have to come from that same install, not from the checkout.
+    cli_dir = common.find_cli_dir(
+        *common.cli_search_order(os.path.dirname(os.path.abspath(__file__)), prefer_install=True)
+    )
     if cli_dir and cli_dir not in sys.path:
         sys.path.append(cli_dir)
     # Tests name AmdSmiExitCode, so a miss has to fail here rather than as an
