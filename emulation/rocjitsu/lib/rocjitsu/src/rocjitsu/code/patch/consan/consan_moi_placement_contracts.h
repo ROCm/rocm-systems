@@ -474,15 +474,15 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
                               const MoiResourceProblem &problem,
                               std::span<const ConSanCandidateResourcePlan> site_plans);
 
-[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+[[nodiscard]] std::optional<std::string>
 validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
                                const ConSanMoiOperatingPoint &point,
                                const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch);
 
-[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure>
+[[nodiscard]] std::optional<std::string>
 validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point);
 
-[[nodiscard]] std::optional<ConSanMoiScalarValidationFailure> validate_moi_ordinary_scalar_state(
+[[nodiscard]] std::optional<std::string> validate_moi_ordinary_scalar_state(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
     rj_code_arch_t arch);
@@ -498,8 +498,8 @@ resource_plan_for_site(std::span<const ConSanCandidateResourcePlan> plans,
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan,
-                         const ConSanMoiOperatingPoint &site_point,
-                         MoiOwnerAssignments assignments, uint16_t expected_count);
+                         const ConSanMoiOperatingPoint &site_point, MoiOwnerAssignments assignments,
+                         uint16_t expected_count);
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
@@ -511,12 +511,10 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     uint16_t allocated_vgpr_count, const MoiPersistentVgprStateView &persistent_state);
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments,
-                               uint64_t descriptor_offset);
+moi_persistent_vgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset);
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-moi_transient_sgpr_assignment(MoiOwnerAssignments assignments,
-                              uint64_t descriptor_offset);
+moi_transient_sgpr_assignment(MoiOwnerAssignments assignments, uint64_t descriptor_offset);
 
 [[nodiscard]] std::vector<MoiSgprRange>
 moi_relocatable_host_scalar_ranges(const ConSanRequest &request,

@@ -250,7 +250,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   if (result.outcome != ConSanTransformOutcome::Unsupported)
     result.moi_operating_point = effective_point;
-  std::optional<ConSanMoiScalarValidationFailure> scalar_validation_failure;
+  std::optional<std::string> scalar_validation_failure;
   if (result.outcome != ConSanTransformOutcome::Unsupported) {
     scalar_validation_failure = validate_moi_dispatch_id_sgprs(
         effective_options, effective_options, effective_point, mode_plan.semantics, arch);
@@ -261,7 +261,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
   }
   if (scalar_validation_failure) {
     result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
+    result.warnings.push_back(std::move(*scalar_validation_failure));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     publish_pending_moi_lowering_rejections(ConSanRegisterPlanReason::NoLegalWindow);
@@ -293,7 +293,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     scalar_validation_failure = validate_moi_dispatch_id_vgprs(effective_point);
   if (scalar_validation_failure) {
     result.outcome = ConSanTransformOutcome::Unsupported;
-    result.warnings.push_back(std::move(scalar_validation_failure->diagnostic));
+    result.warnings.push_back(std::move(*scalar_validation_failure));
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     publish_pending_moi_lowering_rejections(ConSanRegisterPlanReason::NoLegalWindow);
