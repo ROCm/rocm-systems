@@ -894,7 +894,6 @@ foreach(_enq_variant "" "-devlinker")
   )
 
   target_compile_definitions(${_enq_tgt} PRIVATE
-    __HIP_PLATFORM_AMD__
     NCCL_OS_LINUX
     ROCM_VERSION=70000
     USE_AMDSMI
@@ -907,6 +906,18 @@ foreach(_enq_variant "" "-devlinker")
   if(_enq_variant STREQUAL "-devlinker")
     target_compile_definitions(${_enq_tgt} PRIVATE RCCL_DEVICE_LINKER)
   endif()
+  # Apply HIP compile requirements without linking the runtime.
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(${_enq_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+      target_compile_definitions(${_enq_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+      target_compile_options(${_enq_tgt} PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+    endif()
+  endforeach()
+  target_compile_options(${_enq_tgt} PRIVATE --offload-host-only)
 
   target_link_options(${_enq_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(${_enq_tgt} PRIVATE
