@@ -94,6 +94,29 @@ struct TranslationTraceEvent {
 
 using TranslationTraceCallback = std::function<void(const TranslationTraceEvent &)>;
 
+/// @brief Optional whole-text rewrite for one ordinary source instruction.
+///
+/// @details The callback runs after control-transfer relocation has claimed its
+/// instructions and before profile-specific semantic lowering. Returning words
+/// replaces the complete source instruction at every emitted copy of that
+/// source offset; returning nullopt leaves normal translation in charge. The
+/// replacement is emitted inline, so BinaryTranslator's existing block,
+/// branch, symbol, descriptor, and PC-relative relocation transaction owns the
+/// resulting text growth. Callers are responsible for including the guest
+/// instruction in the replacement when its semantics must still execute.
+using InstructionRewriteCallback =
+    std::function<std::optional<std::vector<uint32_t>>(const Instruction &, uint64_t)>;
+
+/// @brief One final placement of a source .text instruction or boundary.
+///
+/// @details A source offset may occur more than once when a shared function
+/// body is cloned into multiple kernel scopes. Consumers must therefore treat
+/// this as a multimap rather than assuming one source-to-output address.
+struct TranslatedTextPlacement {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
 /// @brief Optional controls for DBT translation.
 struct BinaryTranslatorOptions {
   /// @brief Input silicon revision used to determine translation direction.
@@ -147,6 +170,7 @@ struct TranslatedCodeObject {
   std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+  std::vector<TranslatedTextPlacement> text_placements;  ///< Final source-to-target multimap.
   bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
   bool rewrite_discharge_verified = false; ///< No registered rewrite remained actionable.
 
@@ -196,6 +220,9 @@ public:
   /// @brief Install an optional callback for per-instruction debugging.
   void set_trace_callback(TranslationTraceCallback callback);
 
+  /// @brief Install an optional inline source-instruction rewrite callback.
+  void set_instruction_rewrite_callback(InstructionRewriteCallback callback);
+
   /// @brief Translate a decoded code object.
   /// @param obj  The guest code object to translate.
   /// @returns TranslatedCodeObject with the host ELF bytes and diagnostics.
@@ -237,6 +264,7 @@ private:
   rj_code_arch_t host_arch_;                                ///< Target ISA.
   uint32_t target_mach_;                                    ///< ELF MACH flag for target processor.
   TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
+  InstructionRewriteCallback instruction_rewrite_callback_; ///< Optional client inline rewrite.
   BinaryTranslatorOptions options_;                         ///< Optional translation controls.
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.

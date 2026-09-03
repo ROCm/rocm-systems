@@ -2242,6 +2242,10 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
   trace_callback_ = std::move(callback);
 }
 
+void BinaryTranslator::set_instruction_rewrite_callback(InstructionRewriteCallback callback) {
+  instruction_rewrite_callback_ = std::move(callback);
+}
+
 void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) const {
   result.rewrite_discharge_checked = true;
   if (!semantic_translator_->supports_rewrite_discharge()) {
@@ -4261,6 +4265,18 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           continue;
         }
 
+        if (instruction_rewrite_callback_) {
+          std::optional<std::vector<uint32_t>> rewrite =
+              instruction_rewrite_callback_(inst, offset);
+          if (rewrite) {
+            std::vector<uint32_t> target_words = std::move(*rewrite);
+            append_words(kernel_text, target_words);
+            queue_trace(pending_traces, inst, offset, nullptr, false, true, true, target_offset,
+                        std::move(target_words));
+            continue;
+          }
+        }
+
         const InstructionLegalization *leg = lookup_legalization(inst);
 
         // A deferred gfx1250 family has no A0 handling yet and stays on the copy
@@ -5106,6 +5122,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
+  result.text_placements.reserve(text_relocations.size());
+  for (const TextOffsetRelocation &relocation : text_relocations) {
+    result.text_placements.push_back({.source_offset = relocation.source_offset,
+                                      .target_offset = relocation.target_offset});
+  }
   return result;
 }
 

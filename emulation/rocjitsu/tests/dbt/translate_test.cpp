@@ -3601,6 +3601,51 @@ TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
   EXPECT_FALSE(diagnosed);
 }
 
+TEST(BinaryTranslator, ClientRewriteExpandsInlineAndPublishesFinalPlacements) {
+  const uint32_t source_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t inserted_nop = build_s_nop(1, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> words = {source_nop, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const Instruction &, uint64_t source_offset)
+          -> std::optional<std::vector<uint32_t>> {
+        if (source_offset != 0)
+          return std::nullopt;
+        return std::vector<uint32_t>{inserted_nop, source_nop};
+      });
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section *text = translated.text_sections().front();
+  ASSERT_GE(text->size(), 3 * sizeof(uint32_t));
+  const auto translated_words =
+      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
+                                text->size() / sizeof(uint32_t));
+  EXPECT_EQ(translated_words[0], inserted_nop);
+  EXPECT_EQ(translated_words[1], source_nop);
+  EXPECT_EQ(translated_words[2], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+
+  const auto placement_for = [&](uint64_t source_offset) {
+    return std::ranges::find_if(result.text_placements, [&](const auto &placement) {
+      return placement.source_offset == source_offset;
+    });
+  };
+  const auto rewritten = placement_for(0);
+  const auto endpgm = placement_for(sizeof(uint32_t));
+  ASSERT_NE(rewritten, result.text_placements.end());
+  ASSERT_NE(endpgm, result.text_placements.end());
+  EXPECT_EQ(rewritten->target_offset, 0u);
+  EXPECT_EQ(endpgm->target_offset, 2 * sizeof(uint32_t));
+}
+
 TEST(BinaryTranslator, InlineExpansionIgnoresUnreachableTextTail) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject source_layout(image.data(), image.size());
@@ -4199,6 +4244,49 @@ TEST(BinaryTranslatorE2E, AgreeingScopesResolveAnAddressTakenCloneThroughCanonic
   ASSERT_GE(*addend, text_vaddr);
   EXPECT_EQ(*addend - text_vaddr, clones.front())
       << "the stored pointer names the canonical clone, not the caller-local one";
+}
+
+TEST(BinaryTranslatorE2E, ClientRewriteAndPlacementsCoverEverySharedBodyClone) {
+  const auto image = make_shared_address_taken_helper_image(/*oversized_kernel0_lds=*/false);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  const uint64_t helper_offset = kSharedHelperEntryWord * sizeof(uint32_t);
+  const uint32_t first_nop = build_s_nop(3, ROCJITSU_CODE_ARCH_CDNA3);
+  const uint32_t second_nop = build_s_nop(4, ROCJITSU_CODE_ARCH_CDNA3);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  translator.set_instruction_rewrite_callback(
+      [&](const Instruction &, uint64_t source_offset)
+          -> std::optional<std::vector<uint32_t>> {
+        if (source_offset != helper_offset)
+          return std::nullopt;
+        return std::vector<uint32_t>{first_nop, second_nop};
+      });
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  std::vector<uint64_t> helper_placements;
+  for (const TranslatedTextPlacement &placement : result.text_placements) {
+    if (placement.source_offset == helper_offset)
+      helper_placements.push_back(placement.target_offset);
+  }
+  ASSERT_EQ(helper_placements.size(), 2u)
+      << "the public placement map must retain both kernel-scope copies";
+  EXPECT_NE(helper_placements[0], helper_placements[1]);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  const auto translated_words =
+      std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text.data()),
+                                text.size() / sizeof(uint32_t));
+  for (const uint64_t placement : helper_placements) {
+    ASSERT_LT(placement / sizeof(uint32_t) + 1u, translated_words.size());
+    EXPECT_EQ(translated_words[placement / sizeof(uint32_t)], first_nop);
+    EXPECT_EQ(translated_words[placement / sizeof(uint32_t) + 1u], second_nop);
+  }
 }
 
 // The same fixture with kernel 0 given more static LDS than the host can dispatch. Its scope now
