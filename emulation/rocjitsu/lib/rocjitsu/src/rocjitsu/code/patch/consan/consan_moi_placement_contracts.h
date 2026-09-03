@@ -211,10 +211,7 @@ struct MoiAccessEntryIslandPlan {
 /// A scalar register interval that a relocated host must preserve while it
 /// bootstraps a generated router. This is a placement constraint, not an
 /// engine emission policy.
-struct MoiSgprRange {
-  uint16_t base = 0;
-  uint16_t width = 0;
-};
+using MoiSgprRange = consan_detail::ScalarOwnerSgprRange;
 
 enum class MoiRelocatableHostScalarState : uint8_t {
   AccessRouter,
@@ -475,17 +472,12 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
                               std::span<const ConSanCandidateResourcePlan> site_plans);
 
 [[nodiscard]] std::optional<std::string>
-validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
-                               const ConSanMoiOperatingPoint &point,
-                               const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch);
+validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                          const ConSanMoiOperatingPoint &point,
+                          const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch);
 
 [[nodiscard]] std::optional<std::string>
 validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point);
-
-[[nodiscard]] std::optional<std::string> validate_moi_ordinary_scalar_state(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
-    rj_code_arch_t arch);
 
 [[nodiscard]] ConSanMoiPersistentPlacementUpdate configure_automatic_moi_persistent_vgprs(
     const ConSanMoiOperatingPoint &base, const MoiResourceProblem &problem,

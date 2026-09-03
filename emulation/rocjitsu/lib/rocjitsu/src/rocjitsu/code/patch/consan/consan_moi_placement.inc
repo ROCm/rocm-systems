@@ -44,11 +44,6 @@ struct MoiLocalNopIsland {
   bool claimed = false;
 };
 
-[[nodiscard]] bool moi_sgpr_range_overlaps_dynamic_stack_state(uint16_t base, uint16_t width) {
-  return range_overlaps(base, width, kDynamicStackTopSgpr, 1u) ||
-         range_overlaps(base, width, kDynamicFrameBaseSgpr, 1u);
-}
-
 /// Return the first aligned register range admitted by one placement policy.
 /// Candidate order is part of the generated-code contract: callers provide
 /// their original search floor and alignment while this shared traversal owns
@@ -1474,13 +1469,8 @@ collect_moi_scalar_owner_contexts(std::span<const MoiScalarOwnerContextGroup> gr
 [[nodiscard]] bool moi_scalar_contexts_conflict_with_physical_vcc(
     std::span<const consan_detail::ScalarOwnerContextSummary> contexts,
     std::span<const MoiSgprRange> ranges, rj_code_arch_t arch) {
-  if (!consan_uses_gfx9_cdna_encoding(arch))
-    return false;
-  std::vector<consan_detail::ScalarOwnerSgprRange> scalar_ranges;
-  scalar_ranges.reserve(ranges.size());
-  for (const MoiSgprRange &range : ranges)
-    scalar_ranges.push_back({range.base, range.width});
-  return consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(contexts, scalar_ranges);
+  return consan_uses_gfx9_cdna_encoding(arch) &&
+         consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(contexts, ranges);
 }
 
 [[nodiscard]] bool moi_scalar_contexts_admit_reserved_window(
@@ -1540,10 +1530,11 @@ public:
         }
       }
     }
-    std::vector<MoiSgprRange> combined = selected_;
+    std::vector<consan_detail::ScalarOwnerSgprRange> combined = selected_;
     combined.push_back({base, width});
     return owner_contexts_.empty() ||
-           !moi_scalar_contexts_conflict_with_physical_vcc(owner_contexts_, combined, arch_);
+           !consan_detail::scalar_owner_contexts_conflict_with_physical_vcc(owner_contexts_,
+                                                                            combined);
   }
 
   [[nodiscard]] std::optional<uint16_t>
@@ -1584,7 +1575,7 @@ private:
   std::span<const consan_detail::ScalarOwnerContextSummary> owner_contexts_;
   const RegisterSet *unavailable_ = nullptr;
   std::vector<MoiSgprRange> occupied_;
-  std::vector<MoiSgprRange> selected_;
+  std::vector<consan_detail::ScalarOwnerSgprRange> selected_;
 };
 
 void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
@@ -4189,52 +4180,85 @@ plan_moi_dispatch_id_fallback(const ConSanOptions &input, const ConSanMoiOperati
 }
 
 [[nodiscard]] std::optional<std::string>
-validate_moi_dispatch_id_sgprs(const ConSanRequest &request, const BoundRuntimeResources &resources,
-                               const ConSanMoiOperatingPoint &point,
-                               const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
-  if (!point.moi_dispatch_identity.sgpr())
-    return std::nullopt;
-  const uint16_t base = *point.moi_dispatch_identity.sgpr();
-  const uint16_t dispatch_state_count = kMoiDispatchStateSgprCount;
-  const bool overlaps_owner =
-      point.moi_owner_sgpr.base() &&
-      range_overlaps(base, dispatch_state_count, *point.moi_owner_sgpr.base(), 1u);
-  const bool overlaps_exec =
-      point.moi_exec_save_sgpr &&
-      range_overlaps(
-          base, dispatch_state_count, *point.moi_exec_save_sgpr,
-          moi_exec_save_sgpr_count(
-              resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch));
-  const bool below_entry_window = base < 20u;
-  const bool unaligned = base % 2u != 0u;
-  const bool beyond_ordinary_file =
-      static_cast<uint32_t>(base) + dispatch_state_count > moi_ordinary_sgpr_limit(arch);
-  const bool overlaps_reserved =
-      persistent_sgpr_range_overlaps_reserved_ordinary_range(base, dispatch_state_count, arch);
-  if (below_entry_window || unaligned || beyond_ordinary_file || overlaps_reserved ||
-      overlaps_owner || overlaps_exec) {
+validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResources &resources,
+                          const ConSanMoiOperatingPoint &point,
+                          const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
+  if (point.moi_dispatch_identity.sgpr()) {
+    const uint16_t base = *point.moi_dispatch_identity.sgpr();
+    const uint16_t width = kMoiDispatchStateSgprCount;
+    const bool overlaps_owner = point.moi_owner_sgpr.base() &&
+                                range_overlaps(base, width, *point.moi_owner_sgpr.base(), 1u);
+    const bool overlaps_exec =
+        point.moi_exec_save_sgpr &&
+        range_overlaps(base, width, *point.moi_exec_save_sgpr,
+                       moi_exec_save_sgpr_count(resolve_moi_exec_save_requirement(
+                                                    request, resources, point, mode_semantics),
+                                                arch));
+    const std::array violations{
+        std::pair{base < 20u, std::string_view{"entry window"}},
+        std::pair{base % 2u != 0u, std::string_view{"alignment"}},
+        std::pair{static_cast<uint32_t>(base) + width > moi_ordinary_sgpr_limit(arch),
+                  std::string_view{"ordinary-file bound"}},
+        std::pair{persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch),
+                  std::string_view{"architectural reservation"}},
+        std::pair{overlaps_owner, std::string_view{"owner temporary"}},
+        std::pair{overlaps_exec, std::string_view{"EXEC-save window"}},
+    };
     std::string reason;
-    const auto append_reason = [&](std::string_view item) {
+    for (const auto &[violated, item] : violations) {
+      if (!violated)
+        continue;
       if (!reason.empty())
         reason += ", ";
       reason += item;
-    };
-    if (below_entry_window)
-      append_reason("entry window");
-    if (unaligned)
-      append_reason("alignment");
-    if (beyond_ordinary_file)
-      append_reason("ordinary-file bound");
-    if (overlaps_reserved)
-      append_reason("architectural reservation");
-    if (overlaps_owner)
-      append_reason("owner temporary");
-    if (overlaps_exec)
-      append_reason("EXEC-save window");
-    return "ConSan MOI persistent dispatch-ID SGPR pair s" + std::to_string(base) + ":s" +
-           std::to_string(base + dispatch_state_count - 1u) + " violates " + reason;
+    }
+    if (!reason.empty()) {
+      return "ConSan MOI persistent dispatch-ID SGPR pair s" + std::to_string(base) + ":s" +
+             std::to_string(base + width - 1u) + " violates " + reason;
+    }
   }
-  return std::nullopt;
+  const bool inline_layout =
+      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
+      ConSanMoiScalarSpillLayout::Inline;
+  const std::span<const consan_detail::ScalarOwnerContextSummary> no_contexts;
+  const MoiScalarPlacementDomain domain(arch, moi_ordinary_sgpr_limit(arch), no_contexts);
+  const auto invalid = [&](std::optional<uint16_t> base, uint16_t width) {
+    return base && !domain.legal_range(*base, width);
+  };
+  const uint16_t exec_count = moi_exec_save_sgpr_count(
+      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
+  const bool exec_invalid = invalid(point.moi_exec_save_sgpr, exec_count);
+  const bool owner_invalid = invalid(point.moi_owner_sgpr.base(), 1u);
+  bool persistent_invalid = false;
+  point.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
+    persistent_invalid |= invalid(base, width);
+  });
+  bool auxiliary_invalid = false;
+  point.for_each_auxiliary_sgpr_range([&](std::optional<uint16_t> base, uint16_t width) {
+    auxiliary_invalid |= invalid(base, width);
+  });
+  const bool branch_only_scalar_invalid =
+      point.moi_branch_only_spill &&
+      (!inline_layout || !point.has_inline_moi_scalar_spill() ||
+       !consan_uses_gfx12_encoding(arch) || !point.moi_exec_save_sgpr || point.moi_scalar_router);
+  const bool dynamic_bootstrap_invalid = [&] {
+    if (!point.moi_branch_only_spill || !point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
+      return false;
+    const uint16_t base = *point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr;
+    MoiScalarPlacementDomain bootstrap_domain = domain;
+    bootstrap_domain.occupy_dynamic_stack_state();
+    bootstrap_domain.occupy(point.moi_exec_save_sgpr, exec_count);
+    point.moi_persistent_sgprs.for_each_range(
+        [&](std::optional<uint16_t> reg, uint16_t width) { bootstrap_domain.occupy(reg, width); });
+    return !inline_layout || !point.has_inline_moi_scalar_spill() ||
+           !point.moi_dynamic_stack_spill || !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
+           point.moi_scalar_router ||
+           !bootstrap_domain.can_select(base, 2u, /*require_dead=*/false);
+  }();
+  if (!exec_invalid && !owner_invalid && !persistent_invalid && !auxiliary_invalid &&
+      !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)
+    return std::nullopt;
+  return "ConSan MOI scalar instrumentation state aliases an architectural special SGPR";
 }
 
 [[nodiscard]] std::optional<std::string>
@@ -4255,59 +4279,6 @@ validate_moi_dispatch_id_vgprs(const ConSanMoiOperatingPoint &point) {
            "the architectural VGPR file";
   }
   return std::nullopt;
-}
-
-[[nodiscard]] std::optional<std::string> validate_moi_ordinary_scalar_state(
-    const ConSanRequest &request, const BoundRuntimeResources &resources,
-    const ConSanMoiOperatingPoint &point, const MoiObjectModeSemantics &mode_semantics,
-    rj_code_arch_t arch) {
-  const ConSanMoiOperatingPoint &options = point;
-  const uint16_t limit = moi_ordinary_sgpr_limit(arch);
-  const bool inline_layout =
-      moi_mode_operations(request.moi_engine).transient_scalar_placement.spill_layout ==
-      ConSanMoiScalarSpillLayout::Inline;
-  const std::span<const consan_detail::ScalarOwnerContextSummary> no_contexts;
-  const MoiScalarPlacementDomain domain(arch, limit, no_contexts);
-  const auto invalid = [&](std::optional<uint16_t> base, uint16_t width) {
-    return base && !domain.legal_range(*base, width);
-  };
-  const uint16_t exec_count = moi_exec_save_sgpr_count(
-      resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
-  const bool exec_invalid = invalid(options.moi_exec_save_sgpr, exec_count);
-  const bool owner_invalid = invalid(options.moi_owner_sgpr.base(), 1u);
-  bool persistent_invalid = false;
-  options.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
-    persistent_invalid |= invalid(base, width);
-  });
-  bool auxiliary_invalid = false;
-  options.for_each_auxiliary_sgpr_range([&](std::optional<uint16_t> base, uint16_t width) {
-    auxiliary_invalid |= invalid(base, width);
-  });
-  const bool branch_only_scalar_invalid =
-      options.moi_branch_only_spill && (!inline_layout || !options.has_inline_moi_scalar_spill() ||
-                                        !consan_uses_gfx12_encoding(arch) ||
-                                        !options.moi_exec_save_sgpr || options.moi_scalar_router);
-  const bool dynamic_bootstrap_invalid = [&] {
-    if (!options.moi_branch_only_spill ||
-        !options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
-      return false;
-    const uint16_t base = *options.moi_branch_only_spill->dynamic_stack_borrowed_sgpr;
-    bool overlaps_persistent = false;
-    options.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> reg, uint16_t width) {
-      overlaps_persistent |= reg && range_overlaps(base, 2u, *reg, width);
-    });
-    return !inline_layout || !options.has_inline_moi_scalar_spill() ||
-           !options.moi_branch_only_spill || !options.moi_dynamic_stack_spill ||
-           !consan_uses_gfx12_encoding(arch) || base % 2u != 0u ||
-           moi_sgpr_range_overlaps_dynamic_stack_state(base, 2u) ||
-           (options.moi_exec_save_sgpr &&
-            range_overlaps(base, 2u, *options.moi_exec_save_sgpr, exec_count)) ||
-           options.moi_scalar_router || overlaps_persistent;
-  }();
-  if (!exec_invalid && !owner_invalid && !persistent_invalid && !auxiliary_invalid &&
-      !branch_only_scalar_invalid && !dynamic_bootstrap_invalid)
-    return std::nullopt;
-  return "ConSan MOI scalar instrumentation state aliases an architectural special SGPR";
 }
 
 [[nodiscard]] ConSanMoiPersistentPlacementUpdate configure_automatic_moi_persistent_vgprs(
@@ -5194,29 +5165,19 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
                                 const ConSanMoiOperatingPoint &point,
                                 const MoiObjectModeSemantics &mode_semantics, rj_code_arch_t arch) {
   uint16_t required_count = 0;
-  if (point.moi_exec_save_sgpr) {
-    const uint16_t count = moi_exec_save_sgpr_count(
-        resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch);
-    required_count = static_cast<uint16_t>(*point.moi_exec_save_sgpr + count);
-  }
-  if (request.moi_owner_source == ConSanMoiOwnerSource::HwId && point.moi_owner_sgpr.base()) {
-    required_count = std::max<uint16_t>(required_count,
-                                        static_cast<uint16_t>(*point.moi_owner_sgpr.base() + 1u));
-  }
-  if (point.moi_dispatch_identity.sgpr()) {
-    required_count = std::max<uint16_t>(
-        required_count,
-        static_cast<uint16_t>(*point.moi_dispatch_identity.sgpr() + kMoiDispatchStateSgprCount));
-  }
-  point.moi_persistent_sgprs.for_each_range([&](std::optional<uint16_t> base, uint16_t width) {
-    if (base) {
-      required_count = std::max<uint16_t>(required_count, static_cast<uint16_t>(*base + width));
-    }
-  });
-  point.for_each_auxiliary_sgpr_range([&](std::optional<uint16_t> base, uint16_t width) {
+  const auto note_range = [&](std::optional<uint16_t> base, uint16_t width) {
     if (base)
       required_count = std::max<uint16_t>(required_count, static_cast<uint16_t>(*base + width));
-  });
+  };
+  note_range(
+      point.moi_exec_save_sgpr,
+      moi_exec_save_sgpr_count(
+          resolve_moi_exec_save_requirement(request, resources, point, mode_semantics), arch));
+  if (request.moi_owner_source == ConSanMoiOwnerSource::HwId)
+    note_range(point.moi_owner_sgpr.base(), 1u);
+  note_range(point.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
+  point.moi_persistent_sgprs.for_each_range(note_range);
+  point.for_each_auxiliary_sgpr_range(note_range);
   if (required_count == 0)
     return;
   note_maximum_descriptor_extents(requirements, plan.owner_descriptor_file_offsets, required_count);

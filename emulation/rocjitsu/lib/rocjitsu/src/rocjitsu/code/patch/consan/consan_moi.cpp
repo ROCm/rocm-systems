@@ -252,12 +252,8 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
     result.moi_operating_point = effective_point;
   std::optional<std::string> scalar_validation_failure;
   if (result.outcome != ConSanTransformOutcome::Unsupported) {
-    scalar_validation_failure = validate_moi_dispatch_id_sgprs(
+    scalar_validation_failure = validate_moi_scalar_state(
         effective_options, effective_options, effective_point, mode_plan.semantics, arch);
-    if (!scalar_validation_failure) {
-      scalar_validation_failure = validate_moi_ordinary_scalar_state(
-          effective_options, effective_options, effective_point, mode_plan.semantics, arch);
-    }
   }
   if (scalar_validation_failure) {
     result.outcome = ConSanTransformOutcome::Unsupported;
