@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <system_error>
 
 namespace rocprofiler_compute_tool
@@ -31,6 +32,9 @@ public:
     virtual std::filesystem::path weakly_canonical(const std::filesystem::path& path,
                                                    std::error_code&             error)         = 0;
     virtual std::filesystem::path relative_path(const std::filesystem::path& path)             = 0;
+    virtual void                  write_file(const std::filesystem::path& path,
+                                             const std::string&           contents,
+                                             std::error_code&             error)               = 0;
 };
 
 class filesystem_wrapper_impl_t : public filesystem_wrapper_t
@@ -50,5 +54,8 @@ public:
     std::filesystem::path weakly_canonical(const std::filesystem::path& path,
                                            std::error_code&             error) override;
     std::filesystem::path relative_path(const std::filesystem::path& path) override;
+    void                  write_file(const std::filesystem::path& path,
+                                     const std::string&           contents,
+                                     std::error_code&             error) override;
 };
 }  // namespace rocprofiler_compute_tool

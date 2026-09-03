@@ -2,6 +2,10 @@
 // SPDX-License-Identifier:  MIT
 #include "test_source_snapshotter.h"
 
+#include "nlohmann/json.hpp"
+
+#include <unistd.h>
+
 #include <algorithm>
 #include <system_error>
 
@@ -53,6 +57,31 @@ std::filesystem::path test_source_snapshotter_t::destination_path(const std::fil
 void test_source_snapshotter_t::set_regular_source(const std::filesystem::path& source_path)
 {
     m_filesystem->set_status(source_path, regular_file_status());
+}
+
+std::string test_source_snapshotter_t::source_path_map_json(const source_path_map_t& source_path_map)
+{
+    auto source_paths = nlohmann::json::object();
+    for (const auto& [raw_path, canonical_path] : source_path_map)
+        source_paths[raw_path.string()] = canonical_path.string();
+
+    return nlohmann::json{{"source_paths", std::move(source_paths)}}.dump();
+}
+
+std::string test_source_snapshotter_t::written_source_path_map() const
+{
+    const auto& write_file_calls = m_filesystem->get_write_file_calls();
+    if (write_file_calls.size() != 1)
+        return {};
+
+    EXPECT_EQ(write_file_calls[0].path,
+              m_destination_root / (std::to_string(getpid()) + "_source_map.json"));
+    return write_file_calls[0].contents;
+}
+
+void test_source_snapshotter_t::expect_no_source_path_map() const
+{
+    EXPECT_TRUE(m_filesystem->get_write_file_calls().empty());
 }
 
 void test_source_snapshotter_t::expect_no_copy() const
@@ -112,6 +141,8 @@ TEST_F(test_source_snapshotter_t, ProvidedRegularSource_CreatesParentAndCopiesTo
     set_regular_source(source_path);
 
     EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, m_destination_root));
+
+    EXPECT_EQ(written_source_path_map(), source_path_map_json({{source_path, source_path}}));
 
     EXPECT_EQ(m_filesystem->get_create_directories_calls(),
               std::vector<std::filesystem::path>{destination.parent_path()});
@@ -231,6 +262,40 @@ TEST_F(test_source_snapshotter_t, ProvidedCopyError_DoesNotThrow)
 
     ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
     EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].source, source_path);
+    expect_no_source_path_map();
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedNonCanonicalSource_MapsSpelledPathToCanonicalPath)
+{
+    const std::filesystem::path source_path    = "/sources/app/bin/../include/kernel.h";
+    const std::filesystem::path canonical_path = "/sources/app/include/kernel.h";
+    set_regular_source(source_path);
+    m_filesystem->set_weakly_canonical(source_path, canonical_path);
+
+    m_snapshotter->snapshot({source_path}, m_destination_root);
+
+    EXPECT_EQ(written_source_path_map(), source_path_map_json({{source_path, canonical_path}}));
+    ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
+    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].destination, destination_path(canonical_path));
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedMissingSource_LeavesItOutOfMap)
+{
+    const std::filesystem::path present_source_path = "/sources/present.cpp";
+    const std::filesystem::path missing_source_path = "/sources/missing.cpp";
+    set_regular_source(present_source_path);
+
+    m_snapshotter->snapshot({present_source_path, missing_source_path}, m_destination_root);
+
+    EXPECT_EQ(written_source_path_map(),
+              source_path_map_json({{present_source_path, present_source_path}}));
+}
+
+TEST_F(test_source_snapshotter_t, ProvidedNoCopiedSource_WritesNoSourcePathMap)
+{
+    m_snapshotter->snapshot({"/sources/missing.cpp"}, m_destination_root);
+
+    expect_no_source_path_map();
 }
 
 TEST_F(test_source_snapshotter_t, ProvidedSameBasenameDifferentDirectories_CopiesBoth)
