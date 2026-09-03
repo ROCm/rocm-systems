@@ -27,7 +27,9 @@
 #include "lib/rocprofiler-sdk/kfd/dispatch_hub.hpp"
 #include "lib/rocprofiler-sdk/kfd/complete_signal_less_dispatch.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/owner_registry.hpp"
+#include "lib/rocprofiler-sdk/kfd/record_pipe.hpp"
 
 #include <gtest/gtest.h>
 
@@ -138,7 +140,8 @@ register_win(hub_t& hub, correlation_key key, window_ptr window, uint64_t corr_i
 {
     auto batch = std::vector<hub_t::registration>{};
     batch.emplace_back(reg_of(key, std::move(window), corr_id));
-    return hub.register_batch(std::move(batch));
+    auto evicted = std::vector<hub_t::leaked>{};
+    return hub.register_batch(std::move(batch), evicted);
 }
 
 std::optional<hub_t::proven>
@@ -222,6 +225,15 @@ TEST(DispatchHub, resolution_rule)
     ASSERT_TRUE(register_win(hub, K, mk_window(5, 200), /*corr_id=*/2));
     EXPECT_FALSE(end_nostart(hub, K, 300).has_value());
 }
+{  // a stale EOP (its own START was lost, it predates this window) must NOT
+   // consume the newer entry: reject BEFORE take, leaving it PENDING for its own.
+    auto hub = hub_t{};
+    ASSERT_TRUE(register_win(hub, K, mk_window(5, 100)));
+    EXPECT_FALSE(end_nostart(hub, K, 50).has_value()) << "EOP before t_open rejected";
+    EXPECT_FALSE(end_nostart(hub, K, 100).has_value()) << "EOP at t_open rejected";
+    EXPECT_EQ(hub.pending_count(), 1u) << "a rejected EOP consumes nothing";
+    EXPECT_TRUE(end_nostart(hub, K, 300).has_value()) << "its own later EOP still resolves";
+}
 }
 {  // a contained START with end < start is dropped (free sanity check).
     auto hub = hub_t{};
@@ -257,7 +269,8 @@ TEST(DispatchHub, admissibility_and_batch_atomicity)
         auto batch = std::vector<hub_t::registration>{};
         batch.emplace_back(reg_of(key_of(4, 10), mk_window(4, 100)));
         batch.emplace_back(reg_of(key_of(4, 2), mk_window(4, 100)));  // collides (open)
-        EXPECT_FALSE(hub.register_batch(std::move(batch)));
+        auto evicted = std::vector<hub_t::leaked>{};
+        EXPECT_FALSE(hub.register_batch(std::move(batch), evicted));
         EXPECT_EQ(hub.pending_count(), 1u) << "no partial registration";
     }
     {  // a duplicate key within one batch is rejected.
@@ -265,7 +278,8 @@ TEST(DispatchHub, admissibility_and_batch_atomicity)
         auto batch = std::vector<hub_t::registration>{};
         batch.emplace_back(reg_of(key_of(4, 1), mk_window(4, 100)));
         batch.emplace_back(reg_of(key_of(4, 1), mk_window(4, 100)));
-        EXPECT_FALSE(hub.register_batch(std::move(batch)));
+        auto evicted = std::vector<hub_t::leaked>{};
+        EXPECT_FALSE(hub.register_batch(std::move(batch), evicted));
         EXPECT_EQ(hub.pending_count(), 0u);
     }
     {  // quarantine refuses every future registration and is permanent.
@@ -300,7 +314,8 @@ TEST(DispatchHub, gc_closed_windows)
         auto batch = std::vector<hub_t::registration>{};
         batch.emplace_back(reg_of(key_of(5, 1), w, /*corr_id=*/11));
         batch.emplace_back(reg_of(key_of(5, 2), w, /*corr_id=*/12));
-        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+        auto evicted = std::vector<hub_t::leaked>{};
+        ASSERT_TRUE(hub.register_batch(std::move(batch), evicted));
     }
     w->gc_deadline_ns = 1000;
     w->t_close.store(200, std::memory_order_release);
@@ -374,7 +389,8 @@ TEST(DispatchHub, recycle_maps_each_start_to_its_own_window)
     {
         auto batch = std::vector<hub_t::registration>{};
         batch.emplace_back(reg_of(K, mk_window(5, 100, 200), /*corr_id=*/10, /*payload_id=*/1));
-        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+        auto evicted = std::vector<hub_t::leaked>{};
+        ASSERT_TRUE(hub.register_batch(std::move(batch), evicted));
     }
     {
         auto batch = std::vector<hub_t::registration>{};
@@ -382,7 +398,8 @@ TEST(DispatchHub, recycle_maps_each_start_to_its_own_window)
                                   mk_window(5, 200, kWindowOpen, /*first=*/false),
                                   /*corr_id=*/20,
                                   /*payload_id=*/2));
-        ASSERT_TRUE(hub.register_batch(std::move(batch)));
+        auto evicted = std::vector<hub_t::leaked>{};
+        ASSERT_TRUE(hub.register_batch(std::move(batch), evicted));
     }
     EXPECT_EQ(hub.pending_count(), 2u) << "both recycled owners live at once";
 
@@ -822,4 +839,145 @@ TEST(fork_safety, forked_child_short_circuits_and_survives_normal_exit)
 
     EXPECT_EQ(parent_only.pending_count(), 1u);
     EXPECT_TRUE(end_nostart(parent_only, key_of(9, 1), 300).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// D9 (F7) per-GPU cap ARITHMETIC seam. hub_cap_need is the pure branch the review
+// flagged: it must never form `live + batch` (overflow) or subtract into a wrap on
+// a healthy GPU (the underflow that would evict everything). Spec 1191-1202,1227-1230.
+// ---------------------------------------------------------------------------
+TEST(HubCapArithmetic, checked_shortfall_never_wraps)
+{
+    // cap 1, empty GPU: a one-entry batch fits; a two-entry batch needs one victim.
+    EXPECT_EQ(hub_cap_need(/*live=*/0, /*batch=*/1, /*cap=*/1), 0u);
+    EXPECT_EQ(hub_cap_need(0, 2, 1), 1u);
+
+    // A batch LARGER than the whole cap must report the exact shortfall, never wrap
+    // into "no shortfall" (the `live + batch - cap` overflow bug).
+    EXPECT_EQ(hub_cap_need(0, 5, 2), 3u);
+
+    // live == cap exactly with a one-entry batch takes the shortfall path.
+    EXPECT_EQ(hub_cap_need(1, 1, 1), 1u);
+    EXPECT_EQ(hub_cap_need(10, 1, 10), 1u);
+
+    // live < cap on a healthy GPU takes ZERO victims -- the underflow regression the
+    // `live + batch - cap` form causes (it would wrap to a huge need here).
+    EXPECT_EQ(hub_cap_need(1, 1, 10), 0u);
+    EXPECT_EQ(hub_cap_need(5, 1, 10), 0u);
+
+    // live > cap: exact overflow-free shortfall.
+    EXPECT_EQ(hub_cap_need(12, 3, 10), 5u);
+}
+
+// ---------------------------------------------------------------------------
+// D2 (F4) GC gate predicate + counter protocol. The predicate is pure (all four
+// combos); the reserve->publish counter balance is exercised through the real
+// copy/spill helpers. Spec 1324-1329.
+// ---------------------------------------------------------------------------
+TEST(GcGate, predicate_truth_table)
+{
+    EXPECT_TRUE(gc_gate_open(/*inflight=*/0, /*pipe_empty=*/true));  // only open state
+    EXPECT_FALSE(gc_gate_open(1, true)) << "copied-but-unpublished record in flight";
+    EXPECT_FALSE(gc_gate_open(0, false)) << "pipe not drained";
+    EXPECT_FALSE(gc_gate_open(3, false));
+}
+
+// The reader-published in-flight counter is reserved before a record leaves the
+// ring and discharged at publish, so a full copy->publish cycle nets to 0 and the
+// gate reopens; while a batch sits unpublished in overflow the counter stays > 0.
+TEST(GcGate, spill_publish_balances_the_inflight_counter)
+{
+    auto pipe     = record_pipe<4>{};
+    auto overflow = std::deque<record_batch>{};
+    auto inflight = std::atomic<uint64_t>{0};
+
+    // Two batches parked in overflow, reserved by the (simulated) copy: 3 + 2 = 5.
+    auto b0 = record_batch{};
+    b0.records.resize(3);
+    auto b1 = record_batch{};
+    b1.records.resize(2);
+    overflow.emplace_back(std::move(b0));
+    overflow.emplace_back(std::move(b1));
+    inflight.fetch_add(5, std::memory_order_release);  // reserve-per-region analogue
+
+    EXPECT_FALSE(gc_gate_open(inflight.load(std::memory_order_acquire), pipe.empty()))
+        << "GC gated while copied records sit unpublished in overflow";
+
+    ASSERT_TRUE(spill_overflow_to_pipe(pipe, overflow, &inflight));
+    EXPECT_EQ(inflight.load(std::memory_order_acquire), 0u) << "every reservation discharged";
+    EXPECT_FALSE(pipe.empty()) << "batches are now visible to the processor";
+
+    // Drain the pipe; only then is the gate open.
+    while(pipe.peek() != nullptr)
+        pipe.pop();
+    EXPECT_TRUE(gc_gate_open(inflight.load(std::memory_order_acquire), pipe.empty()));
+}
+
+// ---------------------------------------------------------------------------
+// D8 shared env parse contract (env_long_in_range): reject-and-default, never
+// clamp; one verdict per case. Spec 1018-1040. Uses a private env var so no other
+// accessor's cached static-const read is disturbed.
+// ---------------------------------------------------------------------------
+TEST(EnvLongInRange, reject_and_default_never_clamp)
+{
+    const char* var = "ROCPROFILER_KFD_DLOG_TEST_ENVLONG";
+    auto        set = [&](const char* v) { ::setenv(var, v, 1); };
+
+    ::unsetenv(var);
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value())
+        << "unset -> nullopt (caller default)";
+
+    set("100");
+    EXPECT_EQ(env_long_in_range(var, 0, 1000).value_or(-1), 100);  // valid
+
+    set("0");
+    EXPECT_EQ(env_long_in_range(var, 0, 1000).value_or(-1), 0) << "0 is in-range here, honored";
+
+    set("100junk");
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value()) << "trailing junk rejected";
+
+    set("100 ");
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value()) << "trailing whitespace rejected";
+
+    set("-5");
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value()) << "below range rejected";
+
+    set("1001");
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value())
+        << "above range rejected, not clamped";
+
+    set("4294967296");  // > INT_MAX: must not be narrowed into range
+    EXPECT_FALSE(env_long_in_range(var, 0, 1000).has_value())
+        << "above INT_MAX rejected, not narrowed";
+
+    set("1000");
+    EXPECT_EQ(env_long_in_range(var, 0, 1000).value_or(-1), 1000) << "upper endpoint accepted";
+
+    ::unsetenv(var);
+}
+
+// The strict opt-in switch: ONLY an explicit true value enables. Everything else
+// -- unset, empty, a false word, a typo, a number -- is DISABLED (fail-closed),
+// and nothing throws or fatals.
+TEST(EnvBoolOptIn, only_explicit_true_enables)
+{
+    const char* var = "ROCPROFILER_KFD_DLOG_TEST_ENVBOOL";
+    auto        set = [&](const char* v) { ::setenv(var, v, 1); };
+
+    ::unsetenv(var);
+    EXPECT_FALSE(env_bool_opt_in(var)) << "unset -> off";
+
+    for(const char* _yes : {"1", "true", "yes", "on"})
+    {
+        set(_yes);
+        EXPECT_TRUE(env_bool_opt_in(var)) << _yes << " enables";
+    }
+    for(const char* _no :
+        {"0", "false", "no", "off", "", "flase", "2", "TRUE", "99999999999999999"})
+    {
+        set(_no);
+        EXPECT_FALSE(env_bool_opt_in(var)) << "'" << _no << "' must not enable";
+    }
+
+    ::unsetenv(var);
 }

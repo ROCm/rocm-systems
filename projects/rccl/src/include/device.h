@@ -55,6 +55,25 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define NCCL_MAX_OPS 2048
 #define NCCL_STEPS 8
 
+// Build gate for the experimental TDM SIMPLE path, set to 1 by -DENABLE_TDM_SIMPLE=ON.
+// Always defined so every site can use `#if ENABLE_TDM_SIMPLE` rather than mixing ifdef and if.
+#ifndef ENABLE_TDM_SIMPLE
+#define ENABLE_TDM_SIMPLE 0
+#endif
+
+// Global-address alignment for TDM's direct L2->LDS path.
+#define RCCL_TDM_ALIGN 256
+
+// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
+// every kernel pays the LDS: 167KB of 320KB at 16KB/warp. The arch check cannot move to CMake:
+// it must be zero on every device pass that is not gfx1250, or those kernels reserve LDS they
+// can never use. Host and non-gfx1250 passes therefore see 0 and the member disappears.
+#if ENABLE_TDM_SIMPLE && defined(__gfx1250__)
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
+#else
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 0
+#endif
+
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
 #else
@@ -622,6 +641,9 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+#if ENABLE_TDM_SIMPLE
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;

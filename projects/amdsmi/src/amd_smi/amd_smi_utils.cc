@@ -1437,3 +1437,22 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type) 
       return nullptr;
   }
 }
+
+void init_asic_info_defaults(amdsmi_asic_info_t* info) {
+  if (info == nullptr) {
+    return;
+  }
+  std::memset(info, 0, sizeof(*info));
+  info->vendor_id = std::numeric_limits<uint32_t>::max();
+  info->subvendor_id = std::numeric_limits<uint32_t>::max();
+  info->device_id = std::numeric_limits<uint64_t>::max();
+  info->rev_id = std::numeric_limits<uint32_t>::max();
+  std::snprintf(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, "ffffffffffffffff");
+  info->oam_id = std::numeric_limits<uint32_t>::max();
+  info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
+  info->target_graphics_version = std::numeric_limits<uint64_t>::max();
+  info->subsystem_id = std::numeric_limits<uint32_t>::max();
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  info->chip_rev_id = std::numeric_limits<uint32_t>::max();
+  info->external_rev_id = std::numeric_limits<uint32_t>::max();
+}
