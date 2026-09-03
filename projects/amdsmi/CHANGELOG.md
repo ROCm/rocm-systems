@@ -80,6 +80,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   | Invalid parameter value | `5` | `197` |
   | Missing parameter value | `6` | `198` |
   | Command not supported (CLI, parse-time) | `7` | `199` (distinct from library `NOT_SUPPORTED` = `2`) |
+  | Device interface unavailable (CLI, runtime) | — | `200` |
   | Required target/argument missing | `9` | `201` |
   | Invalid subcommand | `10` | `202` |
   | Permission denied | `11` | `10` (real `AMDSMI_STATUS_NO_PERM`) |

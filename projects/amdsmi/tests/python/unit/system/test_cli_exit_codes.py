@@ -1368,6 +1368,56 @@ def _build_reset_specs(reset):
     }
 
 
+class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
+    """The gpu_od ``--fan`` error branches must record, not just print.
+
+    _build_set_specs drives --fan down the legacy hwmon path (detect_gpu_od ->
+    False), so these two branches are reached nowhere else: both printed an
+    error and left the exit code at 0, while their hwmon sibling recorded.
+    """
+
+    def setUp(self):
+        if _CLI_DRIVE_SKIP:
+            self.skipTest(_CLI_DRIVE_SKIP)
+        self.set_value = _load_set_value()
+
+    def _drive_fan(self, od_range, fan_arg):
+        cmd = _make_set_gpu_cmd(self.set_value)
+        cmd.helpers.detect_gpu_od = lambda bdf: (True, "/fake/gpu_od")
+        cmd.helpers.parse_gpu_od_fan_range = lambda path: od_range
+        args = _gpu_set_args(self.set_value, fan=fan_arg)
+        with _patch_amdsmi_interface(
+            self.set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, amdsmi_set_gpu_fan_speed=_noop
+        ):
+            cmd.set_gpu(args)
+        return cmd.helpers.error_collector
+
+    def test_unreadable_od_range_records_device_interface_unavailable(self):
+        """OD_RANGE unreadable: parse_gpu_od_fan_range swallows the OSError and
+        returns (None, None), so there is no library status -- the CLI records
+        DEVICE_INTERFACE_UNAVAILABLE (200) rather than exiting 0."""
+        collector = self._drive_fan((None, None), (50, True))
+        self.assertTrue(collector.has_errors)
+        self.assertEqual(
+            collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.DEVICE_INTERFACE_UNAVAILABLE)
+        )
+
+    def test_value_outside_od_range_records_invalid_parameter_value(self):
+        """Out-of-range value on gpu_od must resolve to the same code its legacy
+        hwmon sibling records; the fan interface a GPU exposes must not change
+        the exit code for identical user input."""
+        collector = self._drive_fan((0, 100), (250, False))
+        self.assertTrue(collector.has_errors)
+        self.assertEqual(
+            collector.resolve_exit_code(), int(cli_exc.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
+        )
+
+    def test_gpu_od_success_records_nothing(self):
+        """Control: a value inside OD_RANGE still exits 0."""
+        collector = self._drive_fan((0, 100), (50, True))
+        self.assertFalse(collector.has_errors)
+
+
 class TestResetGpuGAllFailureGuards(unittest.TestCase):
     """A per-device GPU `reset` failure must be recorded and must NOT crash."""
 

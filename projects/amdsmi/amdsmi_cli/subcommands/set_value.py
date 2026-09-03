@@ -1009,7 +1009,16 @@ class SetValueCommands:
                             f"Unable to read gpu_od OD_RANGE from {gpu_od_path}. Cannot set fan speed.",
                             include_driver_note=True,
                         )
-                        self.logger.store_output(args.gpu, "fan", result)
+                        # No library status to fold: parse_gpu_od_fan_range() reads sysfs
+                        # directly because no API reports the OD_RANGE minimum. Switch to
+                        # record_library_error() when amdsmi_get_gpu_fan_speed_range() lands.
+                        self.helpers.store_device_error(
+                            self.logger,
+                            args.gpu,
+                            "fan",
+                            result,
+                            code=AmdSmiExitCode.DEVICE_INTERFACE_UNAVAILABLE,
+                        )
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
                         return
@@ -1033,7 +1042,13 @@ class SetValueCommands:
                                 f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: {od_min}-{od_max} or use percentage (0-100%)",
                                 include_driver_note=True,
                             )
-                            self.logger.store_output(args.gpu, "fan", result)
+                            self.helpers.store_device_error(
+                                self.logger,
+                                args.gpu,
+                                "fan",
+                                result,
+                                code=AmdSmiExitCode.INVALID_PARAMETER_VALUE,
+                            )
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
                             return
@@ -1052,9 +1067,12 @@ class SetValueCommands:
                             )  # round down (aka floor) to nearest whole number
                         else:
                             result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
-                            self.logger.store_output(args.gpu, "fan", result)
-                            self.helpers.error_collector.record(
-                                AmdSmiExitCode.INVALID_PARAMETER_VALUE
+                            self.helpers.store_device_error(
+                                self.logger,
+                                args.gpu,
+                                "fan",
+                                result,
+                                code=AmdSmiExitCode.INVALID_PARAMETER_VALUE,
                             )
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
