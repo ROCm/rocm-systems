@@ -43,6 +43,11 @@
 extern ncclRma_t ncclRmaIbProxy;
 extern ncclRma_t IbCastRmaIbProxy;
 
+// Building a vNIC is a net-plugin operation; the RMA proxy has no makeVDevice of
+// its own and reads the same device table these populate.
+extern ncclNet_t ncclNetIb;
+extern ncclNet_t netIbCast;
+
 namespace RCCLRmaTests
 {
 
@@ -92,6 +97,13 @@ protected:
 
     virtual int  GetNumContexts() const { return 1; }
     virtual bool UseDmaBuf()     const { return false; }
+
+    // Device index the fixture connects over, or a negative value to ask for a
+    // skip with skipReason_ explaining why. Called after rma_->devices(), so an
+    // override may inspect nDevices_ and build virtual devices.
+    virtual int SelectDevice() { return 0; }
+
+    std::string skipReason_;
 
     void SetUp() override
     {
@@ -210,7 +222,26 @@ protected:
             return false;
         }
 
-        // 3. listen — produce this rank's listen handle
+        // 3. pick the device to connect over, then listen on it. The default is
+        // physical device 0; the fused-NIC fixture builds a vNIC and returns
+        // that instead. The verdict is reduced so a host that cannot satisfy
+        // the request does not skip alone and strand its peers in the
+        // allgather below.
+        int selected = SelectDevice();
+        int unavailable = (selected < 0) ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &unavailable, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if(unavailable)
+        {
+            // See comment above on the bool-vs-void GTEST_SKIP wrapping.
+            [&]() {
+                GTEST_SKIP() << (skipReason_.empty() ? "Requested RMA device unavailable on a peer"
+                                                     : skipReason_);
+            }();
+            return false;
+        }
+        defaultDevice_ = selected;
+
+        // 4. listen — produce this rank's listen handle
         std::vector<char> localHandle(NCCL_NET_HANDLE_MAXSIZE, 0);
         r = rma_->listen(pluginCtx_, defaultDevice_,
                          localHandle.data(), &listenComm_);
@@ -220,7 +251,7 @@ protected:
             return false;
         }
 
-        // 4. allgather all listen handles
+        // 5. allgather all listen handles
         std::vector<char> allHandles(NCCL_NET_HANDLE_MAXSIZE * worldSize_, 0);
         int mpiRet = MPI_Allgather(localHandle.data(), NCCL_NET_HANDLE_MAXSIZE, MPI_BYTE,
                                    allHandles.data(),  NCCL_NET_HANDLE_MAXSIZE, MPI_BYTE,
@@ -237,7 +268,7 @@ protected:
             handlePtrs[i] = allHandles.data() + i * NCCL_NET_HANDLE_MAXSIZE;
         }
 
-        // 5. connect (N-way collective)
+        // 6. connect (N-way collective)
         r = rma_->connect(pluginCtx_, handlePtrs.data(),
                           worldSize_, worldRank_,
                           listenComm_, &collComm_);
@@ -247,7 +278,7 @@ protected:
             return false;
         }
 
-        // 6. createContext — number of contexts driven by the parameter.
+        // 7. createContext — number of contexts driven by the parameter.
         // The RMA v14 config is host-only: no signal/counter pools or device
         // handle (those belong to the device-initiated GIN v14 surface).
         ncclRmaConfig_t cfg = {};
@@ -509,6 +540,61 @@ class RmaMPIStressTest : public RmaMPITestBase
 {
 protected:
     int GetNumContexts() const override { return 1; }
+};
+
+// ---------------------------------------------------------------------------
+// Non-parameterized fixture — connects over a fused vNIC instead of a physical
+// NIC.
+//
+// Fusion is topology-driven in production: ncclTopoMakeVDevice calls into the
+// plugin during communicator setup. A plugin-level fixture never goes through
+// that, so it has to build the vNIC itself, the way NicFusionTests does.
+// ---------------------------------------------------------------------------
+class RmaMPIFusedNicTest : public RmaMPITestBase
+{
+protected:
+    int GetNumContexts() const override { return 1; }
+
+    int SelectDevice() override
+    {
+        // The RMA proxy shares net_ib's device table, so the vNIC has to be
+        // built through the matching net plugin rather than the RMA one.
+        ncclNet_t* net = (rma_ == &IbCastRmaIbProxy) ? &netIbCast : &ncclNetIb;
+
+        if(nDevices_ < 2)
+        {
+            skipReason_ = "Fused vNIC needs at least 2 IB devices on this host";
+            return -1;
+        }
+
+        ncclNetVDeviceProps_t vProps{};
+        vProps.ndevs   = 2;
+        vProps.devs[0] = 0;
+        vProps.devs[1] = 1;
+
+        int vdev = -1;
+        if(net->makeVDevice(&vdev, &vProps) != ncclSuccess || vdev < 0)
+        {
+            // Rejected when NCCL_IB_MERGE_NICS=0, and when the two NICs are too
+            // far apart for the plugin to merge.
+            skipReason_ = "makeVDevice refused to fuse devices 0 and 1 "
+                          "(needs NCCL_IB_MERGE_NICS=1 and two mergeable NICs)";
+            return -1;
+        }
+
+        // Confirm the plugin really fused rather than handing back a
+        // single-device vNIC, which would make the test silently vacuous.
+        ncclNetProperties_t props{};
+        if(rma_->getProperties(vdev, &props) != ncclSuccess || props.vProps.ndevs < 2)
+        {
+            skipReason_ = "vNIC came back with a single device; nothing was fused";
+            return -1;
+        }
+
+        TEST_INFO("RmaMPIFusedNicTest: using fused dev %d (%s, ndevs=%d)",
+                  vdev, props.name, props.vProps.ndevs);
+        return vdev;
+    }
 };
 
 } // namespace RCCLRmaTests
