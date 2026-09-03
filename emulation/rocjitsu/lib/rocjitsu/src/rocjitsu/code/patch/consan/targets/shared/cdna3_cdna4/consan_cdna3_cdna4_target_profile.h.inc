@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Target-profile facts shared by gfx942 and gfx950.
-[[nodiscard]] constexpr ConSanTargetProfile consan_gfx9_cdna_target_profile_defaults() {
+/// Target-profile facts shared by CDNA3 and CDNA4.
+[[nodiscard]] constexpr ConSanTargetProfile consan_cdna3_cdna4_target_profile_defaults() {
   ConSanTargetProfile profile;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::PreloadedScalar;
   profile.accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned;

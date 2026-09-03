@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_program_analysis_gfx12_target_ops.h
-/// @brief Shared gfx12 raw atomic normalization recipes.
+/// @file consan_program_analysis_rdna4_cdna5_common.h
+/// @brief Raw instruction normalization shared by RDNA4 and CDNA5.
 
 #pragma once
 
@@ -14,16 +14,16 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
-/// Map the gfx12-family cache-scope field into ConSan's causal vocabulary.
+/// Map the RDNA4/CDNA5 cache-scope field into ConSan's causal vocabulary.
 ///
 /// CU and SE are hardware cache domains, not HSA memory scopes. ConSan treats
 /// them conservatively as wavefront- and workgroup-local visibility for its
 /// detector model; device and system map to agent and system. The exact raw
 /// field remains alongside this product. A target's compiler-qualified
-/// workgroup acquire is a separate decoded fact because gfx1201 spells it with
-/// raw SE while gfx1250 spells it with raw CU.
+/// workgroup acquire is a separate decoded fact because RDNA4 spells it with
+/// raw SE while CDNA5 spells it with raw CU.
 [[nodiscard]] inline constexpr std::optional<ConSanMemoryScope>
-normalize_gfx12_memory_scope(uint32_t raw_scope) {
+normalize_rdna4_cdna5_memory_scope(uint32_t raw_scope) {
   switch (raw_scope) {
   case 0:
     return ConSanMemoryScope::Wavefront;
@@ -39,8 +39,8 @@ normalize_gfx12_memory_scope(uint32_t raw_scope) {
 }
 
 inline ConSanCacheOperationEncoding
-classify_gfx12_cache_operation(std::string_view mnemonic,
-                               bool ordinary_acquire_mutation_supported) {
+classify_rdna4_cdna5_cache_operation(std::string_view mnemonic,
+                                     bool ordinary_acquire_mutation_supported) {
   if (mnemonic == "global_wb")
     return {.operation = ConSanCacheOperation::Release};
   if (mnemonic == "global_inv" || mnemonic == "s_dcache_inv") {
@@ -54,7 +54,8 @@ classify_gfx12_cache_operation(std::string_view mnemonic,
 }
 
 inline ConSanWaitInstructionEncoding
-classify_gfx12_wait_instruction(std::string_view mnemonic, uint32_t word, rj_code_arch_t arch) {
+classify_rdna4_cdna5_wait_instruction(std::string_view mnemonic, uint32_t word,
+                                      rj_code_arch_t arch) {
   const bool bounded_release_counter_form =
       mnemonic == "s_wait_storecnt" || mnemonic == "s_wait_storecnt_dscnt" ||
       mnemonic == "s_wait_loadcnt" || mnemonic == "s_wait_loadcnt_dscnt";
@@ -64,7 +65,7 @@ classify_gfx12_wait_instruction(std::string_view mnemonic, uint32_t word, rj_cod
 
 template <typename Raw>
 std::optional<ConSanScratchComponentEncoding>
-decode_gfx12_scratch_component(std::span<const uint8_t> instruction) {
+decode_rdna4_cdna5_scratch_component(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(Raw))
     return std::nullopt;
   Raw raw{};
@@ -82,7 +83,7 @@ decode_gfx12_scratch_component(std::span<const uint8_t> instruction) {
 
 template <typename Raw>
 std::optional<ConSanLaneTransferEncoding>
-decode_gfx12_lane_transfer(std::span<const uint8_t> instruction, int value_source_operand) {
+decode_rdna4_cdna5_lane_transfer(std::span<const uint8_t> instruction, int value_source_operand) {
   if (instruction.size() < sizeof(Raw))
     return std::nullopt;
   Raw raw{};
@@ -95,9 +96,9 @@ decode_gfx12_lane_transfer(std::span<const uint8_t> instruction, int value_sourc
 
 template <typename Raw>
 ConSanVectorMemoryEncoding
-make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exact_size,
-                                  bool ordinary_well_formed, bool ordinary_mutation_supported,
-                                  uint32_t workgroup_acquire_scope) {
+make_rdna4_cdna5_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exact_size,
+                                        bool ordinary_well_formed, bool ordinary_mutation_supported,
+                                        uint32_t workgroup_acquire_scope) {
   return ConSanVectorMemoryEncoding{
       .raw_op = static_cast<uint32_t>(raw.op),
       .raw_saddr = static_cast<uint32_t>(raw.saddr),
@@ -116,7 +117,7 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
       .raw_segment = 0u,
       .raw_scope = static_cast<uint32_t>(raw.scope),
       .raw_th = static_cast<uint32_t>(raw.th),
-      .scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope)),
+      .scope = normalize_rdna4_cdna5_memory_scope(static_cast<uint32_t>(raw.scope)),
       .encoded_segment = ConSanEncodedFlatSegment::Unspecified,
       .scalar_provenance_sgpr = raw.saddr == null_saddr
                                     ? std::nullopt
@@ -131,10 +132,10 @@ make_gfx12_vector_memory_encoding(const Raw &raw, uint32_t null_saddr, bool exac
 }
 
 template <typename Raw>
-ConSanVectorMemoryDecode decode_gfx12_vector_memory(std::span<const uint8_t> instruction,
-                                                    uint32_t null_saddr, uint32_t expected_encoding,
-                                                    bool mutation_supported,
-                                                    uint32_t workgroup_acquire_scope) {
+ConSanVectorMemoryDecode
+decode_rdna4_cdna5_vector_memory(std::span<const uint8_t> instruction, uint32_t null_saddr,
+                                 uint32_t expected_encoding, bool mutation_supported,
+                                 uint32_t workgroup_acquire_scope) {
   if (instruction.size() < sizeof(Raw))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   Raw raw{};
@@ -150,12 +151,13 @@ ConSanVectorMemoryDecode decode_gfx12_vector_memory(std::span<const uint8_t> ins
                            raw.pad_22_23 == 0u && high_padding && raw.pad_63 == 0u;
   return {
       .status = ConSanTargetDecodeStatus::Decoded,
-      .encoding = make_gfx12_vector_memory_encoding(raw, null_saddr, exact_size, well_formed,
-                                                    mutation_supported, workgroup_acquire_scope),
+      .encoding = make_rdna4_cdna5_vector_memory_encoding(
+          raw, null_saddr, exact_size, well_formed, mutation_supported, workgroup_acquire_scope),
   };
 }
 
-template <typename Raw> void fill_gfx12_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw>
+void fill_rdna4_cdna5_flat_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   if constexpr (requires { raw.scale_offset; })
@@ -165,12 +167,13 @@ template <typename Raw> void fill_gfx12_flat_atomic_site(ConSanAtomicSite &site,
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
   site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
   site.raw_scope = static_cast<uint32_t>(raw.scope);
-  site.scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope));
+  site.scope = normalize_rdna4_cdna5_memory_scope(static_cast<uint32_t>(raw.scope));
   site.raw_th = static_cast<uint32_t>(raw.th);
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw> void fill_gfx12_buffer_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw>
+void fill_rdna4_cdna5_buffer_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_vdata = static_cast<uint32_t>(raw.vdata);
   site.raw_rsrc = static_cast<uint32_t>(raw.rsrc);
@@ -178,12 +181,13 @@ template <typename Raw> void fill_gfx12_buffer_atomic_site(ConSanAtomicSite &sit
   site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
   site.raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset));
   site.raw_scope = static_cast<uint32_t>(raw.scope);
-  site.scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope));
+  site.scope = normalize_rdna4_cdna5_memory_scope(static_cast<uint32_t>(raw.scope));
   site.raw_th = static_cast<uint32_t>(raw.th);
   site.returns_old_value = amdgpu::gfx12_atomic_returns(static_cast<uint8_t>(raw.th));
 }
 
-template <typename Raw> void fill_gfx12_ds_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
+template <typename Raw>
+void fill_rdna4_cdna5_ds_atomic_site(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_addr = static_cast<uint32_t>(raw.addr);
   site.raw_data0 = static_cast<uint32_t>(raw.data0);
@@ -194,36 +198,36 @@ template <typename Raw> void fill_gfx12_ds_atomic_site(ConSanAtomicSite &site, c
 
 template <typename DsRaw, typename FlatRaw, typename GlobalRaw, typename ScratchRaw,
           typename BufferRaw>
-bool decode_gfx12_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
-                              std::span<const uint8_t> instruction) {
+bool decode_rdna4_cdna5_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                    std::span<const uint8_t> instruction) {
   if (mnemonic.starts_with("ds_") && instruction.size() >= sizeof(DsRaw)) {
     DsRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx12_ds_atomic_site(site, raw);
+    fill_rdna4_cdna5_ds_atomic_site(site, raw);
     return true;
   }
   if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
     FlatRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx12_flat_atomic_site(site, raw);
+    fill_rdna4_cdna5_flat_atomic_site(site, raw);
     return true;
   }
   if (mnemonic.starts_with("global_atomic") && instruction.size() >= sizeof(GlobalRaw)) {
     GlobalRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx12_flat_atomic_site(site, raw);
+    fill_rdna4_cdna5_flat_atomic_site(site, raw);
     return true;
   }
   if (mnemonic.starts_with("scratch_atomic") && instruction.size() >= sizeof(ScratchRaw)) {
     ScratchRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx12_flat_atomic_site(site, raw);
+    fill_rdna4_cdna5_flat_atomic_site(site, raw);
     return true;
   }
   if (mnemonic.starts_with("buffer_atomic") && instruction.size() >= sizeof(BufferRaw)) {
     BufferRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_gfx12_buffer_atomic_site(site, raw);
+    fill_rdna4_cdna5_buffer_atomic_site(site, raw);
     return true;
   }
   return false;

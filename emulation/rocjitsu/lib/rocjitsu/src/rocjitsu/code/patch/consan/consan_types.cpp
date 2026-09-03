@@ -115,7 +115,7 @@ constexpr auto kConSanBarrierLifecycleIssues = make_consan_enum_vocabulary(
     consan_enum(ConSanBarrierLifecycleIssue::MissingLeave,
                 "lifecycle run has no contiguous same-block leave operation"),
     consan_enum(ConSanBarrierLifecycleIssue::InvalidLeaveEncoding,
-                "lifecycle leave is not the fixed-zero GFX12 encoding"));
+                "lifecycle leave is not the fixed-zero RDNA4 encoding"));
 
 } // namespace
 

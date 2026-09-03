@@ -28,7 +28,7 @@ make_global_atomic_site(const AtomicPolicyTarget &target = {}, uint64_t offset =
   ConSanAtomicSite site;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size = consan_uses_gfx12_encoding(target.arch) ? 12u : 8u;
+  site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
   site.width_bits = 32;
   site.dst_vgpr = 1;
   site.addr_vgpr = 0;
@@ -73,7 +73,7 @@ ConSanOrdinaryMemorySite make_global_store_site(const AtomicPolicyTarget &target
   site.support_reason = ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly;
   site.text_offset = offset;
   site.file_offset = offset;
-  site.size = consan_uses_gfx12_encoding(target.arch) ? 12u : 8u;
+  site.size = consan_arch_is_rdna4_or_cdna5(target.arch) ? 12u : 8u;
   site.width_bits = 32;
   site.address_vgpr = 0;
   site.address_sgpr = 4;

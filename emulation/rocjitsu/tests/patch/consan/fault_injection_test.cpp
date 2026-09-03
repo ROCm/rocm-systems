@@ -9,7 +9,7 @@
 namespace rocjitsu {
 namespace {
 
-TEST(ConSan, Gfx12AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites) {
+TEST(ConSan, Rdna4Cdna5AtomicFaultTargetOperationsOwnRawAddressAndScopeRewrites) {
   const auto bytes_of = []<typename Raw>(Raw &raw) {
     return std::span<uint8_t>(reinterpret_cast<uint8_t *>(&raw), sizeof(raw));
   };

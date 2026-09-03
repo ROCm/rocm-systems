@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Target-profile facts shared by gfx1100 and gfx1201.
+/// Target-profile facts shared by RDNA3 and RDNA4.
 [[nodiscard]] constexpr ConSanTargetProfile consan_rdna_target_profile_defaults() {
   ConSanTargetProfile profile;
   profile.architecture_family = ConSanArchitectureFamily::Rdna;

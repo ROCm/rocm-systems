@@ -193,7 +193,7 @@ struct ConSanMoiWorkgroupSources {
   /// Source of z, or an absent source for a one- or two-dimensional launch.
   ConSanMoiWorkgroupSource z;
 
-  /// Source of the gfx1250 cluster-local workgroup coordinate, or absent when
+  /// Source of the CDNA5 cluster-local workgroup coordinate, or absent when
   /// the launch ABI does not expose one.
   ConSanMoiWorkgroupSource cluster_workgroup_id;
 
@@ -537,7 +537,7 @@ struct MoiSpecialStateSgprs {
 /// Append the target's device-scope cache refresh before retrying a contended
 /// global publication.
 ///
-/// Qualified gfx9 CDNA targets require an explicit buffer invalidate sequence;
+/// CDNA3/CDNA4 targets require an explicit buffer invalidate sequence;
 /// targets whose coherent atomic-load path needs no extra instruction succeed
 /// without appending words. Encoding failure returns false without partial
 /// output.
@@ -547,7 +547,7 @@ struct MoiSpecialStateSgprs {
 /// Append the waits required after a returning device-scope global atomic.
 ///
 /// Every target waits for the returned load value. Targets with separately
-/// tracked global-store completion also wait for the memory-side effect; gfx9
+/// tracked global-store completion also wait for the memory-side effect; CDNA3/CDNA4
 /// CDNA's unified VM counter needs only the first wait. The target profile owns
 /// that distinction. Encoding failure is transactional and leaves `words`
 /// unchanged.
@@ -1163,7 +1163,7 @@ patch_requires_full_workgroup_id_payload(ConSanCapabilityEngine engine, rj_code_
       engine == ConSanCapabilityEngine::SuperCollider || engine == ConSanCapabilityEngine::Count) {
     return false;
   }
-  if (consan_uses_gfx9_cdna_encoding(arch)) {
+  if (consan_arch_is_cdna3_or_cdna4(arch)) {
     const bool entry_capture = patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
                                patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
     return entry_capture &&

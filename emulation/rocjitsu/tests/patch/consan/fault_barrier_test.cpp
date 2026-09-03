@@ -50,7 +50,7 @@ TEST(ConSan, BarrierFaultInventoryIssuesAreTypedAndRenderStableDiagnostics) {
       std::pair{LifecycleIssue::MissingLeave,
                 std::string_view{"lifecycle run has no contiguous same-block leave operation"}},
       std::pair{LifecycleIssue::InvalidLeaveEncoding,
-                std::string_view{"lifecycle leave is not the fixed-zero GFX12 encoding"}},
+                std::string_view{"lifecycle leave is not the fixed-zero RDNA4 encoding"}},
   };
   static_assert(lifecycle_messages.size() == static_cast<size_t>(LifecycleIssue::Count));
   for (size_t index = 0; index < lifecycle_messages.size(); ++index) {
@@ -441,7 +441,7 @@ TEST(ConSan, FaultBarrierParticipantsReturnTypedUnsupportedWithoutProvenEncoding
   EXPECT_TRUE(mask.errors.empty());
   EXPECT_TRUE(mask.fault_plans.empty());
   EXPECT_TRUE(std::ranges::any_of(mask.warnings, [](const std::string &warning) {
-    return warning == "ConSan barrier participant mutation is unsupported: the GFX12.5 lifecycle "
+    return warning == "ConSan barrier participant mutation is unsupported: the CDNA5 lifecycle "
                       "exposes a six-bit count in M0, not a participant mask";
   }));
 }

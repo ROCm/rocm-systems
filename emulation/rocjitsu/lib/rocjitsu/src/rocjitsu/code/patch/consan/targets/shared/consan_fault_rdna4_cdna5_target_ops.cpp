@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_fault_gfx12_target_ops.cpp
-/// @brief GFX12 fault-classification and mutation recipes.
+/// @file consan_fault_rdna4_cdna5_target_ops.cpp
+/// @brief RDNA4/CDNA5 fault-classification and mutation recipes.
 
 #include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops_internal.h"
 
@@ -18,8 +18,8 @@
 namespace rocjitsu {
 
 ConSanAtomicFaultEncoding
-consan_fault_target_detail::classify_gfx12_atomic_fault_encoding(std::string_view mnemonic,
-                                                                 uint32_t size) {
+consan_fault_target_detail::classify_rdna4_cdna5_atomic_fault_encoding(std::string_view mnemonic,
+                                                                       uint32_t size) {
   if ((mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst)) {
     return ConSanAtomicFaultEncoding::FlatLike;
@@ -68,7 +68,7 @@ bool rewrite_consan_ordinary_global_fault_scope(std::span<uint8_t> instruction, 
   return true;
 }
 
-ConSanAtomicFaultRewriteResult consan_fault_target_detail::rewrite_gfx12_atomic_fault_address(
+ConSanAtomicFaultRewriteResult consan_fault_target_detail::rewrite_rdna4_cdna5_atomic_fault_address(
     std::span<uint8_t> instruction, ConSanAtomicFaultEncoding encoding, uint32_t width_bits,
     uint32_t address_delta) {
   static_assert(sizeof(rdna4::VflatMachineInst) == sizeof(rdna4::VbufferMachineInst));
@@ -104,7 +104,8 @@ ConSanAtomicFaultRewriteResult consan_fault_target_detail::rewrite_gfx12_atomic_
   return {.status = ConSanAtomicFaultRewriteStatus::Rewritten, .previous_value = previous_value};
 }
 
-ConSanAtomicFaultRewriteResult consan_fault_target_detail::rewrite_gfx12_atomic_fault_scope_to_wave(
+ConSanAtomicFaultRewriteResult
+consan_fault_target_detail::rewrite_rdna4_cdna5_atomic_fault_scope_to_wave(
     std::span<uint8_t> instruction, ConSanAtomicFaultEncoding encoding) {
   if (instruction.size() != sizeof(rdna4::VflatMachineInst) ||
       (encoding != ConSanAtomicFaultEncoding::FlatLike &&

@@ -86,7 +86,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
   constexpr uint64_t kIndirectIslandWords = kMoiCompactIndirectIslandWords;
   // The fast gate has 26 fixed worst-case words for x/y/z, plus three when a
-  // gfx1250 kernel reads the cluster-local workgroup coordinate. Reserving a
+  // CDNA5 kernel reads the cluster-local workgroup coordinate. Reserving a
   // larger unconditional envelope for an offset-zero profile makes
   // thousand-site images exceed direct-branch reach even though each emitted
   // gate only needs a few dozen words.
@@ -101,8 +101,7 @@ void try_apply_direct_sampled_watchpoint_patch(
   // a different kernel or helper. Size the dense gates from the tuple they
   // will actually consume, not only from access-local analysis metadata.
   const bool has_cluster_workgroup_id =
-      operating_point.moi_persistent_sgprs.exact_workgroup.cluster_workgroup_id()
-          .has_value() ||
+      operating_point.moi_persistent_sgprs.exact_workgroup.cluster_workgroup_id().has_value() ||
       operating_point.moi_exact_workgroup_vgprs.cluster_workgroup_id().has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return candidate->container.uses_cluster_workgroup_id;
@@ -376,8 +375,7 @@ void try_apply_direct_sampled_watchpoint_patch(
     const bool has_private_workgroup_sources =
         private_layout && private_layout->exact_workgroup_offsets.complete();
     const auto workgroup_sources = moi_exact_entry_workgroup_sources(
-        candidate_point,
-        private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
+        candidate_point, private_layout ? &private_layout->exact_workgroup_offsets : nullptr);
     if (!workgroup_sources) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());

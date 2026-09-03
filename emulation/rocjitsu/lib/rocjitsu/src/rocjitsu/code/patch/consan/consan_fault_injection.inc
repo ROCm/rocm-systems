@@ -576,7 +576,7 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                                         : nullptr;
     if (options.fault_barrier_target_participant_mask) {
       mark_participant_mutation_unsupported(
-          result, "the GFX12.5 lifecycle exposes a six-bit count in M0, not a participant mask");
+          result, "the CDNA5 lifecycle exposes a six-bit count in M0, not a participant mask");
     } else if (group == nullptr || !group->admissible() || init == nullptr ||
                init->participant_encoding != ConSanBarrierSite::ParticipantEncoding::M0Literal32 ||
                !init->participant_count || !init->participant_setup_text_offset ||
@@ -745,9 +745,9 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
     artifacts.errors = std::move(transaction.errors);
     artifacts.transform_failure_cause = transaction.transform_failure_cause;
     if (!accepted) {
-      artifacts.mutation.fault.applied =
-          mechanisms_succeeded ? transaction.mutation.fault.applied
-                               : applied_fault_mutation_count(artifacts.patches);
+      artifacts.mutation.fault.applied = mechanisms_succeeded
+                                             ? transaction.mutation.fault.applied
+                                             : applied_fault_mutation_count(artifacts.patches);
       return;
     }
     artifacts.warnings = std::move(transaction.warnings);
@@ -933,7 +933,8 @@ static void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_obje
   return std::nullopt;
 }
 
-static void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
+static void
+try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
                                        const ConSanSyncSequence *selected,
                                        const ConSanBarrierLifecycleGroup *lifecycle_group,
                                        int32_t target_id, FaultApplicationState &result) {

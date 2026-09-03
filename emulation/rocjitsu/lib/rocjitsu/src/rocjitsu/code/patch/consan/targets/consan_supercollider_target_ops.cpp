@@ -12,8 +12,8 @@
 namespace rocjitsu {
 
 std::optional<uint32_t> consan_sc_build_guest_flat_completion_wait(rj_code_arch_t arch) {
-  return consan_uses_gfx9_cdna_encoding(arch) ? instrumentation::build_s_wait_flat_load0(arch)
-                                              : instrumentation::build_s_wait_lds0(arch);
+  return consan_arch_is_cdna3_or_cdna4(arch) ? instrumentation::build_s_wait_flat_load0(arch)
+                                             : instrumentation::build_s_wait_lds0(arch);
 }
 
 std::optional<uint32_t> consan_sc_delay_instruction_word_count(const ConSanOptions &options,
@@ -96,10 +96,10 @@ std::optional<uint32_t> consan_sc_build_v_cmp_ne_u16(uint16_t src0, uint16_t vsr
 
 std::optional<uint32_t> consan_sc_build_ds_load_word0(const ConSanAccessLoweringForm &form,
                                                       uint32_t word0, rj_code_arch_t arch) {
-  if (consan_uses_gfx11_or_gfx12_encoding(arch))
-    return consan_sc_target_detail::build_gfx11_gfx12_ds_load_word0(form, word0);
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return consan_sc_target_detail::build_gfx9_ds_load_word0(form, word0);
+  if (consan_arch_is_rdna3_rdna4_or_cdna5(arch))
+    return consan_sc_target_detail::build_rdna3_rdna4_cdna5_ds_load_word0(form, word0);
+  if (consan_arch_is_cdna3_or_cdna4(arch))
+    return consan_sc_target_detail::build_cdna3_cdna4_ds_load_word0(form, word0);
   return std::nullopt;
 }
 
@@ -121,8 +121,8 @@ consan_sc_two_address_lds_byte_offsets(const ConSanAccessLoweringForm &form, uin
 std::optional<std::array<uint32_t, 2>>
 consan_sc_build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
                                       const ConSanTargetProfile &target) {
-  return consan_sc_target_detail::build_gfx9_cdna_accvgpr_read_b32(dst_vgpr, src_accvgpr,
-                                                                   target.encoding_family);
+  return consan_sc_target_detail::build_cdna3_cdna4_accvgpr_read_b32(dst_vgpr, src_accvgpr,
+                                                                     target.arch);
 }
 
 std::optional<std::vector<uint32_t>> consan_sc_build_split_single_address_lds_pair(
@@ -147,14 +147,14 @@ std::optional<std::array<uint32_t, 3>> retarget_flat_load_vdst(std::array<uint32
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
-  if (target->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-      target->encoding_family == ConSanEncodingFamily::Gfx9Cdna4 ||
-      target->encoding_family == ConSanEncodingFamily::Gfx11) {
-    return consan_sc_target_detail::retarget_classic_flat_load_vdst(words, vdst);
+  if (consan_arch_is_cdna3_or_cdna4(arch) || consan_arch_is_rdna3(arch)) {
+    return consan_sc_target_detail::retarget_cdna3_cdna4_rdna3_flat_load_vdst(words, vdst);
   }
-  if (target->architecture_family == ConSanArchitectureFamily::Cdna)
-    return consan_sc_target_detail::retarget_gfx1250_flat_load_vdst(words, vdst);
-  return consan_sc_target_detail::retarget_rdna4_flat_load_vdst(words, vdst);
+  if (consan_arch_is_cdna5(arch))
+    return consan_sc_target_detail::retarget_cdna5_flat_load_vdst(words, vdst);
+  return consan_arch_is_rdna4_or_cdna5(arch)
+             ? consan_sc_target_detail::retarget_rdna4_flat_load_vdst(words, vdst)
+             : std::nullopt;
 }
 
 std::optional<std::array<uint32_t, 3>>
@@ -163,19 +163,19 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (target == nullptr)
     return std::nullopt;
-  switch (target->encoding_family) {
-  case ConSanEncodingFamily::Gfx9Cdna3:
-  case ConSanEncodingFamily::Gfx9Cdna4:
-    return consan_sc_target_detail::build_gfx9_cdna_flat_load_from_store(words, width_bits, vdst);
-  case ConSanEncodingFamily::Gfx11:
+  switch (target->arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return consan_sc_target_detail::build_cdna3_cdna4_flat_load_from_store(words, width_bits, vdst);
+  case ROCJITSU_CODE_ARCH_RDNA3:
     return consan_sc_target_detail::build_rdna3_flat_load_from_store(words, width_bits, vdst);
-  case ConSanEncodingFamily::Gfx12:
-    return target->architecture_family == ConSanArchitectureFamily::Cdna
-               ? consan_sc_target_detail::build_gfx1250_flat_load_from_store(words, width_bits,
-                                                                             vdst)
-               : consan_sc_target_detail::build_rdna4_flat_load_from_store(words, width_bits, vdst);
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return consan_sc_target_detail::build_rdna4_flat_load_from_store(words, width_bits, vdst);
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return consan_sc_target_detail::build_cdna5_flat_load_from_store(words, width_bits, vdst);
+  default:
+    return std::nullopt;
   }
-  return std::nullopt;
 }
 
 } // namespace rocjitsu

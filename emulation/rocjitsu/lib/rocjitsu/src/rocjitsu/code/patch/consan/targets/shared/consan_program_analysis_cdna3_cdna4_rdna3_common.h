@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_program_analysis_pregfx12_target_ops.h
-/// @brief Shared normalization for the related gfx9-CDNA and gfx11 memory forms.
+/// @file consan_program_analysis_cdna3_cdna4_rdna3_common.h
+/// @brief Raw memory normalization shared by CDNA3, CDNA4, and RDNA3.
 
 #pragma once
 
@@ -14,8 +14,9 @@
 namespace rocjitsu::consan_program_analysis_target_detail {
 
 template <typename Raw>
-ConSanVectorMemoryDecode decode_pregfx12_vector_memory(std::span<const uint8_t> instruction,
-                                                       bool global, uint32_t null_saddr) {
+ConSanVectorMemoryDecode
+decode_cdna3_cdna4_rdna3_vector_memory(std::span<const uint8_t> instruction, bool global,
+                                       uint32_t null_saddr) {
   if (instruction.size() < sizeof(Raw))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   Raw raw{};
@@ -83,8 +84,8 @@ ConSanVectorMemoryDecode decode_pregfx12_vector_memory(std::span<const uint8_t> 
 }
 
 template <typename Raw>
-void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool global,
-                               uint32_t null_saddr) {
+void fill_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool global,
+                                        uint32_t null_saddr) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
   site.raw_vaddr = static_cast<uint32_t>(raw.addr);
@@ -111,18 +112,19 @@ void fill_pregfx12_atomic_site(ConSanAtomicSite &site, const Raw &raw, bool glob
 }
 
 template <typename FlatRaw, typename GlobalRaw>
-bool decode_pregfx12_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
-                                 std::span<const uint8_t> instruction, uint32_t null_saddr) {
+bool decode_cdna3_cdna4_rdna3_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                                          std::span<const uint8_t> instruction,
+                                          uint32_t null_saddr) {
   if (mnemonic.starts_with("flat_atomic") && instruction.size() >= sizeof(FlatRaw)) {
     FlatRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_pregfx12_atomic_site(site, raw, false, null_saddr);
+    fill_cdna3_cdna4_rdna3_atomic_site(site, raw, false, null_saddr);
     return true;
   }
   if (mnemonic.starts_with("global_atomic") && instruction.size() >= sizeof(GlobalRaw)) {
     GlobalRaw raw{};
     std::memcpy(&raw, instruction.data(), sizeof(raw));
-    fill_pregfx12_atomic_site(site, raw, true, null_saddr);
+    fill_cdna3_cdna4_rdna3_atomic_site(site, raw, true, null_saddr);
     return true;
   }
   return false;

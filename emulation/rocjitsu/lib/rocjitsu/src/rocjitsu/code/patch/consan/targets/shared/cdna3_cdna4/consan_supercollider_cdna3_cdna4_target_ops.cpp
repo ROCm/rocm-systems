@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_supercollider_gfx9_target_ops.cpp
-/// @brief GFX9 CDNA3/CDNA4 recipes consumed by SuperCollider.
+/// @file consan_supercollider_cdna3_cdna4_target_ops.cpp
+/// @brief CDNA3/CDNA4 recipes consumed by SuperCollider.
 
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
@@ -13,8 +13,8 @@
 
 namespace rocjitsu::consan_sc_target_detail {
 
-std::optional<uint32_t> build_gfx9_ds_load_word0(const ConSanAccessLoweringForm &form,
-                                                 uint32_t original_word0) {
+std::optional<uint32_t> build_cdna3_cdna4_ds_load_word0(const ConSanAccessLoweringForm &form,
+                                                        uint32_t original_word0) {
   uint32_t base = 0;
   if (form.kind == ConSanAccessLoweringFormKind::NativeTwoRange) {
     switch (original_word0 & 0xFFFF0000u) {
@@ -62,18 +62,17 @@ std::optional<uint32_t> build_gfx9_ds_load_word0(const ConSanAccessLoweringForm 
 }
 
 std::optional<std::array<uint32_t, 2>>
-build_gfx9_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
-                                 ConSanEncodingFamily family) {
+build_cdna3_cdna4_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr, rj_code_arch_t arch) {
   if (dst_vgpr > 255u || src_accvgpr > 255u)
     return std::nullopt;
-  if (family == ConSanEncodingFamily::Gfx9Cdna3) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
     return cdna3::build_vop3p(cdna3::kVAccvgprReadVop3p,
                               {.vdst = static_cast<uint8_t>(dst_vgpr),
                                .op_sel_hi_2 = 1u,
                                .src0 = static_cast<uint16_t>(256u + src_accvgpr),
                                .op_sel_hi = 3u});
   }
-  if (family == ConSanEncodingFamily::Gfx9Cdna4) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
     return cdna4::build_vop3p(cdna4::kVAccvgprReadVop3p,
                               {.vdst = static_cast<uint8_t>(dst_vgpr),
                                .op_sel_hi_2 = 1u,
@@ -84,8 +83,8 @@ build_gfx9_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr,
 }
 
 std::optional<std::array<uint32_t, 3>>
-build_gfx9_cdna_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
-                                     uint16_t vdst) {
+build_cdna3_cdna4_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
+                                       uint16_t vdst) {
   uint32_t load_op = 0;
   switch (width_bits) {
   case 8:

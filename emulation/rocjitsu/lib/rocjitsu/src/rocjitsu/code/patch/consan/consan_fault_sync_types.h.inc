@@ -444,7 +444,7 @@ consan_barrier_lifecycle_issue_message(ConSanBarrierLifecycleIssue issue);
 /// A contiguous, statically associated barrier lifecycle retained in semantic
 /// inventory.
 ///
-/// On gfx12-class targets `s_barrier_leave` has no explicit barrier operand and
+/// On RDNA4 `s_barrier_leave` has no explicit barrier operand and
 /// drops the last named barrier joined by the thread. A group is therefore
 /// admissible only when its ordered typed member identities and one matching
 /// static join prove that association. Rejected groups remain in inventory so

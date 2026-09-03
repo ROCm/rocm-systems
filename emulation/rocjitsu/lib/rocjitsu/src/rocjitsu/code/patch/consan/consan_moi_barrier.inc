@@ -198,8 +198,8 @@ using MoiBarrierBodyPlan =
 
 using MoiBarrierBodyPlanner = std::optional<MoiBarrierBodyPlan> (*)(
     const ConSanOptions &, ConSanMoiOperatingPoint &, const MoiScalarAbiPlan &,
-    std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t,
-    MoiOwnerAssignments, std::vector<std::string> &, std::vector<std::string> &);
+    std::optional<uint16_t>, std::span<const uint64_t>, rj_code_arch_t, MoiOwnerAssignments,
+    std::vector<std::string> &, std::vector<std::string> &);
 
 struct PlannedBarrierLowering {
   MoiBarrierEvidenceSitePlan candidate;
@@ -267,17 +267,16 @@ build_inline_shadow_private_epoch_barrier_cave_words(
     uint32_t original_barrier_word, uint64_t cave_text_offset, uint64_t return_text_offset,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> selectable_vgpr_bank_mode,
     std::vector<std::string> &errors);
-[[nodiscard]] std::optional<MoiBarrierIslandReservation>
-validate_reserved_barrier_island_layout(
+[[nodiscard]] std::optional<MoiBarrierIslandReservation> validate_reserved_barrier_island_layout(
     std::span<const uint8_t> text, rj_code_arch_t arch,
     const std::optional<MoiBarrierIslandReservation> &reservation, size_t barrier_count,
     uint64_t expected_slot_count) {
   if (!reservation || barrier_count == 0u || expected_slot_count < barrier_count ||
-      reservation->reserved_slot_count != expected_slot_count ||
-      reservation->slot_words == 0u || reservation->protected_prefix_words == 0u ||
+      reservation->reserved_slot_count != expected_slot_count || reservation->slot_words == 0u ||
+      reservation->protected_prefix_words == 0u ||
       reservation->protected_prefix_words > reservation->slot_words ||
-      expected_slot_count > std::numeric_limits<uint64_t>::max() /
-                                (reservation->slot_words * sizeof(uint32_t))) {
+      expected_slot_count >
+          std::numeric_limits<uint64_t>::max() / (reservation->slot_words * sizeof(uint32_t))) {
     return std::nullopt;
   }
   const uint64_t reservation_bytes =
@@ -315,9 +314,8 @@ validate_reserved_barrier_island_layout(
 void try_apply_shared_barrier_patch(
     std::span<const uint8_t> bytes, const ConSanOptions &options,
     ConSanProbeIntentKind evidence_kind, MoiBarrierBodyPlanner plan_body,
-    MoiPrivateBarrierPlanner plan_private_body,
-    const ConSanMoiOperatingPoint &operating_point, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state,
+    MoiPrivateBarrierPlanner plan_private_body, const ConSanMoiOperatingPoint &operating_point,
+    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
     const std::optional<MoiBarrierIslandReservation> &reserved_sync_islands,
     const MoiObjectModeSemantics &semantics, ConSanTransformArtifacts &result) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
@@ -431,8 +429,8 @@ void try_apply_shared_barrier_patch(
       }
       if (!owner_point.automatic_moi_private_epoch)
         continue;
-      if (!apply_moi_transient_sgpr_assignment(options, owner_point,
-                                               result.moi_operating_point, owners)) {
+      if (!apply_moi_transient_sgpr_assignment(options, owner_point, result.moi_operating_point,
+                                               owners)) {
         result.warnings.emplace_back("ConSan MOI private epoch barrier lost its transient state");
         continue;
       }
@@ -709,13 +707,12 @@ void try_apply_shared_barrier_patch(
     // one otherwise-supported site must not abort the whole code object.
     if (cave_text_offset >= return_text_offset &&
         !compute_sopp_branch_simm16(cave_text_offset, return_text_offset) && !indirect_jump) {
-      result.warnings.emplace_back(
-          std::string(moi_transient_sgpr_assignment_is_branch_only(
-                          result.moi_operating_point,
-                          planned.patch_abi.owner_descriptor_file_offsets)
-                          ? "ConSan MOI branch-only scalar-spill barrier"
-                          : "ConSan MOI inline-shadow barrier") +
-          " has no encodable far return in " + candidate.container_name);
+      result.warnings.emplace_back(std::string(moi_transient_sgpr_assignment_is_branch_only(
+                                                   result.moi_operating_point,
+                                                   planned.patch_abi.owner_descriptor_file_offsets)
+                                                   ? "ConSan MOI branch-only scalar-spill barrier"
+                                                   : "ConSan MOI inline-shadow barrier") +
+                                   " has no encodable far return in " + candidate.container_name);
       continue;
     }
     std::optional<std::vector<uint32_t>> cave_words =
@@ -738,11 +735,10 @@ void try_apply_shared_barrier_patch(
                           ? oversized_local_body_island
                           : local_indirect_allocator.claim_reachable(site.text_offset);
       if (!island_offset) {
-        const bool has_dense_router =
-            consan_arch_has_selectable_vgpr_bank(arch) ||
-            (consan_is_capability_arch(arch) &&
-             ((updates_exact_epoch && !consan_uses_gfx11_encoding(arch)) ||
-              (emits_barrier_record && semantics.dense_barrier_router)));
+        const bool has_dense_router = consan_arch_has_selectable_vgpr_bank(arch) ||
+                                      (consan_is_capability_arch(arch) &&
+                                       ((updates_exact_epoch && !consan_arch_is_rdna3(arch)) ||
+                                        (emits_barrier_record && semantics.dense_barrier_router)));
         if (has_dense_router && indirect_jump &&
             !planned.patch_abi.owner_descriptor_file_offsets.empty()) {
           dense_fallback_indices.push_back(planned_index);

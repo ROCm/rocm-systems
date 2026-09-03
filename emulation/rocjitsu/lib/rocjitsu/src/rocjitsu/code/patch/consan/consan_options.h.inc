@@ -328,7 +328,7 @@ public:
   /// Compact workgroup identity used by InlineShadow when that engine does
   /// not require the exact coordinate tuple.
   std::optional<uint16_t> workgroup_key;
-  /// Exact x/y/z and optional gfx1250 cluster coordinates retained by
+  /// Exact x/y/z and optional CDNA5 cluster coordinates retained by
   /// Record/Replay and Sampled instrumentation.
   ConSanMoiPersistentWorkgroupRegisters exact_workgroup;
 
@@ -989,7 +989,7 @@ struct ConSanMoiOperatingPoint {
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
-  /// Internal gfx1250 fallback: one high code-object-wide EXEC-save window is
+  /// Internal CDNA5 fallback: one high code-object-wide EXEC-save window is
   /// retained, while resource planning excludes only owner groups whose guest
   /// scalar allocation reaches that window.
   bool automatic_moi_partial_exec_save_sgprs = false;

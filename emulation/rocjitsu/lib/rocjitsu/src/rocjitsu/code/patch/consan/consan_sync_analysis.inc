@@ -13,7 +13,6 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_barrier_move_proof.h"
 #include "rocjitsu/code/patch/consan/consan_cfg.h"
-#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_instruction_semantics.h"
 #include "rocjitsu/code/patch/consan/consan_inventory_diagnostics.h"
 #include "rocjitsu/code/patch/consan/consan_perturbation.h"
@@ -21,11 +20,12 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
-#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -1035,7 +1035,7 @@ void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView i
     }
     const ConSanSyncSequence &leave = sync_sequences[cursor];
     append_member(leave);
-    // LLVM's GFX12 ISA model defines S_BARRIER_LEAVE as a zero-operand SOPP
+    // LLVM's RDNA4 ISA model defines S_BARRIER_LEAVE as a zero-operand SOPP
     // with a fixed-zero simm16. Its execution-synchronization specification
     // defines it as dropping the last named barrier joined by this thread.
     // Therefore the matching static join, rather than the fixed encoding,
@@ -1214,7 +1214,7 @@ template <typename Container>
                                                    const ConSanSyncEvent &event) {
   if (event.address_source != ConSanSyncAddressSource::FlatVector)
     return false;
-  // gfx12 RDNA carries workgroup scope explicitly even when pointer tracking
+  // RDNA4 carries workgroup scope explicitly even when pointer tracking
   // cannot reconstruct a complete generic address. Other targets spell the
   // same semantic through an exact src_shared_base provenance proof.
   if (event.scope == ConSanMemoryScope::Workgroup)
@@ -1660,7 +1660,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   }
   sync_sequences = std::move(associated);
 
-  // gfx12 lowers the release half of an atomic to an immediately preceding
+  // RDNA4/CDNA5 lower the release half of an atomic to an immediately preceding
   // store-count-zero wait, either combined or inside a contiguous suffix of
   // counter-specific waits, without a separate release-cache event. This applies
   // both to release-only no-return atomics and to returning acquire-release
@@ -1681,11 +1681,11 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         already_acquire ? ConSanSyncMemoryRole::AcquireRelease : ConSanSyncMemoryRole::Release;
     sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
     sequence.confidence = ConSanSemanticConfidence::Conservative;
-    sequence.confidence_reason = already_acquire
-                                     ? "exact same-block gfx12 release wait immediately before "
-                                       "bounded atomic/acquire-cache sequence"
-                                     : "exact same-block gfx12 s_wait_storecnt_dscnt 0 "
-                                       "immediately before atomic release";
+    sequence.confidence_reason =
+        already_acquire ? "exact same-block RDNA4/CDNA5 release wait immediately before "
+                          "bounded atomic/acquire-cache sequence"
+                        : "exact same-block RDNA4/CDNA5 s_wait_storecnt_dscnt 0 "
+                          "immediately before atomic release";
     sequence.release_wait_text_offset = *boundary;
     sequence.identity += "|release-wait=pc=0x" + consan_fixed_hex(*boundary, 16);
     sequence.begin_text_offset = *boundary;

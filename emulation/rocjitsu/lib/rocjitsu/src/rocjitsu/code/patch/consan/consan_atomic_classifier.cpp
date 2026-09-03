@@ -90,10 +90,9 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   const ConSanTargetProfile *target = consan_target_profile(arch);
   if (!target)
     return reject(Reason::TargetUnavailable);
-  const bool gfx9_cdna_encoding = consan_uses_gfx9_cdna_encoding(arch);
-  const bool gfx12_encoding = target->encoding_family == ConSanEncodingFamily::Gfx12;
-  const bool gfx12_cdna_execution =
-      gfx12_encoding && target->architecture_family == ConSanArchitectureFamily::Cdna;
+  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(arch);
+  const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(arch);
+  const bool cdna5 = consan_arch_is_cdna5(arch);
 
   const bool compare_exchange = is_rmw && consan_atomic_is_compare_exchange(site);
   const uint16_t value_register_count = static_cast<uint16_t>((site.width_bits + 31u) / 32u);
@@ -115,7 +114,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   };
 
   if (site.mnemonic.starts_with("ds_")) {
-    if (!gfx12_cdna_execution)
+    if (!cdna5)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits != 32u)
       return reject(Reason::InvalidAccessWidth);
@@ -151,7 +150,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
     constexpr uint32_t kNullScalarOffset = 0x7cu;
     constexpr int32_t kSigned24Min = -(1 << 23);
     constexpr int32_t kSigned24Max = (1 << 23) - 1;
-    if (!gfx12_cdna_execution)
+    if (!cdna5)
       return reject(Reason::UnsupportedAddressSource);
     if (site.width_bits == 0u || site.width_bits > 128u)
       return reject(Reason::InvalidAccessWidth);
@@ -197,20 +196,19 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(Reason::InvalidAccessWidth);
 
-  const bool two_word_encoding = !gfx12_encoding;
+  const bool two_word_encoding = !rdna4_or_cdna5;
   const uint32_t expected_size = two_word_encoding ? 2u * sizeof(uint32_t) : 3u * sizeof(uint32_t);
   if (site.size != expected_size || !site.raw_saddr || !site.raw_vaddr || !site.raw_ioffset)
     return reject(Reason::UnsupportedEncoding);
-  if ((gfx12_cdna_execution && !site.raw_scale_offset) ||
-      (!gfx12_cdna_execution && site.raw_scale_offset.value_or(false)))
+  if ((cdna5 && !site.raw_scale_offset) || (!cdna5 && site.raw_scale_offset.value_or(false)))
     return reject(Reason::UnsupportedEncoding);
   if (!site.addr_vgpr || !site.data_vgpr || *site.raw_vaddr != *site.addr_vgpr)
     return reject(Reason::MissingOperands);
 
   constexpr uint32_t kCdnaGlobalNoSaddr = 0x7fu;
-  constexpr uint32_t kGfx11NoSaddr = 0x7cu;
+  constexpr uint32_t kRdna3NoSaddr = 0x7cu;
   const uint32_t vector_only_saddr =
-      gfx9_cdna_encoding ? (global ? kCdnaGlobalNoSaddr : 0u) : kGfx11NoSaddr;
+      legacy_cdna ? (global ? kCdnaGlobalNoSaddr : 0u) : kRdna3NoSaddr;
   constexpr int32_t kSigned13Min = -(1 << 12);
   constexpr int32_t kSigned13Max = (1 << 12) - 1;
   constexpr int32_t kSigned24Min = -(1 << 23);
@@ -232,7 +230,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
                 : ConSanAtomicLoweringFormKind::GlobalVectorAddress;
     address_register_count = 2u;
   } else {
-    if (!gfx12_encoding && flat)
+    if (!rdna4_or_cdna5 && flat)
       return reject(Reason::UnsupportedEncoding);
     if (!site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr)
       return reject(Reason::UnsupportedInputWidth);
@@ -263,7 +261,7 @@ classify_consan_atomic_lowering(const ConSanAtomicSite &site, rj_code_arch_t arc
       .scalar_offset_sgpr = std::nullopt,
       .signed_byte_offset = *site.raw_ioffset,
       .scale_vector_offset = site.raw_scale_offset.value_or(false),
-      .sign_extend_vector_offset = gfx9_cdna_encoding,
+      .sign_extend_vector_offset = legacy_cdna,
       .is_rmw = is_rmw,
       .compare_exchange = compare_exchange,
       .returns_old_value = site.returns_old_value.value_or(false),

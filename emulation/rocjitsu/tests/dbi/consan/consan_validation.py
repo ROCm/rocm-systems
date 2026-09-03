@@ -1540,7 +1540,7 @@ def _target_fault_families(target: str, workload: Workload) -> tuple[str, ...]:
     families = workload.fault_families
     if target in NATIVE_CDNA_TARGETS:
         # CDNA compiler atomics encode ordering through surrounding cache and
-        # wait operations, but have no gfx12-style instruction scope field.
+        # wait operations, but have no RDNA4/CDNA5-style instruction scope field.
         families = tuple(
             family for family in families if family != "atomic-weaken-scope"
         )

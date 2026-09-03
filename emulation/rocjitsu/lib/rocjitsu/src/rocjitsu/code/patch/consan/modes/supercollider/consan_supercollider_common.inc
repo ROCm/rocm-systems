@@ -1,28 +1,28 @@
 [[nodiscard]] std::unordered_set<uint64_t>
 sc_admitted_access_file_offsets(const ProgramInventory &inventory,
-                                const ConSanCoverageLedger &coverage,
-                                ConSanAccessOrigin origin) {
+                                const ConSanCoverageLedger &coverage, ConSanAccessOrigin origin) {
   std::unordered_set<uint64_t> offsets;
   for (const ConSanAccessInventorySite &access : inventory.access_sites())
     if (access.origin == origin &&
-        !coverage.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
-                                     access.physical_id)
+        !coverage
+             .pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation,
+                                 access.physical_id)
              .empty())
       offsets.insert(access.file_offset);
   return offsets;
 }
 
 [[nodiscard]] bool publish_sc_access_rejection(ConSanCoverageLedger &coverage,
-                                               std::vector<std::string> &errors, const PhysicalSiteId &site,
+                                               std::vector<std::string> &errors,
+                                               const PhysicalSiteId &site,
                                                ConSanLoweringOutcomeKind outcome,
                                                std::string detail) {
-  std::vector<ConSanProbeIntentId> intent_ids = coverage.pending_intent_ids(
-      ConSanProbeIntentKind::RedundantAccessObservation, site);
+  std::vector<ConSanProbeIntentId> intent_ids =
+      coverage.pending_intent_ids(ConSanProbeIntentKind::RedundantAccessObservation, site);
   if (intent_ids.empty())
     return true;
   if (!coverage.publish_lowering_rejection(intent_ids, outcome, std::move(detail))) {
-    errors.emplace_back(
-        "ConSan SuperCollider could not publish an intent-bound access rejection");
+    errors.emplace_back("ConSan SuperCollider could not publish an intent-bound access rejection");
     return false;
   }
   return true;
@@ -79,10 +79,7 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
 }
 
 [[nodiscard]] uint16_t sc_vcc_save_sgpr_width(const ConSanTargetProfile &target) {
-  return target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                 target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4
-             ? 2u
-             : 1u;
+  return consan_arch_is_cdna3_or_cdna4(target.arch) ? 2u : 1u;
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_borrowed_scalar_sgpr(uint16_t allocated_sgpr_count,
@@ -123,8 +120,7 @@ void publish_unplaced_sc_access_rejections(ConSanCoverageLedger &coverage,
     return std::nullopt;
   };
   const uint16_t allocated_limit = std::min(allocated_sgpr_count, limit);
-  if (target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-      target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4) {
+  if (consan_arch_is_cdna3_or_cdna4(target.arch)) {
     // CDNA SGPR allocation participates in occupancy. Reuse an all-owner dead
     // hole inside the current allocation before growing every descriptor.
     if (auto existing = find_free(0, allocated_limit))
@@ -521,16 +517,13 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   auto skip_action =
       instrumentation::build_s_cbranch_vccz(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kAmdGpuVccLo = 106;
-  const bool uses_gfx9_cdna_encoding = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                                       target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
   const std::optional<uint32_t> save_vcc =
-      uses_gfx9_cdna_encoding
-          ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
-          : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
+      legacy_cdna ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kAmdGpuVccLo, arch)
+                  : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kAmdGpuVccLo, arch));
   const std::optional<uint32_t> restore_vcc =
-      uses_gfx9_cdna_encoding
-          ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
-          : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
+      legacy_cdna ? instrumentation::build_s_mov_b64(kAmdGpuVccLo, vcc_save_sgpr, arch)
+                  : std::optional<uint32_t>(build_s_mov_b32(kAmdGpuVccLo, vcc_save_sgpr, arch));
   if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;
@@ -611,7 +604,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
                   site.kind == ConSanLdsAccessKind::Read, target)
             : std::nullopt;
     if (!split) {
-      errors.emplace_back("ConSan LDS check/trap proof could not split gfx1250 two-address access");
+      errors.emplace_back("ConSan LDS check/trap proof could not split CDNA5 two-address access");
       return std::nullopt;
     }
     words.insert(words.end(), split->begin(), split->end());
@@ -633,8 +626,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
         scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + split_two_address->element_dwords),
         compare_scratch_vgpr, true, target);
     if (!split) {
-      errors.emplace_back(
-          "ConSan LDS check/trap proof could not split gfx1250 two-address readback");
+      errors.emplace_back("ConSan LDS check/trap proof could not split CDNA5 two-address readback");
       return std::nullopt;
     }
     words.insert(words.end(), split->begin(), split->end());
@@ -648,7 +640,7 @@ build_mismatch_action_words(const ConSanOptions &options, const ConSanTargetProf
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, selectable_vgpr_bank_mode);
-    if (form.destination_accvgpr && uses_gfx9_cdna_encoding) {
+    if (form.destination_accvgpr && legacy_cdna) {
       const auto acc_read = consan_sc_build_cdna_accvgpr_read_b32(
           compare_scratch_vgpr, static_cast<uint16_t>(*form.destination_accvgpr + i), target);
       if (!acc_read) {

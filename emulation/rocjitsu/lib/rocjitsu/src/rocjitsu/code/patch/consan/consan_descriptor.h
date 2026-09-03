@@ -138,7 +138,7 @@ struct ConSanDescriptorVgprGrowthRequest {
   uint32_t required_ordinary_count = 0;
 
   /// Largest ordinary-VGPR extent the requesting instrumentation path can
-  /// address. Bank-aware gfx1250 mechanics may use RocJitsu's full analysis
+  /// address. Bank-aware CDNA5 mechanics may use RocJitsu's full analysis
   /// range; ordinary MOI operand forms currently limit themselves to 256.
   uint32_t maximum_ordinary_count = 0;
 
@@ -244,7 +244,7 @@ descriptor_sgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descriptor_t &
 /// CDNA3 and CDNA4 place VCC, XNACK, and FLAT_SCRATCH in a six-SGPR tail at the
 /// end of the descriptor allocation. A scratch register below the architectural
 /// ordinary-SGPR limit is therefore usable only when the encoded allocation
-/// also leaves room for that tail. RDNA and gfx1250 use fixed special-register
+/// also leaves room for that tail. RDNA and CDNA5 use fixed special-register
 /// indices and need no tail. The function rejects zero, unsupported targets,
 /// and requests beyond the target's ordinary operand file without modifying
 /// the descriptor.

@@ -141,7 +141,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // target. CDNA entry clearing completes before any instrumented access;
     // RDNA4 can instead use its packed first-use bitmap. If either full layout
     // does not fit, the caller uses the semantically equivalent external table.
-    if (consan_uses_gfx12_encoding(arch)) {
+    if (consan_arch_is_rdna4_or_cdna5(arch)) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor->group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;
@@ -239,8 +239,7 @@ build_moi_private_state_layout(const ProgramInventory &program_inventory,
         static_cast<uint32_t>((*exact_workgroup_offset_values)[1]),
         static_cast<uint32_t>((*exact_workgroup_offset_values)[2]),
         (*exact_workgroup_offset_values)[3] != 0u
-            ? std::optional<uint32_t>(
-                  static_cast<uint32_t>((*exact_workgroup_offset_values)[3]))
+            ? std::optional<uint32_t>(static_cast<uint32_t>((*exact_workgroup_offset_values)[3]))
             : std::nullopt};
   }
   const auto ephemeral_base =
@@ -473,7 +472,6 @@ bool apply_moi_descriptor_requirements(
        group_segment_bytes == nullptr ? kNoMoiLdsRequirements : *group_segment_bytes},
       moi_descriptor_policy(capabilities, arch), arch, subject, errors);
 }
-
 
 [[nodiscard]] bool append_inline_shadow_owner_field(
     std::vector<uint32_t> &words, const MoiInlineShadowOwnerFieldPlan &plan, uint16_t low_vgpr,

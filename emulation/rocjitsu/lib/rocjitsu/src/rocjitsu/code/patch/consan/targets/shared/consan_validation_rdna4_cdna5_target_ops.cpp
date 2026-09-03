@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_validation_gfx12_target_ops.cpp
-/// @brief Independent GFX12 proofs for encoded fault mutations.
+/// @file consan_validation_rdna4_cdna5_target_ops.cpp
+/// @brief Independent RDNA4/CDNA5 proofs for encoded fault mutations.
 
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
@@ -57,9 +57,10 @@ namespace {
 
 } // namespace
 
-ConSanEncodedMutationValidation validate_gfx12_encoded_mutation(ConSanEncodedMutationKind kind,
-                                                                std::span<const uint8_t> before,
-                                                                std::span<const uint8_t> after) {
+ConSanEncodedMutationValidation
+validate_rdna4_cdna5_encoded_mutation(ConSanEncodedMutationKind kind,
+                                      std::span<const uint8_t> before,
+                                      std::span<const uint8_t> after) {
   switch (kind) {
   case ConSanEncodedMutationKind::OrdinaryGlobalAddress: {
     if (!same_size(before, after, sizeof(rdna4::VglobalMachineInst)))

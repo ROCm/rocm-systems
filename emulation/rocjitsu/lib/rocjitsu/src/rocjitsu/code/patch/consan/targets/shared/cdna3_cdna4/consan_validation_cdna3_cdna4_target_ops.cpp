@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_validation_gfx9_cdna_target_ops.cpp
-/// @brief Independent gfx9 CDNA descriptor-resource proof.
+/// @file consan_validation_cdna3_cdna4_target_ops.cpp
+/// @brief Independent CDNA3/CDNA4 descriptor-resource proof.
 
 #include "rocjitsu/code/patch/consan/targets/consan_validation_target_ops.h"
 
@@ -18,8 +18,8 @@ namespace rocjitsu::consan_validation_target_detail {
 namespace kd = rocr::llvm::amdhsa;
 
 ConSanDescriptorResourceDeltaValidation
-validate_gfx9_cdna_descriptor_resource_delta(const ConSanTargetProfile &target,
-                                             const ConSanDescriptorResourceDeltaInput &input) {
+validate_cdna3_cdna4_descriptor_resource_delta(const ConSanTargetProfile &target,
+                                               const ConSanDescriptorResourceDeltaInput &input) {
   const uint32_t original_encoded_accum_offset =
       AMDHSA_BITS_GET(input.original_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
   const uint32_t replacement_encoded_accum_offset =

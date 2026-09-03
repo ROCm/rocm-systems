@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_moi_gfx9_target_ops.cpp
-/// @brief GFX9 CDNA3/CDNA4 recipes shared by MOI engines.
+/// @file consan_moi_cdna3_cdna4_target_ops.cpp
+/// @brief CDNA3/CDNA4 recipes shared by MOI engines.
 
 #include "rocjitsu/code/patch/consan/targets/consan_moi_target_ops.h"
 
@@ -17,15 +17,14 @@ bool append_restore_moi_scc_from_route_key(std::vector<uint32_t> &words,
                                            const MoiEncodedSccRestoreRequest &request,
                                            const ConSanTargetProfile &target) {
   uint16_t bit_test_opcode = 0u;
-  switch (target.encoding_family) {
-  case ConSanEncodingFamily::Gfx9Cdna3:
+  switch (target.arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
     bit_test_opcode = cdna3::kSBitcmp1B32Sopc;
     break;
-  case ConSanEncodingFamily::Gfx9Cdna4:
+  case ROCJITSU_CODE_ARCH_CDNA4:
     bit_test_opcode = cdna4::kSBitcmp1B32Sopc;
     break;
-  case ConSanEncodingFamily::Gfx11:
-  case ConSanEncodingFamily::Gfx12:
+  default:
     return false;
   }
   const auto normalize =

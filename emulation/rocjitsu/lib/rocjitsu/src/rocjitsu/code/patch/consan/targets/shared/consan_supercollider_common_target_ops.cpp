@@ -1,15 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_supercollider_gfx11_gfx12_target_ops.cpp
-/// @brief Family-shared GFX11/GFX12 recipes consumed by SuperCollider.
+/// @file consan_supercollider_common_target_ops.cpp
+/// @brief RDNA3/RDNA4/CDNA5 recipes consumed by SuperCollider.
 
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
 namespace rocjitsu::consan_sc_target_detail {
 
-std::optional<uint32_t> build_gfx11_gfx12_ds_load_word0(const ConSanAccessLoweringForm &form,
-                                                        uint32_t original_word0) {
+std::optional<uint32_t> build_rdna3_rdna4_cdna5_ds_load_word0(const ConSanAccessLoweringForm &form,
+                                                              uint32_t original_word0) {
   uint32_t base = 0;
   if (form.kind == ConSanAccessLoweringFormKind::NativeTwoRange) {
     switch (original_word0 & 0xFFFF0000u) {
@@ -57,7 +57,7 @@ std::optional<uint32_t> build_gfx11_gfx12_ds_load_word0(const ConSanAccessLoweri
 }
 
 std::optional<std::array<uint32_t, 3>>
-retarget_classic_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst) {
+retarget_cdna3_cdna4_rdna3_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst) {
   words[1] = (words[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(vdst) << 24u);
   return words;
 }

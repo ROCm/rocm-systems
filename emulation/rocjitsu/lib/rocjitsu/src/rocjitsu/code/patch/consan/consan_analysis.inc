@@ -817,7 +817,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
     // so its component transfer is unambiguous even when the peer slot is an
     // unrelated arithmetic instruction. Capture both transfers before either
     // destination is invalidated: the compiler commonly packs the low/high
-    // copies of src_shared_base into one dual instruction on gfx11.
+    // copies of src_shared_base into one dual instruction on RDNA3.
     const bool x_is_move = mnemonic.starts_with("v_dual_mov_b32");
     const bool y_is_move = mnemonic.ends_with("v_dual_mov_b32");
     const auto x_dst =
@@ -1232,7 +1232,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.instruction_size = static_cast<uint32_t>(inst.size());
   site.decoded_width_bits = lds_width_bits(mnemonic);
-  if (!consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("flat_atomic") &&
+  if (!consan_arch_is_rdna4_or_cdna5(arch) && mnemonic.starts_with("flat_atomic") &&
       site.decoded_width_bits == 0u) {
     site.decoded_width_bits = 32u;
   }
@@ -1417,7 +1417,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if (!consan_uses_gfx12_encoding(arch) &&
+  if (!consan_arch_is_rdna4_or_cdna5(arch) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       site.width_bits == 0u) {
     site.width_bits = 32u;

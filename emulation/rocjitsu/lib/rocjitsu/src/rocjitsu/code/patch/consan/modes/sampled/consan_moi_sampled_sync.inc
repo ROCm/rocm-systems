@@ -251,7 +251,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state, uint64_t des
   // A patched s_call_i64 can be immediately followed by the guest's next
   // s_set_vgpr_msb.  That program-state update may take effect as control
   // transfers, even when the replaced barrier itself ran in mode zero.  Make
-  // every gfx1250 cave establish its low-register invariant explicitly before
+  // every CDNA5 cave establish its low-register invariant explicitly before
   // touching scratch VGPRs.
   if (control_selectable_vgpr_bank)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
@@ -1052,7 +1052,7 @@ void try_apply_sampled_barrier_sync_patch(
     patches.push_back(std::move(info));
     return true;
   };
-  // A single nearby gfx1250 barrier needs no shared call router. Keeping that
+  // A single nearby CDNA5 barrier needs no shared call router. Keeping that
   // case on the ordinary direct-cave path is also important for a shared
   // helper: B0-to-A0 translation clones the helper per kernel owner, whereas
   // an absolute call-return dispatcher only names one physical clone.
@@ -1093,7 +1093,7 @@ void try_apply_sampled_barrier_sync_patch(
           .source_index = index,
       });
     }
-    // GFX1250 helpers can be cloned independently during B0-to-A0 translation.
+    // CDNA5 helpers can be cloned independently during B0-to-A0 translation.
     // Keep every caller identity in the non-negative scalar inline-constant
     // range so a clone-local two-word entry stub can carry it to the common
     // appended dispatcher without embedding a clone address.

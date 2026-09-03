@@ -731,7 +731,7 @@ function(rj_add_consan_device_conformance_cases)
     if(_device_TARGET STREQUAL "gfx1100")
         list(
             APPEND _device_workloads
-            "Gfx11ScalarVglobal|gfx11_scalar_vglobal|ConSanDeviceGfx11ScalarVglobalTest|atomics"
+            "Rdna3ScalarVglobal|rdna3_scalar_vglobal|ConSanDeviceRdna3ScalarVglobalTest|atomics"
         )
     endif()
     foreach(_workload IN LISTS _device_workloads)
@@ -1407,7 +1407,7 @@ function(rj_add_consan_device_fixture_targets target)
     if(target STREQUAL "gfx1100")
         list(
             APPEND _device_workload_sources
-            "gfx11_scalar_vglobal|gfx11_scalar_vglobal_test.hip"
+            "rdna3_scalar_vglobal|rdna3_scalar_vglobal_test.hip"
         )
     endif()
     foreach(_workload IN LISTS _device_workload_sources)
@@ -3114,7 +3114,7 @@ function(rj_add_consan_rdna3_compact_sim_cases)
     # cross-family simulator matrix. The common matrix depends on generic
     # high-half D16, forced-spill, shared-helper, and exact-byte fixtures that
     # are not RDNA3-native qualification artifacts. Broad transformation
-    # coverage stays in the host suite; this slice proves that native gfx11
+    # coverage stays in the host suite; this slice proves that native RDNA3
     # objects execute all four engines and attribute a real conflict.
 
     rj_add_consan_scalar_spill_exec_cases(

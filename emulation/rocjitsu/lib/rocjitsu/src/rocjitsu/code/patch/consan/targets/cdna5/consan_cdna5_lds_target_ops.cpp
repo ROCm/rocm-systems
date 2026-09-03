@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_gfx1250_lds_target_ops.cpp
-/// @brief gfx1250 normalized LDS access recipes.
+/// @file consan_cdna5_lds_target_ops.cpp
+/// @brief CDNA5 normalized LDS access recipes.
 
 #include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
@@ -18,7 +18,7 @@ namespace rocjitsu {
 std::optional<std::vector<uint32_t>>
 consan_build_split_two_address_lds_pair(const ConSanSplitTwoAddressLdsRequest &request,
                                         rj_code_arch_t arch) {
-  if (!consan_uses_gfx12_cdna_execution(arch) || request.address_vgpr > 255u ||
+  if (!consan_arch_is_cdna5(arch) || request.address_vgpr > 255u ||
       request.first_data_vgpr > 255u || request.second_data_vgpr > 255u ||
       (request.element_dwords == 2u &&
        (request.first_data_vgpr > 254u || request.second_data_vgpr > 254u)) ||

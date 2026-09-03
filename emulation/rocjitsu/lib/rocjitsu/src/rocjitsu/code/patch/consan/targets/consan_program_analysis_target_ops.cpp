@@ -15,15 +15,15 @@ namespace {
 [[nodiscard]] const ConSanProgramAnalysisTargetOperations *operations(rj_code_arch_t arch) {
   static constexpr std::array registrations{
       ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA3,
-                                              &kConSanGfx9CdnaProgramAnalysisOperations},
+                                              &kConSanCdna3Cdna4ProgramAnalysisOperations},
       ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA4,
-                                              &kConSanGfx9CdnaProgramAnalysisOperations},
+                                              &kConSanCdna3Cdna4ProgramAnalysisOperations},
       ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA3,
-                                              &kConSanGfx1100ProgramAnalysisOperations},
+                                              &kConSanRdna3ProgramAnalysisOperations},
       ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_RDNA4,
-                                              &kConSanGfx1201ProgramAnalysisOperations},
+                                              &kConSanRdna4ProgramAnalysisOperations},
       ConSanProgramAnalysisTargetRegistration{ROCJITSU_CODE_ARCH_CDNA5,
-                                              &kConSanGfx1250ProgramAnalysisOperations},
+                                              &kConSanCdna5ProgramAnalysisOperations},
   };
   return find_consan_program_analysis_target_operations<rj_code_arch_t>(registrations, arch);
 }

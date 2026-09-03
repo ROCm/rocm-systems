@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Production-shaped gfx12 FP8 WMMA staging reduced from the empirical FP8
+/// Production-shaped RDNA4 FP8 WMMA staging reduced from the empirical FP8
 /// matmul: B128 LDS traffic, split workgroup synchronization, live WMMA state,
 /// register pressure, exact outputs, and surrounding canaries.
 
@@ -62,7 +62,7 @@ __launch_bounds__(kThreadCount) void rdna_fp8_staged_matmul_for_consan(DeviceSta
     private_words[i] = 0xf8000000u ^ (tid * 13u + i);
   const uint32_t selected = private_words[(tid + 1u) % private_count];
 
-  // The gfx12 WMMA FP8 encoding represents 1.0 as 0x38. Each operand contains eight
+  // The RDNA4 WMMA FP8 encoding represents 1.0 as 0x38. Each operand contains eight
   // packed elements, hence two identical 32-bit words.
   const i32x2_t ones = {static_cast<int32_t>(0x38383838u), static_cast<int32_t>(0x38383838u)};
   f32x8_t accumulator{};

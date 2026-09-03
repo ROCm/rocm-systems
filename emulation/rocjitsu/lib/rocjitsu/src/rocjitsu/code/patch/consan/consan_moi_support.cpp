@@ -283,15 +283,14 @@ bool consan_detail::append_restore_moi_special_state(std::vector<uint32_t> &word
 bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words,
                                                     const ConSanTargetProfile &target) {
   std::optional<std::array<uint32_t, 2>> invalidate;
-  switch (target.encoding_family) {
-  case ConSanEncodingFamily::Gfx9Cdna3:
+  switch (target.device_cache_refresh) {
+  case ConSanDeviceCacheRefreshForm::Cdna3BufferInvSc1:
     invalidate = build_cdna3_buffer_inv_sc1(target.arch);
     break;
-  case ConSanEncodingFamily::Gfx9Cdna4:
+  case ConSanDeviceCacheRefreshForm::Cdna4BufferInvSc1:
     invalidate = build_cdna4_buffer_inv_sc1(target.arch);
     break;
-  case ConSanEncodingFamily::Gfx11:
-  case ConSanEncodingFamily::Gfx12:
+  case ConSanDeviceCacheRefreshForm::None:
     return true;
   }
   if (!invalidate)
@@ -303,9 +302,7 @@ bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words
 bool consan_detail::append_moi_global_atomic_completion(std::vector<uint32_t> &words,
                                                         const ConSanTargetProfile &target) {
   const auto load = instrumentation::build_s_wait_global_load0(target.arch);
-  const bool needs_separate_store_wait =
-      target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
-      target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4;
+  const bool needs_separate_store_wait = !consan_arch_is_cdna3_or_cdna4(target.arch);
   const auto store = needs_separate_store_wait
                          ? instrumentation::build_s_wait_global_store0(target.arch)
                          : std::optional<uint32_t>{};

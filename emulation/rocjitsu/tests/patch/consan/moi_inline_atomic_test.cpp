@@ -145,8 +145,8 @@ expected_dynamic_fence_literal_store(uint64_t field_address, uint32_t value, uin
       text_words.insert(text_words.end(), release.begin(), release.end());
       text_words.push_back(*wait);
     } else {
-      // global_wb is the target-native release member paired with the gfx12
-      // FLAT atomic. Both admitted gfx12 decoders use this three-dword form.
+      // global_wb is the target-native release member paired with the
+      // RDNA4/CDNA5 FLAT atomic. Both admitted decoders use this three-dword form.
       text_words.insert(text_words.end(), {0xEE0B0000u, 0x00000000u, 0x00000000u});
     }
   }
@@ -176,7 +176,7 @@ expected_dynamic_fence_literal_store(uint64_t field_address, uint32_t value, uin
       text_words.push_back(*wait);
       text_words.insert(text_words.end(), acquire.begin(), acquire.end());
     } else {
-      // global_inv is the target-native gfx12 acquire member.
+      // global_inv is the target-native RDNA4/CDNA5 acquire member.
       if (ordinary_load) {
         const auto wait = build_s_wait_loadcnt0(target.arch);
         if (!wait)
@@ -226,7 +226,7 @@ inline_ordinary_acquire_load(const InlineReleaseSequenceTarget &target) {
   };
 }
 
-TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
+TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteRdna3CacheSequence) {
   const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
                                            /*release_transaction_vsrc=*/12,
                                            /*token_transaction_vsrc=*/26};
@@ -3567,7 +3567,7 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   }
 }
 
-TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcrossGfx12) {
+TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcrossRdna4Cdna5) {
   constexpr std::array targets = {
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_RDNA4, "gfx1201/rdna4", 13u, 27u},
       InlineReleaseSequenceTarget{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250/cdna5", 13u, 27u},
@@ -3904,7 +3904,7 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   drained_release_transaction.push_back(*wait_global_load0);
   drained_release_transaction.push_back(*wait_global_store0);
   EXPECT_EQ(count_subsequence(release_words, drained_release_transaction), 2u)
-      << "every gfx12 release claim and commit must drain both sides of the returning CAS";
+      << "every RDNA4/CDNA5 release claim and commit must drain both sides of the returning CAS";
   const uint16_t release_retry_count_sgpr = 100u;
   const std::array<uint32_t, 2> initialize_release_retries = {
       build_s_mov_b32(release_retry_count_sgpr, /*literal source=*/255u, ROCJITSU_CODE_ARCH_RDNA4),
@@ -4470,7 +4470,7 @@ TEST(ConSanMoi, InlineAtomicRetainsDisplacedVglobalAcquireAndPublishesToken) {
   const size_t token_transaction_count = count_subsequence(acquire_words, *token_transaction_cas);
   ASSERT_GT(token_transaction_count, 0u);
   EXPECT_EQ(count_subsequence(acquire_words, drained_token_transaction), token_transaction_count)
-      << "every gfx12 token claim, rollback, and commit must drain both sides of "
+      << "every RDNA4/CDNA5 token claim, rollback, and commit must drain both sides of "
          "the returning FLAT atomic";
 }
 

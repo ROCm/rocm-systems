@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_program_analysis_gfx1250_target_ops.cpp
-/// @brief gfx1250 raw pointer-provenance decoding.
+/// @file consan_program_analysis_cdna5_target_ops.cpp
+/// @brief CDNA5 raw pointer-provenance decoding.
 
 #include "rocjitsu/code/patch/consan/targets/consan_program_analysis_target_ops_internal.h"
 
-#include "rocjitsu/code/patch/consan/targets/shared/gfx12/consan_program_analysis_gfx12_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/shared/consan_program_analysis_rdna4_cdna5_common.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 
@@ -14,31 +14,31 @@
 
 namespace rocjitsu::consan_program_analysis_target_detail {
 
-ConSanCacheOperationEncoding classify_gfx1250_cache_operation(std::string_view mnemonic) {
-  return classify_gfx12_cache_operation(mnemonic, false);
+ConSanCacheOperationEncoding classify_cdna5_cache_operation(std::string_view mnemonic) {
+  return classify_rdna4_cdna5_cache_operation(mnemonic, false);
 }
 
 std::optional<ConSanScratchComponentEncoding>
-decode_gfx1250_scratch_component(std::span<const uint8_t> instruction) {
-  return decode_gfx12_scratch_component<cdna5::VscratchMachineInst>(instruction);
+decode_cdna5_scratch_component(std::span<const uint8_t> instruction) {
+  return decode_rdna4_cdna5_scratch_component<cdna5::VscratchMachineInst>(instruction);
 }
 
 std::optional<ConSanLaneTransferEncoding>
-decode_gfx1250_lane_transfer(std::span<const uint8_t> instruction) {
-  return decode_gfx12_lane_transfer<cdna5::Vop3MachineInst>(instruction, 0);
+decode_cdna5_lane_transfer(std::span<const uint8_t> instruction) {
+  return decode_rdna4_cdna5_lane_transfer<cdna5::Vop3MachineInst>(instruction, 0);
 }
 
-ConSanVectorMemoryDecode decode_gfx1250_flat_memory(std::span<const uint8_t> instruction) {
-  return decode_gfx12_vector_memory<cdna5::VflatMachineInst>(instruction, cdna5::OPR_SREG_NULL,
-                                                             0xecu, false, 0u);
+ConSanVectorMemoryDecode decode_cdna5_flat_memory(std::span<const uint8_t> instruction) {
+  return decode_rdna4_cdna5_vector_memory<cdna5::VflatMachineInst>(
+      instruction, cdna5::OPR_SREG_NULL, 0xecu, false, 0u);
 }
 
-ConSanVectorMemoryDecode decode_gfx1250_global_memory(std::span<const uint8_t> instruction) {
-  return decode_gfx12_vector_memory<cdna5::VglobalMachineInst>(instruction, cdna5::OPR_SREG_NULL,
-                                                               0xeeu, false, 0u);
+ConSanVectorMemoryDecode decode_cdna5_global_memory(std::span<const uint8_t> instruction) {
+  return decode_rdna4_cdna5_vector_memory<cdna5::VglobalMachineInst>(
+      instruction, cdna5::OPR_SREG_NULL, 0xeeu, false, 0u);
 }
 
-ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> instruction) {
+ConSanBufferMemoryDecode decode_cdna5_buffer_memory(std::span<const uint8_t> instruction) {
   if (instruction.size() != sizeof(cdna5::VbufferMachineInst))
     return {.status = ConSanTargetDecodeStatus::UnsupportedEncodingSize, .encoding = {}};
   cdna5::VbufferMachineInst raw{};
@@ -50,7 +50,7 @@ ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> i
               .raw_ioffset = sign_extend_24(static_cast<uint32_t>(raw.ioffset)),
               .raw_scope = static_cast<uint32_t>(raw.scope),
               .raw_th = static_cast<uint32_t>(raw.th),
-              .scope = normalize_gfx12_memory_scope(static_cast<uint32_t>(raw.scope)),
+              .scope = normalize_rdna4_cdna5_memory_scope(static_cast<uint32_t>(raw.scope)),
               .raw_rsrc = static_cast<uint32_t>(raw.rsrc),
               .raw_soffset = static_cast<uint32_t>(raw.soffset),
               .raw_offen = raw.offen != 0u,
@@ -68,8 +68,7 @@ ConSanBufferMemoryDecode decode_gfx1250_buffer_memory(std::span<const uint8_t> i
 }
 
 std::optional<ConSanDirectLdsTransferEncoding>
-decode_gfx1250_direct_lds_transfer(std::string_view mnemonic,
-                                   std::span<const uint8_t> instruction) {
+decode_cdna5_direct_lds_transfer(std::string_view mnemonic, std::span<const uint8_t> instruction) {
   const bool async_load = mnemonic.starts_with("global_load_async_to_lds_b");
   const bool async_store = mnemonic.starts_with("global_store_async_from_lds_b");
   if ((!async_load && !async_store) || instruction.size() != sizeof(cdna5::VglobalMachineInst))
@@ -86,31 +85,31 @@ decode_gfx1250_direct_lds_transfer(std::string_view mnemonic,
   };
 }
 
-bool decode_gfx1250_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
-                                std::span<const uint8_t> instruction) {
-  return decode_gfx12_atomic_site<cdna5::VdsMachineInst, cdna5::VflatMachineInst,
-                                  cdna5::VglobalMachineInst, cdna5::VscratchMachineInst,
-                                  cdna5::VbufferMachineInst>(site, mnemonic, instruction);
+bool decode_cdna5_atomic_site(ConSanAtomicSite &site, std::string_view mnemonic,
+                              std::span<const uint8_t> instruction) {
+  return decode_rdna4_cdna5_atomic_site<cdna5::VdsMachineInst, cdna5::VflatMachineInst,
+                                        cdna5::VglobalMachineInst, cdna5::VscratchMachineInst,
+                                        cdna5::VbufferMachineInst>(site, mnemonic, instruction);
 }
 
 } // namespace rocjitsu::consan_program_analysis_target_detail
 
 namespace rocjitsu {
 
-extern const ConSanProgramAnalysisTargetOperations kConSanGfx1250ProgramAnalysisOperations = {
+extern const ConSanProgramAnalysisTargetOperations kConSanCdna5ProgramAnalysisOperations = {
     .classify_cache_operation =
-        consan_program_analysis_target_detail::classify_gfx1250_cache_operation,
+        consan_program_analysis_target_detail::classify_cdna5_cache_operation,
     .classify_wait_instruction =
-        consan_program_analysis_target_detail::classify_gfx12_wait_instruction,
+        consan_program_analysis_target_detail::classify_rdna4_cdna5_wait_instruction,
     .decode_scratch_component =
-        consan_program_analysis_target_detail::decode_gfx1250_scratch_component,
-    .decode_lane_transfer = consan_program_analysis_target_detail::decode_gfx1250_lane_transfer,
-    .decode_flat_memory = consan_program_analysis_target_detail::decode_gfx1250_flat_memory,
-    .decode_global_memory = consan_program_analysis_target_detail::decode_gfx1250_global_memory,
-    .decode_buffer_memory = consan_program_analysis_target_detail::decode_gfx1250_buffer_memory,
+        consan_program_analysis_target_detail::decode_cdna5_scratch_component,
+    .decode_lane_transfer = consan_program_analysis_target_detail::decode_cdna5_lane_transfer,
+    .decode_flat_memory = consan_program_analysis_target_detail::decode_cdna5_flat_memory,
+    .decode_global_memory = consan_program_analysis_target_detail::decode_cdna5_global_memory,
+    .decode_buffer_memory = consan_program_analysis_target_detail::decode_cdna5_buffer_memory,
     .decode_direct_lds_transfer =
-        consan_program_analysis_target_detail::decode_gfx1250_direct_lds_transfer,
-    .decode_atomic_site = consan_program_analysis_target_detail::decode_gfx1250_atomic_site,
+        consan_program_analysis_target_detail::decode_cdna5_direct_lds_transfer,
+    .decode_atomic_site = consan_program_analysis_target_detail::decode_cdna5_atomic_site,
 };
 
 } // namespace rocjitsu

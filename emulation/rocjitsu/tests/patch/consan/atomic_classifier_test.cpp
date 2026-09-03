@@ -85,7 +85,7 @@ TEST(ConSanAtomicClassifier, OrderedOrdinaryFormsOwnGuestDestinationShape) {
   EXPECT_EQ(store_classification.form->destination_register_count, 0u);
 }
 
-TEST(ConSanAtomicClassifier, Gfx12ScalarVectorAddressHasOneNormalizedForm) {
+TEST(ConSanAtomicClassifier, Rdna4Cdna5ScalarVectorAddressHasOneNormalizedForm) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     AtomicTargetCase target{arch, 12u, 8u};
     ConSanAtomicSite site = exact_flat_atomic(target);

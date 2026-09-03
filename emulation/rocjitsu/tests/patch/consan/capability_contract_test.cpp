@@ -27,11 +27,11 @@ struct ExpectedTargetProfile {
   rj_code_target_id_t target;
   rj_code_arch_t arch;
   ConSanArchitectureFamily architecture_family;
-  ConSanEncodingFamily encoding_family;
   ConSanAccumulatorModel accumulator_model;
   ConSanDispatchIdentitySource dispatch_identity;
   std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form;
+  ConSanDeviceCacheRefreshForm device_cache_refresh;
   ConSanCodeTransportModel code_transport;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
@@ -79,11 +79,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .target = ROCJITSU_CODE_TARGET_GFX942,
         .arch = ROCJITSU_CODE_ARCH_CDNA3,
         .architecture_family = ConSanArchitectureFamily::Cdna,
-        .encoding_family = ConSanEncodingFamily::Gfx9Cdna3,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .device_cache_refresh = ConSanDeviceCacheRefreshForm::Cdna3BufferInvSc1,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
@@ -133,11 +133,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .target = ROCJITSU_CODE_TARGET_GFX950,
         .arch = ROCJITSU_CODE_ARCH_CDNA4,
         .architecture_family = ConSanArchitectureFamily::Cdna,
-        .encoding_family = ConSanEncodingFamily::Gfx9Cdna4,
         .accumulator_model = ConSanAccumulatorModel::DescriptorPartitioned,
         .dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .device_cache_refresh = ConSanDeviceCacheRefreshForm::Cdna4BufferInvSc1,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
@@ -187,11 +187,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .target = ROCJITSU_CODE_TARGET_GFX1100,
         .arch = ROCJITSU_CODE_ARCH_RDNA3,
         .architecture_family = ConSanArchitectureFamily::Rdna,
-        .encoding_family = ConSanEncodingFamily::Gfx11,
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity = std::nullopt,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
@@ -242,7 +242,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .target = ROCJITSU_CODE_TARGET_GFX1201,
         .arch = ROCJITSU_CODE_ARCH_RDNA4,
         .architecture_family = ConSanArchitectureFamily::Rdna,
-        .encoding_family = ConSanEncodingFamily::Gfx12,
         .accumulator_model = ConSanAccumulatorModel::None,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity =
@@ -252,6 +251,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .cluster_workgroup_id_ttmp = std::nullopt,
             },
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
         .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
@@ -305,7 +305,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .target = ROCJITSU_CODE_TARGET_GFX1250,
         .arch = ROCJITSU_CODE_ARCH_CDNA5,
         .architecture_family = ConSanArchitectureFamily::Cdna,
-        .encoding_family = ConSanEncodingFamily::Gfx12,
         .accumulator_model = ConSanAccumulatorModel::SelectableVgprBank,
         .dispatch_identity = ConSanDispatchIdentitySource::CodeObjectLiteral,
         .command_processor_workgroup_identity =
@@ -315,6 +314,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
                 .cluster_workgroup_id_ttmp = 6u,
             },
         .direct_call_form = ConSanDirectCallForm::SCallI64,
+        .device_cache_refresh = ConSanDeviceCacheRefreshForm::None,
         .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
@@ -374,12 +374,12 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.target, expected.target);
   EXPECT_EQ(actual.arch, expected.arch);
   EXPECT_EQ(actual.architecture_family, expected.architecture_family);
-  EXPECT_EQ(actual.encoding_family, expected.encoding_family);
   EXPECT_EQ(actual.accumulator_model, expected.accumulator_model);
   EXPECT_EQ(actual.dispatch_identity, expected.dispatch_identity);
   EXPECT_EQ(actual.command_processor_workgroup_identity,
             expected.command_processor_workgroup_identity);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
+  EXPECT_EQ(actual.device_cache_refresh, expected.device_cache_refresh);
   EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
@@ -526,7 +526,7 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("unknown post-instrumentation transport model", [](auto &profiles) {
     profiles[0].code_transport = static_cast<ConSanCodeTransportModel>(255u);
   });
-  expect_invalid("two-address relocation split on a non-gfx12 encoding", [](auto &profiles) {
+  expect_invalid("two-address relocation split outside CDNA5", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });
   expect_invalid("unsupported dense-route group capacity",
@@ -535,9 +535,9 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].supports_moi_far_dense_barrier_route = false; });
   expect_invalid("dense s_call_b64 support without the target call form",
                  [](auto &profiles) { profiles[4].supports_moi_dense_s_call_b64 = true; });
-  expect_invalid("SC branch-only route on a non-gfx12 encoding",
+  expect_invalid("SC branch-only route outside RDNA4/CDNA5",
                  [](auto &profiles) { profiles[0].supports_sc_branch_only_route = true; });
-  expect_invalid("SC inline FLAT trap on a non-gfx12 RDNA target",
+  expect_invalid("SC inline FLAT trap outside RDNA4",
                  [](auto &profiles) { profiles[0].supports_sc_inline_flat_trap_rewrite = true; });
   expect_invalid("SC runtime group gate without selectable VGPR banks",
                  [](auto &profiles) { profiles[0].requires_sc_runtime_flat_group_gate = true; });
@@ -736,19 +736,18 @@ TEST(ConSanCapabilityContract, PrivateSizeNormalizationCoversGranularityLimitAnd
 TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirTypedFacts) {
   for (const ExpectedTargetProfile &expected : kExpectedTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(expected.target));
-    EXPECT_EQ(consan_uses_gfx9_cdna_encoding(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                  expected.encoding_family == ConSanEncodingFamily::Gfx9Cdna4);
-    EXPECT_EQ(consan_uses_gfx11_encoding(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx11);
-    EXPECT_EQ(consan_uses_gfx12_encoding(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx12);
-    EXPECT_EQ(consan_uses_gfx12_cdna_execution(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx12 &&
-                  expected.architecture_family == ConSanArchitectureFamily::Cdna);
-    EXPECT_EQ(consan_uses_gfx11_or_gfx12_encoding(expected.arch),
-              expected.encoding_family == ConSanEncodingFamily::Gfx11 ||
-                  expected.encoding_family == ConSanEncodingFamily::Gfx12);
+    EXPECT_EQ(consan_arch_is_cdna3_or_cdna4(expected.arch),
+              expected.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                  expected.arch == ROCJITSU_CODE_ARCH_CDNA4);
+    EXPECT_EQ(consan_arch_is_rdna3(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_RDNA3);
+    EXPECT_EQ(consan_arch_is_rdna4_or_cdna5(expected.arch),
+              expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                  expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(consan_arch_is_cdna5(expected.arch), expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
+    EXPECT_EQ(consan_arch_is_rdna3_rdna4_or_cdna5(expected.arch),
+              expected.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                  expected.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                  expected.arch == ROCJITSU_CODE_ARCH_CDNA5);
     EXPECT_EQ(consan_arch_has_s_call_i64(expected.arch),
               expected.direct_call_form == ConSanDirectCallForm::SCallI64);
     EXPECT_EQ(consan_arch_uses_per_kernel_owner_translation(expected.arch),
@@ -761,11 +760,11 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   }
 
   constexpr rj_code_arch_t unsupported = ROCJITSU_CODE_ARCH_CDNA2;
-  EXPECT_FALSE(consan_uses_gfx9_cdna_encoding(unsupported));
-  EXPECT_FALSE(consan_uses_gfx11_encoding(unsupported));
-  EXPECT_FALSE(consan_uses_gfx12_encoding(unsupported));
-  EXPECT_FALSE(consan_uses_gfx12_cdna_execution(unsupported));
-  EXPECT_FALSE(consan_uses_gfx11_or_gfx12_encoding(unsupported));
+  EXPECT_FALSE(consan_arch_is_cdna3_or_cdna4(unsupported));
+  EXPECT_FALSE(consan_arch_is_rdna3(unsupported));
+  EXPECT_FALSE(consan_arch_is_rdna4_or_cdna5(unsupported));
+  EXPECT_FALSE(consan_arch_is_cdna5(unsupported));
+  EXPECT_FALSE(consan_arch_is_rdna3_rdna4_or_cdna5(unsupported));
   EXPECT_FALSE(consan_arch_is_cdna(unsupported));
   EXPECT_FALSE(consan_arch_is_rdna(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// Native 12-byte LDS tuple publication. The aliasing store source/address and
-/// load destination/address are retained from framework-generated gfx11/gfx12
+/// load destination/address are retained from framework-generated RDNA3/RDNA4
 /// kernels: instrumentation must preserve the shared operand before relocating
 /// either B96 access.
 

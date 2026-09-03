@@ -158,7 +158,7 @@ namespace consan_moi_impl {
   }
   if (capture_high_bank_address && load_clobbers_address && candidate.is_native_two_range()) {
     errors.emplace_back("ConSan MOI first-light probe cannot yet preserve a clobbered high-bank "
-                        "gfx1250 two-address LDS operand");
+                        "CDNA5 two-address LDS operand");
     return std::nullopt;
   }
   std::optional<uint16_t> derived_owner_vgpr;

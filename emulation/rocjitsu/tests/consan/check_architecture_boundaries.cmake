@@ -18,8 +18,8 @@ set(
 
 # Physical ownership is part of the architecture. A reader can skip every
 # concrete target or mode by skipping these directories, and a new extension
-# has one visible home. Cross-target encoding families remain explicit under
-# targets/shared rather than being copied into marketed-architecture owners.
+# has one visible home. Cross-architecture mechanisms remain explicit under
+# targets/shared rather than being copied into architecture owners.
 foreach(_directory IN ITEMS
     targets/rdna3
     targets/rdna4
@@ -27,9 +27,6 @@ foreach(_directory IN ITEMS
     targets/cdna4
     targets/cdna5
     targets/shared/cdna3_cdna4
-    targets/shared/gfx11_gfx12
-    targets/shared/gfx12
-    targets/shared/pregfx12
     targets/shared/rdna3_rdna4
     modes/record_replay
     modes/sampled
@@ -49,6 +46,21 @@ file(GLOB_RECURSE _consan_layout_files
 foreach(_file IN LISTS _consan_layout_files)
     file(RELATIVE_PATH _relative "${_consan_dir}" "${_file}")
     get_filename_component(_name "${_file}" NAME)
+    file(READ "${_file}" _contents)
+    if(_contents MATCHES "ConSanEncodingFamily|consan_uses_gfx")
+        message(FATAL_ERROR
+            "ConSan regained a synthetic gfx encoding family in ${_relative}")
+    endif()
+    if(_relative MATCHES "(^|[/_])gfx(11|12)([/_.]|$)")
+        message(FATAL_ERROR
+            "ConSan architecture owner uses a gfx alias instead of its canonical architecture name: ${_relative}")
+    endif()
+    if(_relative MATCHES "gfx1250" AND
+       NOT _relative MATCHES
+           "^targets/cdna5/consan_gfx1250_target_profile[.]h[.]inc$")
+        message(FATAL_ERROR
+            "ConSan architecture owner uses a gfx alias instead of its canonical architecture name: ${_relative}")
+    endif()
     if(_name MATCHES "^consan_(gfx[0-9]|rdna[0-9]|cdna[0-9])" AND
        NOT _relative MATCHES "^targets/")
         message(FATAL_ERROR
@@ -1353,7 +1365,7 @@ _consan_assert_no_match(
 )
 file(READ "${_consan_dir}/consan_capability_contract.h"
      _visible_evidence_target_contract)
-file(READ "${_consan_dir}/targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc"
+file(READ "${_consan_dir}/targets/shared/cdna3_cdna4/consan_cdna3_cdna4_target_profile.h.inc"
      _gfx9_visible_evidence_profile)
 file(READ "${_consan_dir}/consan_moi_dynamic_record_emission.cpp"
      _visible_evidence_mechanism)
@@ -2260,7 +2272,7 @@ _consan_assert_no_match(
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_sync_analysis.inc"
-    "site->raw_(scope|th)|consan_uses_gfx9_cdna_encoding|consan_uses_gfx12_(cdna|rdna)_execution"
+    "site->raw_(scope|th)|consan_arch_is_cdna3_or_cdna4|consan_uses_gfx"
     "synchronization analysis must consume target-normalized workgroup-acquire ordering"
 )
 foreach(_cache_semantic_consumer IN ITEMS
@@ -2270,7 +2282,7 @@ foreach(_cache_semantic_consumer IN ITEMS
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_cache_semantic_consumer}"
-        "global_(wb|inv)|buffer_(wb|wbl2|inv|gl0_inv|gl1_inv)|s_dcache_inv|consan_uses_gfx11_encoding"
+        "global_(wb|inv)|buffer_(wb|wbl2|inv|gl0_inv|gl1_inv)|s_dcache_inv|consan_arch_is_rdna3"
         "cache semantic consumers must use target-normalized cache operations"
     )
 endforeach()
@@ -2350,11 +2362,12 @@ foreach(_scope_semantic_only_consumer IN ITEMS
         "semantic scope consumers must not depend on retained raw target scope"
     )
 endforeach()
-file(READ "${_consan_dir}/targets/shared/gfx12/consan_program_analysis_gfx12_target_ops.h"
-     _gfx12_program_analysis_contract)
-if(NOT _gfx12_program_analysis_contract MATCHES "normalize_gfx12_memory_scope")
+file(READ "${_consan_dir}/targets/shared/consan_program_analysis_rdna4_cdna5_common.h"
+     _rdna4_cdna5_program_analysis_contract)
+if(NOT _rdna4_cdna5_program_analysis_contract MATCHES
+       "normalize_rdna4_cdna5_memory_scope")
     message(FATAL_ERROR
-        "gfx12 program analysis lost its explicit raw-to-semantic scope mapping"
+        "RDNA4/CDNA5 program analysis lost its explicit raw-to-semantic scope mapping"
     )
 endif()
 _consan_assert_no_match(
@@ -2509,7 +2522,7 @@ foreach(_sampled_window_client IN ITEMS
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_sync_emission.cpp"
-    "consan_uses_gfx9_cdna_encoding|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"
+    "consan_arch_is_cdna3_or_cdna4|ConSanMoiLiteralDispatchIdPolicy|moi_report_dispatch_id_source_permitted"
     "shared synchronization emission must consume normalized target facts and authorized dispatch sources"
 )
 # InlineShadow atomic tables share one private address-hash implementation;
@@ -2844,14 +2857,17 @@ if(NOT _fault_target_operation_consumer MATCHES "rewrite_consan_atomic_fault_add
         "ConSan atomic fault mutation lost its target-owned rewrite operations"
     )
 endif()
-file(READ "${_consan_dir}/targets/shared/gfx12/consan_fault_gfx12_target_ops.cpp" _gfx12_fault_target_owner)
-if(NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_address" OR
-   NOT _gfx12_fault_target_owner MATCHES "rewrite_gfx12_atomic_fault_scope_to_wave" OR
-   NOT _gfx12_fault_target_owner MATCHES "rdna4::VdsMachineInst" OR
-   NOT _gfx12_fault_target_owner MATCHES "rdna4::VflatMachineInst" OR
-   NOT _gfx12_fault_target_owner MATCHES "rdna4::VbufferMachineInst")
+file(READ "${_consan_dir}/targets/shared/consan_fault_rdna4_cdna5_target_ops.cpp"
+     _rdna4_cdna5_fault_target_owner)
+if(NOT _rdna4_cdna5_fault_target_owner MATCHES
+       "rewrite_rdna4_cdna5_atomic_fault_address" OR
+   NOT _rdna4_cdna5_fault_target_owner MATCHES
+       "rewrite_rdna4_cdna5_atomic_fault_scope_to_wave" OR
+   NOT _rdna4_cdna5_fault_target_owner MATCHES "rdna4::VdsMachineInst" OR
+   NOT _rdna4_cdna5_fault_target_owner MATCHES "rdna4::VflatMachineInst" OR
+   NOT _rdna4_cdna5_fault_target_owner MATCHES "rdna4::VbufferMachineInst")
     message(FATAL_ERROR
-        "ConSan gfx12 fault target owner lost a concrete atomic rewrite recipe"
+        "ConSan RDNA4/CDNA5 fault target owner lost a concrete atomic rewrite recipe"
     )
 endif()
 _consan_assert_no_match(
@@ -3101,7 +3117,7 @@ foreach(_mode IN ITEMS record_replay sampled inline_shadow)
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_mode_planning.cpp"
-    "ConSanEncodingFamily::|ROCJITSU_CODE_ARCH_"
+    "ROCJITSU_CODE_ARCH_"
     "common mode planning must consume normalized target capabilities"
 )
 
@@ -3109,19 +3125,19 @@ _consan_assert_no_match(
 # family/member lowering, program analysis, or independent validation owners.
 set(
     _generated_header_owners
-    consan_fault_gfx12_target_ops.cpp
-    consan_fault_gfx9_target_ops.cpp
-    consan_gfx1250_lds_target_ops.cpp
-    consan_moi_gfx9_target_ops.cpp
-    consan_program_analysis_gfx9_cdna_target_ops.cpp
-    consan_program_analysis_gfx1100_target_ops.cpp
-    consan_program_analysis_gfx1201_target_ops.cpp
-    consan_program_analysis_gfx1250_target_ops.cpp
-    consan_supercollider_gfx1250_target_ops.cpp
-    consan_supercollider_gfx9_target_ops.cpp
+    consan_fault_rdna4_cdna5_target_ops.cpp
+    consan_fault_cdna3_cdna4_target_ops.cpp
+    consan_cdna5_lds_target_ops.cpp
+    consan_moi_cdna3_cdna4_target_ops.cpp
+    consan_program_analysis_cdna3_cdna4_target_ops.cpp
+    consan_program_analysis_rdna3_target_ops.cpp
+    consan_program_analysis_rdna4_target_ops.cpp
+    consan_program_analysis_cdna5_target_ops.cpp
+    consan_supercollider_cdna5_target_ops.cpp
+    consan_supercollider_cdna3_cdna4_target_ops.cpp
     consan_supercollider_rdna3_target_ops.cpp
     consan_supercollider_rdna4_target_ops.cpp
-    consan_validation_gfx12_target_ops.cpp
+    consan_validation_rdna4_cdna5_target_ops.cpp
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_final_validation.cpp"
@@ -3430,9 +3446,9 @@ endif()
 # keep these exact recipes in their named family/member files too.
 set(
     _raw_word_owners
-    consan_gfx1250_vgpr_bank_state.cpp
-    consan_supercollider_gfx11_gfx12_target_ops.cpp
-    consan_supercollider_gfx9_target_ops.cpp
+    consan_cdna5_vgpr_bank_state.cpp
+    consan_supercollider_common_target_ops.cpp
+    consan_supercollider_cdna3_cdna4_target_ops.cpp
 )
 set(
     _raw_word_regex
@@ -3455,12 +3471,13 @@ foreach(_file IN LISTS _consan_sources)
     endif()
 endforeach()
 
-# Concrete target-profile data belongs to gfx-named owners. The common
-# capability contract may aggregate those immutable products, but it must not
-# grow another mixed table of raw product identities.
+# Concrete target-profile data belongs to exact-target owners. The common
+# capability contract may aggregate those immutable products and define
+# canonical architecture predicates, but it must not grow another mixed table
+# of raw product identities.
 set(
     _target_profile_fragments
-    targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc
+    targets/shared/cdna3_cdna4/consan_cdna3_cdna4_target_profile.h.inc
     targets/shared/rdna3_rdna4/consan_rdna_target_profile.h.inc
     targets/cdna3/consan_gfx942_target_profile.h.inc
     targets/cdna4/consan_gfx950_target_profile.h.inc
@@ -3495,12 +3512,12 @@ set(
 set(_capability_contract "${_consan_dir}/consan_capability_contract.h")
 _consan_assert_no_match(
     "${_capability_contract}"
-    "ROCJITSU_CODE_TARGET_GFX|ROCJITSU_CODE_ARCH_(CDNA|RDNA)[0-9]"
-    "common capability contract must aggregate gfx-named target profiles"
+    "ROCJITSU_CODE_TARGET_GFX"
+    "common capability contract must aggregate exact-target profiles"
 )
 file(READ "${_capability_contract}" _capability_contract_contents)
 if(_capability_contract_contents MATCHES
-       "ConSanKernelTargetProfile|consan_kernel_target_profile|consan_profile_supports_wave_size|consan_profile_vgpr_allocation_granularity|consan_is_capability_target|consan_uses_gfx12_rdna_execution|consan_arch_has_s_call_b64|consan_arch_has_descriptor_partitioned_accumulators")
+       "ConSanKernelTargetProfile|consan_kernel_target_profile|consan_profile_supports_wave_size|consan_profile_vgpr_allocation_granularity|consan_is_capability_target|consan_arch_has_s_call_b64|consan_arch_has_descriptor_partitioned_accumulators")
     message(
         FATAL_ERROR
         "ConSan target contract regained an unused projection or test-only profile predicate"
@@ -3805,7 +3822,8 @@ if(NOT _fault_application_body MATCHES "struct FaultApplicationState" OR
     )
 endif()
 foreach(_private_fault_mechanism IN LISTS _private_fault_mechanisms)
-    if(NOT _fault_application_body MATCHES "static void ${_private_fault_mechanism}" OR
+    if(NOT _fault_application_body MATCHES
+           "static[ \t\r\n]+void[ \t\r\n]+${_private_fault_mechanism}" OR
        NOT _fault_application_body MATCHES
        "${_private_fault_mechanism}\\([^\\{]*FaultApplicationState &result\\)")
         message(FATAL_ERROR

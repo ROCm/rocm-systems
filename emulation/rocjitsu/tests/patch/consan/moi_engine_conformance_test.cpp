@@ -142,7 +142,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
   }
 }
 
-TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) {
+TEST_P(MoiEngineConformanceTest, MaterializesRdna4Cdna5ScalarVectorGroupFlatAddress) {
   const MoiEngineConformanceCase &test_case = GetParam();
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     SCOPED_TRACE(arch == ROCJITSU_CODE_ARCH_RDNA4 ? "gfx1201" : "gfx1250");

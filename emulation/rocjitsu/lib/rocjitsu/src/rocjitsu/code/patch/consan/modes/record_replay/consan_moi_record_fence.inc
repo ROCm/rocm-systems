@@ -253,7 +253,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     uint32_t displaced_original_size = patch_size;
     bool entry_island_at_anchor = false;
     bool compact_entry_without_scc = false;
-    if (!direct_entry && !has_indirect_entry_island && consan_uses_gfx12_encoding(arch)) {
+    if (!direct_entry && !has_indirect_entry_island && consan_arch_is_rdna4_or_cdna5(arch)) {
       constexpr size_t kCompactEntryIslandWords = 7u;
       compact_entry_without_scc =
           moi_resource_scc_is_dead_before(*resource_state, patch_text_offset);

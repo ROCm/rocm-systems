@@ -81,8 +81,8 @@ __global__ __launch_bounds__(kThreadCount) void rdna_wmma_pipeline_for_consan(De
     ones[i] = static_cast<_Float16>(1.0f);
   accumulator = wmma(ones, ones, accumulator);
 
-  // Leave only a narrow tail on gfx11 so persistent dispatch identity still
-  // fits while the much larger per-site probe must spill. gfx12 exercises the
+  // Leave only a narrow tail on RDNA3 so persistent dispatch identity still
+  // fits while the much larger per-site probe must spill. RDNA4 exercises the
   // fully allocated bank and its scalar persistent-state fallback.
 #if defined(__gfx1100__)
   asm volatile("v_mov_b32 v247, %0\n\t" : : "v"(selected) : "v247");

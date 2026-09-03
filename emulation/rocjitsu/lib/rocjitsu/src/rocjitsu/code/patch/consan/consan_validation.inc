@@ -35,9 +35,8 @@ struct ValidationByteRange {
   return lhs.begin < rhs.end && rhs.begin < lhs.end;
 }
 
-[[nodiscard]] constexpr bool validation_uses_gfx9_cdna_encoding(const ConSanTargetProfile &target) {
-  return target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-         target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+[[nodiscard]] constexpr bool validation_uses_legacy_cdna(const ConSanTargetProfile &target) {
+  return consan_arch_is_cdna3_or_cdna4(target.arch);
 }
 
 enum class BranchRelayReservoirShape : uint8_t {
@@ -593,10 +592,8 @@ void validate_sc_indirect_island_semantics(const FinalValidationEnvironment &env
     const uint16_t scc_save = route.jump.scc_save_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
-    const bool gfx9_cdna =
-        environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-        environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
-    const uint16_t vcc_save_width = is_flat_body || gfx9_cdna ? 2u : 1u;
+    const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(environment.target_profile->arch);
+    const uint16_t vcc_save_width = is_flat_body || legacy_cdna ? 2u : 1u;
     std::vector<uint32_t> expected_entry;
     std::vector<uint32_t> expected_return;
     const bool encoded =
@@ -949,10 +946,7 @@ void validate_sc_dense_call_semantics(const FinalValidationEnvironment &environm
       const auto body_route = body->sc_dense_route->body;
       const bool isolated_route = !has_other_indirect_route(*body);
       const uint16_t vcc_save_width =
-          environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                  environment.target_profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4
-              ? 2u
-              : 1u;
+          consan_arch_is_cdna3_or_cdna4(environment.target_profile->arch) ? 2u : 1u;
       const uint32_t body_required_sgprs =
           body_route ? std::max<uint32_t>(route.minimum_required_sgpr_count(),
                                           static_cast<uint32_t>(body_route->vcc_save_sgpr) +
@@ -2890,7 +2884,7 @@ void validate_inline_exact_shadow_semantics(const FinalValidationEnvironment &en
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_publication_loop ? 1u : 0u);
-      const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
+      const bool cdna = validation_uses_legacy_cdna(*environment.target_profile);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b64 = instrumentation::build_ds_storexchg_rtn_b64(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
@@ -3192,7 +3186,7 @@ void validate_inline_release_transaction_semantics(const FinalValidationEnvironm
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna = validation_uses_gfx9_cdna_encoding(*environment.target_profile);
+    const bool cdna = validation_uses_legacy_cdna(*environment.target_profile);
     const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));

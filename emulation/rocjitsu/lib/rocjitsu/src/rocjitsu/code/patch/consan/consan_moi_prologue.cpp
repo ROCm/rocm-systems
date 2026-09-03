@@ -316,7 +316,7 @@ append_exact_workgroup_capture(std::vector<uint32_t> &words,
             "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
         return false;
       }
-      // A code-object-wide gfx1250 tuple reserves the cluster coordinate when
+      // A code-object-wide CDNA5 tuple reserves the cluster coordinate when
       // any owning kernel consumes it. Ordinary kernels in the same object do
       // not receive that launch input; zero is their exact cluster identity.
       if (scalar_tuple[index]) {
@@ -2549,7 +2549,7 @@ void try_apply_owner_epoch_prologue_patch(
     // Keep the hardware entry stable and displace its first instruction
     // through the same local-island mechanism used by ordinary long-range
     // probes. Dynamic-stack kernels normally require this route, and it also
-    // avoids a gfx12 runtime failure observed when a large instrumented module
+    // avoids an RDNA4 runtime failure observed when a large instrumented module
     // redirects a descriptor entry across particular late .text placement
     // boundaries.
     const bool requires_in_place_entry = kernel.uses_dynamic_stack.value_or(false);

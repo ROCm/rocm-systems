@@ -222,17 +222,15 @@ TEST(ConSanMoi, EncodedRouteSccRestoreIsConfinedToQualifiedTargetProfiles) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     std::vector<uint32_t> words;
-    const bool gfx9_cdna = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                           target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+    const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
     EXPECT_EQ(consan_detail::append_restore_moi_scc_from_route_key(words, request, target),
-              gfx9_cdna);
-    if (!gfx9_cdna) {
+              legacy_cdna);
+    if (!legacy_cdna) {
       EXPECT_TRUE(words.empty());
       continue;
     }
-    const uint16_t opcode = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3
-                                ? cdna3::kSBitcmp1B32Sopc
-                                : cdna4::kSBitcmp1B32Sopc;
+    const uint16_t opcode =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
     const auto normalize =
         instrumentation::build_s_cselect_b32(request.encoded_sgpr, scalar_positive_inline_u32(1),
                                              scalar_positive_inline_u32(0), target.arch);
@@ -257,17 +255,15 @@ TEST(ConSanMoi, EncodedRouteSccRestoreCanPreserveTheRouteKey) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     std::vector<uint32_t> words;
-    const bool gfx9_cdna = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                           target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
+    const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
     EXPECT_EQ(consan_detail::append_restore_moi_scc_from_route_key(words, request, target),
-              gfx9_cdna);
-    if (!gfx9_cdna) {
+              legacy_cdna);
+    if (!legacy_cdna) {
       EXPECT_TRUE(words.empty());
       continue;
     }
-    const uint16_t opcode = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3
-                                ? cdna3::kSBitcmp1B32Sopc
-                                : cdna4::kSBitcmp1B32Sopc;
+    const uint16_t opcode =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
     EXPECT_EQ(words,
               (std::vector<uint32_t>{build_sopc_encoding(target.arch, opcode, request.encoded_sgpr,
                                                          scalar_positive_inline_u32(0))}));
@@ -289,22 +285,26 @@ TEST(ConSanMoi, DeviceCacheRefreshUsesOnlyQualifiedTargetSequences) {
     SCOPED_TRACE(rj_code_target_name(target.target));
     std::vector<uint32_t> words;
     ASSERT_TRUE(consan_detail::append_moi_device_cache_refresh(words, target));
-    switch (target.encoding_family) {
-    case ConSanEncodingFamily::Gfx9Cdna3: {
+    switch (target.arch) {
+    case ROCJITSU_CODE_ARCH_CDNA3: {
       const auto expected = build_cdna3_buffer_inv_sc1(target.arch);
       ASSERT_TRUE(expected);
       EXPECT_EQ(words, std::vector<uint32_t>(expected->begin(), expected->end()));
       break;
     }
-    case ConSanEncodingFamily::Gfx9Cdna4: {
+    case ROCJITSU_CODE_ARCH_CDNA4: {
       const auto expected = build_cdna4_buffer_inv_sc1(target.arch);
       ASSERT_TRUE(expected);
       EXPECT_EQ(words, std::vector<uint32_t>(expected->begin(), expected->end()));
       break;
     }
-    case ConSanEncodingFamily::Gfx11:
-    case ConSanEncodingFamily::Gfx12:
+    case ROCJITSU_CODE_ARCH_RDNA3:
+    case ROCJITSU_CODE_ARCH_RDNA4:
+    case ROCJITSU_CODE_ARCH_CDNA5:
       EXPECT_TRUE(words.empty());
+      break;
+    default:
+      FAIL() << "unexpected ConSan target architecture";
       break;
     }
   }
@@ -316,8 +316,7 @@ TEST(ConSanMoi, GlobalAtomicCompletionUsesEachTargetsCounterModel) {
     const auto load = instrumentation::build_s_wait_global_load0(target.arch);
     ASSERT_TRUE(load);
     std::vector<uint32_t> expected = {*load};
-    if (target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
-        target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4) {
+    if (!consan_arch_is_cdna3_or_cdna4(target.arch)) {
       const auto store = instrumentation::build_s_wait_global_store0(target.arch);
       ASSERT_TRUE(store);
       expected.push_back(*store);
@@ -717,8 +716,7 @@ TEST(ConSanMoi, PrivateStateLayoutOwnsRangesAndDistinctAllocationBoundaries) {
       .owner_offset = 4u,
       .workgroup_key_offset = 8u,
       .dispatch_id_offset = 12u,
-      .exact_workgroup_offsets =
-          ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
+      .exact_workgroup_offsets = ConSanMoiPersistentWorkgroupPrivateOffsets{20u, 24u, 28u, 32u},
       .persistent_state_end = 36u,
       .ephemeral_base = 48u,
   };

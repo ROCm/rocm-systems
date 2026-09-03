@@ -131,9 +131,9 @@ TEST(ConSanAccessClassifier, NativeReplayAndValueComparisonNormalizeOnAllFiveTar
 TEST(ConSanAccessClassifier, FlatEncodingDifferencesProduceOneNormalizedVocabulary) {
   for (const TargetCase &target : kTargets) {
     SCOPED_TRACE(rj_code_target_name(target.target));
-    const bool gfx12 = consan_uses_gfx12_encoding(target.arch);
-    ConSanAccessInventorySite input = flat_store_site(gfx12 ? 12u : 8u);
-    if (gfx12) {
+    const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
+    ConSanAccessInventorySite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
+    if (rdna4_or_cdna5) {
       input.operands.raw_saddr = 124;
       input.operands.raw_scale_offset = true;
     }
@@ -167,8 +167,8 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
     for (const Case &test : cases) {
       SCOPED_TRACE(rj_code_target_name(target.target));
       SCOPED_TRACE(test.mnemonic);
-      const bool gfx12 = consan_uses_gfx12_encoding(target.arch);
-      ConSanAccessInventorySite input = flat_store_site(gfx12 ? 12u : 8u);
+      const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target.arch);
+      ConSanAccessInventorySite input = flat_store_site(rdna4_or_cdna5 ? 12u : 8u);
       input.mnemonic = test.mnemonic;
       input.kind = test.kind;
       input.decoded_width_bits = test.width_bits;
@@ -176,7 +176,7 @@ TEST(ConSanAccessClassifier, ReplayAdmissionVocabularyIsPrivateToClassifier) {
         input.operands.data_vgpr.reset();
         input.operands.destination_vgpr = 7;
       }
-      if (gfx12) {
+      if (rdna4_or_cdna5) {
         input.operands.raw_saddr = 124;
         input.operands.raw_scale_offset = true;
       }

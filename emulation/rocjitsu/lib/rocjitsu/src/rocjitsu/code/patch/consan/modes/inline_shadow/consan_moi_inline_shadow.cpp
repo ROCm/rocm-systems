@@ -142,7 +142,7 @@ bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &sta
         "scalar spill");
     return false;
   }
-  const uint16_t ordinary_sgpr_count = consan_uses_gfx9_cdna_encoding(arch) ? 102u : kMaxSgprs;
+  const uint16_t ordinary_sgpr_count = consan_arch_is_cdna3_or_cdna4(arch) ? 102u : kMaxSgprs;
   const uint16_t max_exec_save_sgpr =
       static_cast<uint16_t>(ordinary_sgpr_count - required_sgpr_count);
   if (*state.exec_save_sgpr > max_exec_save_sgpr || *state.exec_save_sgpr % 2u != 0u) {

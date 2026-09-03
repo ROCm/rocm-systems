@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_gfx1250_vgpr_bank_state.cpp
-/// @brief gfx1250 selectable-VGPR-bank instruction state.
+/// @file consan_cdna5_vgpr_bank_state.cpp
+/// @brief CDNA5 selectable-VGPR-bank instruction state.
 
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 

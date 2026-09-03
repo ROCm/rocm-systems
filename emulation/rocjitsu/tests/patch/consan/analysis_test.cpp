@@ -37,7 +37,7 @@ TEST(ConSan, MemoryScopeIsOneNormalizedCrossTargetContract) {
   EXPECT_TRUE(consan_memory_scope_is_agent_or_system(ConSanMemoryScope::System));
 }
 
-TEST(ConSan, Gfx12TargetsPublishRawAndNormalizedScopeIndependently) {
+TEST(ConSan, Rdna4Cdna5TargetsPublishRawAndNormalizedScopeIndependently) {
   constexpr std::array expected = {
       ConSanMemoryScope::Wavefront,
       ConSanMemoryScope::Workgroup,
@@ -236,20 +236,20 @@ TEST(ConSan, EveryTargetOwnsItsWaitEffectVocabulary) {
     EXPECT_FALSE(wait.release_boundary) << arch;
   }
 
-  const auto gfx11_release = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
-  ASSERT_TRUE(gfx11_release);
-  const ConSanWaitInstructionEncoding gfx11 =
-      classify_consan_wait_instruction("s_waitcnt_vscnt", *gfx11_release, ROCJITSU_CODE_ARCH_RDNA3);
-  EXPECT_TRUE(gfx11.bounded_release_counter_form);
-  EXPECT_TRUE(is_exact_zero(gfx11));
-  EXPECT_TRUE(gfx11.drains_store);
-  EXPECT_TRUE(gfx11.drains_lds || gfx11.release_boundary);
-  EXPECT_TRUE(gfx11.release_boundary);
-  const ConSanWaitInstructionEncoding gfx11_nonzero = classify_consan_wait_instruction(
-      "s_waitcnt_vscnt", *gfx11_release | 1u, ROCJITSU_CODE_ARCH_RDNA3);
-  EXPECT_TRUE(gfx11_nonzero.bounded_release_counter_form);
-  EXPECT_FALSE(is_exact_zero(gfx11_nonzero));
-  EXPECT_FALSE(gfx11_nonzero.release_boundary);
+  const auto rdna3_release_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(rdna3_release_wait);
+  const ConSanWaitInstructionEncoding rdna3 = classify_consan_wait_instruction(
+      "s_waitcnt_vscnt", *rdna3_release_wait, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(rdna3.bounded_release_counter_form);
+  EXPECT_TRUE(is_exact_zero(rdna3));
+  EXPECT_TRUE(rdna3.drains_store);
+  EXPECT_TRUE(rdna3.drains_lds || rdna3.release_boundary);
+  EXPECT_TRUE(rdna3.release_boundary);
+  const ConSanWaitInstructionEncoding rdna3_nonzero = classify_consan_wait_instruction(
+      "s_waitcnt_vscnt", *rdna3_release_wait | 1u, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(rdna3_nonzero.bounded_release_counter_form);
+  EXPECT_FALSE(is_exact_zero(rdna3_nonzero));
+  EXPECT_FALSE(rdna3_nonzero.release_boundary);
 
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     const auto store = build_s_wait_storecnt0(arch);
@@ -3676,8 +3676,8 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
 
 TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
   const auto rdna3_wait = build_rdna3_s_wait_vscnt0(ROCJITSU_CODE_ARCH_RDNA3);
-  const auto gfx12_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(rdna3_wait && gfx12_wait);
+  const auto rdna4_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(rdna3_wait && rdna4_wait);
   MoiOptions options = moi_options();
   options.moi_track_atomics = true;
 
@@ -3701,7 +3701,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
   EXPECT_EQ(rdna3_release->release_wait_text_offset, 0u);
 
   const std::array<uint32_t, 5> rdna4_words = {
-      *gfx12_wait,
+      *rdna4_wait,
       0xEE068000u,
       0x00880000u,
       0x00000400u, // global_store_b32 v0, v1, s[0:1] offset:4 scope:SCOPE_DEV

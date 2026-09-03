@@ -80,11 +80,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   constexpr uint64_t kIndirectIslandWords = kMoiInlineShadowIndirectIslandWords;
-  // A gfx1250 dispatcher can contain a stranded singleton. Its worst case is
+  // A CDNA5 dispatcher can contain a stranded singleton. Its worst case is
   // a 12-word relocated-host arm, a 15-word two-word-access arm (return-PC
   // match, guest-return adjustment, conditional branch, and long jump), plus
   // the final terminator. Keep RDNA4's compact spacing: its explicit-key
-  // groups do not carry the gfx1250 call-return and adjustment sequences.
+  // groups do not carry the CDNA5 call-return and adjustment sequences.
   const uint64_t access_relay_words =
       target->direct_call_form == ConSanDirectCallForm::SCallI64 ? 28u : 20u;
   const bool has_function_candidate =

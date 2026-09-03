@@ -27,11 +27,11 @@ MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatin
       .address_scratch_vgpr_count = flat_address_scratch_count != 0u
                                         ? flat_address_scratch_count
                                         : static_cast<uint16_t>(needs_address_capture),
-      .two_address_replay_vgpr_count = static_cast<uint16_t>(
-          consan_uses_gfx12_cdna_execution(arch) && candidate.is_native_two_range() &&
-          candidate.encoded_offset_scale_bytes() > 8u),
+      .two_address_replay_vgpr_count =
+          static_cast<uint16_t>(consan_arch_is_cdna5(arch) && candidate.is_native_two_range() &&
+                                candidate.encoded_offset_scale_bytes() > 8u),
       .dynamic_stack_reservoir_vgpr_count =
-          static_cast<uint16_t>(consan_uses_gfx12_encoding(arch) && point.moi_dynamic_stack_spill
+          static_cast<uint16_t>(consan_arch_is_rdna4_or_cdna5(arch) && point.moi_dynamic_stack_spill
                                     ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
                                     : 0u),
       .has_exec_save = point.moi_exec_save_sgpr.has_value(),
@@ -42,10 +42,10 @@ MoiAccessResourceFacts resolve_moi_access_resource_facts(const ConSanMoiOperatin
       .target_available = consan_is_capability_arch(arch),
       .supports_native_lds_spill_recovery =
           candidate.is_native_lds() &&
-          (consan_arch_is_rdna(arch) || consan_uses_gfx9_cdna_encoding(arch)) &&
+          (consan_arch_is_rdna(arch) || consan_arch_is_cdna3_or_cdna4(arch)) &&
           !requires_flat_materialization,
       .supports_clobbered_address_spill_reload =
-          consan_uses_gfx9_cdna_encoding(arch) && !candidate.is_flat() &&
+          consan_arch_is_cdna3_or_cdna4(arch) && !candidate.is_flat() &&
           moi_load_clobbers_address(candidate) && !requires_flat_materialization,
       .guest_replay_requires_disjoint_address_scratch =
           consan_arch_has_selectable_vgpr_bank(arch) && candidate.is_native_two_range() &&
@@ -99,13 +99,13 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 
   // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
   // in an ordinary VGPR. Preserve it before relocating the guest instruction.
-  if (consan_uses_gfx12_cdna_execution(arch)) {
+  if (consan_arch_is_cdna5(arch)) {
     if (!form.address_vgpr || *form.address_vgpr >= 256u || result_vgpr >= 256u)
       return false;
     words.push_back(build_v_mov_b32_e32(result_vgpr, vector_source_vgpr(*form.address_vgpr), arch));
     return true;
   }
-  if (!consan_uses_gfx9_cdna_encoding(arch))
+  if (!consan_arch_is_cdna3_or_cdna4(arch))
     return false;
 
   const uint16_t lane_stride_shift = form.element_width_bits == 32u    ? 2u
@@ -163,7 +163,7 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
   return candidate_uses_scalar_vector_flat_address(candidate) ? 3u : 2u;
 }
 
-/// Materialize the exact gfx12 VFLAT address calculation used by the ISA:
+/// Materialize the exact RDNA4/CDNA5 VFLAT address calculation used by the ISA:
 /// either a vector pair plus signed IOFFSET, or
 ///   saddr + zero_extend(vaddr * scale) + signed IOFFSET.
 /// For group pointers the low result word is the LDS byte offset consumed by
@@ -235,7 +235,7 @@ candidate_requires_flat_address_materialization(const ConSanMoiCandidate &candid
 [[nodiscard]] bool
 moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidate,
                                               rj_code_arch_t arch) {
-  // gfx1250 DS encodings carry only the low eight bits of each VGPR operand.
+  // CDNA5 DS encodings carry only the low eight bits of each VGPR operand.
   // The current s_set_vgpr_msb mode supplies the high bank independently for
   // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
   // SRC0 bank must be copied while that bank is still selected. The appended

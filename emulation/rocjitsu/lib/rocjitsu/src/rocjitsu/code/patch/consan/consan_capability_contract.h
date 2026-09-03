@@ -88,32 +88,9 @@ enum class ConSanCapabilityForm : uint8_t {
 
 /// Identifies the architectural product lineage to which a supported target
 /// belongs.
-///
-/// Product lineage captures architectural intent such as CDNA versus RDNA; it
-/// does not imply that two members use the same machine-instruction encoding.
-/// Conversely, targets from different product lineages may share encodings:
-/// gfx1250 is CDNA even though it shares the gfx12 encoding family with RDNA4.
-/// Callers that need to choose an instruction layout must use
-/// `ConSanEncodingFamily`, not this type.
 enum class ConSanArchitectureFamily : uint8_t {
   Cdna,
   Rdna,
-};
-
-/// Selects the machine-instruction encoding rules used by ConSan decoders and
-/// lowerers.
-///
-/// An encoding family is a statement about compatible binary layouts and
-/// instruction-building facilities, not product branding or the complete set
-/// of semantic capabilities. The two gfx9 CDNA generations remain distinct
-/// because some exact encodings differ, while RDNA4 and CDNA5 intentionally
-/// share `Gfx12`. Exact target exceptions may still be handled after this
-/// coarse routing decision.
-enum class ConSanEncodingFamily : uint8_t {
-  Gfx9Cdna3,
-  Gfx9Cdna4,
-  Gfx11,
-  Gfx12,
 };
 
 /// Describes how accumulator registers participate in a kernel's physical
@@ -122,7 +99,7 @@ enum class ConSanEncodingFamily : uint8_t {
 /// `None` means ConSan does not need a separate accumulator allocation model.
 /// `DescriptorPartitioned` means a descriptor field divides one allocation
 /// into ordinary VGPR and AccVGPR regions. `SelectableVgprBank` means the ISA
-/// selects among physical VGPR banks rather than exposing the gfx9 descriptor
+/// selects among physical VGPR banks rather than exposing the CDNA3/CDNA4 descriptor
 /// partition. Resource planning uses this type to interpret allocation facts;
 /// it does not by itself select an instrumentation strategy.
 enum class ConSanAccumulatorModel : uint8_t {
@@ -168,6 +145,14 @@ struct ConSanCommandProcessorWorkgroupIdentity {
 enum class ConSanDirectCallForm : uint8_t {
   SCallB64,
   SCallI64,
+};
+
+/// Selects the target-owned device-cache refresh sequence used before MOI
+/// consumes published evidence. `None` means no explicit refresh is required.
+enum class ConSanDeviceCacheRefreshForm : uint8_t {
+  None,
+  Cdna3BufferInvSc1,
+  Cdna4BufferInvSc1,
 };
 
 /// Selects the identity carried by a SuperCollider dense access route.
@@ -308,7 +293,7 @@ enum class ConSanCapabilityDisposition : uint8_t {
 ///
 /// There is exactly one profile for each admitted target. It contains facts
 /// that remain constant across every code object and kernel for that target:
-/// product and encoding families, available identity/call/wait facilities,
+/// architecture lineage, available identity/call/wait facilities,
 /// register-allocation rules, address and memory limits, and normalized
 /// semantic-form availability. It deliberately contains no engine choice,
 /// decoded-instruction state, resource-allocation decision, or mutable analysis
@@ -324,11 +309,11 @@ struct ConSanTargetProfile {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   ConSanArchitectureFamily architecture_family = ConSanArchitectureFamily::Cdna;
-  ConSanEncodingFamily encoding_family = ConSanEncodingFamily::Gfx9Cdna3;
   ConSanAccumulatorModel accumulator_model = ConSanAccumulatorModel::None;
   ConSanDispatchIdentitySource dispatch_identity = ConSanDispatchIdentitySource::PreloadedSgprPair;
   std::optional<ConSanCommandProcessorWorkgroupIdentity> command_processor_workgroup_identity;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+  ConSanDeviceCacheRefreshForm device_cache_refresh = ConSanDeviceCacheRefreshForm::None;
   ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
@@ -408,14 +393,14 @@ inline constexpr uint16_t kConSanCdnaSemanticFormMask =
     kConSanCommonSemanticFormMask |
     consan_capability_form_bit(ConSanCapabilityForm::RelaxedLdsAtomicAccess);
 
-#include "rocjitsu/code/patch/consan/targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/shared/cdna3_cdna4/consan_cdna3_cdna4_target_profile.h.inc"
 #include "rocjitsu/code/patch/consan/targets/shared/rdna3_rdna4/consan_rdna_target_profile.h.inc"
 
-#include "rocjitsu/code/patch/consan/targets/rdna3/consan_gfx1100_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/rdna4/consan_gfx1201_target_profile.h.inc"
-#include "rocjitsu/code/patch/consan/targets/cdna5/consan_gfx1250_target_profile.h.inc"
 #include "rocjitsu/code/patch/consan/targets/cdna3/consan_gfx942_target_profile.h.inc"
 #include "rocjitsu/code/patch/consan/targets/cdna4/consan_gfx950_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/cdna5/consan_gfx1250_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/rdna3/consan_gfx1100_target_profile.h.inc"
+#include "rocjitsu/code/patch/consan/targets/rdna4/consan_gfx1201_target_profile.h.inc"
 
 /// The production target-admission map and documentation iteration order.
 /// Concrete architectural facts live in the gfx-named profile owners above.
@@ -530,7 +515,7 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         (profile.has_selectable_vgpr_bank !=
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
         (profile.requires_split_two_address_lds_relocation &&
-         profile.encoding_family != ConSanEncodingFamily::Gfx12) ||
+         profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
         (profile.moi_dense_route_group_capacity != 0u &&
          profile.moi_dense_route_group_capacity != 31u &&
          profile.moi_dense_route_group_capacity != 64u) ||
@@ -538,11 +523,10 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          !profile.supports_moi_far_dense_barrier_route) ||
         (profile.supports_moi_dense_s_call_b64 &&
          profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
-        (profile.supports_sc_branch_only_route &&
-         profile.encoding_family != ConSanEncodingFamily::Gfx12) ||
+        (profile.supports_sc_branch_only_route && profile.arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
         (profile.supports_sc_inline_flat_trap_rewrite &&
-         (profile.encoding_family != ConSanEncodingFamily::Gfx12 ||
-          profile.architecture_family != ConSanArchitectureFamily::Rdna)) ||
+         profile.arch != ROCJITSU_CODE_ARCH_RDNA4) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||
         profile.moi_dispatch_identity_placement ==
             ConSanMoiDispatchIdentityPlacement::Unsupported ||
@@ -560,8 +544,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         (profile.sc_dense_route_identity == ConSanScDenseRouteIdentity::ExplicitInlineKey &&
          profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
         (profile.requires_raw_memory_order_qualifier !=
-         (profile.encoding_family == ConSanEncodingFamily::Gfx11 ||
-          profile.encoding_family == ConSanEncodingFamily::Gfx12)) ||
+         (profile.arch == ROCJITSU_CODE_ARCH_RDNA3 || profile.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+          profile.arch == ROCJITSU_CODE_ARCH_CDNA5)) ||
         (profile.has_cluster_facilities &&
          (profile.semantic_form_mask &
           consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u) ||
@@ -605,8 +589,7 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
 }
 
 /// Return whether an admitted target uses the compute-oriented CDNA execution
-/// architecture. This is a target-profile fact, not an encoding-family test:
-/// gfx1250 is CDNA even though it shares GFX12 encodings with RDNA4.
+/// architecture.
 [[nodiscard]] constexpr bool consan_arch_is_cdna(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->architecture_family == ConSanArchitectureFamily::Cdna;
@@ -664,36 +647,26 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
   return profile ? consan_profile_normalize_private_size(*profile, requested_bytes) : std::nullopt;
 }
 
-[[nodiscard]] constexpr bool consan_uses_gfx9_cdna_encoding(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && (profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                     profile->encoding_family == ConSanEncodingFamily::Gfx9Cdna4);
+[[nodiscard]] constexpr bool consan_arch_is_cdna3_or_cdna4(rj_code_arch_t arch) {
+  return consan_is_capability_arch(arch) &&
+         (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4);
 }
 
-[[nodiscard]] constexpr bool consan_uses_gfx12_encoding(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12;
+[[nodiscard]] constexpr bool consan_arch_is_rdna4_or_cdna5(rj_code_arch_t arch) {
+  return consan_is_capability_arch(arch) &&
+         (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
 }
 
-/// Return whether a target combines GFX12 instruction encodings with CDNA
-/// execution facilities. This operating point currently describes gfx1250,
-/// but the predicate intentionally names the architectural facts that lowering
-/// needs so a future product with the same combination follows the same path.
-[[nodiscard]] constexpr bool consan_uses_gfx12_cdna_execution(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
-         profile->architecture_family == ConSanArchitectureFamily::Cdna;
+[[nodiscard]] constexpr bool consan_arch_is_cdna5(rj_code_arch_t arch) {
+  return consan_is_capability_arch(arch) && arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-[[nodiscard]] constexpr bool consan_uses_gfx11_encoding(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx11;
+[[nodiscard]] constexpr bool consan_arch_is_rdna3(rj_code_arch_t arch) {
+  return consan_is_capability_arch(arch) && arch == ROCJITSU_CODE_ARCH_RDNA3;
 }
 
-[[nodiscard]] constexpr bool consan_uses_gfx11_or_gfx12_encoding(rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && (profile->encoding_family == ConSanEncodingFamily::Gfx11 ||
-                     profile->encoding_family == ConSanEncodingFamily::Gfx12);
+[[nodiscard]] constexpr bool consan_arch_is_rdna3_rdna4_or_cdna5(rj_code_arch_t arch) {
+  return consan_arch_is_rdna3(arch) || consan_arch_is_rdna4_or_cdna5(arch);
 }
 
 [[nodiscard]] constexpr bool consan_arch_has_s_call_i64(rj_code_arch_t arch) {

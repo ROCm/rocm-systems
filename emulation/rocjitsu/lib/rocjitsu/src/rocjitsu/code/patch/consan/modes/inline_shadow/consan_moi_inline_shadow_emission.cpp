@@ -487,7 +487,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       static_cast<uint16_t>(plan.scratch_vgpr + diagnostic_tuple_offset);
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
   const uint16_t slot_vgpr =
-      consan_uses_gfx9_cdna_encoding(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
+      consan_arch_is_cdna3_or_cdna4(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
   if (!sequence.emit_all(
           instrumentation::build_s_mov_b64(
               static_cast<uint16_t>(*plan.scalar_state.exec_save_sgpr + 2u), kAmdGpuExecLo, arch),
@@ -1573,7 +1573,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     return false;
 
   // The selected group is a subset of pending EXEC, so XOR removes exactly
-  // that group. Keep this independent of the gfx12 AND-NOT operand convention;
+  // that group. Keep this independent of the RDNA4 AND-NOT operand convention;
   // live qualification is the authority for this generated control flow.
   failure.stage = "loop completion";
   if (!sequence.emit(instrumentation::build_s_xor_b64(pending_exec_sgpr, pending_exec_sgpr,
@@ -1616,9 +1616,9 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
     std::vector<std::string> &errors) {
   if (!workgroup_shadow.lazy_initialization)
     return true;
-  if ((!consan_uses_gfx12_encoding(arch)) || !plan.scalar_state.exec_save_sgpr ||
+  if ((!consan_arch_is_rdna4_or_cdna5(arch)) || !plan.scalar_state.exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
-    errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
+    errors.emplace_back("ConSan MOI lazy local shadow requires RDNA4 packed validity state");
     return false;
   }
 
@@ -1698,7 +1698,7 @@ using consan_moi_detail::MoiVisibleEvidencePublicationResult;
       !sequence.emit(instrumentation::build_s_mov_b64(kAmdGpuExecLo, bounded_exec_sgpr, arch)) ||
       !sequence.resolve_branches(arch)) {
     errors.emplace_back(
-        "ConSan MOI lazy local shadow could not encode packed gfx12 state transitions");
+        "ConSan MOI lazy local shadow could not encode packed RDNA4 state transitions");
     return false;
   }
   return true;
@@ -1988,13 +1988,13 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
   };
   const std::optional<uint16_t> spill_backed_lds_byte_offset_source =
-      spill != nullptr && !materialize_flat_address && (consan_uses_gfx9_cdna_encoding(arch)) &&
+      spill != nullptr && !materialize_flat_address && (consan_arch_is_cdna3_or_cdna4(arch)) &&
               source_is_spilled(*lds_byte_offset_vgpr)
           ? lds_byte_offset_vgpr
           : std::nullopt;
   const bool compact_spill_keeps_disjoint_clobbered_address =
       spill != nullptr && scratch_count == spill_scratch_count &&
-      (consan_uses_gfx9_cdna_encoding(arch)) && moi_load_clobbers_address(candidate) &&
+      (consan_arch_is_cdna3_or_cdna4(arch)) && moi_load_clobbers_address(candidate) &&
       !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (candidate.is_direct_to_lds()) {
@@ -2264,7 +2264,7 @@ build_inline_shadow_words(std::span<const uint8_t> bytes, const ConSanMoiCandida
   // an even return tuple, so rotate only that local result to the unused +6
   // pair on CDNA3/4.
   const uint16_t local_old_value_vgpr =
-      static_cast<uint16_t>(old_value_vgpr + (consan_uses_gfx9_cdna_encoding(arch) ? 1u : 0u));
+      static_cast<uint16_t>(old_value_vgpr + (consan_arch_is_cdna3_or_cdna4(arch) ? 1u : 0u));
 
   for (const ConSanAccessRange &range : access_ranges) {
     ConSanMoiLdsCellRange cell_range;

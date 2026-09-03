@@ -619,8 +619,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
                                              target, options)
               : std::nullopt;
       bool spill_vcc_save_to_vgpr = false;
-      if (!vcc_save && target.encoding_family == ConSanEncodingFamily::Gfx12 &&
-          allocated_sgpr_count) {
+      if (!vcc_save && consan_arch_is_rdna4_or_cdna5(target.arch) && allocated_sgpr_count) {
         vcc_save = choose_sc_borrowed_scalar_sgpr(*allocated_sgpr_count, options);
         spill_vcc_save_to_vgpr = vcc_save.has_value();
       }
@@ -1170,7 +1169,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
     return lhs.site->physical_id.original_text_offset < rhs.site->physical_id.original_text_offset;
   });
-  // Branch-only continuation uses only the shared GFX12 SOPP branch contract.
+  // Branch-only continuation uses only the shared RDNA4/CDNA5 SOPP branch contract.
   // Reserving its appended bodies on another architecture would leave phantom
   // planner allocations when that route is not emitted, shifting every later
   // body away from the emitter's append cursor.
@@ -1191,7 +1190,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
   // across any one reach window.  Dense generated objects can contain more
   // independent LDS sites than that, making a one-relay-per-site layout
   // mathematically impossible even when pristine text has ample relocatable
-  // instructions. gfx1250 can identify a site with its one-word s_call_i64.
+  // instructions. CDNA5 can identify a site with its one-word s_call_i64.
   // CDNA4 and RDNA4 use an explicit inline key plus s_branch in the two-word
   // LDS anchor. Both forms let all sites in one small kernel share an
   // eight-word local entry host. The appended dispatcher uses that identity
@@ -1236,7 +1235,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object,
     }
 
     // s_mov_b32 can encode keys 0..64 inline in one word. RDNA4 always uses
-    // this two-word s_mov-plus-s_branch anchor; gfx1250 uses it when no fresh
+    // this two-word s_mov-plus-s_branch anchor; CDNA5 uses it when no fresh
     // call-return pair exists. Partition explicit-key groups by their
     // already-dead VCC-save SGPR and into at most 64 sites.
     std::vector<DenseSeedGroup> normalized_seed_groups;

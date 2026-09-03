@@ -207,7 +207,7 @@ struct alignas(8) ConSanMoiSampledCausalWindow {
   uint32_t first_entry = 0;
   uint32_t entry_count = 0;
   uint32_t publication_state = 0;
-  // Zero for ordinary dispatches. On gfx1250 clustered kernels this carries
+  // Zero for ordinary dispatches. On CDNA5 clustered kernels this carries
   // the launch-provided workgroup-within-cluster identity.
   uint32_t cluster_workgroup_id = 0;
 };

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file consan_supercollider_gfx1250_target_ops.cpp
-/// @brief gfx1250 recipes consumed by SuperCollider.
+/// @file consan_supercollider_cdna5_target_ops.cpp
+/// @brief CDNA5 recipes consumed by SuperCollider.
 
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops_internal.h"
 
@@ -11,15 +11,15 @@
 
 namespace rocjitsu::consan_sc_target_detail {
 
-std::optional<std::array<uint32_t, 3>>
-retarget_gfx1250_flat_load_vdst(std::array<uint32_t, 3> words, uint16_t vdst) {
+std::optional<std::array<uint32_t, 3>> retarget_cdna5_flat_load_vdst(std::array<uint32_t, 3> words,
+                                                                     uint16_t vdst) {
   words[1] = (words[1] & ~0xffu) | vdst;
   return words;
 }
 
 std::optional<std::array<uint32_t, 3>>
-build_gfx1250_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
-                                   uint16_t vdst) {
+build_cdna5_flat_load_from_store(std::array<uint32_t, 3> words, uint32_t width_bits,
+                                 uint16_t vdst) {
   uint16_t load_op = 0;
   switch (width_bits) {
   case 8:

@@ -29,22 +29,22 @@ rj_add_object_library(
         targets/consan_relay_target_ops.cpp
         targets/consan_supercollider_target_ops.cpp
         targets/consan_validation_target_ops.cpp
-        targets/rdna3/consan_program_analysis_gfx1100_target_ops.cpp
+        targets/rdna3/consan_program_analysis_rdna3_target_ops.cpp
         targets/rdna3/consan_supercollider_rdna3_target_ops.cpp
-        targets/rdna4/consan_program_analysis_gfx1201_target_ops.cpp
+        targets/rdna4/consan_program_analysis_rdna4_target_ops.cpp
         targets/rdna4/consan_supercollider_rdna4_target_ops.cpp
-        targets/cdna5/consan_gfx1250_lds_target_ops.cpp
-        targets/cdna5/consan_gfx1250_vgpr_bank_state.cpp
-        targets/cdna5/consan_program_analysis_gfx1250_target_ops.cpp
-        targets/cdna5/consan_supercollider_gfx1250_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_fault_gfx9_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_moi_gfx9_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_program_analysis_gfx9_cdna_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_supercollider_gfx9_target_ops.cpp
-        targets/shared/cdna3_cdna4/consan_validation_gfx9_cdna_target_ops.cpp
-        targets/shared/gfx11_gfx12/consan_supercollider_gfx11_gfx12_target_ops.cpp
-        targets/shared/gfx12/consan_fault_gfx12_target_ops.cpp
-        targets/shared/gfx12/consan_validation_gfx12_target_ops.cpp
+        targets/cdna5/consan_cdna5_lds_target_ops.cpp
+        targets/cdna5/consan_cdna5_vgpr_bank_state.cpp
+        targets/cdna5/consan_program_analysis_cdna5_target_ops.cpp
+        targets/cdna5/consan_supercollider_cdna5_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_fault_cdna3_cdna4_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_moi_cdna3_cdna4_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_program_analysis_cdna3_cdna4_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_supercollider_cdna3_cdna4_target_ops.cpp
+        targets/shared/cdna3_cdna4/consan_validation_cdna3_cdna4_target_ops.cpp
+        targets/shared/consan_fault_rdna4_cdna5_target_ops.cpp
+        targets/shared/consan_supercollider_common_target_ops.cpp
+        targets/shared/consan_validation_rdna4_cdna5_target_ops.cpp
 )
 target_link_libraries(rocjitsu_consan_targets PRIVATE rocjitsu_consan_contracts)
 

@@ -580,7 +580,7 @@ private:
     if (!word0)
       return std::nullopt;
     const uint32_t mask =
-        consan_uses_gfx9_cdna_encoding(storage_->arch) && site.kind == ConSanLdsAccessKind::Atomic
+        consan_arch_is_cdna3_or_cdna4(storage_->arch) && site.kind == ConSanLdsAccessKind::Atomic
             ? 0xffu
             : 0xffffu;
     return static_cast<int64_t>(*word0 & mask);

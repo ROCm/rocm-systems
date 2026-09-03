@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// gfx11 scalar-base VGLOBAL acquire coverage. The vector-only address form is
+/// RDNA3 scalar-base VGLOBAL acquire coverage. The vector-only address form is
 /// covered by vglobal_cache_publication_test; this adjacent pair holds the
 /// global pointer in an SGPR pair and supplies a zero VGPR offset. The broken
 /// member removes only the final GL0 acquire invalidation.
@@ -53,7 +53,7 @@ __device__ __forceinline__ uint32_t acquire_scalar_vglobal(uint32_t *flag) {
 }
 
 template <bool CompleteCacheSequence>
-__global__ void gfx11_scalar_vglobal_for_consan(DeviceState *state) {
+__global__ void rdna3_scalar_vglobal_for_consan(DeviceState *state) {
   __shared__ uint32_t payload;
   const uint32_t tid = threadIdx.x;
   const uint32_t wave_size = warpSize;
@@ -69,7 +69,7 @@ __global__ void gfx11_scalar_vglobal_for_consan(DeviceState *state) {
   state->control[tid] = 0x5b000000u | tid;
 }
 
-void run_gfx11_scalar_vglobal(bool complete_cache_sequence) {
+void run_rdna3_scalar_vglobal(bool complete_cache_sequence) {
   const uint32_t thread_count = 2u * consan_device_test::active_wave_size();
   ASSERT_LE(thread_count, kMaximumThreads);
   DeviceState initial{};
@@ -77,9 +77,9 @@ void run_gfx11_scalar_vglobal(bool complete_cache_sequence) {
   HIP_ASSERT(hipMalloc(&device_state, sizeof(DeviceState)));
   HIP_ASSERT(hipMemcpy(device_state, &initial, sizeof(DeviceState), hipMemcpyHostToDevice));
   if (complete_cache_sequence)
-    gfx11_scalar_vglobal_for_consan<true><<<1, thread_count>>>(device_state);
+    rdna3_scalar_vglobal_for_consan<true><<<1, thread_count>>>(device_state);
   else
-    gfx11_scalar_vglobal_for_consan<false><<<1, thread_count>>>(device_state);
+    rdna3_scalar_vglobal_for_consan<false><<<1, thread_count>>>(device_state);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -92,7 +92,7 @@ void run_gfx11_scalar_vglobal(bool complete_cache_sequence) {
   EXPECT_EQ(result.observed, 0x5ca1ab1eu);
 }
 
-TEST(ConSanDeviceGfx11ScalarVglobalTest, Correct) { run_gfx11_scalar_vglobal(true); }
-TEST(ConSanDeviceGfx11ScalarVglobalTest, Incorrect) { run_gfx11_scalar_vglobal(false); }
+TEST(ConSanDeviceRdna3ScalarVglobalTest, Correct) { run_rdna3_scalar_vglobal(true); }
+TEST(ConSanDeviceRdna3ScalarVglobalTest, Incorrect) { run_rdna3_scalar_vglobal(false); }
 
 } // namespace

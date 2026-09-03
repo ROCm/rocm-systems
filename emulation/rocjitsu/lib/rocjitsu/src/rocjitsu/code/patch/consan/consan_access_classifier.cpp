@@ -59,12 +59,11 @@ template <typename Range>
 
 [[nodiscard]] bool is_replayable_single_range_native_lds(std::string_view mnemonic,
                                                          const ConSanTargetProfile &target) {
-  const bool gfx9_cdna = target.encoding_family == ConSanEncodingFamily::Gfx9Cdna3 ||
-                         target.encoding_family == ConSanEncodingFamily::Gfx9Cdna4;
-  if (!gfx9_cdna && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
+  const bool legacy_cdna = consan_arch_is_cdna3_or_cdna4(target.arch);
+  if (!legacy_cdna && (mnemonic == "ds_load_b96" || mnemonic == "ds_store_b96")) {
     return true;
   }
-  if (gfx9_cdna && (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
+  if (legacy_cdna && (mnemonic == "ds_read_b96" || mnemonic == "ds_write_b96")) {
     return true;
   }
   constexpr std::array always = {
@@ -81,12 +80,12 @@ template <typename Range>
   };
   if (named(mnemonic, always))
     return true;
-  constexpr std::array gfx9 = {
+  constexpr std::array legacy_cdna_forms = {
       "ds_read_i8",         "ds_read_u8_d16",     "ds_read_u8_d16_hi",
       "ds_read_i8_d16",     "ds_read_i8_d16_hi",  "ds_read_u16_d16",
       "ds_read_u16_d16_hi", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi",
   };
-  return gfx9_cdna && named(mnemonic, gfx9);
+  return legacy_cdna && named(mnemonic, legacy_cdna_forms);
 }
 
 [[nodiscard]] bool is_replayable_flat_access(std::string_view mnemonic) {
@@ -369,24 +368,24 @@ classify_consan_access_lowering(const ConSanAccessInventorySite &access, rj_code
     if (!register_count)
       return reject(Reason::UnsupportedMnemonic);
     form.data_register_count = *register_count;
-    const bool gfx12_encoding = target->encoding_family == ConSanEncodingFamily::Gfx12;
-    const bool scalar_vector_address = gfx12_encoding && access.operands.scalar_address_sgpr;
+    const bool rdna4_or_cdna5 = consan_arch_is_rdna4_or_cdna5(target->arch);
+    const bool scalar_vector_address = rdna4_or_cdna5 && access.operands.scalar_address_sgpr;
     form.kind = scalar_vector_address ? ConSanAccessLoweringFormKind::FlatScalarVectorAddress
                                       : ConSanAccessLoweringFormKind::FlatVectorAddress;
     form.address_vgpr_count = scalar_vector_address ? 1u : 2u;
     if (scalar_vector_address)
       form.scalar_address_sgpr = *access.operands.scalar_address_sgpr;
 
-    const bool exact_gfx12_encoding = access.instruction_size == 3u * sizeof(uint32_t);
+    const bool exact_modern_encoding = access.instruction_size == 3u * sizeof(uint32_t);
     const bool cdna4_encoding =
         access.instruction_size == 2u * sizeof(uint32_t) && access.operands.raw_segment == 0u;
-    if (!exact_gfx12_encoding && !cdna4_encoding) {
+    if (!exact_modern_encoding && !cdna4_encoding) {
       replay = Reason::UnsupportedEncoding;
     } else if (!access.operands.raw_ioffset ||
-               (gfx12_encoding &&
+               (rdna4_or_cdna5 &&
                 (!access.operands.raw_saddr || !access.operands.raw_scale_offset))) {
       replay = Reason::UnsupportedEncoding;
-    } else if (*access.operands.raw_ioffset != 0 && !gfx12_encoding) {
+    } else if (*access.operands.raw_ioffset != 0 && !rdna4_or_cdna5) {
       replay = Reason::NonzeroImmediateOffset;
     } else if (scalar_vector_address &&
                (*access.operands.raw_saddr > 104u || (*access.operands.raw_saddr & 1u) != 0u)) {

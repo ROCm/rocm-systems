@@ -255,7 +255,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   std::vector<uint32_t> drained_version_cas(version_cas->begin(), version_cas->end());
   drained_version_cas.push_back(*wait_load);
   EXPECT_EQ(count_subsequence(text_words, drained_version_cas), 4u)
-      << "every gfx12 version claim and commit must wait for its returned value";
+      << "every RDNA4 version claim and commit must wait for its returned value";
   EXPECT_EQ(count_subsequence(text_words, *dispatch_store_low), 2u);
   EXPECT_EQ(count_subsequence(text_words, *dispatch_store_high), 2u);
   EXPECT_TRUE(contains_subsequence(

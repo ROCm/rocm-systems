@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// LDS publication through a gfx12 instruction-scoped VGLOBAL atomic. The
+/// LDS publication through an RDNA4 instruction-scoped VGLOBAL atomic. The
 /// broken member changes only the returning acquire atomic's encoded scope
 /// from device to wave; address, operation, payload, cache operations, and
 /// control flow remain identical.
