@@ -559,3 +559,24 @@ vector spill, high selectable-VGPR banks, deferred loads/stores, runtime
 workgroup gates, stale-size/reachability corruption, and committed runtime
 mapping. The complete nonphysical ConSan matrix is required at the second hard
 cutover and after removal of the old paths.
+
+### 12.2 Probe-program cutover checkpoint
+
+The first hard cutover now exists in commits `e1a500ac151` through the current
+checkpoint. Record/Replay borrowed and branch-only bodies, Sampled runtime-gate
+and spill bodies, and InlineShadow deferred-guest and dense bodies all use one
+continuation algebra and one compiled `MoiAccessPatchProgram` executor. The
+previous inline-only callback transaction and the separate inline/appended
+application lifecycles are gone; even a wholly inline transformation uses the
+same tentative `.text`, descriptor, intent-commit, relay, and publication
+transaction.
+
+Focused hard-path tests pass. The complete 4,765-test nonphysical ConSan gate
+ran in 210.99 seconds with 4,764 passes and only the architecture-boundary test
+failing because an intermediate convenience helper accepted the aggregate
+`ConSanTransformArtifacts`. The helper was removed immediately and that test
+then passed alone. This is still a prototype checkpoint, not an accepted
+macro-slice: the new protocol and the deleted inline/appended duplication are
+approximately break-even in governing lines. The next deletion frontier is
+the three mode-local compilers that still independently translate their
+planned access patches into the common executable program.

@@ -1433,9 +1433,12 @@ void try_apply_first_light_access_record_patch(
             }))
       return;
 
-    if (!publish_moi_appended_access_text(
-            std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
-            "first-light probe", result, std::move(lowering_commits), std::move(patches)))
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI first-light probe", result.program_inventory.code_object_id(),
+                             result.errors, &result.transform_failure_cause) ||
+        !result.publish_access_lowering(std::move(patcher).emit(),
+                                        "ConSan MOI first-light probe",
+                                        std::move(lowering_commits), std::move(patches)))
       return;
     if (reserved_sync_island_count != 0u) {
       access_output.reserved_sync_islands = MoiBarrierIslandReservation{

@@ -522,21 +522,6 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   return true;
 }
 
-[[nodiscard]] bool publish_moi_appended_access_text(
-    CodeObjectPatcher patcher, std::vector<uint8_t> text,
-    const ConSanPatchedImageGrowthLimit &growth_limit,
-    std::string_view probe_name, ConSanTransformArtifacts &result,
-    std::vector<ConSanCommittedLowering> commits, std::vector<ConSanPatchInfo> patches) {
-  if (!replace_consan_text(patcher, text, growth_limit, "MOI " + std::string(probe_name),
-                           result.program_inventory.code_object_id(), result.errors,
-                           &result.transform_failure_cause)) {
-    return false;
-  }
-  return result.publish_access_lowering(std::move(patcher).emit(),
-                                        "ConSan MOI " + std::string(probe_name),
-                                        std::move(commits), std::move(patches));
-}
-
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
                                              const ResolvedMoiScratchPlan &resources,

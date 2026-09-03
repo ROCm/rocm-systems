@@ -1194,9 +1194,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }))
       return;
 
-    if (!publish_moi_appended_access_text(
-            std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
-            "inline-shadow probe", result, std::move(lowering_commits), std::move(patches)))
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI inline-shadow probe",
+                             result.program_inventory.code_object_id(), result.errors,
+                             &result.transform_failure_cause) ||
+        !result.publish_access_lowering(std::move(patcher).emit(),
+                                        "ConSan MOI inline-shadow probe",
+                                        std::move(lowering_commits), std::move(patches)))
       return;
     if (reserved_barrier_island_count != 0u) {
       barrier_reservation = MoiBarrierIslandReservation{

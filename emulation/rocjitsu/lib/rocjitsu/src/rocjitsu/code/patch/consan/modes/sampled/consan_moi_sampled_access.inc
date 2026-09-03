@@ -955,9 +955,11 @@ void try_apply_direct_sampled_watchpoint_patch(
             [](const MoiDenseEntryHost &, std::vector<uint32_t> &) { return true; }))
       return;
 
-    if (!publish_moi_appended_access_text(
-            std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
-            "sampled probe", result, std::move(lowering_commits), std::move(patches)))
+    if (!replace_consan_text(patcher, new_text, options.patched_image_growth_limit,
+                             "MOI sampled probe", result.program_inventory.code_object_id(),
+                             result.errors, &result.transform_failure_cause) ||
+        !result.publish_access_lowering(std::move(patcher).emit(), "ConSan MOI sampled probe",
+                                        std::move(lowering_commits), std::move(patches)))
       return;
   return;
 }
