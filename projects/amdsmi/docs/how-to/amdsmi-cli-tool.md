@@ -1189,6 +1189,16 @@ Memory) is automatically detected based on the first available sensor.
   which handles current and future versions, so releases from 7.13 onward are no
   longer affected by this mismatch.)
 
+**Empty Section**: In human-readable output, `N/A` on a section header rather than a
+field means the section has no entries. For example, `RDMA_DEVICES: N/A` under an
+AI-NIC means the NIC reported no RDMA device, which is what you see when `ionic` is
+bound but `ionic_rdma` is not loaded. A header also reads `N/A` when the section's
+query failed and the whole section was replaced by `N/A` rather than left empty, which
+is what `NIC`, `SMU`, and `IFWI` in `amd-smi static` and `FW_LIST` in `amd-smi firmware`
+do. JSON output represents an empty section as an empty object. CSV drops the section's
+columns when no device in the run reports it, and fills them with `N/A` when only some
+do.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1212,6 +1222,8 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
         PHYSICAL_ACC_ID: N/A

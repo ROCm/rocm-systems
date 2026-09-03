@@ -902,7 +902,7 @@
         {
           "name": "NetIB_Stress_AlltoAll",
           "description": "Full mesh, 50 iterations",
-          "test_filter": "NetIbMPITest.AlltoAllStress"
+          "test_filter": "NetIbMPITest.AllToAllStress"
         },
         {
           "name": "NetIB_Stress_BidirectionalMultiRank",
@@ -1970,7 +1970,7 @@
         {
           "name": "UBR_AlltoAll_OutOfPlace_MultiNode",
           "description": "AlltoAll out-of-place with UBR on multi-node",
-          "test_filter": "UBR_AlltoAll.OutOfPlace_MultiNode"
+          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
         },
         {
           "name": "UBR_SendRecv_RingPattern_MultiNode",
@@ -1980,19 +1980,19 @@
         {
           "name": "UBR_AlltoAllStress_InterleavedMultiSize",
           "description": "Stress test with interleaved AlltoAll/AlltoAllv across small/medium/large sizes",
-          "test_filter": "UBR_AlltoAllStress.InterleavedMultiSize_MultiNode",
+          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
           "timeout": 300
         },
         {
           "name": "UBR_AlltoAllStress_SplitComm",
           "description": "Stress test with interleaved AlltoAll/AlltoAllv using split communicators",
-          "test_filter": "UBR_AlltoAllStress.InterleavedWithSplitComm_MultiNode",
+          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
           "timeout": 300
         },
         {
           "name": "UBR_AlltoAllStress_ConcurrentMultiComm",
           "description": "Concurrent AlltoAll on multiple communicators with separate streams",
-          "test_filter": "UBR_AlltoAllStress.ConcurrentMultiComm_MultiNode",
+          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
         },
         {
@@ -2003,12 +2003,12 @@
         {
           "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
           "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
           "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
           "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -2054,12 +2054,12 @@
         {
           "name": "UBR_AlltoAll_Contiguous_Success",
           "description": "ncclAlltoAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
           "name": "UBR_AlltoAll_Stress_Success",
           "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -2100,7 +2100,7 @@
         {
           "name": "GraphCapture_AlltoAll_MultiNode",
           "description": "AlltoAll graph capture with IPC registration on multi-node",
-          "test_filter": "GraphCapture_AlltoAll.MultiNode"
+          "test_filter": "GraphCapture_AllToAll.MultiNode"
         },
         {
           "name": "GraphCapture_AllReduce_MultiNode",
@@ -2215,7 +2215,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         }
@@ -2258,7 +2258,7 @@
         },
         {
           "name": "Revoke_NonBlocking_ThenShrink_NoRace",
-          "description": "Race commRevokeAsync worker thread against an immediate ncclCommShrink on the same parent across 10 iterations over IB transport; shrink must succeed",
+          "description": "Non-blocking revoke then shrink on the same parent across 10 iterations over IB transport, draining each async op via ncclCommGetAsyncError before the next per the non-blocking contract; shrink must succeed",
           "test_filter": "RevokeNonBlockingMPITest.Revoke_NonBlocking_ThenShrink_NoRace",
           "timeout": 300
         },

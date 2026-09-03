@@ -1130,7 +1130,8 @@ typedef struct {
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;                      //!< The subsystem vendor ID
   uint64_t device_id;                         //!< The device ID of a GPU
-  uint32_t rev_id;                            //!< The revision ID of a GPU
+  uint32_t rev_id;                            //!< PCI config-space revision ID, 0xFFFFFFFF if
+                                              //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
   uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
@@ -1139,7 +1140,13 @@ typedef struct {
   uint32_t subsystem_id;             //!> The subsystem ID
   uint64_t flags;                    //!< Chip flags
   uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t reserved[17];
+  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
+                                          as the driver reports it, not decoded.
+                                          0xFFFFFFFF if not supported */
+  uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
+                                          recurs across unrelated ASIC families; pair it with
+                                          device_id. 0xFFFFFFFF if not supported */
+  uint32_t reserved[15];
 } amdsmi_asic_info_t;
 
 /**
@@ -1773,7 +1780,27 @@ typedef enum {
   AMDSMI_GPU_BLOCK_JPEG = (1ULL << 16),           //!< JPEG block
   AMDSMI_GPU_BLOCK_IH = (1ULL << 17),             //!< IH block
   AMDSMI_GPU_BLOCK_MPIO = (1ULL << 18),           //!< MPIO block
-  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_MPIO,
+  AMDSMI_GPU_BLOCK_MMSCH = (1ULL << 19),          //!< MMSCH block
+  AMDSMI_GPU_BLOCK_MP5 = (1ULL << 20),            //!< MP5 block
+  AMDSMI_GPU_BLOCK_ATU = (1ULL << 21),            //!< ATU block
+  AMDSMI_GPU_BLOCK_DACC_BE = (1ULL << 22),        //!< DACC_BE block
+  AMDSMI_GPU_BLOCK_ECLR = (1ULL << 23),           //!< ECLR block
+  AMDSMI_GPU_BLOCK_KPX_SERDES = (1ULL << 24),     //!< KPX_SERDES block
+  AMDSMI_GPU_BLOCK_LSDMA = (1ULL << 25),          //!< LSDMA block
+  AMDSMI_GPU_BLOCK_MPART = (1ULL << 26),          //!< MPART block
+  AMDSMI_GPU_BLOCK_MPIFOE = (1ULL << 27),         //!< MPIFOE block
+  AMDSMI_GPU_BLOCK_MPRAS = (1ULL << 28),          //!< MPRAS block
+  AMDSMI_GPU_BLOCK_NBIF = (1ULL << 29),           //!< NBIF block
+  AMDSMI_GPU_BLOCK_NBIO = (1ULL << 30),           //!< NBIO block
+  AMDSMI_GPU_BLOCK_OXRP = (1ULL << 31),           //!< OXRP block
+  AMDSMI_GPU_BLOCK_PCIE_PL = (1ULL << 32),        //!< PCIE_PL block
+  AMDSMI_GPU_BLOCK_PCS_XGMI = (1ULL << 33),       //!< PCS_XGMI block
+  AMDSMI_GPU_BLOCK_PIE = (1ULL << 34),            //!< PIE block
+  AMDSMI_GPU_BLOCK_CS = (1ULL << 35),             //!< CS block
+  AMDSMI_GPU_BLOCK_SHUB = (1ULL << 36),           //!< SHUB block
+  AMDSMI_GPU_BLOCK_SSBDCI = (1ULL << 37),         //!< SSBDCI block
+  AMDSMI_GPU_BLOCK_UCIE_PCS = (1ULL << 38),       //!< UCIE_PCS block
+  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_UCIE_PCS,
   AMDSMI_GPU_BLOCK_RESERVED = (1ULL << 63)
 } amdsmi_gpu_block_t;
 
@@ -9563,6 +9590,11 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
  *  @ingroup tagNicInfo
  *
  *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @details A NIC whose RDMA driver is absent (for example, ionic_rdma blacklisted)
+ *  is still enumerated: this call returns ::AMDSMI_STATUS_SUCCESS with a zeroed
+ *  struct. Check @p info->num_rdma_dev rather than the return value to tell
+ *  whether any RDMA device was reported.
  *
  *  @param[in] processor_handle NIC for which to query
  *
