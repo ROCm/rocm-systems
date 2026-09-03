@@ -9,6 +9,7 @@ label code is also appended to that file.
 
 To change test categorization, edit test_categories.yaml only.
 """
+#Temporary no-op change on ctest to exercise TheRock Multi-arch CI
 
 import argparse
 import sys
