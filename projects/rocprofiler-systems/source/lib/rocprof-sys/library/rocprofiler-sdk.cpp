@@ -2668,7 +2668,19 @@ reset_sdk_session_guards()
 
 void
 setup()
-{}
+{
+    // rocprof-sys is otherwise a passive rocprofiler-sdk client: rocprofiler-register
+    // initializes the SDK when HSA or HIP loads. A process using OpenMP only on the host
+    // loads neither, and OMPT tool discovery is honored only when the SDK is already
+    // initialized, so bring it up here instead of waiting for a registration that never
+    // arrives.
+    int _initialized = 0;
+    if(rocprofiler_is_initialized(&_initialized) == ROCPROFILER_STATUS_SUCCESS &&
+       _initialized != 0)
+        return;
+
+    ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
+}
 
 void
 shutdown()

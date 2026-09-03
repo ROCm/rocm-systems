@@ -35,6 +35,7 @@ set(openmp-tools-env
     "OMP_DISPLAY_ENV=1"
     "OMP_TARGET_OFFLOAD=mandatory"
     "ROCR_VISIBLE_DEVICES=0"
+    "ROCPROFILER_LIBRARY_CTOR=1"
     "ROCPROFILER_TOOL_OUTPUT_FILE=openmp-tools-test.json"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
