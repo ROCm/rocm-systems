@@ -88,4 +88,35 @@ TEST(VersionGateTests, CeBatchAsyncWindow)
     EXPECT_FALSE(NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
 }
 
+// Kernel floor for cuMem auto-detect. Encoding and the override rule must not
+// silently drift: NCCL_CUMEM_ENABLE>0 bypasses <6.8; auto (-2) and explicit 0 do not.
+static_assert(NCCL_CUMEM_MIN_KERNEL_VERSION == NCCL_KERNEL_VERSION_CODE(6, 8), "cuMem kernel floor drifted");
+static_assert(NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(6, 8), -2), "auto on 6.8 must pass");
+static_assert(NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(6, 8), 0), "explicit-off on 6.8 must pass kernel gate");
+static_assert(!NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(6, 7), -2), "auto on 6.7 must fail");
+static_assert(!NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(5, 14), -2), "auto on 5.14 must fail");
+static_assert(!NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(5, 14), 0), "explicit-off on 5.14 must fail");
+static_assert(NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(5, 14), 1), "force-enable on 5.14 must pass");
+static_assert(NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(6, 7), 1), "force-enable on 6.7 must pass");
+
+TEST(VersionGateTests, CuMemKernelGate)
+{
+    const int k68 = NCCL_KERNEL_VERSION_CODE(6, 8);
+    const int k67 = NCCL_KERNEL_VERSION_CODE(6, 7);
+    const int k514 = NCCL_KERNEL_VERSION_CODE(5, 14);
+
+    // Kernel >= 6.8: gate passes for auto, explicit off, and force-enable.
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(k68, -2));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(k68, 0));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(k68, 1));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(NCCL_KERNEL_VERSION_CODE(6, 9), -2));
+
+    // Kernel < 6.8: only an explicit NCCL_CUMEM_ENABLE>0 override passes.
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_GATE_FOR(k67, -2));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_GATE_FOR(k514, -2));
+    EXPECT_FALSE(NCCL_CUMEM_KERNEL_GATE_FOR(k514, 0));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(k514, 1));
+    EXPECT_TRUE(NCCL_CUMEM_KERNEL_GATE_FOR(k67, 2));
+}
+
 }  // namespace RcclUnitTesting

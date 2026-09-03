@@ -70,6 +70,19 @@
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
+// Linux kernel floor for cuMem auto-detect. Encoding matches uname major/minor
+// packing used by ncclGetKernelVersionCode() in rocmwrap.cc.
+#define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
+#define NCCL_CUMEM_MIN_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
+
+// Kernel gate used by ncclCuMemCapabilityCheck. Auto-detect (param <= 0, including
+// the default NCCL_CUMEM_ENABLE=-2) requires Linux >= 6.8. An explicit
+// NCCL_CUMEM_ENABLE>0 overrides the floor so validation hosts on older kernels
+// can still force the VMM path. Both inputs are parameters so unit tests can
+// cover every combination without depending on the host kernel.
+#define NCCL_CUMEM_KERNEL_GATE_FOR(kernelVersionCode, cumemEnableParam) \
+  ((kernelVersionCode) >= NCCL_CUMEM_MIN_KERNEL_VERSION || (cumemEnableParam) > 0)
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
