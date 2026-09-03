@@ -677,12 +677,7 @@ void try_apply_direct_sampled_watchpoint_patch(
         planned_patch.access_range_count, window_bank_count, patch);
   };
 
-  const bool uses_appended_cave =
-      std::ranges::any_of(planned_patches, [](const PlannedSampledPatch &patch) {
-        return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
-      });
-  if (uses_appended_cave) {
-    CodeObjectPatcher patcher(code_object);
+  CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
             patcher, code_object, static_cast<const RuntimeCapabilities &>(options),
             descriptor_requirements, scalar_requirements, private_requirements, nullptr, arch,
@@ -964,55 +959,5 @@ void try_apply_direct_sampled_watchpoint_patch(
             std::move(patcher), std::move(new_text), options.patched_image_growth_limit,
             "sampled probe", result, std::move(lowering_commits), std::move(patches)))
       return;
-    return;
-  }
-
-  std::vector<MoiAccessPatchProgram> programs;
-  programs.reserve(planned_patches.size());
-  for (const PlannedSampledPatch &planned_patch : planned_patches) {
-    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    ConSanMoiCandidate lowered_candidate = candidate;
-    lowered_candidate.kernel_descriptor_file_offset =
-        planned_patch.workgroup_descriptor_file_offset;
-    auto words = build_direct_sampled_watchpoint_words(
-        bytes, lowered_candidate, planned_patch.emission,
-        planned_patch.spill ? &*planned_patch.spill : nullptr, arch, result.errors);
-    if (!words)
-      return;
-    const size_t planned_words =
-        static_cast<size_t>(planned_patch.placement.body_size / sizeof(uint32_t));
-    if (words->size() > planned_words) {
-      result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
-      return;
-    }
-    words->resize(planned_words, build_s_nop(0, arch));
-    ConSanPatchInfo info;
-    info.kind = ConSanPatchKind::InlineMoiSampledWatchpointStore;
-    info.anchor_offset = candidate.anchor();
-    info.trampoline_offset = candidate.anchor() + candidate.size();
-    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-    note_moi_access_patch_info(info, planned_patch);
-    info.relocated_guest_instruction_offset =
-        candidate.anchor() + planned_patch.probe_guest_instruction_offset;
-    auto commit = make_moi_access_lowering_commit(
-        result.observation_plan(), candidate, info, ConSanProbeIntentKind::SampledAccess,
-        [&](ConSanStaticAccessAttribution access) {
-          return make_runtime_mapping(std::move(access), planned_patch, info);
-        });
-    if (!commit) {
-      result.errors.emplace_back(
-          "ConSan MOI sampled probe produced an invalid intent-bound lowering");
-      return;
-    }
-    MoiAccessPatchProgram program;
-    program.body_offset = candidate.file_offset;
-    program.body_words = std::move(*words);
-    program.patch = std::move(info);
-    program.commit = std::move(*commit);
-    programs.push_back(std::move(program));
-  }
-  if (!apply_inline_moi_access_programs(
-          bytes, std::move(programs), descriptor_requirements, scalar_requirements,
-          private_requirements, nullptr, nullptr, arch, "sampled probe", result))
-    return;
+  return;
 }

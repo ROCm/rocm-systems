@@ -908,12 +908,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
-  const bool uses_appended_cave =
-      std::ranges::any_of(planned_patches, [](const PlannedInlineShadowPatch &patch) {
-        return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
-      });
-  if (uses_appended_cave) {
-    CodeObjectPatcher patcher(code_object);
+  CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
             patcher, code_object, options, descriptor_requirements, scalar_requirements,
             private_requirements, &lds_requirements, arch, result.program_inventory, result.errors))
@@ -1211,44 +1206,5 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           .reserved_slot_count = reserved_barrier_island_count,
       };
     }
-    return;
-  }
-
-  std::vector<MoiAccessPatchProgram> programs;
-  programs.reserve(planned_patches.size());
-  for (const PlannedInlineShadowPatch &planned_patch : planned_patches) {
-    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    auto words = build_inline_shadow_words(
-        bytes, candidate, planned_patch.emission, arch, layout,
-        planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
-    if (!words)
-      return;
-    ConSanPatchInfo info;
-    info.kind = ConSanPatchKind::InlineMoiExactShadowStore;
-    info.anchor_offset = candidate.anchor();
-    info.trampoline_offset = candidate.anchor() + candidate.size();
-    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-    note_moi_access_patch_info(info, planned_patch);
-    info.workgroup_shadow = planned_patch.emission.workgroup_shadow;
-    auto commit = make_moi_access_lowering_commit(
-        result.observation_plan(), candidate, info, ConSanProbeIntentKind::ExactShadowAccess,
-        [](ConSanStaticAccessAttribution) {
-          return std::optional{ConSanRuntimeStaticMapping{}};
-        });
-    if (!commit) {
-      result.errors.emplace_back(
-          "ConSan MOI inline-shadow probe produced an invalid intent-bound lowering");
-      return;
-    }
-    MoiAccessPatchProgram program;
-    program.body_offset = candidate.file_offset;
-    program.body_words = std::move(*words);
-    program.patch = std::move(info);
-    program.commit = std::move(*commit);
-    programs.push_back(std::move(program));
-  }
-  if (!apply_inline_moi_access_programs(
-          bytes, std::move(programs), descriptor_requirements, scalar_requirements,
-          private_requirements, &lds_requirements, &options, arch, "inline-shadow probe", result))
-    return;
+  return;
 }

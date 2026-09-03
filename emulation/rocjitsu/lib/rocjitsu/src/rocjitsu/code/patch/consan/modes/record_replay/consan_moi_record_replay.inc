@@ -1106,12 +1106,7 @@ void try_apply_first_light_access_record_patch(
     note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
-  const bool uses_appended_cave =
-      std::ranges::any_of(planned_patches, [](const PlannedAccessRecordPatch &patch) {
-        return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
-      });
-  if (uses_appended_cave) {
-    CodeObjectPatcher patcher(code_object);
+  CodeObjectPatcher patcher(code_object);
     if (!apply_moi_appended_access_descriptor_requirements(
             patcher, code_object, options, descriptor_requirements, scalar_requirements,
             private_requirements, nullptr, arch, result.program_inventory, result.errors))
@@ -1454,56 +1449,5 @@ void try_apply_first_light_access_record_patch(
       };
     }
     access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
-    return;
-  }
-
-  std::vector<MoiAccessPatchProgram> programs;
-  programs.reserve(planned_patches.size());
-  for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
-    ConSanMoiOperatingPoint candidate_point = operating_point;
-    if (!apply_moi_transient_sgpr_assignment(
-            options, candidate_point, result.moi_operating_point,
-            planned_patch.resources.owner_descriptor_file_offsets) ||
-        !apply_record_replay_entry_workgroup_assignment(
-            candidate_point, result.moi_operating_point,
-            planned_patch.resources.owner_descriptor_file_offsets,
-            planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr))
-      return;
-    auto words = build_first_light_access_record_words(
-        bytes, *planned_patch.candidate, options, options, candidate_point,
-        planned_patch.resources.base, arch, planned_patch.record_index, planned_record_count,
-        planned_patch.logical_range_index, layout, planned_patch.spill_overlaps_guest_operands,
-        planned_patch.spill ? &*planned_patch.spill : nullptr,
-        planned_patch.private_state_layout ? &*planned_patch.private_state_layout : nullptr,
-        planned_patch.owner_derivation, result.errors);
-    if (!words)
-      return;
-    const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    ConSanPatchInfo info;
-    info.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
-    info.anchor_offset = candidate.anchor();
-    info.trampoline_offset = candidate.anchor() + candidate.size();
-    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-    note_moi_access_patch_info(info, planned_patch);
-    info.relocated_guest_instruction_offset =
-        candidate.anchor() + planned_patch.probe_guest_instruction_offset;
-    auto commit = make_moi_access_lowering_commit(
-        result.observation_plan(), candidate, info, ConSanProbeIntentKind::AccessRecord,
-        make_record_replay_access_runtime_mapping);
-    if (!commit) {
-      result.errors.emplace_back(
-          "ConSan MOI first-light probe produced an invalid intent-bound lowering");
-      return;
-    }
-    MoiAccessPatchProgram program;
-    program.body_offset = candidate.file_offset;
-    program.body_words = std::move(*words);
-    program.patch = std::move(info);
-    program.commit = std::move(*commit);
-    programs.push_back(std::move(program));
-  }
-  if (!apply_inline_moi_access_programs(
-          bytes, std::move(programs), descriptor_requirements, scalar_requirements,
-          private_requirements, nullptr, nullptr, arch, "first-light probe", result))
-    return;
+  return;
 }

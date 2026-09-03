@@ -451,14 +451,6 @@ struct MoiAccessPatchProgram {
     rj_code_arch_t arch, std::string_view probe_name, std::vector<ConSanPatchInfo> &patches,
     std::vector<ConSanCommittedLowering> &commits, std::vector<std::string> &errors);
 
-[[nodiscard]] bool apply_inline_moi_access_programs(
-    std::span<const uint8_t> bytes, std::vector<MoiAccessPatchProgram> programs,
-    const MoiDescriptorVgprRequirements &descriptor_requirements,
-    const MoiDescriptorSgprRequirements &scalar_requirements,
-    const MoiDescriptorPrivateRequirements &private_requirements,
-    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
-    rj_code_arch_t arch, std::string_view probe_name, ConSanTransformArtifacts &result);
-
 [[nodiscard]] bool publish_moi_appended_access_text(
     CodeObjectPatcher patcher, std::vector<uint8_t> text,
     const ConSanPatchedImageGrowthLimit &growth_limit,

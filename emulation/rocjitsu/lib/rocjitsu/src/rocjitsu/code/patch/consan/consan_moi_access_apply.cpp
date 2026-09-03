@@ -537,29 +537,6 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
                                         std::move(commits), std::move(patches));
 }
 
-[[nodiscard]] bool apply_inline_moi_access_programs(
-    std::span<const uint8_t> bytes, std::vector<MoiAccessPatchProgram> programs,
-    const MoiDescriptorVgprRequirements &descriptor_requirements,
-    const MoiDescriptorSgprRequirements &scalar_requirements,
-    const MoiDescriptorPrivateRequirements &private_requirements,
-    const MoiDescriptorLdsRequirements *lds_requirements, const RuntimeCapabilities *capabilities,
-    rj_code_arch_t arch, std::string_view probe_name, ConSanTransformArtifacts &result) {
-  std::vector<uint8_t> replacement(bytes.begin(), bytes.end());
-  std::vector<ConSanPatchInfo> patches;
-  std::vector<ConSanCommittedLowering> commits;
-  if (!emit_moi_access_programs(replacement, std::move(programs), arch, probe_name, patches,
-                                commits, result.errors) ||
-      !apply_moi_descriptor_requirements(
-          replacement, result.program_inventory, descriptor_requirements, scalar_requirements,
-          private_requirements, lds_requirements, capabilities, arch,
-          "ConSan MOI " + std::string(probe_name), result.errors)) {
-    return false;
-  }
-  return result.publish_access_lowering(std::move(replacement),
-                                        "ConSan MOI " + std::string(probe_name),
-                                        std::move(commits), std::move(patches));
-}
-
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
                                              const ResolvedMoiScratchPlan &resources,
