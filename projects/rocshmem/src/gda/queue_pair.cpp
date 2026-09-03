@@ -32,7 +32,7 @@
 #include "util.hpp"
 
 #if SQTT_ENABLED
-#include </opt/rocm/include/rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
 #else
 #define sqtt_marker_enter(name) do {} while(0)
 #define sqtt_marker_exit(name) do {} while(0)
