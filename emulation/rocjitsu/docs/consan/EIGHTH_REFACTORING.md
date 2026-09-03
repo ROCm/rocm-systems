@@ -504,3 +504,58 @@ Record lifting theses, hard prototypes, accepted replacements, rejected
 algebras, exact accounting, and validation results here as the campaign
 proceeds. A prototype is evidence, not progress, until its specialized old
 paths have been removed.
+
+### 12.1 Thesis A: one executable MOI access program
+
+The first hard prototype targets the three access lowerers in Record/Replay,
+Sampled, and InlineShadow. They currently own separate outer lifecycles of
+1,545, 1,053, and 1,348 physical source lines respectively. Their evidence
+bodies are genuinely different, but a phase/operation read found the same
+lowering transaction around those bodies:
+
+| Phase | Record/Replay | Sampled | InlineShadow | Proposed owner |
+| --- | --- | --- | --- | --- |
+| admit and order sites | replay order and capacity | stride, range and bank capacity | exact-shadow access order | mode policy produces admitted site requests |
+| bind resources | owner SGPRs, scratch, spills, private owner | owner SGPR/VGPRs, scratch, spills, private epoch | owner SGPR/VGPRs, scratch, spills, private/workgroup shadow | shared planning session resolves common resources; mode leaf requests its widths and storage |
+| place | inline or appended, dense, indirect, branch-only | same | same, plus explicit relay-bank prefix | shared site lifecycle and route handle |
+| construct probe | access record | sampled window | exact shadow | typed mode leaf returning native probe words and guest boundary |
+| construct entry | direct anchor, island, dense call or borrowed entry | direct anchor, island/runtime gate or dense call | direct anchor, dependency-wait island or dense call | executable entry program with typed gate words as a leaf result |
+| construct body | preservation, bank transition, probe, relocated guest | same | same plus deferred guest/continuation ordering | shared body program and assembler |
+| continue | direct branch, indirect jump, dense return, borrowed return | direct branch or long return with empty-wave guard | direct/long/call return with dependency wait and deferred guest | small continuation instruction algebra |
+| commit | descriptor transaction, byte replacement, patch geometry, intent attribution, relay publication | same | same | shared access-program executor |
+
+The proposed stable vocabulary is `site`, `entry`, `body segment`, `guest
+boundary`, `continuation`, `resource effect`, and `commit`. Cardinality,
+padding, selectable-bank transitions, empty-wave guards, and continuation kind
+become data. Runtime gates and evidence construction remain narrow typed leaf
+mechanics. Evidence meaning, report indexing, exact-shadow policy, and
+candidate admission remain mode-owned observable distinctions.
+
+The first hard pair is Record/Replay's borrowed/branch-only dynamic-record
+path and InlineShadow's deferred-guest branch-only/dense paths. They force the
+program to express different guest boundaries, relay ownership, entry forms,
+return ABIs, spill guards, and dependency waits. Sampled is the third consumer
+and tests that the vocabulary handles windowed evidence and runtime gates
+without enumerating modes in the executor.
+
+The bounded deletion target is the three mode-owned descriptor/apply/commit
+tails and their complete inline/appended split, followed by the repeated
+routing-session setup and common per-site resource/placement transitions.
+Expected retired code includes `apply_inline_moi_access_patches`, the three
+mode-local byte mutation loops, three descriptor-commit loops, three
+anchor/island/relay commit loops, mode-local continuation switches, and the
+old complete local patch plans once planning also emits the normalized
+program. The preliminary physical estimate is 2,350--2,750 old orchestration
+lines, 650--900 new protocol/executor lines, and 1,500--2,000 net deletion.
+
+Abort conditions are: a mode must retain its complete old apply lifecycle
+behind a callback; the common program needs a mode discriminator; typed leaf
+code must perform byte publication or descriptor mutation; the two hard paths
+cannot preserve exact guest ordering, EXEC/SCC state, branch reachability, or
+transactional failure; or measured net deletion after all three migrations is
+below 1,000 lines with no already-bounded second deletion. Focused tests must
+cover inline and appended placement, branch-only and dense routing, scalar and
+vector spill, high selectable-VGPR banks, deferred loads/stores, runtime
+workgroup gates, stale-size/reachability corruption, and committed runtime
+mapping. The complete nonphysical ConSan matrix is required at the second hard
+cutover and after removal of the old paths.

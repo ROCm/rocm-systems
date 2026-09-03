@@ -301,6 +301,154 @@ assemble_moi_appended_body(const MoiAppendedBodyPatchPlan &plan,
   return body;
 }
 
+[[nodiscard]] std::optional<MoiFinalizedAccessBody> finalize_moi_access_body(
+    std::vector<uint32_t> body, uint64_t body_text_offset, uint64_t planned_body_size,
+    const MoiAccessContinuationPlan &continuation, rj_code_arch_t arch,
+    std::string_view probe_name, std::vector<std::string> &errors) {
+  if (continuation.displaced_tail_word_count > body.size()) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " lost its displaced continuation");
+    return std::nullopt;
+  }
+  if (continuation.transfer == MoiAccessTransferKind::IndirectJump &&
+      (!continuation.pc_sgpr || !continuation.scc_save_sgpr)) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has incomplete indirect-return scalar state");
+    return std::nullopt;
+  }
+  if (continuation.transfer == MoiAccessTransferKind::SetPc && !continuation.setpc_sgpr) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has no call-return scalar state");
+    return std::nullopt;
+  }
+  if (continuation.guest_before_terminal_transfer &&
+      continuation.transfer != MoiAccessTransferKind::IndirectJump) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " requested a non-indirect terminal guest boundary");
+    return std::nullopt;
+  }
+  if (continuation.empty_exec_resumes_at_transfer &&
+      continuation.empty_exec_resumes_at_displaced_tail) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " has ambiguous empty-wave continuation state");
+    return std::nullopt;
+  }
+
+  std::vector<uint32_t> displaced_tail;
+  if (!continuation.deferred_guest_words.empty() && continuation.displaced_tail_word_count != 0u) {
+    auto tail_begin = body.end() - continuation.displaced_tail_word_count;
+    displaced_tail.assign(tail_begin, body.end());
+    body.erase(tail_begin, body.end());
+  }
+  const size_t continuation_begin = body.size();
+  std::optional<size_t> deferred_guest_word;
+  size_t transfer_word = continuation_begin;
+
+  const auto insert_guest_and_tail = [&](std::vector<uint32_t>::iterator position) {
+    const size_t position_index = static_cast<size_t>(position - body.begin());
+    if (!continuation.deferred_guest_words.empty()) {
+      deferred_guest_word = position_index;
+      position = body.insert(position, continuation.deferred_guest_words.begin(),
+                             continuation.deferred_guest_words.end());
+      position += continuation.deferred_guest_words.size();
+    }
+    body.insert(position, displaced_tail.begin(), displaced_tail.end());
+  };
+
+  if (!continuation.guest_before_terminal_transfer)
+    insert_guest_and_tail(body.end());
+
+  transfer_word = body.size();
+  switch (continuation.transfer) {
+  case MoiAccessTransferKind::DirectBranch: {
+    const auto branch = compute_sopp_branch_simm16(
+        body_text_offset + body.size() * sizeof(uint32_t), continuation.return_target);
+    if (!branch) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " direct return is out of range");
+      return std::nullopt;
+    }
+    body.push_back(build_s_branch(*branch, arch));
+    break;
+  }
+  case MoiAccessTransferKind::IndirectJump: {
+    const size_t return_begin = body.size();
+    if (!append_moi_scc_preserving_indirect_jump(
+            body, body_text_offset, continuation.return_target, *continuation.pc_sgpr,
+            *continuation.scc_save_sgpr, continuation.capture_scc, arch)) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " could not encode its indirect return");
+      return std::nullopt;
+    }
+    while (body.size() < return_begin + continuation.reserved_transfer_words)
+      body.push_back(build_s_nop(0u, arch));
+    if (continuation.dependency_wait_before_transfer) {
+      const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
+      if (!wait_pc || body.size() <= return_begin) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " could not encode its return dependency wait");
+        return std::nullopt;
+      }
+      body.insert(body.end() - 1, *wait_pc);
+    }
+    if (continuation.guest_before_terminal_transfer) {
+      insert_guest_and_tail(body.end() - 1);
+      transfer_word = body.size() - 1u;
+    }
+    break;
+  }
+  case MoiAccessTransferKind::SetPc:
+    body.push_back(build_s_setpc_b64(*continuation.setpc_sgpr, arch));
+    break;
+  }
+
+  const size_t continuation_payload_words = continuation.deferred_guest_words.size() +
+                                            displaced_tail.size();
+  const size_t transfer_and_suffix_words = body.size() -
+                                           (continuation_begin + continuation_payload_words);
+  if ((body.size() - transfer_and_suffix_words) * sizeof(uint32_t) != planned_body_size) {
+    errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                        " body size changed after placing its guest continuation");
+    return std::nullopt;
+  }
+
+  if (continuation.empty_exec_guard_word) {
+    size_t target = continuation.empty_exec_resumes_at_transfer ? transfer_word
+                                                                : continuation_begin;
+    if (continuation.empty_exec_resumes_at_displaced_tail) {
+      if (continuation.displaced_tail_word_count > continuation_begin) {
+        errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                            " has no displaced continuation for its empty-wave guard");
+        return std::nullopt;
+      }
+      target = continuation_begin - continuation.displaced_tail_word_count;
+    }
+    const size_t guard = *continuation.empty_exec_guard_word;
+    if (guard >= body.size() || target <= guard || target - guard - 1u >
+                                                   static_cast<size_t>(
+                                                       std::numeric_limits<int16_t>::max())) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " empty-wave guard cannot reach its continuation");
+      return std::nullopt;
+    }
+    const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
+        static_cast<int16_t>(target - guard - 1u), arch);
+    if (!skip_empty_wave) {
+      errors.emplace_back("ConSan MOI " + std::string(probe_name) +
+                          " could not encode its empty-wave guard");
+      return std::nullopt;
+    }
+    body[guard] = *skip_empty_wave;
+  }
+  return MoiFinalizedAccessBody{
+      .words = std::move(body),
+      .deferred_guest_offset = deferred_guest_word
+                                   ? std::optional<uint32_t>(static_cast<uint32_t>(
+                                         *deferred_guest_word * sizeof(uint32_t)))
+                                   : std::nullopt,
+  };
+}
+
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
                                              const ResolvedMoiScratchPlan &resources,

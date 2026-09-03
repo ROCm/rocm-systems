@@ -1062,31 +1062,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                      result.errors, body_options);
         if (!cave_words)
           return;
-        std::optional<size_t> empty_exec_continuation_word_offset;
-        const auto insert_deferred_guest = [&](size_t word_offset) {
-          if (deferred_guest_words.empty())
-            return;
-          info.relocated_guest_instruction_offset =
-              cave_text_offset + word_offset * sizeof(uint32_t);
-          cave_words->insert(cave_words->begin() + static_cast<ptrdiff_t>(word_offset),
-                             deferred_guest_words.begin(), deferred_guest_words.end());
-        };
-        // An anchor-resident indirect island may displace instructions after
-        // the memory access. Those instructions are the access's continuation
-        // and must remain after the deferred guest operation. In particular,
-        // a load's relocated consumers may overwrite its address VGPRs.
-        std::vector<uint32_t> displaced_tail_words;
-        if (!deferred_guest_words.empty() && !planned_patch.displaced_tail_words.empty()) {
-          if (cave_words->size() < planned_patch.displaced_tail_words.size()) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe lost its displaced continuation");
-            return;
-          }
-          const auto displaced_begin =
-              cave_words->end() - planned_patch.displaced_tail_words.size();
-          displaced_tail_words.assign(displaced_begin, cave_words->end());
-          cave_words->erase(displaced_begin, cave_words->end());
-        }
+        MoiAccessContinuationPlan continuation;
+        continuation.return_target = planned_patch.placement.return_target;
+        continuation.deferred_guest_words = deferred_guest_words;
+        continuation.displaced_tail_word_count =
+            static_cast<uint32_t>(planned_patch.displaced_tail_words.size());
+        if (planned_patch.scalar_spill)
+          continuation.empty_exec_guard_word = 0u;
         if (planned_patch.branch_only_route) {
           if (!planned_patch.emission.scalar_state.branch_only_spill ||
               planned_patch.entry_island_offset || planned_patch.dense_call_anchor ||
@@ -1095,142 +1077,57 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 "ConSan MOI inline-shadow probe found inconsistent branch-only state");
             return;
           }
-          if (cave_words->empty()) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow branch-only body lost its guard slot");
-            return;
-          }
-          const uint64_t guarded_word_count =
-              cave_words->size() - 1u + deferred_guest_words.size() + displaced_tail_words.size();
-          if (guarded_word_count > std::numeric_limits<int16_t>::max()) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow branch-only guard exceeds conditional-branch range");
-            return;
-          }
-          const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-              static_cast<int16_t>(guarded_word_count), arch);
-          if (!skip_empty_wave) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe could not encode its empty-wave guard");
-            return;
-          }
-          cave_words->front() = *skip_empty_wave;
-          insert_deferred_guest(cave_words->size());
-          cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
-                             displaced_tail_words.end());
-          if (cave_words->size() * sizeof(uint32_t) != planned_patch.placement.body_size) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow branch-only body size changed after placement");
-            return;
-          }
-          const uint64_t return_source = cave_text_offset + cave_words->size() * sizeof(uint32_t);
-          const uint64_t return_target =
+          continuation.transfer = MoiAccessTransferKind::DirectBranch;
+          continuation.empty_exec_resumes_at_transfer = true;
+          continuation.return_target =
               planned_patch.branch_only_route->return_relay_offsets.empty()
                   ? planned_patch.placement.return_target
                   : planned_patch.branch_only_route->return_relay_offsets.front();
-          const auto ret = compute_sopp_branch_simm16(return_source, return_target);
-          if (!ret) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow branch-only return is unreachable");
-            return;
-          }
-          cave_words->push_back(build_s_branch(*ret, arch));
         } else if (planned_patch.dense_call_anchor) {
           if (target->direct_call_form == ConSanDirectCallForm::SCallI64) {
-            empty_exec_continuation_word_offset = cave_words->size();
-            insert_deferred_guest(cave_words->size());
-            cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
-                               displaced_tail_words.end());
-            const uint16_t call_return_sgpr =
+            continuation.transfer = MoiAccessTransferKind::SetPc;
+            continuation.setpc_sgpr =
                 planned_patch.emission.scalar_state.inline_scalar_spill
                     ? planned_patch.emission.scalar_state.scalar_router->call->call_return_sgpr
                     : static_cast<uint16_t>(*planned_patch.emission.scalar_state.exec_save_sgpr +
                                             28u);
-            cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           } else {
             const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
-            empty_exec_continuation_word_offset = cave_words->size();
-            if (!jump_sgprs ||
-                !append_moi_scc_preserving_indirect_jump(
-                    *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                    jump_sgprs->pc_sgpr, jump_sgprs->scc_save_sgpr,
-                    /*capture_scc=*/false, arch)) {
+            if (!jump_sgprs) {
               result.errors.emplace_back(
-                  "ConSan MOI inline-shadow dense explicit-key probe could not encode its long "
-                  "return");
+                  "ConSan MOI inline-shadow dense explicit-key probe has no return scalar state");
               return;
             }
-            const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
-            if (!wait_pc) {
-              result.errors.emplace_back(
-                  "ConSan MOI inline-shadow dense explicit-key probe could not encode its return "
-                  "dependency wait");
-              return;
-            }
-            cave_words->insert(cave_words->end() - 1, *wait_pc);
-            insert_deferred_guest(cave_words->size() - 1u);
-            cave_words->insert(cave_words->end() - 1, displaced_tail_words.begin(),
-                               displaced_tail_words.end());
+            continuation.transfer = MoiAccessTransferKind::IndirectJump;
+            continuation.pc_sgpr = jump_sgprs->pc_sgpr;
+            continuation.scc_save_sgpr = jump_sgprs->scc_save_sgpr;
+            continuation.dependency_wait_before_transfer = true;
+            continuation.guest_before_terminal_transfer = true;
           }
         } else if (planned_patch.entry_island_offset) {
           const auto jump_sgprs = planned_patch.emission.scalar_abi.indirect_jump;
-          empty_exec_continuation_word_offset = cave_words->size();
           if (!jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI inline-shadow probe has no return jump scalar state");
             return;
           }
-          if (!append_moi_scc_preserving_indirect_jump(
-                  *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  jump_sgprs->pc_sgpr, jump_sgprs->scc_save_sgpr,
-                  /*capture_scc=*/false, arch)) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe could not encode its long return");
-            return;
-          }
-          const auto wait_pc = instrumentation::build_s_wait_indirect_pc0(arch);
-          if (!wait_pc) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe could not encode its return dependency wait");
-            return;
-          }
-          cave_words->insert(cave_words->end() - 1, *wait_pc);
-          insert_deferred_guest(cave_words->size() - 1u);
-          cave_words->insert(cave_words->end() - 1, displaced_tail_words.begin(),
-                             displaced_tail_words.end());
+          continuation.transfer = MoiAccessTransferKind::IndirectJump;
+          continuation.pc_sgpr = jump_sgprs->pc_sgpr;
+          continuation.scc_save_sgpr = jump_sgprs->scc_save_sgpr;
+          continuation.dependency_wait_before_transfer = true;
+          continuation.guest_before_terminal_transfer = true;
         } else {
-          const auto ret = compute_sopp_branch_simm16(planned_patch.placement.return_branch_offset,
-                                                      planned_patch.placement.return_target);
-          if (!ret) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow probe appended cave return is out of range");
-            return;
-          }
-          empty_exec_continuation_word_offset = cave_words->size();
-          insert_deferred_guest(cave_words->size());
-          cave_words->insert(cave_words->end(), displaced_tail_words.begin(),
-                             displaced_tail_words.end());
-          cave_words->push_back(build_s_branch(*ret, arch));
+          continuation.transfer = MoiAccessTransferKind::DirectBranch;
         }
-        if (planned_patch.scalar_spill && !planned_patch.branch_only_route) {
-          if (!empty_exec_continuation_word_offset || *empty_exec_continuation_word_offset == 0u ||
-              *empty_exec_continuation_word_offset - 1u >
-                  static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow scalar-spill empty-wave guard cannot reach the "
-                "guest continuation");
-            return;
-          }
-          const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-              static_cast<int16_t>(*empty_exec_continuation_word_offset - 1u), arch);
-          if (!skip_empty_wave || cave_words->empty()) {
-            result.errors.emplace_back(
-                "ConSan MOI inline-shadow scalar-spill body could not encode its empty-wave "
-                "guard");
-            return;
-          }
-          cave_words->front() = *skip_empty_wave;
-        }
+        auto finalized = finalize_moi_access_body(
+            std::move(*cave_words), cave_text_offset, planned_patch.placement.body_size,
+            continuation, arch, "inline-shadow probe", result.errors);
+        if (!finalized)
+          return;
+        if (finalized->deferred_guest_offset)
+          info.relocated_guest_instruction_offset =
+              cave_text_offset + *finalized->deferred_guest_offset;
+        cave_words = std::move(finalized->words);
         append_words_bytes(new_text, *cave_words);
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;

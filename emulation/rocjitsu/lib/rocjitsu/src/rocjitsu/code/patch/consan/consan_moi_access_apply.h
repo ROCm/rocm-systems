@@ -419,6 +419,62 @@ assemble_moi_appended_body(const PlannedPatch &planned_patch, std::span<const ui
       probe_words, probe_name, errors, options);
 }
 
+/// Terminal control transfer for one normalized appended access program.
+///
+/// Mode emitters select a transfer and its already-resolved scalar operands;
+/// the common access executor owns its position relative to the relocated
+/// guest, displaced continuation, empty-wave guard, and patch-size contract.
+enum class MoiAccessTransferKind : uint8_t {
+  DirectBranch,
+  IndirectJump,
+  SetPc,
+};
+
+/// Low-level continuation of a normalized MOI access program.
+///
+/// This deliberately admits combinations unused by an individual mode.  It
+/// is the common operation algebra for returning from an appended body, not a
+/// union of mode plans.  `deferred_guest_words` and the displaced tail are
+/// inserted immediately before the transfer, or immediately before an
+/// indirect transfer's terminal SETPC when `guest_before_terminal_transfer`
+/// is true.  All spans are borrowed only for the duration of finalization.
+struct MoiAccessContinuationPlan {
+  MoiAccessTransferKind transfer = MoiAccessTransferKind::DirectBranch;
+  uint64_t return_target = 0;
+  std::optional<uint16_t> pc_sgpr;
+  std::optional<uint16_t> scc_save_sgpr;
+  std::optional<uint16_t> setpc_sgpr;
+  bool capture_scc = false;
+  bool dependency_wait_before_transfer = false;
+  bool guest_before_terminal_transfer = false;
+  uint32_t reserved_transfer_words = 0;
+  std::span<const uint32_t> deferred_guest_words = {};
+  uint32_t displaced_tail_word_count = 0;
+  /// Entry-prefix word to replace with S_CBRANCH_EXECZ. When present, an
+  /// empty wave skips the probe and resumes at the continuation boundary.
+  std::optional<uint32_t> empty_exec_guard_word;
+  bool empty_exec_resumes_at_transfer = false;
+  bool empty_exec_resumes_at_displaced_tail = false;
+};
+
+struct MoiFinalizedAccessBody {
+  std::vector<uint32_t> words;
+  /// Byte offset of a deferred guest relative to the appended body.
+  std::optional<uint32_t> deferred_guest_offset;
+};
+
+/// Finish the guest/continuation portion of one normalized access program.
+///
+/// `body` is the result of `assemble_moi_appended_body`; its size plus any
+/// deferred guest already equals `planned_body_size`.  This routine preserves
+/// that placed prefix, reorders a displaced continuation only when requested
+/// by a deferred guest, emits the selected transfer, and patches the optional
+/// empty-wave guard.  No mode or evidence distinction is observed here.
+[[nodiscard]] std::optional<MoiFinalizedAccessBody> finalize_moi_access_body(
+    std::vector<uint32_t> body, uint64_t body_text_offset, uint64_t planned_body_size,
+    const MoiAccessContinuationPlan &continuation, rj_code_arch_t arch,
+    std::string_view probe_name, std::vector<std::string> &errors);
+
 [[nodiscard]] bool
 moi_scalar_spill_requires_dynamic_vgpr_frame(const ProgramInventory &inventory,
                                              const ResolvedMoiScratchPlan &resources,

@@ -1324,87 +1324,57 @@ void try_apply_first_light_access_record_patch(
                                                      result.errors, body_options);
         if (!cave_words)
           return;
+        MoiAccessContinuationPlan continuation;
+        continuation.return_target = planned_patch.placement.return_target;
+        continuation.displaced_tail_word_count =
+            static_cast<uint32_t>(planned_patch.displaced_tail_words.size());
         if (borrowed_empty_exec_guard_word) {
-          const size_t displaced_tail_begin =
-              cave_words->size() - planned_patch.displaced_tail_words.size();
-          if (displaced_tail_begin <= *borrowed_empty_exec_guard_word ||
-              displaced_tail_begin - *borrowed_empty_exec_guard_word - 1u >
-                  static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light borrowed-entry empty-EXEC guard is out of range");
-            return;
-          }
-          const auto guard = instrumentation::build_s_cbranch_execz(
-              static_cast<int16_t>(displaced_tail_begin - *borrowed_empty_exec_guard_word - 1u),
-              arch);
-          if (!guard) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light could not encode its borrowed-entry empty-EXEC guard");
-            return;
-          }
-          (*cave_words)[*borrowed_empty_exec_guard_word] = *guard;
+          continuation.empty_exec_guard_word =
+              static_cast<uint32_t>(*borrowed_empty_exec_guard_word);
+          continuation.empty_exec_resumes_at_displaced_tail = true;
+          const size_t displaced_tail_begin = cave_words->size() -
+                                              planned_patch.displaced_tail_words.size();
           info.branch_only_route->borrowed_entry()->empty_exec_continuation_offset =
               cave_text_offset + displaced_tail_begin * sizeof(uint32_t);
         }
         if (planned_patch.dense_call_anchor) {
           if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
               candidate_point.has_compact_moi_scalar_spill()) {
-            const size_t return_begin = cave_words->size();
-            if (!append_moi_scc_preserving_indirect_jump(
-                    *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                    scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
-                    /*capture_scc=*/true, arch)) {
-              result.errors.emplace_back(
-                  "ConSan MOI first-light probe could not encode its dense long return");
-              return;
-            }
-            while (cave_words->size() < return_begin + kIndirectIslandWords)
-              cave_words->push_back(build_s_nop(0, arch));
+            continuation.transfer = MoiAccessTransferKind::IndirectJump;
+            continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
+            continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
+            continuation.capture_scc = true;
+            continuation.reserved_transfer_words = kIndirectIslandWords;
           } else {
-            const uint16_t call_return_sgpr =
+            continuation.transfer = MoiAccessTransferKind::SetPc;
+            continuation.setpc_sgpr =
                 static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 6u);
-            cave_words->push_back(build_s_setpc_b64(call_return_sgpr, arch));
           }
         } else if (planned_patch.borrowed_entry) {
-          const uint64_t return_target =
+          continuation.transfer = MoiAccessTransferKind::DirectBranch;
+          continuation.return_target =
               planned_patch.branch_only_route &&
                       !planned_patch.branch_only_route->return_relay_offsets.empty()
                   ? planned_patch.branch_only_route->return_relay_offsets.front()
                   : planned_patch.placement.return_target;
-          const auto direct_return = compute_sopp_branch_simm16(
-              cave_text_offset + cave_words->size() * sizeof(uint32_t), return_target);
-          if (!direct_return) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light borrowed-entry return is unreachable");
-            return;
-          }
-          cave_words->push_back(build_s_branch(*direct_return, arch));
         } else if (planned_patch.entry_island_offset) {
-          if (!append_moi_scc_preserving_indirect_jump(
-                  *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  scalar_abi.indirect_jump->pc_sgpr, scalar_abi.special_state->scc_save_sgpr,
-                  /*capture_scc=*/false, arch)) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light probe could not encode its long return");
-            return;
-          }
-        } else if (planned_patch.branch_only_scalar_spill) {
-          const uint64_t return_target =
+          continuation.transfer = MoiAccessTransferKind::IndirectJump;
+          continuation.pc_sgpr = scalar_abi.indirect_jump->pc_sgpr;
+          continuation.scc_save_sgpr = scalar_abi.special_state->scc_save_sgpr;
+        } else {
+          continuation.transfer = MoiAccessTransferKind::DirectBranch;
+          continuation.return_target =
               planned_patch.branch_only_route &&
                       !planned_patch.branch_only_route->return_relay_offsets.empty()
                   ? planned_patch.branch_only_route->return_relay_offsets.front()
                   : planned_patch.placement.return_target;
-          const auto direct_return = compute_sopp_branch_simm16(
-              cave_text_offset + cave_words->size() * sizeof(uint32_t), return_target);
-          if (!direct_return) {
-            result.errors.emplace_back(
-                "ConSan MOI first-light branch-only scalar-spill return is unreachable");
-            return;
-          }
-          cave_words->push_back(build_s_branch(*direct_return, arch));
-        } else {
-          cave_words->push_back(build_s_branch(*ret, arch));
         }
+        auto finalized = finalize_moi_access_body(
+            std::move(*cave_words), cave_text_offset, planned_patch.placement.body_size,
+            continuation, arch, "first-light probe", result.errors);
+        if (!finalized)
+          return;
+        cave_words = std::move(finalized->words);
         append_words_bytes(new_text, *cave_words);
         for (uint64_t relay : planned_patch.appended_branch_relay_offsets) {
           (void)relay;

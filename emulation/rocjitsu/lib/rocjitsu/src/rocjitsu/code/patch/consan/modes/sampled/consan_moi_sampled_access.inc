@@ -872,77 +872,40 @@ void try_apply_direct_sampled_watchpoint_patch(
                                                      result.errors, body_options);
         if (!cave_words)
           return;
-        std::optional<size_t> empty_exec_continuation_word_offset;
-        std::optional<uint16_t> return_scc_sgpr;
-        std::optional<ConSanIndirectJumpSgprs> return_jump_sgprs;
+        MoiAccessContinuationPlan continuation;
+        continuation.return_target = planned_patch.placement.return_target;
+        if (planned_patch.scalar_spill)
+          continuation.empty_exec_guard_word = 0u;
         if (planned_patch.dense_call_anchor || planned_patch.entry_island_offset) {
-          return_scc_sgpr = moi_sampled_access_return_scc_sgpr(planned_patch.scalar_routing);
-          return_jump_sgprs = planned_patch.scalar_abi.indirect_jump;
+          const auto return_scc_sgpr =
+              moi_sampled_access_return_scc_sgpr(planned_patch.scalar_routing);
+          const auto return_jump_sgprs = planned_patch.scalar_abi.indirect_jump;
           if (!return_scc_sgpr || !return_jump_sgprs) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe has no stable long-return scalar state");
             return;
           }
-        }
-        if (planned_patch.dense_call_anchor) {
-          empty_exec_continuation_word_offset = cave_words->size();
-          const size_t return_begin = cave_words->size();
-          if (!append_moi_scc_preserving_indirect_jump(
-                  *cave_words, cave_text_offset, planned_patch.placement.return_target,
-                  return_jump_sgprs->pc_sgpr, *return_scc_sgpr,
-                  /*capture_scc=*/planned_patch.scalar_routing.has_compact_spill(), arch)) {
-            result.errors.emplace_back(
-                "ConSan MOI sampled probe could not encode its dense long return");
-            return;
-          }
-          if (planned_patch.scalar_routing.has_compact_spill())
-            while (cave_words->size() < return_begin + kIndirectIslandWords)
-              cave_words->push_back(build_s_nop(0, arch));
-        } else if (planned_patch.entry_island_offset) {
-          empty_exec_continuation_word_offset = cave_words->size();
-          if (!append_moi_scc_preserving_indirect_jump(*cave_words, cave_text_offset,
-                                                       planned_patch.placement.return_target,
-                                                       return_jump_sgprs->pc_sgpr, *return_scc_sgpr,
-                                                       /*capture_scc=*/false, arch)) {
-            result.errors.emplace_back("ConSan MOI sampled probe could not encode its long return");
-            return;
-          }
-        } else if (planned_patch.branch_only_scalar_spill) {
-          empty_exec_continuation_word_offset = cave_words->size();
-          const uint64_t return_target =
+          continuation.transfer = MoiAccessTransferKind::IndirectJump;
+          continuation.pc_sgpr = return_jump_sgprs->pc_sgpr;
+          continuation.scc_save_sgpr = *return_scc_sgpr;
+          continuation.capture_scc = planned_patch.dense_call_anchor &&
+                                     planned_patch.scalar_routing.has_compact_spill();
+          if (continuation.capture_scc)
+            continuation.reserved_transfer_words = kIndirectIslandWords;
+        } else {
+          continuation.transfer = MoiAccessTransferKind::DirectBranch;
+          continuation.return_target =
               planned_patch.branch_only_route &&
                       !planned_patch.branch_only_route->return_relay_offsets.empty()
                   ? planned_patch.branch_only_route->return_relay_offsets.front()
                   : planned_patch.placement.return_target;
-          const auto direct_return = compute_sopp_branch_simm16(
-              cave_text_offset + cave_words->size() * sizeof(uint32_t), return_target);
-          if (!direct_return) {
-            result.errors.emplace_back(
-                "ConSan MOI sampled branch-only scalar-spill return is unreachable");
-            return;
-          }
-          cave_words->push_back(build_s_branch(*direct_return, arch));
-        } else {
-          empty_exec_continuation_word_offset = cave_words->size();
-          cave_words->push_back(build_s_branch(*ret, arch));
         }
-        if (planned_patch.scalar_spill) {
-          if (!empty_exec_continuation_word_offset || *empty_exec_continuation_word_offset == 0u ||
-              *empty_exec_continuation_word_offset - 1u >
-                  static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-            result.errors.emplace_back(
-                "ConSan MOI sampled scalar-spill empty-wave guard cannot reach the continuation");
-            return;
-          }
-          const auto skip_empty_wave = instrumentation::build_s_cbranch_execz(
-              static_cast<int16_t>(*empty_exec_continuation_word_offset - 1u), arch);
-          if (!skip_empty_wave || cave_words->empty()) {
-            result.errors.emplace_back(
-                "ConSan MOI sampled scalar-spill body could not encode its empty-wave guard");
-            return;
-          }
-          cave_words->front() = *skip_empty_wave;
-        }
+        auto finalized = finalize_moi_access_body(
+            std::move(*cave_words), cave_text_offset, planned_patch.placement.body_size,
+            continuation, arch, "sampled probe", result.errors);
+        if (!finalized)
+          return;
+        cave_words = std::move(finalized->words);
         append_words_bytes(new_text, *cave_words);
         info.trampoline_offset = cave_text_offset;
         info.original_size = planned_patch.placement.original_size;
