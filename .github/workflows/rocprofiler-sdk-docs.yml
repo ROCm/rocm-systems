@@ -183,7 +183,7 @@ jobs:
           apt-get update
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
-          python3 -m pip install -U --user cmake==3.25.0
+          python3 -m pip install -U --user cmake==4.4.3
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
