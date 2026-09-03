@@ -34,6 +34,7 @@ using namespace rocshmem;
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
+template <typename T>
 class ReduceOnStreamTester : public Tester {
  public:
   explicit ReduceOnStreamTester(TesterArguments args);
@@ -52,11 +53,11 @@ class ReduceOnStreamTester : public Tester {
   virtual void verifyResults(size_t size) override;
 
  private:
-  int *source_buf;
-  int *dest_buf;
+  T *source_buf;
+  T *dest_buf;
   int my_pe;
   int n_pes;
-  size_t buf_size;
+  size_t buf_elems;
   int num_streams;
   std::vector<rocshmem_team_t> team_world_dup;
   std::vector<rocshmem_ctx_t> ctxs;
