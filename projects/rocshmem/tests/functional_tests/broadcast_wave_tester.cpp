@@ -41,10 +41,18 @@ __device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unus
 
 BROADCAST_WAVE_DEF_GEN(float, float)
 BROADCAST_WAVE_DEF_GEN(double, double)
+BROADCAST_WAVE_DEF_GEN(char, char)
+// BROADCAST_WAVE_DEF_GEN(long double, longdouble)
+BROADCAST_WAVE_DEF_GEN(signed char, schar)
 BROADCAST_WAVE_DEF_GEN(short, short)
 BROADCAST_WAVE_DEF_GEN(int, int)
 BROADCAST_WAVE_DEF_GEN(long, long)
 BROADCAST_WAVE_DEF_GEN(long long, longlong)
+BROADCAST_WAVE_DEF_GEN(unsigned char, uchar)
+BROADCAST_WAVE_DEF_GEN(unsigned short, ushort)
+BROADCAST_WAVE_DEF_GEN(unsigned int, uint)
+BROADCAST_WAVE_DEF_GEN(unsigned long, ulong)
+BROADCAST_WAVE_DEF_GEN(unsigned long long, ulonglong)
 BROADCAST_WAVE_DEF_GEN(__half, half)
 BROADCAST_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
