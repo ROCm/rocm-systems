@@ -5,6 +5,7 @@
 cmake_minimum_required(VERSION 3.16.8)
 project(clr)
 
+# Temporary no-op change on aqlprofile to exercise TheRock Multi-arch CI
 ##########
 # Defaults
 ##########
