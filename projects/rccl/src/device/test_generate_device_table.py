@@ -19,7 +19,6 @@ generated text rather than compiling it.
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -238,13 +237,11 @@ class DeviceTableGenerationTest(unittest.TestCase):
 
     def test_all_unrolls_opt_in_generates_every_unroll(self):
         # BUILD_ALL_UNROLLS fills in the skipped unrolls and drops the gfx1250 restriction.
-        tmpdir = tempfile.mkdtemp(prefix="rccl_devtable_all_")
-        try:
+        with tempfile.TemporaryDirectory(prefix="rccl_devtable_all_") as tmpdir:
             header = _generate(tmpdir, all_unrolls="ON")
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
         tables = _unroll_tables(header)
-        self.assertEqual({"1", "2", "4", "8", "16", "32"}, set(tables))
+        # Filter to non-empty: a table is emitted per enum value regardless.
+        self.assertEqual({"1", "2", "4", "8", "16", "32"}, {u for u, t in tables.items() if t})
         for unroll, entries in tables.items():
             self.assertTrue(entries, "ncclDevFuncTable_%s is empty under BUILD_ALL_UNROLLS" % unroll)
         self.assertNotIn("#if defined(__gfx1250__)\n", header)

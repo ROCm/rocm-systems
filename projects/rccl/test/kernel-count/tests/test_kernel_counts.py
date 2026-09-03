@@ -182,17 +182,11 @@ def _parse(out_dir):
     return records, len(files), manifest_count
 
 
-def _per_coll(records):
+def _count_by(records, dim):
+    """Tally records by one DIMENSIONS axis, e.g. "coll" or "unroll"."""
     counts = {}
     for r in records:
-        counts[r["coll"]] = counts.get(r["coll"], 0) + 1
-    return counts
-
-
-def _per_unroll(records):
-    counts = {}
-    for r in records:
-        counts[r["unroll"]] = counts.get(r["unroll"], 0) + 1
+        counts[r[dim]] = counts.get(r[dim], 0) + 1
     return counts
 
 
@@ -268,7 +262,7 @@ def test_kernel_count_baselines(generated, rocshmem):
     report = diff_report(
         "rocshmem=%s" % rocshmem,
         exp["total"], len(data["records"]),
-        exp["per_coll"], _per_coll(data["records"]),
+        exp["per_coll"], _count_by(data["records"], "coll"),
         _expected_dims(exp["per_coll"]), _dims(data["records"]),
     )
     assert report is None, report
@@ -292,7 +286,7 @@ def test_parser_integrity(generated, rocshmem):
 def test_unroll_tables_have_equal_kernel_counts(generated, rocshmem):
     # Host ids come from the first unroll and index every other unroll's table, so the
     # unrolls must be generated in lockstep; a func_validate exception shows up as a skew.
-    counts = _per_unroll(generated[rocshmem]["records"])
+    counts = _count_by(generated[rocshmem]["records"], "unroll")
     assert len(set(counts.values())) == 1, (
         "unroll tables are not generated in lockstep (host ids would misindex): %s" % counts
     )
@@ -307,11 +301,11 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
     records, _, manifest_count = _parse(str(d))
     assert manifest_count == len(records)
 
-    counts = _per_unroll(records)
+    counts = _count_by(records, "unroll")
     assert set(counts) == {"1", "2", "4", "8", "16", "32"}
     assert len(set(counts.values())) == 1, counts
 
-    baseline = _per_unroll(generated["OFF"]["records"])
+    baseline = _count_by(generated["OFF"]["records"], "unroll")
     assert set(counts.values()) == set(baseline.values()), (
         "--all_unrolls changed the per-unroll kernel count: %s vs %s" % (counts, baseline)
     )
@@ -322,8 +316,8 @@ def test_rocshmem_on_is_off_plus_gda(generated):
     # Generator-backed (not just constant self-consistency): ON must equal OFF
     # plus exactly the two GDA collectives, with every shared collective's count
     # unchanged. Catches ON accidentally perturbing non-GDA kernels.
-    off = _per_coll(generated["OFF"]["records"])
-    on = _per_coll(generated["ON"]["records"])
+    off = _count_by(generated["OFF"]["records"], "coll")
+    on = _count_by(generated["ON"]["records"], "coll")
     assert set(on) - set(off) == {"AlltoAllGda", "AlltoAllvGda"}
     assert set(off) - set(on) == set()
     for coll, n in off.items():

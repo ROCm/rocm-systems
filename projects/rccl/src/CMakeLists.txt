@@ -745,7 +745,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${BUILD_ALL_UNROLLS} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} "${IFC_ENABLED}" OFF "${BUILD_LOCAL_GPU_TARGET_ONLY}" "${ENABLE_ROCSHMEM}" "${BUILD_ALL_UNROLLS}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
