@@ -1,7 +1,7 @@
 .. meta::
     :description: ROCm Compute Profiler FAQ and troubleshooting
     :keywords: ROCm Compute Profiler, FAQ, troubleshooting, ROCm, profiler, tool, Instinct,
-               accelerator, AMD, SSH, error, version, workaround, help
+               accelerator, AMD, SSH, error, version, workaround, help, vLLM
 
 ***
 FAQ
@@ -108,3 +108,10 @@ launched on separate HIP streams on the same GPU will run one after
 another during profiling. Kernel duration and throughput metrics reflect
 this serialized execution rather than the concurrent behavior that may
 occur during normal execution.
+
+Why does profiling a vLLM workload produce empty performance counter data?
+==========================================================================
+
+vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
+on shutdown, and counter data is only written when a process exits normally.
+See :ref:`profile-vllm-workloads` for the workaround and where it applies.

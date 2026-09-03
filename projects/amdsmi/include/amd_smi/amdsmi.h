@@ -1368,7 +1368,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  uint32_t clk;            //!< In MHz
+  uint32_t clk;            //!< In MHz. UINT32_MAX when the clock is unavailable
   uint32_t min_clk;        //!< In MHz
   uint32_t max_clk;        //!< In MHz
   uint8_t clk_locked;      //!< True/False
@@ -2227,9 +2227,9 @@ typedef struct {
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
-  uint16_t average_dram_writes;                             //!< v3_0
-  uint16_t average_ipu_reads;                               //!< v3_0
-  uint16_t average_ipu_writes;                              //!< v3_0
+  uint16_t average_dram_writes;                             //!< v3_0 [MB/s]
+  uint16_t average_ipu_reads;                               //!< v3_0 [MB/s]
+  uint16_t average_ipu_writes;                              //!< v3_0 [MB/s]
 
   /**
    * @brief Power [mW]
