@@ -735,11 +735,11 @@ typedef struct hipFileIOEvents {
 typedef void *hipFileBatchHandle_t;
 
 /*!
- * @brief Prepare the system to perform a batch IO operation
+ * @brief Prepare the system to perform batch IO operations
  * @ingroup batch
  *
  * @param [out] batch_idp \batch_handle_param
- * @param [in] max_nr     Maximum number of requests that can be submitted to this batch handle
+ * @param [in] max_nr     Size of the queue for this batch handle. Cannot exceed 128.
  *
  * @return \hipfile_error_return
  */
