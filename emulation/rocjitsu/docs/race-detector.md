@@ -228,7 +228,9 @@ s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
 ```
 
 Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
-CDNA1 through CDNA4.
+CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
+GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
+domain and therefore do not create VMCNT pressure.
 
 The same completion-order distinction is used for nonzero partial waits; a
 zero wait still completes every event on the selected counter. The detector

@@ -103,6 +103,62 @@ __global__ void standalone_lgkmcnt_does_not_wait_for_vmem_kernel(const float *sr
   dst[tid] = val;
 }
 
+// --- GFX11 counter-capacity backpressure ---
+
+static constexpr int kGfx11CounterCapacity = 63;
+
+template <int YoungerLoads>
+__global__ void vmcnt_capacity_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x;
+  float producer, younger, result;
+  asm volatile(
+      "global_load_dword %[producer], %[address], off\n"
+      ".rept %c[younger_loads]\n"
+      "global_load_dword %[younger], %[address], off\n"
+      ".endr\n"
+      "v_mov_b32 %[result], %[producer]\n"
+      : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+      : [address] "v"(&src[tid]), [younger_loads] "n"(YoungerLoads)
+      : "memory");
+  dst[tid] = result;
+}
+
+__global__ void vscnt_pressure_does_not_advance_vmcnt_kernel(const float *src, float *scratch,
+                                                              float *dst) {
+  int tid = threadIdx.x;
+  float producer, result;
+  asm volatile(
+      "global_load_dword %[producer], %[load_address], off\n"
+      ".rept %c[stores]\n"
+      "global_store_dword %[store_address], %[store_value], off\n"
+      ".endr\n"
+      "v_mov_b32 %[result], %[producer]\n"
+      : [producer] "=&v"(producer), [result] "=&v"(result)
+      : [load_address] "v"(&src[tid]), [store_address] "v"(&scratch[tid]),
+        [store_value] "v"(1.0f), [stores] "n"(kGfx11CounterCapacity)
+      : "memory");
+  dst[tid] = result;
+}
+
+template <int YoungerReads> __global__ void lgkmcnt_capacity_kernel(int *dst) {
+  __shared__ int lds[32];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, result;
+  asm volatile(
+      "ds_read_b32 %[producer], %[address]\n"
+      ".rept %c[younger_reads]\n"
+      "ds_read_b32 %[younger], %[address]\n"
+      ".endr\n"
+      "v_mov_b32 %[result], %[producer]\n"
+      : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+      : [address] "v"(tid * 4), [younger_reads] "n"(YoungerReads)
+      : "memory");
+  dst[tid] = result;
+}
+
 // D16 loads write only one half of the destination dword on RDNA. This kernel
 // initializes the high half, performs a low-half global_load_d16_u8, waits for
 // vmcnt, and then stores the merged dword. The test below checks two things:
@@ -238,6 +294,43 @@ TEST_F(Gfx1151RaceTest, standalone_lgkmcnt_does_not_wait_for_vmem) {
   auto *src = allocWithData<float>(32);
   auto *dst = alloc<float>(32);
   standalone_lgkmcnt_does_not_wait_for_vmem_kernel<<<1, 32>>>(src, dst);
+  sync();
+  ExpectRace(kVgprRaceExpectation);
+}
+
+TEST_F(Gfx1151RaceTest, vmcnt_capacity_boundary) {
+  auto *src = allocWithData<float>(32);
+  auto *dst = alloc<float>(32);
+  vmcnt_capacity_kernel<kGfx11CounterCapacity><<<1, 32>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx1151RaceTest, vmcnt_below_capacity_race) {
+  auto *src = allocWithData<float>(32);
+  auto *dst = alloc<float>(32);
+  vmcnt_capacity_kernel<kGfx11CounterCapacity - 1><<<1, 32>>>(src, dst);
+  sync();
+  ExpectRace(kVgprRaceExpectation);
+}
+
+TEST_F(Gfx1151RaceTest, vscnt_pressure_does_not_advance_vmcnt) {
+  auto *src = allocWithData<float>(32);
+  auto *scratch = alloc<float>(32);
+  auto *dst = alloc<float>(32);
+  vscnt_pressure_does_not_advance_vmcnt_kernel<<<1, 32>>>(src, scratch, dst);
+  sync();
+  ExpectRace(kVgprRaceExpectation);
+}
+
+TEST_F(Gfx1151RaceTest, lgkmcnt_capacity_boundary) {
+  lgkmcnt_capacity_kernel<kGfx11CounterCapacity><<<1, 32>>>(alloc<int>(32));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx1151RaceTest, lgkmcnt_below_capacity_race) {
+  lgkmcnt_capacity_kernel<kGfx11CounterCapacity - 1><<<1, 32>>>(alloc<int>(32));
   sync();
   ExpectRace(kVgprRaceExpectation);
 }

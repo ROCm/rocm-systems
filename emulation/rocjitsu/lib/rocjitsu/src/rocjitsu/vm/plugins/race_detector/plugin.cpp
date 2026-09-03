@@ -60,6 +60,10 @@ bool uses_cdna_combined_counters(rj_code_arch_t arch) {
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
+bool uses_gfx11_combined_counters(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
 bool supports_race_detector_memory_ordering(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -112,7 +116,10 @@ MemoryOrderClass memory_order_for(const Instruction &inst, rj_code_arch_t arch) 
 
 void apply_issue_backpressure(const Instruction &inst, amdgpu::Wavefront &wavefront,
                               WaveRaceState &state) {
-  if (!uses_cdna_combined_counters(wavefront.cu().arch()))
+  const rj_code_arch_t arch = wavefront.cu().arch();
+  const bool isCdna = uses_cdna_combined_counters(arch);
+  const bool isGfx11 = uses_gfx11_combined_counters(arch);
+  if (!isCdna && !isGfx11)
     return;
 
   const std::string_view mnemonic = inst.mnemonic();
@@ -134,11 +141,21 @@ void apply_issue_backpressure(const Instruction &inst, amdgpu::Wavefront &wavefr
     return;
   }
   if (mnemonic.starts_with("flat_")) {
-    state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
-    state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    // FLAT can contribute to either counter depending on the resolved address.
+    // CDNA stalls both domains conservatively. Do not infer GFX11 completion
+    // until the exact pre-issue counter contribution is exposed to the plugin.
+    if (isCdna) {
+      state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
+      state.prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    }
     return;
   }
-  state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
+
+  // CDNA counts non-FLAT vector loads, stores, and atomics on VMCNT. GFX11
+  // separates stores onto VSCNT; limit capacity inference there to returning
+  // load families whose completion order is represented by memory_order_for.
+  if (isCdna || memory_order_for(inst, arch) == MemoryOrderClass::VMEM)
+    state.prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
 }
 
 } // namespace
