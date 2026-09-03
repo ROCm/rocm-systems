@@ -1598,10 +1598,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-r", "--ras", action="store_true", required=False, help=ras_help
             )
             static_parser.add_argument(
-                "--cuid", action="store_true", required=False, help=cuid_help
+                "-U", "--cuid", action="store_true", required=False, help=cuid_help
             )
             static_parser.add_argument(
-                "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
+                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
             )
             static_parser.add_argument(
                 "-C",
@@ -2643,6 +2643,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 )
 
             set_value_exclusive_group.add_argument(
+                "-u",
                 "--cuid-seed",
                 action="store",
                 required=False,

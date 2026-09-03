@@ -52,7 +52,7 @@ void build_derived_id_from_file_entry(const CuidFileEntry& entry, amdcuid_derive
   cuid::get_hash_from_raw(id.raw_bits, id.hash);
 }
 
-// Is this primary an auxiliary (temporary) identifier?
+// Is this id an auxiliary (temporary) identifier?
 //
 // Only a constructed CUID has a payload to read the marker out of. In a
 // Platform CUID adopted verbatim from firmware, bit 117 is whatever the
@@ -60,14 +60,17 @@ void build_derived_id_from_file_entry(const CuidFileEntry& entry, amdcuid_derive
 // synthesised. An adopted identifier is a genuine firmware identity, so it is
 // never auxiliary.
 //
-// One definition, shared by get_derived_cuid(), which picks the derivation key
-// from it, and is_temporary_cuid(), which reports it.
-bool primary_is_auxiliary(const amdcuid_primary_id& primary) {
-  if (!CuidUtilities::is_constructed(&primary.UUIDv8_representation)) {
+// Templated so the same check works on both amdcuid_primary_id and
+// amdcuid_derived_id: both carry raw_bits and UUIDv8_representation at the
+// same layout, and get_derived_cuid() checks a primary while
+// is_temporary_cuid() checks whichever derived ID it obtained.
+template <typename IdT>
+bool id_is_auxiliary(const IdT& id) {
+  if (!CuidUtilities::is_constructed(&id.UUIDv8_representation)) {
     return false;
   }
   // The Auxiliary Value Identifier, payload bit 117.
-  return (primary.raw_bits[14] & 0x20) != 0;
+  return (id.raw_bits[14] & 0x20) != 0;
 }
 
 }  // namespace
@@ -215,9 +218,9 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac*
   }
 
   // An auxiliary primary is derived with the fixed public temporary key rather
-  // than the node key; primary_is_auxiliary() reads the marker only where it
+  // than the node key; id_is_auxiliary() reads the marker only where it
   // means something.
-  if (primary_is_auxiliary(primary)) {
+  if (id_is_auxiliary(primary)) {
     // Same operand order as every other derivation: the key is the constant,
     // the message is the 16 auxiliary primary octets. Do not swap them to
     // protect the machine ID in the primary. HMAC with a public key is a keyed
@@ -239,13 +242,13 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool* is_temp) const {
   if (!is_temp) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
-  amdcuid_primary_id primary = {};
-  amdcuid_status_t status = get_primary_cuid(primary);
+  amdcuid_derived_id derived = {};
+  amdcuid_status_t status = get_derived_cuid(derived);
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }
 
-  *is_temp = primary_is_auxiliary(primary);
+  *is_temp = id_is_auxiliary(derived);
 
   return AMDCUID_STATUS_SUCCESS;
 }
