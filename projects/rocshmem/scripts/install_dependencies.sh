@@ -46,7 +46,7 @@ export _UCX_COMMIT_HASH=b6a9d47fccce849c28111f05a7fa8f1c930ff17d  # UCX 1.21.x
 
 export _OMPI_INSTALL_DIR=${INSTALL_DIR:-$_INSTALL_DIR/ompi}
 export _OMPI_REPO=https://github.com/ROCm/ompi.git
-export _OMPI_COMMIT_HASH=697a596dde68815fe50db3c2a75a42ddb41b5ef4
+export _OMPI_COMMIT_HASH=147c74f983f38e63250b4532250c9a4ba54c17e5
 
 # Step 1: Build UCX with ROCm support
 cd $_DEPS_SRC_DIR
