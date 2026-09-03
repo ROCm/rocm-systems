@@ -92,6 +92,8 @@ bool getGenericTarget(const std::string& agentTarget, std::string& genericTarget
       // "gfx12-generic"
       {"gfx1200", "gfx12-generic"},
       {"gfx1201", "gfx12-generic"},
+      // "gfx12-5-generic"
+      {"gfx1250", "gfx12-5-generic"},
   };
   auto search = genericTargetMap.find(agentTarget);
   if (search == genericTargetMap.end()) return false;

@@ -55,6 +55,28 @@ inline void rcclRegisterShutdownHandler() {
   static std::once_flag once;
   std::call_once(once, []() { atexit(rcclShutdownHandler); });
 }
+
+// RCCL workaround (gfx950): hipMemUnmap on cuMem VMM *peer* allocations can
+// deadlock in the HSA busy-wait during ncclCommDestroy teardown. To avoid the
+// hang we skip ONLY the peer-aperture teardown in ncclCuMemFreeAddr (the
+// cuMemUnmap + cuMemAddressFree of the peer-mapped VA range), leaking just that
+// VA aperture (the OS reclaims it at process exit). The owner's physical handle
+// (ncclCuMemFree -> cuMemRelease) and ordinary buffers (ncclCudaFree -> cudaFree)
+// still free normally, so long-lived processes do not grow memory on every
+// ncclCommDestroy. Auto-enabled on gfx950; override with NCCL_CUMEM_SKIP_FREE=0
+// (force off) or =1 (force on).
+inline bool rcclSkipCuMemFree() {
+  static const bool skip = [](){
+    const char* e = getenv("NCCL_CUMEM_SKIP_FREE");
+    if (e) return atoi(e) != 0;
+    hipDeviceProp_t prop;
+    int dev = 0;
+    if (hipGetDevice(&dev) != hipSuccess) return false;
+    if (hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
+    return strstr(prop.gcnArchName, "gfx950") != nullptr;
+  }();
+  return skip;
+}
 uint64_t clockNano(); // from utils.h with which we have a circular dependency
 
 template <typename T>
@@ -108,6 +130,7 @@ struct ncclSideStream {
 
 inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
+
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
 // Clamp a requested stream priority into the device-supported range.
@@ -355,23 +378,12 @@ ncclResult_t ncclCudaHostCallocDebug(T** ptr, size_t nelem, const char* filefunc
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  int managed = 0;
-  CUDACHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
   if (nelem > 0) {
-    if (managed) {
-#if defined(HIP_UNCACHED_MEMORY)
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), hipDeviceMallocUncached), result,
-                    finish);
-#else
-      CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), hipDeviceMallocFinegrained), result,
-                    finish);
-#endif
-    } else
 #if defined(HIP_HOST_UNCACHED_MEMORY)
-      CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped | hipHostMallocUncached), result,
-                    finish);
+    CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped | hipHostMallocUncached), result,
+                  finish);
 #else
-      CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped), result, finish);
+    CUDACHECKGOTO(hipHostMalloc(ptr, nelem * ncclSizeOfT<T>(), cudaHostAllocMapped), result, finish);
 #endif
     memset(*ptr, 0, nelem * ncclSizeOfT<T>());
   }
@@ -537,9 +549,14 @@ fail:
 
 static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
-  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
-    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (process shutdown) pointer %p", ptr);
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // gfx950 (rcclSkipCuMemFree): hipMemUnmap on cuMem VMM *peer* apertures can
+  // deadlock in the HSA busy-wait during ncclCommDestroy. GIN-SDMA device tests
+  // allocate symmetric windows and hit this on teardown; skipping only the peer
+  // VA unmap here lets the run finish (OS reclaims at exit). Owner handle release
+  // (ncclCuMemFree) and ordinary buffers are unaffected — see rcclSkipCuMemFree().
+  if (rcclShutdownFlag().load(std::memory_order_acquire) || rcclSkipCuMemFree()) {
+    INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Skipping free (%s) pointer %p", rcclSkipCuMemFree() ? "NCCL_CUMEM_SKIP_FREE" : "process shutdown", ptr);
     return ncclSuccess;
   }
 
@@ -645,12 +662,22 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
   {
     cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
-    cudaStream_t zeroStream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    // Reuse the pooled side stream when an allocation scope is active (comm
+    // init / P2P connect burst) so this per-allocation zeroing does not churn a
+    // scarce GPU hardware queue via create/destroy on every VMM allocation.
+    // Fall back to a private non-blocking stream when no scope is active.
+    cudaStream_t sidestream = nullptr, zeroStream = nullptr;
+    NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
+    zeroStream = sidestream;
+    if (sidestream == nullptr) {
+      CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    }
     CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
     CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
   destroyStream:
-    CUDACHECK(cudaStreamDestroy(zeroStream));
+    if (sidestream == nullptr) {
+      CUDACHECK(cudaStreamDestroy(zeroStream));
+    }
   restoreCapMode:
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
     if (result != ncclSuccess) goto fail;
@@ -679,7 +706,11 @@ fail:
 
 static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
-  // Check if process is shutting down to avoid use-after-free in HIP runtime
+  // Check if process is shutting down to avoid use-after-free in HIP runtime.
+  // NOTE: the gfx950 rcclSkipCuMemFree() workaround is intentionally NOT applied
+  // here -- this releases the owner's physical handle (cuMemRelease), which does
+  // not hit the peer-unmap deadlock; skipping it would leak physical memory. The
+  // skip is confined to the peer aperture unmap in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
@@ -816,7 +847,7 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
 
 static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize,
                                                     CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize,
-                                                    int* numSegments) {
+                                                    int* numSegments, bool* hasSysmemSegment = nullptr) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
@@ -871,20 +902,22 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    // Need a side stream so as not to interfere with graph capture.
-    cudaStream_t stream, sidestream;
-    NCCLCHECK(getSideStream(&sidestream));
-    stream = sidestream;
-    if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset/stream is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
+      // Need a side stream so as not to interfere with graph capture.
+      cudaStream_t stream, sidestream;
+      NCCLCHECK(getSideStream(&sidestream));
+      stream = sidestream;
+      if (sidestream == nullptr) CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
+      CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
+      if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
-    CUDACHECKGOTO(cudaStreamSynchronize(stream), result, finish);
-    if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -934,12 +967,14 @@ ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream,
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
+      // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
+      // reusing the pooled side stream, so no extra memset is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
                     result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem * ncclSizeOfT<T>(), flags), result, finish);
+      CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem * ncclSizeOfT<T>(), stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -1003,6 +1038,10 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   // Check if process is shutting down. The atexit handler sets this flag
   // BEFORE HIP runtime static destructors run, so we can safely skip the free.
   // The OS will reclaim all memory when the process exits anyway.
+  // NOTE: the gfx950 rcclSkipCuMemFree() workaround is intentionally NOT applied
+  // here -- ordinary buffers (cudaFree) and the VMM handle release
+  // (ncclCuMemFree) must free normally so long-lived processes do not leak on
+  // every ncclCommDestroy. The peer-unmap deadlock is dodged in ncclCuMemFreeAddr.
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCudaFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;

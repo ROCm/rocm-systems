@@ -40,8 +40,6 @@ inline bool is_trivial_match(int wave, InstCategory line)
 {
     if (line == wave)
         return true;
-    else if (line == InstCategory::BRANCH)
-        return wave == WaveInstCategory::NEXT;
     else if (wave == WaveInstCategory::MSG)
         return line == InstCategory::IMMED;
     else if (wave == WaveInstCategory::FLAT)
@@ -58,6 +56,8 @@ inline bool is_elaborate_match(int wave, InstCategory line)
         return wave == WaveInstCategory::JUMP;
     else if (wave == WaveInstCategory::IMMED)
         return skippable(line);
+    else if (line == InstCategory::BRANCH)
+        return wave == WaveInstCategory::NEXT;
 
     return false;
 }
@@ -148,18 +148,6 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             }
             continue;
         }
-        else if (gfxip >= 12 && inst_index == 0)
-        {
-            // AM
-            try
-            {
-                next = pctranslator->getcode(inst.pc);
-            }
-            catch (...)
-            {};
-
-            if (!next || next->line.empty()) return {0, barrier_gap};
-        }
 
         line = std::move(next);
         next = nullptr;
@@ -226,8 +214,19 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
         }
         else if (line->cat == InstCategory::BRANCH)
         {
-            if (inst.category != WaveInstCategory::JUMP) break;
-            next = pctranslator->jump(*line);
+            if (inst.category == WaveInstCategory::NEXT)
+                line->not_taken++;
+            else if (inst.category != WaveInstCategory::JUMP && line->line.find("s_branch") != 0)
+            {
+                if (line->taken > line->not_taken)
+                    next = pctranslator->jump(*line);
+                else if (line->not_taken == 0)
+                    break;
+                else
+                    continue;
+            }
+            else
+                next = pctranslator->jump(*line);
         }
         else if (gfxip == 12 && line->cat == InstCategory::V_MOV_B64 && inst.category == WaveInstCategory::VALU)
         {

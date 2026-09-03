@@ -25,6 +25,13 @@ library](./amdsmi-cpp-lib) is recommended as a robust data source.
 
 Refer to the [installation instructions](../install/install.md).
 
+```{note}
+CPU commands (`amd-smi static --smu`, `amd-smi metric --cpu-*`, etc.) require
+the `amd_hsmp` kernel module (with HSMP enabled in BIOS). Without it, CPU
+discovery is skipped (non-fatal). GPU and NIC functionality is unaffected. See
+{ref}`install_amdgpu_driver` for more information.
+```
+
 ## Get started
 
 The `amd-smi` command provides system management and monitoring capabilities for
@@ -1021,6 +1028,47 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+### amd-smi node
+
+Gets power and baseboard information for the node. Returns information for
+node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
+information will be displayed.
+
+```shell-session
+~$ amd-smi node --help
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+                     [--loglevel LEVEL]
+
+Node arguments:
+  -h, --help                    show this help message and exit
+  -p, --power-management        Displays power management information
+  -b, --base-board-temps        Displays baseboard temperatures
+  -G, --gtt                     Displays GTT (shared GPU memory) size
+  -T, --tray                    Displays compute tray type and accelerator count
+
+Command Modifiers:
+  --json                        Displays output in JSON format (human readable by default).
+  --csv                         Displays output in CSV format (human readable by default).
+  --file FILE                   Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL              Set the logging level from the possible choices:
+                                   DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+This example shows `amd-smi node --tray` output on a system with a UALoE
+session active:
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: 8
+        TRAY_TYPE: HELIOS_P
+```
+
+On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
+`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
+`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
 ## Interpreting the output
 
 When you run an `amd-smi` command, the tool presents detailed information
@@ -1141,6 +1189,16 @@ Memory) is automatically detected based on the first available sensor.
   which handles current and future versions, so releases from 7.13 onward are no
   longer affected by this mismatch.)
 
+**Empty Section**: In human-readable output, `N/A` on a section header rather than a
+field means the section has no entries. For example, `RDMA_DEVICES: N/A` under an
+AI-NIC means the NIC reported no RDMA device, which is what you see when `ionic` is
+bound but `ionic_rdma` is not loaded. A header also reads `N/A` when the section's
+query failed and the whole section was replaced by `N/A` rather than left empty, which
+is what `NIC`, `SMU`, and `IFWI` in `amd-smi static` and `FW_LIST` in `amd-smi firmware`
+do. JSON output represents an empty section as an empty object. CSV drops the section's
+columns when no device in the run reports it, and fills them with `N/A` when only some
+do.
+
 (cli-ex-static)=
 ### Example output from amd-smi static
 
@@ -1164,8 +1222,11 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
+        PHYSICAL_ACC_ID: N/A
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
         FLAGS: 17

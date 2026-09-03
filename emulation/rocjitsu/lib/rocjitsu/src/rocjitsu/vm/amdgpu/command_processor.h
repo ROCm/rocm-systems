@@ -36,6 +36,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -72,6 +73,14 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  /// @brief Set when a packet faulted; the queue stops until it is torn down.
+  /// @details A faulted packet is retired rather than retried, because its
+  /// endpoint will never resolve. Continuing the scan would then run the FENCE
+  /// or signal packet behind it and publish completion for work that never
+  /// happened, which is the same lie the faulted copy was stopped from telling.
+  /// Hardware halts the engine on a VM fault and waits for the driver; this
+  /// models that, and the violation has already been reported to the process.
+  bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
   /// A command-processor pass observed this queue while its debugger gate was closed.
@@ -85,6 +94,15 @@ struct HwQueue {
   /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
   /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
   uint64_t fetch_cursor = 0;
+  /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
+  /// multi-XCD part does when it runs as a single partition. Set by the queue
+  /// creation path that models such a device; registering the queue replicates it
+  /// onto the peer XCDs.
+  bool xcd_fanout = false;
+  /// Set on the replicas that xcd_fanout creates. A replica never reads the ring
+  /// and never polls a doorbell; work reaches it as dispatch shards from the XCD
+  /// that owns the queue.
+  bool fanout_replica = false;
 };
 
 enum class SdmaPacketDialect {
@@ -156,8 +174,35 @@ public:
     scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
   }
 
+  /// @brief Tell this CP where its XCD sits among the SoC's XCDs.
+  ///
+  /// @details @p peers lists every XCD's command processor in XCD index order and
+  /// includes this one at index @p rank. A dispatch on a fanned-out queue is split
+  /// so that XCD i takes the grid chunks congruent to i modulo peers.size(); the
+  /// rank is the XCD's own index, not its position relative to the queue's owner,
+  /// so the workgroup-to-XCD mapping does not depend on which XCD a queue landed on.
+  /// @param rank This CP's XCD index.
+  /// @param peers All XCD command processors of the SoC, in XCD index order.
+  void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
+
+  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
+  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
+    scratch_xcc_id_ = xcc_id;
+    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
+
+  /// @brief Take one XCD's share of a dispatch fanned out by a peer XCD.
+  ///
+  /// @details Thread-safe, and safe to call from another partition's thread while
+  /// the caller holds its own CP's hw_queue_mutex_: the shard is parked in an inbox
+  /// guarded by a leaf mutex and the CP is woken through the engine's cross-thread
+  /// event queue rather than dispatched inline. The shard reaches the queue state
+  /// when this CP next drains the inbox on its own thread.
+  /// @param shard The share of the grid this XCD is to run.
+  void accept_fanout_shard(DispatchEntry shard);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                     uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
@@ -184,6 +229,10 @@ public:
                                                 simdojo::PortProtocol::DISPATCH);
     dispatch_ports_.push_back(add_port(std::move(port)));
     cus_.push_back(cu);
+    scratch_shader_engine_count_ =
+        std::max(scratch_shader_engine_count_, cu->shader_engine_id() + 1);
+    scratch_waves_per_se_ =
+        std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->num_wf_slots());
     cu->set_command_processor(this);
     cu->set_on_idle([this]() { on_cu_idle(); });
   }
@@ -198,7 +247,7 @@ public:
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
-  size_t dispatched_count() const { return total_dispatched_; }
+  [[nodiscard]] size_t dispatched_count() const { return total_dispatched_; }
 
   /// @brief Total workgroups this CP has placed on its own XCD's compute units.
   /// @details Distinct from dispatched_count(), which counts AQL packets. This is
@@ -213,7 +262,70 @@ public:
     return dispatched_workgroups_.load(std::memory_order_relaxed);
   }
 
-  size_t next_cu_index() const { return next_cu_; }
+  [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
+
+  /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
+  ///
+  /// @details Test-only. Acceptance is recorded at the queue's single ordered push
+  /// site under this CP's queue mutex and read AFTER a run. Unlike queue depth, the
+  /// count does not depend on whether a peer retires an earlier entry before the
+  /// next one arrives.
+  [[nodiscard]] size_t accepted_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? 0 : qs->accepted_entries;
+  }
+
+  /// @brief Kinds of the first two entries accepted on this CP for the queue.
+  /// @details Test-only. The order matches the queue's ordered push site.
+  [[nodiscard]] std::array<DispatchPacketKind, 2>
+  first_accepted_entry_kinds_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto *qs = find_queue_state(queue_id, process_id);
+    return qs == nullptr ? std::array<DispatchPacketKind, 2>{} : qs->first_accepted_entry_kinds;
+  }
+
+  /// @brief Hardware queues registered with this CP, including fan-out replicas.
+  ///
+  /// @details Test-only. Whether a queue is present here as an owner or as a
+  /// replica is an internal placement detail, not something production code
+  /// should branch on.
+  [[nodiscard]] size_t registered_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    return hw_queues_.size();
+  }
+
+  /// @brief Host-accessible queues this CP polls, excluding fan-out replicas.
+  ///
+  /// @details Test-only, and the count form of polls_kfd_queues(): replication
+  /// makes every CP hold a host-accessible queue, so this is what says whether a
+  /// CP still has a ring of its own to read after another CP's queue is
+  /// destroyed. Deliberately narrower than "queues this CP owns" -- a queue
+  /// registered directly against this CP by a test is owned by it but is not
+  /// host-accessible, so it is not counted here.
+  [[nodiscard]] size_t polled_kfd_queue_count_for_test() const {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    size_t polled = 0;
+    for (const auto &q : hw_queues_)
+      polled += (q.host_accessible && !q.fanout_replica) ? 1 : 0;
+    return polled;
+  }
+
+  /// @brief Step a dispatch id within one XCD's residue class.
+  ///
+  /// @details Public and static only so the wrap can be pinned by a test: it is
+  /// otherwise ~2^29 dispatches away, and the case that matters is a
+  /// non-power-of-two XCD count, where running off the end of uint32_t would
+  /// interleave the classes and let two XCDs mint the same id.
+  /// @param current The id just handed out.
+  /// @param base First id of this XCD's class, where the sequence restarts.
+  /// @param stride Number of participating XCDs.
+  /// @returns The next id in the same class.
+  [[nodiscard]] static uint32_t step_dispatch_id(uint32_t current, uint32_t base, uint32_t stride) {
+    if (current > std::numeric_limits<uint32_t>::max() - stride)
+      return base;
+    return current + stride;
+  }
 
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
@@ -225,9 +337,11 @@ public:
   /// @brief Test-only view of the doorbell monitor lifecycle flag.
   ///
   /// @details Exposes doorbell_running_ so a regression test can observe the
-  /// monitor stopping after the last host-accessible queue is destroyed and
-  /// restarting when a new one registers. Read under doorbell_thread_mutex_ so it
-  /// never races monitor teardown or ensure_doorbell_monitor().
+  /// monitor stopping after the last polled queue is destroyed and restarting
+  /// when a new one registers. Polled, not host-accessible: the monitor stops as
+  /// soon as this CP owns no ring of its own, which can leave host-accessible
+  /// fan-out replicas registered behind it. Read under doorbell_thread_mutex_ so
+  /// it never races monitor teardown or ensure_doorbell_monitor().
   [[nodiscard]] bool doorbell_monitor_running_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
@@ -281,6 +395,13 @@ private:
   /// re-check must be kept alive by rescheduling the doorbell event at @p now + 1.
   void arm_stall_recheck(simdojo::Tick now);
 
+  /// @brief Re-arm a re-check while this CP holds a shard whose grid is still
+  /// running on another XCD.
+  /// @details Caller MUST hold hw_queue_mutex_ and MUST be on this CP's own
+  /// partition thread. No-op unless a queue head is a share this XCD has
+  /// finished but the grid has not retired device-wide.
+  void arm_grid_wait_recheck();
+
   /// @brief Fetch AQL packets from a single HW queue.
   void fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now);
 
@@ -318,6 +439,79 @@ private:
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
+
+  /// @brief Split a dispatch across the SoC's XCDs, keeping this XCD's share.
+  ///
+  /// @details Narrows @p dp to this XCD's share and hands the remaining shares to
+  /// the peer XCDs, all sharing one GridCompletion so the completion signal fires
+  /// once. Does nothing when the SoC has a single XCD.
+  ///
+  /// Every XCD gets an entry even when the grid is too small to give it any
+  /// workgroups. An empty share is what keeps the replicas' queues in step with
+  /// the owner's for the packets that are replicated, and barrier_satisfied()
+  /// reads that ordering from the entries sitting ahead of a barrier'd packet;
+  /// skipping the empty ones would leave a replica with a shorter prefix than the
+  /// owner and let it start a barrier'd packet while a sibling was still running
+  /// the one before it. Packets that run no shader are copied across as well, by
+  /// replicate_non_kernel_entry(), so a replica's entry list is the owner's whole
+  /// sequence rather than a subsequence of it.
+  void fan_out_dispatch(DispatchEntry &dp);
+
+  /// @brief Give every peer XCD a copy of a packet that runs no shader.
+  ///
+  /// @details A kernel dispatch is split across the XCDs, but a barrier or an IB
+  /// has no workgroups to split -- what the peers need is the entry itself. The
+  /// ordering barrier_satisfied() reads from the entries sitting ahead of a
+  /// barrier'd packet is only device-wide if every XCD sees the same packets, so a
+  /// replica that skipped these would hold a strict subsequence of the owner's list
+  /// and could start a barrier'd packet while the owner still had an unretired one
+  /// in front of its own copy.
+  ///
+  /// The copy carries no completion signal. A packet is owed exactly one, and the
+  /// XCD that read it keeps that duty, exactly as it does for a kernel shard.
+  void replicate_non_kernel_entry(const DispatchEntry &dp);
+
+  /// @brief Move shards handed over by peer XCDs into their queue states.
+  /// @details Runs on this CP's own thread, under hw_queue_mutex_. Kept separate
+  /// from accept_fanout_shard() so that no CP ever takes a peer's hw_queue_mutex_.
+  void drain_fanout_inbox();
+
+  /// @brief Schedule a doorbell on every XCD of the SoC, this one included.
+  /// @details Used when a dispatch retires device-wide: the XCD holding the
+  /// completion signal may be parked with nothing left to rouse it, and a peer may
+  /// be parked behind a barrier bit this dispatch was blocking. Replicas run no
+  /// doorbell poll thread of their own, so nothing else would re-examine them.
+  void wake_all_xcds();
+
+  /// @brief Allocate a dispatch id unique across every XCD of the SoC.
+  ///
+  /// @details Fan-out copies a dispatch id onto peer XCDs, and completion
+  /// bookkeeping (notify_wg_complete, the cluster placement keys, the CU's
+  /// per-workgroup refcounts) looks entries up by that id. If two XCDs could mint
+  /// the same id, a peer holding a shard of one dispatch and an own dispatch with
+  /// the same id would credit workgroup completions to whichever it found first.
+  /// Seeding each CP at its XCD rank and stepping by the XCD count keeps the id
+  /// spaces disjoint without a shared counter: each XCD owns one residue class
+  /// modulo the XCD count.
+  ///
+  /// The wrap is explicit rather than left to the type. Letting the counter run
+  /// off the end of uint32_t preserves disjointness only when the XCD count
+  /// divides 2^32, and XcdShard deliberately accepts any count >= 1, so the two
+  /// contracts would disagree for a non-power-of-two topology -- after the wrap
+  /// the classes interleave and two XCDs mint the same id. Returning to the base
+  /// of this XCD's own class keeps them disjoint for every count. It is ~2^29
+  /// dispatches per XCD away in any case.
+  uint32_t allocate_dispatch_id() {
+    const uint32_t id = next_dispatch_id_;
+    next_dispatch_id_ = step_dispatch_id(next_dispatch_id_, dispatch_id_base_, dispatch_id_stride_);
+    return id;
+  }
+
+  /// @brief Locate the queue state for a (queue_id, process_id) pair.
+  /// @returns Pointer into new_queue_states_, or null when not registered. Caller
+  /// must hold hw_queue_mutex_ and must not use the result across a registration
+  /// change.
+  HwQueueState *find_queue_state(uint32_t queue_id, uint32_t process_id);
 
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
@@ -363,9 +557,26 @@ private:
     return total;
   }
 
+  /// @brief Whether any host-accessible queue is registered here, replicas included.
+  ///
+  /// @details Answers whether this CP's lifecycle is anchored by the VM-level
+  /// primary, which a fan-out replica does anchor just as its owner does.
   bool has_kfd_queues() const {
     for (const auto &q : hw_queues_)
       if (q.host_accessible)
+        return true;
+    return false;
+  }
+
+  /// @brief Whether any queue here is one whose doorbell this CP actually polls.
+  ///
+  /// @details A fan-out replica is host-accessible but is never polled: its work
+  /// arrives as dispatch shards from the XCD that owns the queue. Anything scoped
+  /// to the doorbell monitor must ask this rather than has_kfd_queues(), or a CP
+  /// left holding only replicas keeps a monitor alive for a ring it never reads.
+  bool polls_kfd_queues() const {
+    for (const auto &q : hw_queues_)
+      if (q.host_accessible && !q.fanout_replica)
         return true;
     return false;
   }
@@ -388,6 +599,20 @@ private:
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
 
+  uint32_t xcd_rank_ = 0;
+  // Every XCD's CP in XCD index order, including this one. Empty until the SoC
+  // wires the topology, which leaves fan-out disabled. Raw pointers: the SoC owns
+  // every XCD and destroys them together, so a peer outlives any use of it here,
+  // including the cross-thread uses in accept_fanout_shard() and wake_all_xcds().
+  std::vector<CommandProcessor *> xcd_peers_;
+
+  // Shards handed over by peer XCDs, awaiting this CP's next pass. Guarded by a
+  // leaf mutex, never hw_queue_mutex_: a peer appends here while holding its own
+  // hw_queue_mutex_, so acquiring anything else under this one would reintroduce
+  // the cross-CP lock cycle it exists to avoid.
+  std::mutex fanout_inbox_mutex_;
+  std::vector<DispatchEntry> fanout_inbox_;
+
   size_t next_cu_ = 0;
   size_t next_queue_idx_ = 0;
   // Almost always accessed under hw_queue_mutex_, but the teardown path in
@@ -403,6 +628,11 @@ private:
   // the decoder cannot infer this dialect from the packet header alone.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
+  // Step between successive dispatch ids from this CP. Set to the XCD count when
+  // the SoC wires the topology so no two XCDs ever mint the same id.
+  uint32_t dispatch_id_stride_ = 1;
+  /// First id of this XCD's residue class; where allocate_dispatch_id() restarts.
+  uint32_t dispatch_id_base_ = 1;
   size_t total_dispatched_ = 0;
   std::atomic<uint64_t> dispatched_workgroups_{0};
 
@@ -435,7 +665,7 @@ private:
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
-  std::recursive_mutex hw_queue_mutex_;
+  mutable std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
@@ -451,10 +681,13 @@ private:
   void read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const;
 
   /// @brief Write a block of bytes to GPU virtual address space from a buffer.
-  void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
+  amdgpu::AccessOutcome write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
-  /// @brief Stop and join the monitor only when no host-accessible queue remains.
+  /// @brief Stop and join the monitor only when no polled queue remains.
+  /// @details Polled rather than host-accessible: a CP left holding only fan-out
+  /// replicas still has host-accessible queues registered, but no ring it reads,
+  /// so its monitor must retire.
   /// @details Caller MUST NOT hold hw_queue_mutex_: this helper takes that mutex
   /// to recheck the queue set, then may join a poller that needs the same mutex to
   /// finish its current scan. Serializing the recheck with startup ensures a
@@ -471,11 +704,21 @@ private:
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
+  uint32_t scratch_shader_engine_count_ = 1;
+  uint32_t scratch_waves_per_se_ = 1;
+  uint32_t scratch_xcc_id_ = 0;
+  uint32_t scratch_xcc_count_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};
 
   std::atomic<uint64_t> doorbell_handle_count_{0};
+  /// @brief Ticks to wait before the next stall re-check, doubled on each idle
+  /// re-check and reset to 1 whenever work arrives.
+  /// @details Only the no-poll-thread path uses this; a CP that polls KFD queues
+  /// re-checks on its poll thread's own cadence instead.
+  simdojo::Tick stall_recheck_backoff_ = 1;
+  static constexpr simdojo::Tick kMaxStallRecheckBackoff = 4096;
 
   // Set when a queue stalls on an unsatisfied barrier/dependency signal (or an
   // SDMA VA not yet translatable) — a wait on progress that is external to the

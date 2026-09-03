@@ -65,7 +65,7 @@ stream:
     <<: *level_2
     tags: [memory, P0]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle, P1]
@@ -113,9 +113,9 @@ stream:
   Unit_hipStreamPriorityAqlLog_ChildWorkload:
     <<: *level_2
     # Internal helper, only invoked by the parent test via re-exec (by exact
-    # name, which still runs hidden [.] cases). Disabled everywhere so it does
-    # not run as a standalone no-op in the regular suite.
-    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    # name, which still runs hidden [.] cases). Enabled on amd_linux, where it
+    # runs as a harmless standalone no-op; disabled on other platforms.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [lifecycle]
   Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
     <<: *level_2

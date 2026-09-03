@@ -11,10 +11,12 @@
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "comm.h"
 
 #include "nccl_device.h"
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -23,6 +25,7 @@
 #include <hip/hip_runtime.h>
 #include <ios>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -37,19 +40,29 @@ std::string ginEnvDisabledReason() {
   return "";
 }
 
-// GIN type requested for this run (2=proxy, 4=rocshmem-gda); 0 if unset.
+// GIN type requested for this run (proxy / rocshmem-gda / anvil-sdma), 0 if unset.
 int requestedGinType() {
   const char* t = std::getenv("NCCL_GIN_TYPE");
   return t ? std::atoi(t) : 0;
 }
 
+// Valid NCCL_GIN_TYPE values, derived from the enum so the numbers stay correct
+// if the type numbering ever changes.
+std::string ginTypeUsage() {
+  return "required NCCL_GIN_TYPE=" +
+         std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + " [proxy], " +
+         std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + " [rocshmem-gda] or " +
+         std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + " [anvil-sdma]";
+}
+
 std::string ginTypeReason() {
   const char* ginType = std::getenv("NCCL_GIN_TYPE");
   if (!ginType)
-    return "GIN type not set (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+    return "GIN type not set (" + ginTypeUsage() + ")";
   int t = requestedGinType();
-  if (t != 2 && t != 4)
-    return std::string("Invalid GIN type: ") + ginType + " (required NCCL_GIN_TYPE=2 [proxy] or 4 [rocshmem-gda])";
+  if (t != NCCL_NET_DEVICE_GIN_PROXY && t != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA &&
+      t != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return std::string("Invalid GIN type: ") + ginType + " (" + ginTypeUsage() + ")";
   return "";
 }
 
@@ -91,6 +104,8 @@ std::string intranetReason() {
   int worldSize = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
   if (nodeLocalRanks() != worldSize) return "";
+  // anvil-sdma works single-node without intranet mode
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
   const char* intra = std::getenv("RCCL_ENABLE_INTRANET");
   if (!intra || std::strcmp(intra, "1") != 0)
     return "Intranet mode required for single-node run (RCCL_ENABLE_INTRANET=1)";
@@ -106,21 +121,63 @@ std::string crossNodeReason() {
   return "";
 }
 
+// anvil-SDMA is a single-node backend. Skip (rather than fail/hang) if it is
+// accidentally launched with ranks spanning more than one physical node.
+std::string anvilSingleNodeReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  int worldSize = 0;
+  MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+  if (nodeLocalRanks() != worldSize)
+    return "anvil-SDMA is a single-node backend; skipping multi-node run";
+  return "";
+}
+
 // First failing prerequisite, or "" if all met.
 std::string ginProxyTestSkipReason() {
-  for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason}) {
+  for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason,
+                     anvilSingleNodeReason}) {
     if (auto reason = check(); !reason.empty()) return reason;
   }
   return "";
 }
 
-// rocSHMEM-GDA (type 4)/SDMA (type 5) implements only INDEXED signals; VA signals are
+// rocSHMEM-GDA and SDMA implement only INDEXED signals; VA signals are
 // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
-  if (requestedGinType() == 4)
-    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=4)";
-  if (requestedGinType() == 5)
-    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=5)";
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    return "VA signals not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) + ")";
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "VA signals not supported by SDMA (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA) + ")";
+  return "";
+}
+
+// The GIN-SDMA alltoall exists only on the SDMA backend.
+std::string sdmaInternalA2AEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "GIN-SDMA alltoall requires NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+  if (const char* e = std::getenv("NCCL_GIN_A2A_ENABLE"); e && std::strcmp(e, "0") == 0)
+    return "GIN-SDMA alltoall disabled (NCCL_GIN_A2A_ENABLE=0)";
+  // The count sweep needs both thresholds at their defaults: a raised floor drops
+  // the smallest count, a raised SDMA cutoff keeps the largest on the LSA kernel.
+  if (std::getenv("NCCL_GIN_A2A_MIN_BYTES"))
+    return "count sweep assumes the default NCCL_GIN_A2A_MIN_BYTES";
+  if (std::getenv("NCCL_GIN_A2A_SDMA_MIN_BYTES"))
+    return "SDMA tier coverage assumes the default NCCL_GIN_A2A_SDMA_MIN_BYTES";
+  return "";
+}
+
+// Comm-side subset of ncclAllToAllGinSdmaEligible in gin_alltoall_sdma.cu, which is
+// the source of truth. Skipping keeps an ineligible setup from failing opaquely.
+std::string sdmaInternalA2ACommSkipReason(ncclComm_t comm) {
+  if (comm->nNodes != 1)
+    return "GIN-SDMA alltoall is scaleup-only (requires nNodes=1)";
+  if (!comm->symmetricSupport)
+    return "GIN-SDMA alltoall requires symmetric memory support";
+  if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL)
+    return "GIN-SDMA alltoall requires full GIN connectivity";
   return "";
 }
 
@@ -131,6 +188,43 @@ ncclDevCommRequirements defaultGinReqs() {
   return r;
 }
 
+// No-ops on backends other than anvil-sdma. acquire() asserts, so callers wrap
+// it in ASSERT_NO_FATAL_FAILURE.
+struct SdmaScratchWindow {
+  ncclComm_t   comm = nullptr;
+  void*        buf  = nullptr;
+  ncclWindow_t win  = nullptr;
+
+  ~SdmaScratchWindow() {
+    if (win) (void)ncclCommWindowDeregister(comm, win);
+    if (buf) (void)ncclMemFree(buf);
+  }
+
+  void acquire(ncclComm_t c) {
+    if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return;
+    constexpr size_t kBytes = 4 * 1024;
+    comm = c;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&buf, kBytes));
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommWindowRegister(c, buf, kBytes, &win, NCCL_WIN_COLL_SYMMETRIC));
+  }
+};
+
+// Bounded stream drain: poll with a deadline so a device-side hang becomes a
+// reported timeout instead of an infinite hipStreamSynchronize. Returns the
+// final stream status so the caller can distinguish the three outcomes:
+//   hipSuccess       - stream completed cleanly
+//   hipErrorNotReady - deadline elapsed while the stream was still busy (hang)
+//   any other error  - a genuine device/launch error, propagated as-is
+hipError_t syncStreamWithinTimeout(hipStream_t stream, int seconds) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  for (;;) {
+    hipError_t q = hipStreamQuery(stream);
+    if (q != hipErrorNotReady) return q;  // hipSuccess or a real error
+    if (std::chrono::steady_clock::now() >= deadline) return hipErrorNotReady;  // timed out
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+}
 // Multi-context trigger for the Tier-1 *_MultiContext tests. Returns the
 // requested context count N (>=2) parsed from NCCL_GIN_NCONTEXTS, clamped to
 // NCCL_GIN_MAX_CONTEXTS; returns 0 when the var is unset or <=1 so the caller
@@ -595,6 +689,246 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
   }
 }
 
+// Whole CTA cooperatively issues one gin.put via ncclCoopCta (every lane enters put()).
+__global__ void putCoopCtaProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes, ncclGinSignal_t sigIdx, int peer,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.put(ncclTeamWorld(devComm), peer,
+          dstWin, dstOff,
+          srcWin, srcOff,
+          bytes,
+          ncclGin_SignalInc{sigIdx},
+          ncclGin_None{},
+          ncclCoopCta());
+  gin.flush(ncclCoopCta());
+}
+
+// A cooperative whole-CTA gin.put must complete rather than deadlock: rank 0 puts a
+// payload + signal, rank 1 waits and verifies. A hang is caught by the bounded drain.
+TEST_F(GinMPIDeviceTests, Put_CoopCta_Regression) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  // Minimal geometry: single-slot full-buffer transfer, signal 0, peer rank 1.
+  constexpr size_t          kBufBytes      = 4 * 1024;
+  constexpr size_t          kTransferBytes = 4 * 1024;
+  constexpr ncclGinSignal_t kSigIdx        = 0;
+  constexpr int             kPeer          = 1;
+  // A full wavefront (>=64 on gfx9) so the coop group spans many lanes; this is
+  // what exercises the coop/thread_rank mismatch. 256 threads = several warps.
+  constexpr int             kThreadsPerCta = 256;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[i] = static_cast<uint8_t>(0xC0 + (i & 0x3F));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putCoopCtaProducerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        srcWin, /*srcOff=*/0,
+        dstWin, /*dstOff=*/0,
+        kTransferBytes, kSigIdx, kPeer,
+        devComm);
+  } else {
+    putBasicConsumerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+
+  // Bounded drain: a hang never completes, so cap the wait and fail instead of blocking.
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
+
+  // Surface the timeout on both ranks so neither is left waiting at the barrier.
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
+  int anyTimedOut   = 0;
+  MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  ASSERT_EQ(0, anyTimedOut)
+      << "cooperative gin.put(ncclCoopCta) did not complete within the timeout "
+         "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
+    }
+  }
+}
+
+// Warp-span variant: same cooperative put through a multi-warp ncclCoopWarpSpan, whose
+// sync() is the AMD software named barrier. Unlike ncclCoopCta's convergent __syncthreads
+// it deadlocks under divergent participation without the coop->ncclCoopThread fix, giving
+// AMD coverage the whole-CTA test cannot.
+__global__ void putCoopWarpSpanProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes, ncclGinSignal_t sigIdx, int peer,
+    struct ncclDevComm devComm) {
+  ncclCoopNamedBarrierInit();  // zero LDS barrier slots (all threads)
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const int nWarps = blockDim.x / warpSize;  // >=2 warps -> software barrier active
+  gin.put(ncclTeamWorld(devComm), peer,
+          dstWin, dstOff,
+          srcWin, srcOff,
+          bytes,
+          ncclGin_SignalInc{sigIdx},
+          ncclGin_None{},
+          ncclCoopWarpSpan(/*warp0=*/0, nWarps, /*id=*/0));
+  gin.flush(ncclCoopCta());
+}
+
+// Warp-span flavor: with the fix this drains and verifies; without it lane 0 deadlocks
+// in the software barrier and the bounded drain turns the hang into a failure.
+TEST_F(GinMPIDeviceTests, Put_CoopWarpSpan_Regression_AMD) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr size_t          kBufBytes      = 4 * 1024;
+  constexpr size_t          kTransferBytes = 4 * 1024;
+  constexpr ncclGinSignal_t kSigIdx        = 0;
+  constexpr int             kPeer          = 1;
+  constexpr int             kThreadsPerCta = 256;  // 4 warps -> warp-span software barrier active
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[i] = static_cast<uint8_t>(0xC0 + (i & 0x3F));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putCoopWarpSpanProducerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        srcWin, /*srcOff=*/0,
+        dstWin, /*dstOff=*/0,
+        kTransferBytes, kSigIdx, kPeer,
+        devComm);
+  } else {
+    putBasicConsumerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
+
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
+  int anyTimedOut   = 0;
+  MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  ASSERT_EQ(0, anyTimedOut)
+      << "cooperative gin.put(ncclCoopWarpSpan) did not complete within the timeout "
+         "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
+    }
+  }
+}
+
 // Producer: putValue carries the 8-byte payload inside the GFD itself
 // (no source MR is dereferenced); also bumps a signal so the receiver
 // can wait synchronously. Context-aware: one block per GIN context
@@ -786,9 +1120,11 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
   constexpr ncclGinSignal_t kSigIdx = 1;
   constexpr int             kPeer   = 1;  // rank 0 -> rank 1
 
-  // No buffers, no windows: gin.signal is a zero-byte put. The runtime's
-  // own signal pool is the only memory touched by the GFD; it's allocated
-  // and registered by ncclDevCommCreate based on ginSignalCount.
+  // anvil-sdma binds signal routes only when >=1 window is registered
+  // (dev_runtime.cc gates on winSortedCount>0). Proxy backends need no window.
+  SdmaScratchWindow scratch;
+  ASSERT_NO_FATAL_FAILURE(scratch.acquire(comm));
+
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
@@ -849,6 +1185,11 @@ TEST_F(GinMPIDeviceTests, Signal_HighIdNoOverflow) {
   constexpr ncclGinSignal_t kSigIdx          = 65536;  // > 0xFFFF
   constexpr uint32_t        kSignalPoolCount = 65537;
   constexpr int             kPeer            = 1;       // rank 0 -> rank 1
+
+  // anvil-sdma needs >=1 window for signal routes to bind (see Signal_NoPayload).
+  // Proxy backends keep the no-window path.
+  SdmaScratchWindow scratch;
+  ASSERT_NO_FATAL_FAILURE(scratch.acquire(comm));
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
@@ -1624,7 +1965,7 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   constexpr int kIters = 16;
 
-  // Only barrierCount provisions the two pools consumed by the generic
+  // Only barrierCount provisions the three pools consumed by the generic
   // world-team session. Keeping every specialized count at zero ensures an
   // accidental constructor or requirement-routing regression cannot be masked.
   ncclDevCommRequirements reqs = defaultGinReqs();
@@ -1637,7 +1978,8 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   ASSERT_MPI_EQ(1, devComm.hybridLsaBarrier.nBarriers);
   ASSERT_MPI_EQ(0, devComm.lsaBarrier.nBarriers);
-  ASSERT_MPI_EQ(ncclTeamRail(comm).nRanks, devComm.ginSignalCount);
+  // barrierCount sizes both outer GIN arms: one cell per source rank of the rail team and of the world team.
+  ASSERT_MPI_EQ(ncclTeamRail(comm).nRanks + ncclTeamWorld(comm).nRanks, devComm.ginSignalCount);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -2273,25 +2615,20 @@ TEST_F(GinMPIDeviceTests, SymPtr_PutAndPutValue) {
 
 // Reference single-node alltoall: every rank puts its slice for every peer
 // into that peer's recvbuf via gin.put + SignalInc, then waits on its own
-// signal cell for nRanks increments. Ported one-for-one from
-// examples/06_device_api/02_gin_alltoall_pure/main.cu so a regression in
-// put + signal + barrier + flush composed under realistic load surfaces here.
-__global__ void alltoallPureKernel(
+// signal cell for nRanks increments. Mirrors ginAlltoAllBody (device impl 3) in
+// rccl-tests/src/alltoall.cu, minus its trailing release sync, so a regression
+// in put + signal + barrier + flush composed under load surfaces here.
+// Body shared by the two reference kernels below. bar is whichever session the
+// caller built, so the identical put + signal + flush composition runs under
+// both the generic barrier and the dedicated world-team GIN barrier.
+template <typename BarT>
+__device__ void alltoallPureBody(
+    ncclGin& gin, BarT& bar, unsigned int signalIndex, uint64_t signalValue,
     ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset,
     size_t count, struct ncclDevComm devComm) {
-  constexpr int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
-  ncclGin gin{devComm, ginContext};
-  // Capture current signal cell so a count-sweep that reuses the same
-  // kernel/devComm doesn't conflate increments from past iterations.
-  uint64_t signalValue = gin.readSignal(signalIndex);
-
   // Cross-rank sync ensures every rank's sendbuf is registered before any
   // peer reads from it via gin.put below.
-  ncclGinBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), gin, ncclTeamWorld(devComm),
-      devComm.railGinBarrier, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -2315,67 +2652,91 @@ __global__ void alltoallPureKernel(
   gin.flush(ncclCoopCta());
 }
 
-// Single-node 2-8 ranks; count sweep {1, 1024, 1<<16}. Bit-for-bit verifies
-// the deterministic sendbuf[i] = rank*1000 + dst*100 + i pattern landed on
-// the right peer slot. The 1<<16 case (256 KiB / direction / peer) saturates
-// ring credit to exercise the postGfd credit-wait path.
-TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
+// Generic session, provisioned from reqs.barrierCount. This is the rccl-tests
+// composition.
+__global__ void alltoallPureKernel(
+    ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset,
+    size_t count, struct ncclDevComm devComm) {
+  unsigned int signalIndex = blockIdx.x;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  // Capture current signal cell so a count-sweep that reuses the same
+  // kernel/devComm doesn't conflate increments from past iterations.
+  uint64_t signalValue = gin.readSignal(signalIndex);
 
-  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
-    GTEST_SKIP() << "Requires 2-8 ranks";
+  ncclBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
+  alltoallPureBody(gin, bar, signalIndex, signalValue,
+      sendwin, sendoffset, recvwin, recvoffset, count, devComm);
+}
 
-  ASSERT_EQ(ncclSuccess, createTestCommunicator());
-  ncclComm_t  comm   = getActiveCommunicator();
-  hipStream_t stream = getActiveStream();
+// Same collective on the dedicated world GIN pool, provisioned from
+// reqs.worldGinBarrierCount. This is the composition in
+// examples/06_device_api/02_alltoall_gin/c/main.cu.
+__global__ void alltoallWorldGinKernel(
+    ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset,
+    size_t count, struct ncclDevComm devComm) {
+  unsigned int signalIndex = blockIdx.x;
+  ncclGin gin{devComm, /*ginContext=*/0};
+  uint64_t signalValue = gin.readSignal(signalIndex);
 
-  int rank = -1, nRanks = -1;
-  ncclCommUserRank(comm, &rank);
-  ncclCommCount(comm, &nRanks);
-  ASSERT_GE(nRanks, 2);
-  ASSERT_LE(nRanks, 8);
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), gin, ncclTeamTagWorld{}, blockIdx.x};
+  alltoallPureBody(gin, bar, signalIndex, signalValue,
+      sendwin, sendoffset, recvwin, recvoffset, count, devComm);
+}
 
-  // ginSignalCount=1 covers signalIndex=0; railGinBarrierCount=1 matches
-  // our single-CTA launch.
-  ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.railGinBarrierCount = 1;
-  reqs.ginSignalCount      = 1;
+// One CTA keeps barrier index 0 the only index in play; 512 threads is the
+// rccl-tests production launch shape.
+constexpr int kAlltoallRefCTAs    = 1;
+constexpr int kAlltoallRefThreads = 512;
+
+// Count sweep shared by the two alltoall reference tests: 1 (alignment/tail
+// edges), 1024 (medium), 65536 (saturating). Only reqs and the kernel differ
+// between them, so each caller supplies those. launch receives the registered
+// windows, the current count and the devComm. Asserts, so callers wrap this in
+// ASSERT_NO_FATAL_FAILURE.
+template <typename LaunchT>
+void runAlltoallReferenceSweep(ncclComm_t comm, hipStream_t stream, int rank, int nRanks,
+                               const ncclDevCommRequirements& reqs, LaunchT&& launch) {
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+
+  // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate
+  // activates GIN: some backends resolve a buffer's address at registration,
+  // which only succeeds pre-activation.
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  // 1 (alignment/tail edges), 1024 (medium), 65536 (saturating).
-  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
-  constexpr int kCTAs          = 1;   // == railGinBarrierCount
-  constexpr int kThreadsPerCTA = 512; // matches the production example launch
-
   for (size_t count : counts) {
     SCOPED_TRACE(::testing::Message() << "count=" << count);
 
     const size_t totalElements = count * static_cast<size_t>(nRanks);
     const size_t sizeBytes     = totalElements * sizeof(float);
-
-    void* dSend = nullptr;
-    void* dRecv = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sizeBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, sizeBytes));
-    auto memCleanup = makeScopeGuard([&]() {
-      if (dSend) (void)ncclMemFree(dSend);
-      if (dRecv) (void)ncclMemFree(dRecv);
-    });
-
-    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dSend, sizeBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dRecv, sizeBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
-    auto winCleanup = makeScopeGuard([&]() {
-      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
-      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
-    });
 
     // Per-source/per-dest pattern: every byte of every slice has a unique
     // expected value, so a misrouted slice surfaces as a mismatch.
@@ -2394,10 +2755,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    alltoallPureKernel<<<kCTAs, kThreadsPerCTA, 0, stream>>>(
-        sendWin, /*sendoffset=*/0,
-        recvWin, /*recvoffset=*/0,
-        count, devComm);
+    launch(sendWin, recvWin, count, devComm);
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -2415,6 +2773,79 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
       }
     }
   }
+}
+
+// Single-node 2-8 ranks. Bit-for-bit verifies the deterministic
+// sendbuf[i] = rank*1000 + dst*100 + i pattern landed on the right peer slot.
+// The 1<<16 case (256 KiB / direction / peer) saturates ring credit to
+// exercise the postGfd credit-wait path.
+TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // ncclBarrierSession(ncclTeamTagWorld) draws on the three hybrid pools, all
+  // sized by reqs.barrierCount rather than lsa/railGinBarrierCount, so leaving
+  // it 0 hangs the GIN arm. ginSignalCount=1 covers the kernel's signalIndex=0.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.barrierCount   = 1;
+  reqs.ginSignalCount = 1;
+
+  ASSERT_NO_FATAL_FAILURE(runAlltoallReferenceSweep(comm, stream, rank, nRanks, reqs,
+      [&](ncclWindow_t sendWin, ncclWindow_t recvWin, size_t count, ncclDevComm& devComm) {
+        alltoallPureKernel<<<kAlltoallRefCTAs, kAlltoallRefThreads, 0, stream>>>(
+            sendWin, /*sendoffset=*/0,
+            recvWin, /*recvoffset=*/0,
+            count, devComm);
+      }));
+}
+
+// Same collective and same verification as Alltoall_PureReference, on the
+// dedicated world GIN barrier pool instead of the generic one. Keeps the
+// ncclTeamTagWorld constructor and worldGinBarrierCount covered, which the
+// generic session never touches.
+TEST_F(GinMPIDeviceTests, Alltoall_WorldGinBarrierReference) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // worldGinBarrierCount allocates the world pool that the ncclTeamTagWorld
+  // constructor binds to, so no manual barrier requirement is needed.
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.worldGinBarrierCount = 1;
+  reqs.ginSignalCount       = 1;
+
+  ASSERT_NO_FATAL_FAILURE(runAlltoallReferenceSweep(comm, stream, rank, nRanks, reqs,
+      [&](ncclWindow_t sendWin, ncclWindow_t recvWin, size_t count, ncclDevComm& devComm) {
+        alltoallWorldGinKernel<<<kAlltoallRefCTAs, kAlltoallRefThreads, 0, stream>>>(
+            sendWin, /*sendoffset=*/0,
+            recvWin, /*recvoffset=*/0,
+            count, devComm);
+      }));
 }
 
 // Hybrid alltoall: LSA stores for intra-node peers + gin.put for cross-node
@@ -2515,40 +2946,46 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.barrierCount        = 1;
   reqs.ginSignalCount      = 1;
+
+  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
+  constexpr int kCTAs          = 1;
+  constexpr int kThreadsPerCTA = 512;
+
+  // Register windows ONCE (largest count) and reuse, BEFORE ncclDevCommCreate
+  // activates GIN: some backends resolve a buffer's address at registration,
+  // which only succeeds pre-activation.
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
 
-  const std::vector<size_t> counts = {1, 1024, size_t{1} << 16};
-  constexpr int kCTAs          = 1;
-  constexpr int kThreadsPerCTA = 512;
-
   for (size_t count : counts) {
     SCOPED_TRACE(::testing::Message() << "count=" << count);
 
     const size_t totalElements = count * static_cast<size_t>(nRanks);
     const size_t sizeBytes     = totalElements * sizeof(float);
-
-    void* dSend = nullptr;
-    void* dRecv = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, sizeBytes));
-    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, sizeBytes));
-    auto memCleanup = makeScopeGuard([&]() {
-      if (dSend) (void)ncclMemFree(dSend);
-      if (dRecv) (void)ncclMemFree(dRecv);
-    });
-
-    ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dSend, sizeBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, dRecv, sizeBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
-    auto winCleanup = makeScopeGuard([&]() {
-      if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
-      if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
-    });
 
     // Same deterministic pattern as Alltoall_PureReference.
     std::vector<float> hostSend(totalElements, 0.0f);
@@ -2926,6 +3363,109 @@ TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinResourcesRemainUsable) {
   secondLive = false;
   ASSERT_MPI_EQ(ncclSuccess, secondDestroyResult);
   MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// ncclAlltoAll dispatches to ncclAllToAllGinSdma when eligible.
+TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = sdmaInternalA2AEnvSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  if (auto reason = sdmaInternalA2ACommSkipReason(comm); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  // Mirrors the NCCL_GIN_A2A_SDMA_MIN_BYTES default (enforced by the env skip).
+  // Below it ncclAllToAllGinSdma runs ncclGinA2AKernel<false>, at or above <true>.
+  constexpr size_t kSdmaMinBytesPerPeer = size_t{8} << 20;
+  const std::vector<size_t> counts = {
+      1, 1024, size_t{1} << 16,               // 4 B / 4 KiB / 256 KiB per peer -> LSA
+      kSdmaMinBytesPerPeer / sizeof(float)};  // 8 MiB per peer -> SDMA engine
+
+  // No ncclDevCommCreate here: the path lazily builds its own private devComm.
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  // Registered once at the largest size and reused across the sweep.
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+      ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
+  for (size_t idx = 0; idx < counts.size(); idx++) {
+    const size_t count = counts[idx];
+    SCOPED_TRACE(::testing::Message() << "count=" << count);
+
+    const size_t totalElements = count * static_cast<size_t>(nRanks);
+    const size_t sizeBytes     = totalElements * sizeof(float);
+
+    // Same deterministic pattern as Alltoall_PureReference.
+    std::vector<float> hostSend(totalElements, 0.0f);
+    std::vector<float> hostRecv(totalElements, 0.0f);
+    for (int dst = 0; dst < nRanks; dst++) {
+      for (size_t i = 0; i < count; i++) {
+        hostSend[static_cast<size_t>(dst) * count + i] =
+            static_cast<float>(rank * 1000 + dst * 100 + static_cast<int>(i));
+      }
+    }
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dSend, hostSend.data(), sizeBytes, hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess,
+        hipMemcpy(dRecv, hostRecv.data(), sizeBytes, hipMemcpyHostToDevice));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclAlltoAll(dSend, dRecv, count, ncclFloat, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    // Set by ncclGinA2AInitOnce and sticky for the comm's lifetime, so the first
+    // dispatch is the only one that can fail this. Checking it here reports a
+    // fallback before the sweep reaches the larger sizes, but it cannot tell the
+    // LSA and SDMA tiers apart.
+    if (idx == 0) ASSERT_MPI_TRUE(comm->ginA2AState.initialized);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_EQ(hipSuccess,
+        hipMemcpy(hostRecv.data(), dRecv, sizeBytes, hipMemcpyDeviceToHost));
+    for (int src = 0; src < nRanks; src++) {
+      for (size_t i = 0; i < count; i++) {
+        const float expected =
+            static_cast<float>(src * 1000 + rank * 100 + static_cast<int>(i));
+        const float got = hostRecv[static_cast<size_t>(src) * count + i];
+        ASSERT_EQ(expected, got)
+            << "rank=" << rank << " src=" << src << " i=" << i;
+      }
+    }
+  }
 }
 
 // Producer: one block per GIN context. Block b uses ginContext=b, puts into
@@ -3658,7 +4198,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
 
 // =====================================================================
 // Coverage for the new NCCL 2.29.7 GIN device-API features. All run on the
-// device-API NCCL_GIN_TYPE=2 path with cross-node placement (2 ranks on 2
+// device-API GIN proxy path with cross-node placement (2 ranks on 2
 // nodes). Tests for features that depend on topology/library support that
 // may be unavailable skip gracefully rather than fail.
 // =====================================================================
@@ -3679,7 +4219,7 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
   ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
 
-  // Backend type must match the requested NCCL_GIN_TYPE (2=proxy, 4=rocshmem-gda).
+  // Backend type must match the requested NCCL_GIN_TYPE (proxy / rocshmem-gda / anvil-sdma).
   EXPECT_EQ(requestedGinType(), (int)props.ginType);
 
   // nLsaTeams = nRanks / lsaSize: >= 1 and must evenly divide nRanks.
@@ -4745,8 +5285,11 @@ std::string intraNodeSymReason() {
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
 // production kernel path -- not a hand-written reference kernel.
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric ReduceScatter is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Symmetric ReduceScatter not supported for anvil-sdma: single-node backend";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
@@ -4834,8 +5377,11 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
 // Same as ReduceScatter_Symmetric but exercises ncclAvg, which drives the
 // FuncSumPostDiv post-divide path on the symmetric RS kernel (RailA2A_LsaLD).
 TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric_Avg) {
-  if (requestedGinType() == 4)
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     GTEST_SKIP() << "Skipping symmetric ReduceScatter (RailA2A_LsaLD) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric ReduceScatter is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "Symmetric ReduceScatter not supported for anvil-sdma: single-node backend";
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 

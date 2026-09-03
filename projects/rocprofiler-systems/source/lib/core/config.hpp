@@ -17,7 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>
 
 #if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
@@ -342,6 +342,9 @@ get_sampling_gpus();
 
 std::string
 get_gpu_perf_counters();
+
+std::vector<std::string>
+get_rocm_counter_events();
 
 std::string
 get_sampling_ainics();

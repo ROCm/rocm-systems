@@ -281,6 +281,7 @@ global:
 	hsa_amd_signal_get_event_id;
 	hsa_amd_vmem_export_fabric_handle;
 	hsa_amd_vmem_import_fabric_handle;
+	hsa_amd_svm_discard_and_prefetch_batch_async;
 local:
     *;
 };

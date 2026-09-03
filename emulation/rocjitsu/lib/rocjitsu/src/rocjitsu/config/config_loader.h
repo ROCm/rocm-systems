@@ -10,6 +10,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -74,9 +75,11 @@ struct LoadedConfig {
       extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
   KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
+  PciDeviceConfig pci;                  ///< PCI bus shape from vm.gpu.pci.
   DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
+  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
 
   /// @brief Return the SoC from the topology root.
   SoC *soc();
@@ -90,6 +93,23 @@ struct LoadedConfig {
   /// @brief Wire deferred link specs into a topology. Call after set_root().
   void wire_links(simdojo::Topology &topo) { topo.wire_links(build_result.link_specs, exec_mode); }
 };
+
+/// @brief The identity and bus shape of the GPU a config describes.
+struct DeviceIdentityConfig {
+  KfdDeviceConfig device; ///< GPU identity, as KFD also reports it.
+  PciDeviceConfig pci;    ///< Bus shape for PCI-attached front ends.
+};
+
+/// @brief Read only a config's device identity and bus shape.
+/// @param json_path Path to the JSON config file.
+/// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @returns The identity and bus shape.
+/// @throws std::runtime_error when the file cannot be read or parsed.
+/// @details Building the topology allocates the whole simulated machine, which
+/// for a large part is gigabytes of register files. A front end that only needs
+/// to know which GPU to present should not pay for a machine it never runs.
+DeviceIdentityConfig load_device_identity(const std::string &json_path,
+                                          const std::string &schema_text);
 
 /// @brief Parse an architecture name string to an rj_code_arch_t enum value.
 rj_code_arch_t parse_arch(const std::string &arch_str);

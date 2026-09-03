@@ -5,7 +5,7 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <charconv>

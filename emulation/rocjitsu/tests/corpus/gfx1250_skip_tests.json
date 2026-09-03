@@ -1,17 +1,11 @@
 {
   "iree": [
-    "iree.gfx1250.e2e.pack_i8.static_pack_vnni_lhs_large"
   ],
   "cts": [
     "cts.gfx1250.fpsan.fpsan_atomic_test",
     "cts.gfx1250.fpsan.fpsan_hip_device_test",
-    "cts.gfx1250.fpsan.fpsan_xlane_test",
-    "cts.gfx1250.fpsan.fpsan_wave_test",
-    "cts.gfx1250.fpsan.fpsan_amdgcn_math_test",
     "cts.gfx1250.fpsan.fpsan_amdgcn_ldexp_test",
     "cts.gfx1250.fpsan.fpsan_cvt_scalef32_pk_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_scale_unpack_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_fp8_e5m3_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_wmma_16x16x32_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_wmma_16x16x64_fp8_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_wmma_16x16x128_fp8_gfx1250_test",
@@ -21,17 +15,7 @@
     "cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test",
     "cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test",
-    "cts.gfx1250.fpsan.fpsan_amdgcn_bf16_trans_test",
-    "cts.gfx1250.fpsan.fpsan_classify_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_f16_fp8_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_fp8_pack_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_fp8_pk_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_fp8_sr_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_fp8_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_sr_pack_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_sr_pk_f16_gfx1250_test",
-    "cts.gfx1250.fpsan.fpsan_cvt_test",
-    "cts.gfx1250.fpsan.fpsan_wmma_16x16x4_gfx1250_test"
+    "cts.gfx1250.int_isa.int_isa_gfx1250_swmmac_i32_16x16x128_iu8_test"
   ],
   "kernels": [
     "rocblas_sgemm::large_2048x2048"

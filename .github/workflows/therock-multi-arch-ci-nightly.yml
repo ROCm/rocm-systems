@@ -10,13 +10,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: the setup job resolves the live tip of ROCm/TheRock@main to one
-# concrete SHA (needs.setup.outputs.ref) and every downstream build/test job
-# consumes that SHA so the whole run is locked to a single TheRock commit. See
-# ROCm/rocm-libraries#9507 (this supersedes the earlier pinned-SHA plan in
-# TheRock#3343). The `uses: ...@main` lines below are the workflow-definition
-# ref (Actions forbids an expression there) and are deliberately separate from
-# the build-source `ref:` inputs.
+# TheRock ref: pinned to ROCm/TheRock commit 3c4ec014374d4d32243334ef229093fe7b38c5b2.
 
 # =============================================================================
 # TEMPORARY: MI455 (gfx125X) bringup configuration
@@ -32,11 +26,6 @@ on:
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
-    inputs:
-      therock_ref_override:
-        type: string
-        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the live tip of ROCm/TheRock@main."
-        default: ""
 
 permissions:
   contents: read
@@ -51,7 +40,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
@@ -62,10 +51,7 @@ jobs:
       prebuilt_stages: ''
       baseline_run_id: ''
       repository: ROCm/TheRock
-      # Default resolves the live tip of ROCm/TheRock@main; workflow_dispatch can
-      # pin an explicit ref via therock_ref_override. setup resolves this to one
-      # concrete SHA (needs.setup.outputs.ref) for every downstream job.
-      ref: ${{ inputs.therock_ref_override || 'main' }}
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       external_repo: >-
@@ -107,7 +93,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -119,8 +105,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -133,7 +118,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -143,8 +128,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
     permissions:
       contents: read
       id-token: write
@@ -162,8 +146,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

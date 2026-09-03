@@ -93,8 +93,8 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
     if (++lds_dst_trace > 80)
       return;
     os << std::format("{} wg[{}] wf[{}] BUF->LDS: lds_base={:#x} plb={} mcast={:#x} targets={}",
-                      d.cu_path, d.wg_id, d.wf_id, d.lds_base, per_lane_bytes, d.cluster_mcast_mask,
-                      target_count);
+                      cu.full_path(), d.wg_id, d.wf_id, d.lds_base, per_lane_bytes,
+                      d.cluster_mcast_mask, target_count);
     for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
       if (!(d.lane_mask & (1ULL << ln)))
         continue;
@@ -143,6 +143,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t total_bytes = d.num_elems * d.elem_size;
   uint32_t vgpr_count =
       is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
+  if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
+    return MemoryAccessCompletion::Complete;
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
   // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
@@ -155,7 +157,7 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       static uint64_t oob_count = 0;
       if (++oob_count > 10)
         return;
-      os << d.cu_path << " wg[" << d.wg_id << "] wf[" << d.wf_id
+      os << cu.full_path() << " wg[" << d.wg_id << "] wf[" << d.wf_id
          << "] OOB zeroing: exec=" << std::hex << d.exec_mask << " lane=" << d.lane_mask
          << " oob=" << oob_mask << std::dec << " dst=" << d.dst_reg_base << " vgprs=" << vgpr_count;
     });
@@ -230,18 +232,18 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    // Dispatch on the selector, not the resolved base: an SDATA of 108..123
-    // names the trap-temporary file, and the ROCr handler loads into TTMPs.
-    amdgpu::write_scalar_selector(wf, d.dst_selector + i, d.response_data[i]);
-  }
+  if (d.dst_register.width != d.num_dwords)
+    return MemoryAccessCompletion::Complete;
+  RegisterAccess registers(wf);
+  for (uint32_t i = 0; i < d.num_dwords; ++i)
+    registers.write_scalar_unobserved(d.dst_register, i, d.response_data[i]);
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {
     if (wf.wg_id() == 0) {
       static thread_local uint32_t slw_count = 0;
       if (++slw_count <= 100) {
-        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
-                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+        os << std::format("SMEM complete: addr={:#x} dst={} ndw={} data=[{:#x}", d.addr,
+                          d.dst_register.index, d.num_dwords, d.response_data[0]);
         for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
           os << std::format(",{:#x}", d.response_data[i]);
         os << std::format("] wg={}", wf.wg_id());
@@ -485,11 +487,8 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
 void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  if (d.cu_path.empty()) {
-    d.cu_path = wf.cu().full_path();
-    d.wg_id = wf.wg_id();
-    d.wf_id = wf.wf_id();
-  }
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
   if (d.atomic_op != AtomicOp::NONE) {
     execute_atomic_rmw(d, l2_, wf.process_id());
     return;
@@ -542,11 +541,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
-  if (d.cu_path.empty()) {
-    d.cu_path = wf.cu().full_path();
-    d.wg_id = wf.wg_id();
-    d.wf_id = wf.wf_id();
-  }
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
   if (d.atomic_op != AtomicOp::NONE) {
     execute_lds_atomic_rmw(d, &lds, d.per_lane_addr, d.store_data, d.response_data);
     if (d.ds2_active) {
@@ -569,8 +565,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
       static thread_local uint64_t ds_ld_trace = 0;
       if (++ds_ld_trace > 80)
         return;
-      os << std::format("{} wg[{}] wf[{}] DS load: esz={} nelm={} ds2={}", d.cu_path, d.wg_id,
-                        d.wf_id, d.elem_size, d.num_elems, d.ds2_active);
+      os << std::format("{} wg[{}] wf[{}] DS load: esz={} nelm={} ds2={}", wf.cu().full_path(),
+                        d.wg_id, d.wf_id, d.elem_size, d.num_elems, d.ds2_active);
       uint32_t stride = d.num_elems * d.elem_size;
       for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
         if (!(d.lane_mask & (1ULL << ln)))
@@ -601,8 +597,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
           in_region = true;
       if (!in_region && ++ds_st_trace > 80)
         return;
-      os << std::format("{} wg[{}] wf[{}] DS store: esz={} nelm={} ds2={}", d.cu_path, d.wg_id,
-                        d.wf_id, d.elem_size, d.num_elems, d.ds2_active);
+      os << std::format("{} wg[{}] wf[{}] DS store: esz={} nelm={} ds2={}", wf.cu().full_path(),
+                        d.wg_id, d.wf_id, d.elem_size, d.num_elems, d.ds2_active);
       uint32_t stride = d.num_elems * d.elem_size;
       for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
         if (!(d.lane_mask & (1ULL << ln)))

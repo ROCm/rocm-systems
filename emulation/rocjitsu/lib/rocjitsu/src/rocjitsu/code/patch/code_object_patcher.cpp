@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -362,8 +363,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   // sidecars: their packet LDS is zero, but stale descriptor bits can still be
   // ORed into hardware command streams on some runtime paths.
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 0);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
-                  translation.target_user_sgpr_count);
+  set_kernel_descriptor_user_sgpr_count(target_arch, desc, translation.target_user_sgpr_count);
   // Fixed private size can be zero for a kernel that requests its call stack
   // dynamically through the AQL packet. Preserve an existing scratch-enable
   // requirement and also enable it whenever DBT introduces fixed spill space.
