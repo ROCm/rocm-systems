@@ -15,6 +15,15 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 
+/// Resolve the requested faults against one pristine inventory. A dry run
+/// publishes only diagnostic plans; an applicable transaction continues from
+/// those exact resolutions into mutation before returning.
+void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
+                                    const ConSanOptions &options, bool apply,
+                                    bool require_applicable_plan,
+                                    bool require_exactly_one_applied,
+                                    ConSanTransformArtifacts &result);
+
 /// Validate and apply one complete set of typed fault plans. Exact mutation
 /// mechanisms and their composition order are private to the fault component.
 void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,

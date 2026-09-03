@@ -225,30 +225,6 @@ carry_perturbation_plans_across_mutation(const ProgramInventory &pristine_invent
 
 namespace {
 
-[[nodiscard]] ConSanFaultPlanningInput
-fault_planning_input(const ConSanTransformArtifacts &result) {
-  return {
-      .selection = {.program_inventory = result.program_inventory,
-                    .fault_sites = result.fault_sites},
-      .barrier_move_destinations = result.barrier_move_destinations,
-      .prior_attempt_unsupported = result.outcome == ConSanTransformOutcome::Unsupported,
-  };
-}
-
-void publish_fault_planning_result(ConSanFaultPlanningResult planning,
-                                   ConSanTransformArtifacts &result) {
-  result.fault_plans.insert(result.fault_plans.end(),
-                            std::make_move_iterator(planning.fault_plans.begin()),
-                            std::make_move_iterator(planning.fault_plans.end()));
-  result.mutation.fault.planned = result.fault_plans.size();
-  if (planning.unsupported)
-    result.outcome = ConSanTransformOutcome::Unsupported;
-  result.warnings.insert(result.warnings.end(), std::make_move_iterator(planning.warnings.begin()),
-                         std::make_move_iterator(planning.warnings.end()));
-  result.errors.insert(result.errors.end(), std::make_move_iterator(planning.errors.begin()),
-                       std::make_move_iterator(planning.errors.end()));
-}
-
 /// Remove every destructive fault kind while retaining independently planned
 /// perturbation policy. A composed instrumentation pass uses this boundary to
 /// ensure it cannot accidentally reapply the already committed fault.
@@ -555,14 +531,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   if (options.fault_dry_run) {
     if (execution != nullptr)
       execution->note_resource_solving_and_lowering();
-    publish_fault_planning_result(build_fault_mutation_plan(options, arch,
-                                                            fault_planning_input(result),
-                                                            require_applicable_fault_plan),
-                                  result);
-    if (require_applicable_fault_plan && result.errors.empty()) {
-      apply_consan_fault_mutations(*code_object, arch, options.patched_image_growth_limit,
-                                   require_exactly_one_applied_fault, result.fault_plans, result);
-    }
+    resolve_consan_fault_mutations(*code_object, arch, options,
+                                   require_applicable_fault_plan, require_applicable_fault_plan,
+                                   require_exactly_one_applied_fault, result);
     build_perturbation_plan(options, perturbation, result.mutation.perturbation, result.errors,
                             carried_plans);
     return result;
