@@ -58,6 +58,15 @@ function(openmp_init_deadlock_add_omp_library _NAME _SRC)
     endif()
 endfunction()
 
+# the client tools contain no OpenMP code, so they build with the default compiler. Only
+# the libraries that actually use OpenMP need the OpenMP target compiler.
+function(openmp_init_deadlock_add_client_library _NAME _SRC)
+    add_library(${_NAME} SHARED)
+    target_sources(${_NAME} PRIVATE ${_SRC})
+    target_link_libraries(${_NAME} PRIVATE rocprofiler-sdk::tests-build-flags
+                                           rocprofiler-sdk::rocprofiler-sdk)
+endfunction()
+
 # models OpenBLAS (USE_OPENMP=1): DT_INIT calls omp_get_num_places() (see blas_stub.cpp)
 openmp_init_deadlock_add_omp_library(openmp-init-deadlock-blas-stub blas_stub.cpp)
 
@@ -68,21 +77,16 @@ openmp_init_deadlock_add_omp_library(openmp-init-deadlock-consumer openmp_consum
 # models a rocprofiler-sdk client tool: only exports rocprofiler_configure. It depends on
 # the consumer (and blas-stub) so their DT_INIT constructors are pending when discovery
 # runs
-openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client client.cpp)
+openmp_init_deadlock_add_client_library(openmp-init-deadlock-client client.cpp)
 target_link_libraries(
     openmp-init-deadlock-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk
-            # the consumer/blas-stub DT_INIT constructors must be pending when this client
+    PRIVATE # the consumer/blas-stub DT_INIT constructors must be pending when this client
             # is dlopen'd during discovery, so link them as hard dependencies of the
             # client
-            "-Wl,--no-as-needed"
-            openmp-init-deadlock-consumer
-            openmp-init-deadlock-blas-stub
-            "-Wl,--as-needed")
+            "-Wl,--no-as-needed" openmp-init-deadlock-consumer
+            openmp-init-deadlock-blas-stub "-Wl,--as-needed")
 
-openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client-alt client.cpp)
-target_link_libraries(openmp-init-deadlock-client-alt
-                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+openmp_init_deadlock_add_client_library(openmp-init-deadlock-client-alt client.cpp)
 
 add_executable(openmp-init-deadlock)
 target_sources(openmp-init-deadlock PRIVATE openmp-init-deadlock.cpp)
