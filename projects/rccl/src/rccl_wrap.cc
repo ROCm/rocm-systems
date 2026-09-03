@@ -1467,6 +1467,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
+  // Graph capture probe hoisted so symMaxR2 can pick symMaxR2Graph vs
+  // symMaxR2 depending on whether a capture is active. Mirrors AllReduce.
+  bool ceCapturing;
+  if (query) {
+    ceCapturing = graphCapturingHint;
+  } else {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+
   // Window registration type is needed for both symSuppressedBySize and CE
   // branch gates below; hoist the lookup here so it is computed once.
   struct ncclDevrWindow* sendWin = nullptr;
@@ -1484,7 +1495,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
   // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
   // (mirrors the AllReduce symSuppressedBySize pattern).
-  const size_t agSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllGather, /*graphMode=*/false);
+  const size_t agSymMaxR2 = rcclSymMaxR2Cap(comm, ncclFuncAllGather, ceCapturing);
   const bool agSymSuppressedBySize = agSymkRequested && agRecvRegistered &&
                                      agSymMaxR2 > 0 && totalBytes > agSymMaxR2;
   const bool symEligible = agSymkRequested && !agSymSuppressedBySize;
@@ -1570,17 +1581,6 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     return ncclSuccess;
   }
 
-  // CE is graph-unsafe. Probe only on the enqueue-bound path (after NCCL_ALGO /
-  // DDA / hierarchical returns). Live probes the stream; reporting uses
-  // graphCapturingHint. The CE AllReduce graph latch is not ticked here.
-  bool ceCapturing;
-  if (query) {
-    ceCapturing = graphCapturingHint;
-  } else {
-    struct ncclCudaGraph ceGraph;
-    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-    ceCapturing = ncclCudaGraphValid(ceGraph);
-  }
   decision->ceCapturing = ceCapturing;
 
   // (3) CE AllGather. Outranks Direct, matching taskAppend's CE-before-useDirect

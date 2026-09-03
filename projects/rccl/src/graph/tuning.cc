@@ -1805,7 +1805,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmMaxR2 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    64ULL*1024,,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
+    64ULL*1024,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
     0,                   // [3] ReduceScatter   -- 0; symEligible=true for R2 blocks DDA regardless
     1ULL*1024*1024,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
     0,                   // [5] SendRecv        -- not used
@@ -1866,7 +1866,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                             // [1] Reduce          -- not used
     8ULL*1024*1024*1024,           // [2] AllGather       -- 8 GiB registered CE cap (R=2)
     0,                             // [3] ReduceScatter   -- not used
-    256ULL*1024*1024,           // [4] AllReduce       -- 8 GiB registered CE cap
+    256ULL*1024*1024,             // [4] AllReduce       -- 8 GiB registered CE cap
     0,                             // [5] SendRecv        -- not used
     0,                             // [6] Send            -- not used
     0,                             // [7] Recv            -- not used
@@ -1879,8 +1879,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symMaxR2 = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    2ULL*1024,       // [2] AllGather       -- CE-registered wins above 4 MiB for R2 (suppress symk)
-    1ULL*1024,                    // [3] ReduceScatter   -- no suppression (placeholder)
+    2ULL*1024*1024,       // [2] AllGather  -- CE-registered wins above 2 MiB for R2 (suppress symk)
+    1ULL*1024,            // [3] ReduceScatter   -- no suppression (placeholder)
     256ULL*1024,          // [4] AllReduce       -- CE-registered wins above 256 KiB for R2
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
