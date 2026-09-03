@@ -7,22 +7,34 @@ runtime libraries by the ROCprofiler (v2) library. The purpose of this library i
 of enabling performance analysis in the ROCm runtimes which does not rely on environment variables or unique methods for each runtime
 library.
 
-When a runtime is initialized (either explicitly and lazily) and the intercept API table is constructed, it passes this API table to
-rocprofiler-register. Rocprofiler-register scans the symbols in the address space and if it detects there is at least one visible symbol named
-`rocprofiler_configure` (which is a function provided by tools), it passes the intercept API table to the rocprofiler library (dlopening
-the rocprofiler library if it is not already loaded). The rocprofiler library then does an extensive scan for _all_ the instances of
-the `rocprofiler_configure` symbols and invokes each of them. The `rocprofiler_configure` function (again, provided by a tool) returns
-effectively tells rocprofiler which behaviors it wants to be notified about, features it wants to use (e.g. API tracing, kernel dispatch timing),
-etc.
+When a runtime is initialized (either explicitly or lazily) and constructs its intercept API table, it passes the table to
+rocprofiler-register. Rocprofiler-register then selects startup profiling or attachment:
+
+- Startup profiling takes precedence when `ROCPROFILER_REGISTER_FORCE_LOAD=1`, when an explicit
+  library is configured through `ROCP_TOOL_LIBRARIES` or `ROCPROFILER_REGISTER_LIBRARY` (unless
+  `ROCPROFILER_REGISTER_FORCE_LOAD=0` suppresses automatic startup loading), or when an
+  `LD_PRELOAD` library directly defines `rocprofiler_configure`.
+- When attachment is enabled through `ROCP_TOOL_ATTACH=1` or the corresponding build default,
+  an ambient `rocprofiler_configure` symbol alone does not activate startup profiling. This
+  allows a framework to expose a dormant entry point without suppressing the attachment listener.
+- When attachment is disabled, an ambient `rocprofiler_configure` symbol retains the traditional
+  startup-profiling behavior.
+
+After startup profiling is selected, rocprofiler-register passes the intercept API table to
+rocprofiler-sdk, loading it if necessary. Rocprofiler-sdk discovers and invokes the tool-provided
+`rocprofiler_configure` functions, which specify the requested services, such as API tracing or
+kernel dispatch timing.
 
 ## Environment Variables
 
-| Environment Variable              | Description                                                               | Default Value  |
-|-----------------------------------|---------------------------------------------------------------------------|----------------|
-| `ROCP_TOOL_LIBRARIES`             | List of rocprofiler-sdk tool libraries (space, comma, or colon separated) | Empty (string) |
-| `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)    |
-| `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)   |
-| `ROCPROFILER_REGISTER_FORCE_LOAD` | Load rocprofiler-sdk library regardless of whether there is a tool or not | false (bool)   |
+| Environment Variable              | Description                                                               | Default Value                            |
+|-----------------------------------|---------------------------------------------------------------------------|------------------------------------------|
+| `ROCP_TOOL_LIBRARIES`             | List of rocprofiler-sdk tool libraries (space, comma, or colon separated) | Empty (string)                           |
+| `ROCP_TOOL_ATTACH`                | Enable the attachment listener instead of ambient-symbol startup loading  | Build-dependent                          |
+| `ROCPROFILER_REGISTER_LIBRARY`    | Explicit rocprofiler-sdk library to load                                  | Empty (string)                           |
+| `ROCPROFILER_REGISTER_ENABLED`    | Set to 0/false/no to disable rocprofiler-register                         | true (bool)                              |
+| `ROCPROFILER_REGISTER_SECURE`     | Additional checks to ensure authenticity of runtime libraries             | false (bool)                             |
+| `ROCPROFILER_REGISTER_FORCE_LOAD` | Control forced startup SDK loading                                       | true when a library variable is set; otherwise false |
 
 ## Contributing
 

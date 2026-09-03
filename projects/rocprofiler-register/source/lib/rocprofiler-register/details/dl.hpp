@@ -56,5 +56,14 @@ get_segment_addresses(pid_t _pid = getpid());
 // helper function for translating generic lib name to resolved path
 std::optional<std::string>
 get_linked_path(std::string_view, open_modes_vec_t&& = {});
+
+// Returns true only when the named loaded library itself defines the symbol.
+// Symbols found solely through one of the library's dependencies are rejected.
+bool
+loaded_library_defines_symbol(std::string_view, const char*);
+
+// Returns true when an entry named directly in the preload list defines the symbol.
+bool
+preloaded_library_defines_symbol(const std::string&, const char*);
 }  // namespace binary
 }  // namespace rocprofiler_register

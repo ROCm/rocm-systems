@@ -118,5 +118,46 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
 
     return std::nullopt;
 }
+
+bool
+loaded_library_defines_symbol(std::string_view library_name, const char* symbol_name)
+{
+    auto  library = std::string{ library_name };
+    auto* handle  = dlopen(library.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+    if(!handle) return false;
+
+    auto*            symbol        = dlsym(handle, symbol_name);
+    auto             symbol_info   = Dl_info{};
+    struct link_map* loaded_object = nullptr;
+    auto has_identity = (dlinfo(handle, RTLD_DI_LINKMAP, &loaded_object) == 0 &&
+                         loaded_object != nullptr && loaded_object->l_name != nullptr &&
+                         !std::string_view{ loaded_object->l_name }.empty());
+    auto is_direct_symbol =
+        (symbol != nullptr && has_identity && dladdr(symbol, &symbol_info) != 0 &&
+         symbol_info.dli_fname != nullptr);
+    if(is_direct_symbol)
+    {
+        auto loaded_path = fs::path{ loaded_object->l_name };
+        auto symbol_path = fs::path{ symbol_info.dli_fname };
+        auto ec          = std::error_code{};
+        is_direct_symbol =
+            (loaded_path == symbol_path || fs::equivalent(loaded_path, symbol_path, ec));
+    }
+
+    dlclose(handle);
+    return is_direct_symbol;
+}
+
+bool
+preloaded_library_defines_symbol(const std::string& preload, const char* symbol_name)
+{
+    if(preload.empty()) return false;
+
+    for(const auto& entry : utility::delimit(preload, ": "))
+    {
+        if(loaded_library_defines_symbol(entry, symbol_name)) return true;
+    }
+    return false;
+}
 }  // namespace binary
 }  // namespace rocprofiler_register
