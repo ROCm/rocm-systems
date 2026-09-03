@@ -102,9 +102,10 @@ def find_cli_dir(*start_dirs):
     """Return the amd-smi CLI dir (the one holding amdsmi_cli_exceptions.py), or None.
 
     Walks up from each start dir, checking the installed (``libexec/amdsmi_cli``)
-    and source (``amdsmi_cli``) layouts. Pass ``amdsmi_path`` first so an
-    AMDSMI_PATH override selects the CLI from the matching install; callers skip
-    the suite when the result is None.
+    and source (``amdsmi_cli``) layouts, and returns the first hit -- so argument
+    order *is* priority. Callers should not hand-order the start dirs; spread
+    ``cli_search_order()`` instead, which encodes the install-vs-source rule in
+    one place. Callers skip the suite when the result is None.
     """
     sentinel = "amdsmi_cli_exceptions.py"
     for start in start_dirs:
@@ -119,6 +120,32 @@ def find_cli_dir(*start_dirs):
                 if (candidate / sentinel).is_file():
                     return str(candidate)
     return None
+
+
+def cli_search_order(source_dir, prefer_install=False):
+    """Return ``find_cli_dir`` start dirs, install-first only when one was asked for.
+
+    Spread it: ``find_cli_dir(*cli_search_order(_THIS_DIR))``. The priority flips
+    on whether the caller pinned an install:
+
+      * AMDSMI_PATH / ROCM_HOME / ROCM_PATH set -- that install wins, so a run
+        pinned to an install exercises *its* CLI rather than whatever source tree
+        the test file happens to live in. Pointing AMDSMI_PATH at a build tree
+        still selects the source CLI, because find_cli_dir() walks up out of the
+        build dir and finds ``amdsmi_cli`` in the checkout.
+      * nothing set -- the source tree wins. Otherwise a checkout silently tests
+        /opt/rocm: a stale install imports fine, so an ImportError guard never
+        trips, and the suite either errors on missing attributes or passes while
+        exercising code that is not the one under review.
+
+    ``prefer_install`` forces install-first even with nothing set. It is for
+    black-box callers that import CLI modules only to describe a binary they
+    spawn out of the install tree; white-box callers importing the code under
+    test want the default.
+    """
+    if prefer_install or amdsmi_path_is_explicit:
+        return (amdsmi_path, source_dir)
+    return (source_dir, amdsmi_path)
 
 
 def add_class_cleanup(test_cls, func, *args):
@@ -197,9 +224,12 @@ def stub_modules(test_cls, modules):
     add_class_cleanup(test_cls, stub_modules_at_import(modules))
 
 
-amdsmi_path = os.environ.get("AMDSMI_PATH") or os.path.join(
-    os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH") or "/opt/rocm", "share/amd_smi"
-)
+# Provenance, not just the value: an explicit AMDSMI_PATH can name the same path
+# as the default, and cli_search_order() has to tell those two apart.
+_env_share = os.environ.get("AMDSMI_PATH")
+_env_root = os.environ.get("ROCM_HOME") or os.environ.get("ROCM_PATH")
+amdsmi_path_is_explicit = bool(_env_share or _env_root)
+amdsmi_path = _env_share or os.path.join(_env_root or "/opt/rocm", "share/amd_smi")
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(
         f'amdsmi path "{amdsmi_path}" does not exist. '
@@ -1111,7 +1141,7 @@ def has_gpu_od_interface(bdf):
     # to remove the dependency on amdsmi_helpers from this common module.
     # Exposing non-public SYSFS API interfaces in the CLI (and in general)
     # is a bad design pattern and needs to be addressed in the future.
-    amdsmi_cli_path = find_cli_dir(amdsmi_path)
+    amdsmi_cli_path = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
     if not amdsmi_cli_path:
         raise FileNotFoundError(
             f'amdsmi_cli directory not found under "{amdsmi_path}". '

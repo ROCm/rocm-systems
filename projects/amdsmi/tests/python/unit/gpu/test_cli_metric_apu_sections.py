@@ -18,17 +18,15 @@ nothing, so ``--energy`` never exits 0 with an empty payload.
 import argparse
 import importlib.util
 import os
-import sys
 import types
 import unittest
 
-from common.common import amdsmi_path
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
 
-# The amd-smi CLI ships alongside the amdsmi package: ``common`` resolves
-# ``amdsmi_path`` to ``<rocm>/share/amd_smi`` and the CLI installs to the sibling
-# ``<rocm>/libexec/amdsmi_cli``. ``setUpClass`` skips the suite if it is absent.
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-METRIC_PATH = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli", "subcommands", "metric.py")
+# Locate the CLI dir; cli_search_order() decides whether the install or this
+# checkout wins. None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
 # Sections gated on APU parts, and the value each reports when named explicitly.
 _SCALAR_NA_SECTIONS = ("ecc_blocks", "overdrive", "xgmi_err", "energy")
@@ -67,8 +65,8 @@ class _FakeEnum(metaclass=_EnumMeta):
     pass
 
 
-def _install_fake_amdsmi():
-    """Register a stub ``amdsmi`` package so ``metric.py`` imports cleanly.
+def _build_fake_amdsmi():
+    """Build a stub ``amdsmi`` package so ``metric.py`` imports cleanly.
 
     Any ``amdsmi_*`` entry point that a test does not stub explicitly raises
     ``_FakeLibraryException``, standing in for a sensor the APU does not expose.
@@ -116,10 +114,11 @@ def _install_fake_amdsmi():
     amdsmi_pkg.amdsmi_interface = interface
     amdsmi_pkg.amdsmi_exception = exception
 
-    sys.modules["amdsmi"] = amdsmi_pkg
-    sys.modules["amdsmi.amdsmi_interface"] = interface
-    sys.modules["amdsmi.amdsmi_exception"] = exception
-    return interface
+    return {
+        "amdsmi": amdsmi_pkg,
+        "amdsmi.amdsmi_interface": interface,
+        "amdsmi.amdsmi_exception": exception,
+    }
 
 
 def _load_metric_module():
@@ -249,9 +248,13 @@ def _build_args(**overrides):
 class TestCliMetricApuSections(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
-        cls.interface = _install_fake_amdsmi()
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.metric_module = _load_metric_module()
 
     def _run_metric(self, metrics=None, **arg_overrides):
@@ -341,7 +344,3 @@ class TestCliMetricApuSections(unittest.TestCase):
         usage = self._run_metric(metrics={"apu_metrics.average_ipu_reads": 0}, usage=True)["usage"]
 
         self.assertEqual(usage["apu_average_ipu_reads"], "0 MB/s")
-
-
-if __name__ == "__main__":
-    unittest.main()

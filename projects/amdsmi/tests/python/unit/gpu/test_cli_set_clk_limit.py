@@ -23,13 +23,16 @@ import unittest
 # degrade gracefully rather than erroring at import; without the harness there is
 # no resolver, and the suite skips with the reason below.
 try:
-    from common.common import amdsmi_path, find_cli_dir, stub_modules
+    from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
+    cli_search_order = None
     find_cli_dir = None
 
 _CLI_DIR = (
-    find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__))) if find_cli_dir else None
+    find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+    if find_cli_dir and cli_search_order
+    else None
 )
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
 

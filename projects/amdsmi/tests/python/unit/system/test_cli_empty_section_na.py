@@ -13,20 +13,18 @@ populated and empty-list paths are pinned alongside it.
 ``AMDSMI_SPACING_REMOVAL`` marker and strips it afterwards by literal match, so
 the marker must never itself become an empty dict.
 
-``amdsmi_logger.py`` is loaded from the source tree so the test exercises the code
-under development rather than a possibly-stale installed copy.
+``amdsmi_logger.py`` is loaded through cli_search_order, so a plain checkout
+exercises the code under development; an explicit AMDSMI_PATH pins that install.
 """
 
 import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-# This directory first so a source checkout wins: the point is to exercise the
-# logger under development, not a possibly-stale installed copy.
-_CLI_DIR = find_cli_dir(_THIS_DIR, amdsmi_path)
+_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
 LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
 

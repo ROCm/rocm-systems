@@ -13,8 +13,8 @@ enrichments of the cache listing:
 * each entry carries a ``total_cache_size`` equal to the per-instance
   ``cache_size`` times ``num_cache_instance``.
 
-``static.py`` is loaded from the source tree so the test exercises the code
-under development rather than a possibly-stale installed copy.
+``static.py`` is loaded through cli_search_order, so a plain checkout
+exercises the code under development; an explicit AMDSMI_PATH pins that install.
 """
 
 import argparse
@@ -23,11 +23,11 @@ import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, fake_module, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
 
-# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
-# matching install; see common.find_cli_dir). None -> setUpClass skips.
-_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+# Locate the CLI dir; cli_search_order() decides whether the install or this
+# checkout wins. None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 # gfx950 (MI350) cache layout captured live: four L1 variants plus L2 and L3.
