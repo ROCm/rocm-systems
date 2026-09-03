@@ -25,6 +25,33 @@
 #ifndef _TYPE_LISTS_HPP_
 #define _TYPE_LISTS_HPP_
 
+#include <string>
+
+/**
+ * Maps a C++ type to its human-readable name string for test output headers.
+ * Primary template is intentionally undefined; only the specializations below
+ * are valid, matching exactly the types used in the X-macro type lists.
+ */
+template <typename T>
+inline std::string type_name();
+
+template <> inline std::string type_name<float>()              { return "float"; }
+template <> inline std::string type_name<double>()             { return "double"; }
+template <> inline std::string type_name<char>()               { return "char"; }
+template <> inline std::string type_name<signed char>()        { return "signed char"; }
+template <> inline std::string type_name<short>()              { return "short"; }
+template <> inline std::string type_name<int>()                { return "int"; }
+template <> inline std::string type_name<long>()               { return "long"; }
+template <> inline std::string type_name<long long>()          { return "long long"; }
+template <> inline std::string type_name<unsigned char>()      { return "unsigned char"; }
+template <> inline std::string type_name<unsigned short>()     { return "unsigned short"; }
+template <> inline std::string type_name<unsigned int>()       { return "unsigned int"; }
+template <> inline std::string type_name<unsigned long>()      { return "unsigned long"; }
+template <> inline std::string type_name<unsigned long long>() { return "unsigned long long"; }
+template <> inline std::string type_name<__half>()             { return "half"; }
+template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat16"; }
+// int32_t / int64_t are aliases of int / long on LP64; no duplicate specializations needed.
+
 /**
  * Type lists used by Tester::create() to decide which typed tester
  * instances to dispatch for a given TypeCoverage mode.
@@ -153,6 +180,10 @@
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long"))          \
     { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long,      args, testers) }                   \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))     \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}                    \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("half"))          \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __half,      args, testers) }                 \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("bfloat16"))      \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __hip_bfloat16, args, testers)}
 
 #endif // _TYPE_LISTS_HPP_

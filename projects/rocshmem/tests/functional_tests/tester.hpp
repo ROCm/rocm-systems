@@ -31,6 +31,7 @@
 #include <climits>
 
 #include "tester_arguments.hpp"
+#include "type_lists.hpp"
 #include "../src/util.hpp"
 #include "verify_results_kernels.hpp"
 
@@ -225,6 +226,8 @@ class Tester {
   virtual ~Tester();
 
   virtual void execute();
+
+  virtual std::string typeName() const { return ""; }
 
   static std::vector<Tester *> create(TesterArguments args);
 
