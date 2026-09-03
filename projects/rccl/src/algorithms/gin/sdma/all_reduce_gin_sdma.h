@@ -4,8 +4,6 @@
  * LSA AllReduce device kernels:
  *   allReduceLsaOneShotKernel — read all peers, sum, write all peers (small messages).
  *   lsaAllReduceTwoShotKernel — LSA reduce-scatter, barrier, LSA all-gather (remote reads only).
- *   lsaAllReduceTwoShotOverlappedKernel — same two shots pipelined, pushing the reduced column to
- *                                        peers so vector i is all-gathered while i+1 is reduced.
  *   ginAllReduceTwoShotKernel  — LSA reduce-scatter, intra-GPU CTA barrier, GIN all-gather from recv.
  *
  * One-shot follows projects/rccl-tests/src/all_reduce.cu allReduceLsaKernel.

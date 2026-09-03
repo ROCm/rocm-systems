@@ -33,8 +33,7 @@ NCCL_PARAM(GinAllReduceEnable, "GIN_ALLREDUCE_ENABLE", 1);
 // Set to 1 to also take LSA one-shot / LSA two-shot for smaller sizes.
 RCCL_PARAM(GinAllReduceForceEnable, "GIN_ALLREDUCE_FORCE_ENABLE", 0);
 // LSA two-shot tuning. CTAs default to kGinAllReduceLsaTwoShotCtasPerPeer * nRanks; the DDA IPC
-// kernels top out at DDA_IPC_MAXBLOCKS (24), so this range is worth sweeping. OVERLAP=1 selects the
-// pipelined kernel that pushes reduced columns to peers instead of the non-overlapped one.
+// kernels top out at DDA_IPC_MAXBLOCKS (24), so this range is worth sweeping. 
 NCCL_PARAM(GinAllReduceLsaTwoShotCtas, "GIN_ALLREDUCE_LSA_TWOSHOT_CTAS", 0);
 
 namespace {
