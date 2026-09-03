@@ -131,7 +131,15 @@ if __name__ == "__main__":
         sys.tracebacklimit = -1
 
     amd_smi_helpers = AMDSMIHelpers()
-    amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
+    # Device init below can fail before argv is parsed, and it still has to
+    # report in the format the user asked for. Neither flag has a short form.
+    if "--json" in sys.argv:
+        init_format = "json"
+    elif "--csv" in sys.argv:
+        init_format = "csv"
+    else:
+        init_format = "human_readable"
+    amd_smi_commands = AMDSMICommands(format=init_format, helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
         amd_smi_commands.list_devices,
