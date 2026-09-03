@@ -507,6 +507,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   const uint64_t plain_lanes = request_lanes & ~scratch_lanes;
   const uint32_t stride = d.scratch_addr_stride;
+  const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (d.is_load) {
     const uint64_t request_lanes = transpose_request_lane_mask(d);
@@ -516,20 +517,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_request_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), stride, base_offset, d.element_lane_masks.view());
     if (plain_request_lanes)
       l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), 0, /*addr_base_offset=*/0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
-                 d.element_lane_masks.view());
+                 base_offset, d.element_lane_masks.view());
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
                  d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
-                 d.element_lane_masks.view());
+                 /*addr_base_offset=*/0, d.element_lane_masks.view());
   }
 }
 
