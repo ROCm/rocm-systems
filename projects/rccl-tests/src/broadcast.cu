@@ -892,6 +892,20 @@ struct BcastRingState {
 #define BCAST_MAX_DEVICES 64
 static BcastRingState g_bcastRingState[BCAST_MAX_DEVICES];
 
+// hipify maps cudaMemcpyToSymbolAsync(sym, src, nbytes, offset, stream) to
+// hipMemcpyToSymbolAsync without hipMemcpyKind; ROCm 7.x requires the kind arg.
+#if defined(__HIPCC__) || defined(__HIP_PLATFORM_AMD__)
+inline cudaError_t bcastMemcpyConstantAsync(const void* symbol, const void* src,
+                                            size_t nbytes, cudaStream_t stream) {
+  return hipMemcpyToSymbolAsync(symbol, src, nbytes, 0, hipMemcpyHostToDevice, stream);
+}
+#else
+inline cudaError_t bcastMemcpyConstantAsync(const void* symbol, const void* src,
+                                            size_t nbytes, cudaStream_t stream) {
+  return cudaMemcpyToSymbolAsync(symbol, src, nbytes, 0, stream);
+}
+#endif
+
 // startColl() calls cudaSetDevice(args->gpus[i]) immediately before runColl on the
 // device-API path, so the current device identifies the state slot. Out-of-range
 // ordinals fall back to slot 0 rather than scribbling past the array; that only
@@ -1158,10 +1172,10 @@ testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
                 const char* e = getenv("NCCL_GIN_ANVIL_BCAST_RING_STREAM");
                 return (e && e[0] == '0') ? 0 : 1;
               }();
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastNRings, &rs.builtNRings, sizeof(int), 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings, 0, stream));
-              CUDACHECK(cudaMemcpyToSymbolAsync(c_bcastStream, &streamStores, sizeof(int), 0, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastNRings, &rs.builtNRings, sizeof(int), stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastRingSucc, h_succ, sizeof(int) * sagRanks * rs.builtNRings, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastRingPos, h_pos, sizeof(int) * sagRanks * rs.builtNRings, stream));
+              CUDACHECK(bcastMemcpyConstantAsync(c_bcastStream, &streamStores, sizeof(int), stream));
             }
             rs.builtN = sagRanks;
           }
