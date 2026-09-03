@@ -30,9 +30,4 @@ compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifact
                            ConSanLoweringExecution *execution,
                            const ConSanLoweringObservation *prepared_observation);
 
-void compose_consan_fault_mutation(std::span<const uint8_t> code_object_bytes,
-                                   const ConSanOptions &context,
-                                   std::span<const ConSanFaultMutationPlan> plans,
-                                   ConSanTransformArtifacts &result);
-
 } // namespace rocjitsu

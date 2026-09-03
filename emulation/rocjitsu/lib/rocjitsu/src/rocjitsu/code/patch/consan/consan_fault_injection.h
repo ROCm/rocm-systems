@@ -24,14 +24,6 @@ void resolve_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code
                                     bool require_exactly_one_applied,
                                     ConSanTransformArtifacts &result);
 
-/// Validate and apply one complete set of typed fault plans. Exact mutation
-/// mechanisms and their composition order are private to the fault component.
-void apply_consan_fault_mutations(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanPatchedImageGrowthLimit &growth_limit,
-                                  bool require_exactly_one,
-                                  std::span<const ConSanFaultMutationPlan> plans,
-                                  ConSanTransformArtifacts &result);
-
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                bool force_trampoline, ConSanTransformArtifacts &result);
 void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,

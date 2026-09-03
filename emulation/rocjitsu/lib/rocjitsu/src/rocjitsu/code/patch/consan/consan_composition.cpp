@@ -101,14 +101,4 @@ bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArt
   return initialize_consan_lowering_observation(options, result, execution, prepared_observation);
 }
 
-void compose_consan_fault_mutation(std::span<const uint8_t> code_object_bytes,
-                                   const ConSanOptions &context,
-                                   std::span<const ConSanFaultMutationPlan> plans,
-                                   ConSanTransformArtifacts &result) {
-  AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-  const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-  apply_consan_fault_mutations(code_object, arch, context.patched_image_growth_limit,
-                               context.fault_require_exactly_one, plans, result);
-}
-
 } // namespace rocjitsu
