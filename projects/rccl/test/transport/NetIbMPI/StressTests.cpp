@@ -498,11 +498,14 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
                 int nullCount = 0;
                 for (int i = 0; i < kThreadedMsgs; i++) {
                     void* request = nullptr;
-                    // Per-worker payload, verified by the receiver: backpressure is
-                    // what this test is about, but without a distinct pattern a
-                    // completion delivered to the wrong worker's communicator would
-                    // pass here just as it would anywhere else.
-                    const int seed = WorkerSeed(threadIdx, i);
+                    // One pattern per worker, held for the whole run rather than
+                    // varying per message. makeBytePattern sees the seed modulo 256
+                    // and these workers advance independently, so a per-message seed
+                    // aliases across them -- worker 0 at message 8 and worker 8 at
+                    // message 0 land on the same byte, and a delivery to the wrong
+                    // worker's communicator would verify clean. The tag identifies
+                    // the message; the pattern identifies the worker.
+                    const int seed = WorkerSeed(threadIdx, 0);
                     if (rank == 0) {
                         if (i > 0) usleep(kThreadedRecvDelayUs);
                         memset(buffer, 0, sz);
