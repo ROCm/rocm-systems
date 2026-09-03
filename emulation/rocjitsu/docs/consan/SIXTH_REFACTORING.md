@@ -1048,3 +1048,67 @@ matrix passed 4,787/4,787 tests across all four modes and all five target
 architectures. The complete nonphysical RocJitsu matrix then completed 9,572
 CTest entries with 9,557 passes, 15 explicit environment-dependent skips, and
 zero failures. No physical-GPU test was run for this slice.
+
+### 10.8 Macro-slice 8: one scalar-placement domain
+
+The post-fault whole-tree comparison rejected three apparent opportunities.
+The host report stack's generic decoder, mode decoders, analyzers, and
+renderers are already separated; its remaining volume is mode-specific
+interpretation rather than parallel implementations. Owner/epoch and private
+epoch prologues share entry capture helpers but intentionally persist state in
+different media, and their large bodies do not expose 500 lines that one
+storage-neutral prologue would eliminate. A declaration/reference audit also
+found no material orphaned public-contract family left by the preceding
+cutovers: the apparent single-include `.h.inc` contracts are composed once by
+their public owner and remain broadly consumed through it.
+
+MOI scalar placement has a stronger duplicate-authority boundary. The
+roughly 2,700-line automatic scalar-placement region repeatedly reconstructs
+the same owner components, tail floors, complete-scope references, site-local
+liveness sets, initialized entry windows, architectural reservations,
+dynamic-stack reservations, physical-VCC conflicts, and already-selected
+instrumentation ranges. Thirty-one local range searches then restate those
+constraints in bespoke predicates while placing the EXEC-save window,
+dispatch identity, owner source, spill window, indirect-PC/SCC/key/return
+tuple, visible-evidence latch, dynamic-stack bootstrap, and persistent scalar
+tuple. The fallback order is substantive; the repeated representation and
+range-accounting mechanics are not.
+
+The deletion thesis is:
+
+- derive one immutable scalar-placement domain per connected owner component,
+  with explicit whole-owner and site-local availability views;
+- let one small transactional window allocator own architectural bounds,
+  alignment, fixed reservations, selected-range overlap, physical-VCC
+  compatibility, and commit/rollback of a candidate tuple;
+- describe each existing fallback as an ordered set of typed scalar roles and
+  lifetime requirements, retaining the current mode and target policy that
+  chooses which fallback is attempted and in what order;
+- obtain code-object-wide placement by intersecting those same component
+  domains, rather than rebuilding a second global liveness/reference model;
+- retain owner-local output contracts, diagnostics, explicit overrides,
+  private-state choices, and descriptor/VGPR placement behavior unchanged;
+  and
+- delete the displaced union-find/context scans, ad hoc unavailable sets,
+  nested first-range searches, repeated overlap predicates, and fallback-only
+  requalification loops as each consumer moves to the common domain.
+
+The affected scalar-placement and validation region contains about 2,700
+production implementation lines and 31 separately spelled window searches.
+The conservative target is at least 900 gross implementation lines removed
+and no more than 300 lines of domain, allocator, and typed role descriptions,
+for at least 600 net lines deleted. This is not permission to introduce a
+general constraint language: the attempt is abandoned and reverted if the
+allocator needs mode enums, target switches, callbacks that encode fallback
+policy, or an opaque table/DSL; if fallback priority or supported pressure
+cases change; or if complete convergence cannot clear the 500-line net abort
+floor.
+
+Focused validation covers automatic global and owner-local EXEC/dispatch
+placement, Inline and compact scalar spill, fixed and dynamic stacks,
+full-pressure and high-reference kernels, persistent scalar/VGPR/private
+fallbacks, wave32/wave64 VCC conflicts, explicit overrides, disconnected and
+shared owners, and all five emulated targets. Exact operating-point,
+diagnostic, descriptor, spill, and emitted-byte assertions remain the
+differential oracle. The cutover gate remains the complete nonphysical
+RocJitsu matrix.
