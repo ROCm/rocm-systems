@@ -8,6 +8,8 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     hwreg.cpp
     memory_pipeline.cpp
     command_processor.cpp
+    gpu_vm.cpp
+    queue_service.cpp
     completion_tracker.cpp
     shader_engine.cpp
     xcd.cpp
