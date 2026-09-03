@@ -844,6 +844,8 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
   cu->step(); // Enter the GFX9 trap handler.
   wave->set_trapsts(wave->trapsts() | (1u << 26));
   wave->set_ttmp(13, wave->ttmp(13) | (1u << 21));
+  wave->set_ttmp(6, 0x55u);   // send_signal's saved M0
+  wave->set_ttmp(2, 0x1234u); // live signal-path state
   wave->set_m0(0x400u);
   wave->set_trapsts(wave->trapsts() & ~(1u << 26));
   cu->step(); // Send the completion after the handler cleared its cause bit.
@@ -851,7 +853,9 @@ TEST_F(KfdIoctlTest, Gfx9ProfilingCompletionAndQueueExceptionUseDistinctPayloads
   EXPECT_FALSE(delivered.load(std::memory_order_acquire));
   EXPECT_FALSE(
       cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
-  wave->set_ttmp(13, wave->ttmp(13) & ~((1u << 21) | (1u << 22)));
+  // The real handler leaves the sampling marker set, restores M0 from TTMP6,
+  // and saves it in TTMP2 before sending a concurrent queue exception.
+  wave->set_ttmp(2, wave->ttmp(6));
   wave->set_m0(0x407u);
   cu->step(); // Route it independently of the profiling-completion payload.
   EXPECT_TRUE(delivered.load(std::memory_order_acquire));

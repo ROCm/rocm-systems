@@ -3314,11 +3314,16 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
   bool profiling_interrupt = false;
   if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2) {
     // GFX9.0-9.3 preserves host-trap provenance in TTMP11 after clearing the
-    // live cause. Stochastic sampling is supported only on GFX9.4+.
-    profiling_interrupt = (wave.ttmp(11) & (1u << 22)) != 0;
+    // live cause. At send_signal, TTMP13 holds the saved M0 while TTMP2 still
+    // belongs to the signal path; the later exception path saves M0 in TTMP2.
+    // Stochastic sampling is supported only on GFX9.4+.
+    profiling_interrupt = (wave.ttmp(11) & (1u << 22)) != 0 && wave.ttmp(2) != wave.ttmp(13);
   } else if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    // GFX9.4+ preserves stochastic and host-trap provenance in TTMP13.
-    profiling_interrupt = (wave.ttmp(13) & ((1u << 21) | (1u << 22))) != 0;
+    // GFX9.4+ preserves stochastic and host-trap provenance in TTMP13. TTMP6
+    // holds send_signal's saved M0; a concurrent exception subsequently copies
+    // that restored M0 into TTMP2 before issuing its own interrupt.
+    profiling_interrupt =
+        (wave.ttmp(13) & ((1u << 21) | (1u << 22))) != 0 && wave.ttmp(2) != wave.ttmp(6);
   } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
     // GFX12 exposes the host/performance causes in common TRAPSTS bits 22/26.
     profiling_interrupt = (wave.trapsts() & ((1u << 22) | (1u << 26))) != 0;
