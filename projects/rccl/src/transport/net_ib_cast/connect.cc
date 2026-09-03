@@ -1003,16 +1003,12 @@ ib_connect_check:
   memcpy(stage->buffer, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
 
   struct ncclIbDevExtraProps exProps;
-  if (!IbCastByOrderRequested()) {
-    exProps.oooRq = true;
-    for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
-      int ibDevN = mergedDev->vProps.devs[i];
-      exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
-    }
-    comm->base.localOooRq = exProps.oooRq;
-  } else {
-    exProps.oooRq = false;
+  exProps.oooRq = true;
+  for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
+    int ibDevN = mergedDev->vProps.devs[i];
+    exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
   }
+  comm->base.localOooRq = exProps.oooRq;
   memcpy((char*)stage->buffer + sizeof(ncclNetVDeviceProps_t), &exProps, sizeof(struct ncclIbDevExtraProps));
 
 // In the case of mismatched nDevs, we will make sure that both sides of a logical connection have the same number of RC qps
@@ -1617,16 +1613,12 @@ ib_recv_dev_list:
   stage->offset = 0;
   stage->state = ncclIbCommStateSendDevList;
 
-  if (!IbCastByOrderRequested()) {
-    exProps.oooRq = true;
-    for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
-      int ibDevN = mergedDev->vProps.devs[i];
-      exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
-    }
-    rComm->base.localOooRq = exProps.oooRq;
-  } else {
-    exProps.oooRq = false;
+  exProps.oooRq = true;
+  for (int i = 0; i < mergedDev->vProps.ndevs; i++) {
+    int ibDevN = mergedDev->vProps.devs[i];
+    exProps.oooRq = exProps.oooRq && IbCastDevs[ibDevN].oooRqSize;
   }
+  rComm->base.localOooRq = exProps.oooRq;
   memcpy((char*)stage->buffer + sizeof(ncclNetVDeviceProps_t), &exProps, sizeof(struct ncclIbDevExtraProps));
 
 ib_send_dev_list:

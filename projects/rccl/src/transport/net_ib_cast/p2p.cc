@@ -549,8 +549,6 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   //  - The status of all posted Send Request is considered unknown
   //
   // slot == devIndex - When writing to CTS FIFO slot N, and this QP lives on device index N, it should send signalled.
-  // This works out that each CTS posting QP gets drained.
-  // BY_ORDER matches CTS CQEs via the request-pool index (same as offload), not the FIFO slot.
   if (comm->base.recvMatchingScheme == BY_ORDER) {
     bool signalCts = comm->useCtsOffload ? (slot == ctsQp->ctsQpSlot) : (slot == ctsQp->devIndex);
     if (signalCts) {

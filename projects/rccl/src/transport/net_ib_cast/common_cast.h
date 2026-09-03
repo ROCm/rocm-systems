@@ -705,9 +705,6 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
 
-// True when BY_ORDER was explicitly asked for through NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME.
-// CTS offload also runs BY_ORDER, but it is not covered here: offload already constrains the
-// posting model itself, so its feature set is left untouched.
 bool IbCastByOrderRequested();
 
 struct ncclIbListenComm {
