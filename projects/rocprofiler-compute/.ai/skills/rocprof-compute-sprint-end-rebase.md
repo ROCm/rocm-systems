@@ -60,6 +60,8 @@ fails tests / pre-commit. Resolve conflicts per commit instead (see step 5).
 
 ## Notes
 
+- Every open PR targeting rcd is now built on commits that no longer exist. Re-land each one
+  with [`rocprof-compute-rebase-pr`](rocprof-compute-rebase-pr.md).
 - Never squash; plain rebase keeps author fields (new SHAs are expected and fine).
 - The oracle in step 6 is non-negotiable. Any resolution strategy is safe behind it; none is
   safe without it. The empty rocprofiler-compute diff proves the tip content is unchanged.
