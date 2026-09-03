@@ -108,6 +108,7 @@ __launch_bounds__(1024)
 #if defined(__gfx1250__)
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
+  __syncthreads();
   ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
 
