@@ -794,7 +794,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     // No CollApi parent: this path returns before ncclEnqueueCheck, so the
     // thread-local handle still names a previous collective.
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
+    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
+      return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
+    });
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
     return ceRet;
   }
