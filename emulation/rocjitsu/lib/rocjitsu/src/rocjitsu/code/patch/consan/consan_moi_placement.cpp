@@ -20,7 +20,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_candidate_projection.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
@@ -30,10 +29,11 @@
 #include "rocjitsu/code/patch/consan/consan_moi_probe_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -81,9 +81,9 @@ using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::range_overlaps;
 using consan_moi_detail::append_word_bytes;
 using consan_moi_detail::decode_relocatable_entry_instruction;
-using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 using consan_moi_detail::moi_exact_entry_workgroup_capture_is_unambiguous;
 using consan_moi_detail::moi_has_exact_entry_workgroup_capture;
+using consan_moi_detail::moi_has_runtime_hardware_dispatch_id;
 
 namespace consan_moi_impl {
 

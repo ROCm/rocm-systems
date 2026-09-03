@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.h"
+#include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_rendering.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_sampled_report_analyzer.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_sampled_report_decoder.h"
 
 namespace rocjitsu::consan_hook {
 

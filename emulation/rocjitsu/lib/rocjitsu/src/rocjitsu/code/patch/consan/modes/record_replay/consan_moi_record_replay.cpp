@@ -5,7 +5,7 @@
 // placement, descriptor, and target emission mechanics enter through declared
 // contracts rather than through the MOI textual include order.
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -164,8 +164,7 @@ uint16_t record_replay_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm 
 MoiPersistentStateDemand plan_record_replay_persistent_state_demand(
     const ConSanRequest &request, const BoundRuntimeResources &resources,
     const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
-  MoiPersistentStateDemand demand =
-      make_exact_workgroup_capture_demand(point, facts);
+  MoiPersistentStateDemand demand = make_exact_workgroup_capture_demand(point, facts);
   demand.private_workgroup_tuple_supported =
       demand.needs_entry_workgroup_tuple &&
       !record_replay_uses_automatic_banked_capture(request, resources);
@@ -283,11 +282,11 @@ const MoiModeOperations kRecordReplayModeOperations = {
     .reconstruct_report_inventory = reconstruct_record_replay_report_inventory,
 };
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_atomic.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_atomic.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_fence.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_fence.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

@@ -28,12 +28,12 @@
 #include "rocjitsu/code/patch/consan/consan_moi_prologue.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_event_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_record_planning.h"
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -78,14 +78,14 @@ using consan_moi_detail::plan_prebuilt_appended_cave;
 
 namespace consan_moi_impl {
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier_planning.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier_planning.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_barrier.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay_barrier.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_barrier.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

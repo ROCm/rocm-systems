@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_supercollider.h"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/kernel_scope.h"
@@ -21,11 +21,11 @@
 #include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
-#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
-#include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_support.h"
+#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
@@ -60,6 +60,6 @@ namespace rocjitsu {
 
 // The three retained implementation paths form one SuperCollider component
 // and are compiled exactly once behind the declarations above.
-#include "rocjitsu/code/patch/consan/consan_supercollider.inc"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider.inc"
 
 } // namespace rocjitsu

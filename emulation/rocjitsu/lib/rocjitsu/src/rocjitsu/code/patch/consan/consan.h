@@ -42,11 +42,11 @@
 
 #include "rocjitsu/code/patch/consan/consan_options.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_scalar_vcc_spill.h.inc"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_scalar_vcc_spill.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_indirect_route.h.inc"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_indirect_route.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_dense_route.h.inc"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_dense_route.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_vgpr_state_effect.h.inc"
 

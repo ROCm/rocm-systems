@@ -31,9 +31,9 @@ namespace rocjitsu {
 // exposes lowerer state, patch proof, or resource placement.
 #include "rocjitsu/code/patch/consan/consan_moi_core_types.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_types.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_model.h.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_model.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_layout.h.inc"
 
@@ -41,20 +41,20 @@ namespace rocjitsu {
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_helpers.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay_report_contract.h.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_report_contract.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_report_contract.h.inc"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_report_contract.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_shadow_common.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_model.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_exact_model.h.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_exact_model.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_report_contract.h.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_report_contract.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay_model.h.inc"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_model.h.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_model.h.inc"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_model.h.inc"
 
 } // namespace rocjitsu

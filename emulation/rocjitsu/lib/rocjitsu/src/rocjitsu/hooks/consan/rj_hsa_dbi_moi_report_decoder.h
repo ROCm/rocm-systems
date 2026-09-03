@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_record_replay_report_decoder.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_sampled_report_decoder.h"
+#include "rocjitsu/hooks/consan/modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
+#include "rocjitsu/hooks/consan/modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.h"
+#include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.h"
 
 #include <cstdint>
 #include <variant>

@@ -1,19 +1,19 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_dynamic_record_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_probe_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"

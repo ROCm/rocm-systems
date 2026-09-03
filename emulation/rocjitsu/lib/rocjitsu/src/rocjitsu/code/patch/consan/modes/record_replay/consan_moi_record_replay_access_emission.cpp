@@ -4,7 +4,7 @@
 // Record/Replay's access-record protocol. Shared target, address, relocation,
 // and instruction mechanisms enter only through their published contracts.
 
-#include "rocjitsu/code/patch/consan/consan_moi_record_replay.h"
+#include "rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"

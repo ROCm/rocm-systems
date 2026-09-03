@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
 
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 

@@ -135,10 +135,10 @@
     "engines": {
       "supercollider": {
         "dedicated_files": [
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_common.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_flat.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_supercollider_lds.inc"
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_common.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_flat.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_lds.inc"
         ],
         "test_pattern": "supercollider|SuperCollider",
         "runtime_model": "stateless perturbation and read-back; no persistent report allocation in admitted rows",
@@ -147,10 +147,10 @@
       },
       "record-replay": {
         "dedicated_files": [
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_atomic.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_record_replay_types.h.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_types.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/modes/record_replay/rj_hsa_dbi_replay_provenance.h"
         ],
         "test_pattern": "record[_-]?replay|RecordReplay",
         "runtime_model": "bounded device histories, dispatch directory, host replay, saturation and provenance repair",
@@ -159,9 +159,9 @@
       },
       "sampled": {
         "dedicated_files": [
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_access.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_sync.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
         ],
         "test_pattern": "sampled|Sampled",
         "runtime_model": "bounded sampled watchpoints and causal sync windows with runtime offset/stride selection",
@@ -170,10 +170,10 @@
       },
       "inline-shadow": {
         "dedicated_files": [
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_model.h.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc",
-          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_model.h.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.inc",
+          "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.inc",
           "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/consan_moi_shadow_models.h.inc"
         ],
         "test_pattern": "inline[_-]?shadow|InlineShadow",

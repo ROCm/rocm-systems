@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
+#include "rocjitsu/hooks/consan/modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_rendering.h"
 
 namespace rocjitsu::consan_hook {

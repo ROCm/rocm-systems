@@ -6,7 +6,7 @@
 // explicit orchestration concern; their representation and route machinery
 // remain private to the Sampled component.
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/kernel_scope.h"
@@ -32,12 +32,12 @@
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_access_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/consan/targets/consan_vgpr_bank_state.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -114,9 +114,8 @@ using consan_moi_detail::resolve_moi_report_layout;
 namespace consan_moi_impl {
 
 bool append_sampled_private_owner_epoch_load(
-    std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    uint64_t descriptor_file_offset, bool automatic_private_epoch,
-    const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
+    std::vector<uint32_t> &words, std::span<const uint8_t> bytes, uint64_t descriptor_file_offset,
+    bool automatic_private_epoch, const ConSanMoiOwnerEpochVgprSources &owner_epoch_vgprs,
     const ConSanMoiPrivateStateLayout &layout, rj_code_arch_t arch,
     std::vector<std::string> &errors) {
   if (!automatic_private_epoch || !owner_epoch_vgprs.owner || !owner_epoch_vgprs.epoch ||
@@ -127,8 +126,8 @@ bool append_sampled_private_owner_epoch_load(
   const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, arch, errors);
   const auto load_epoch =
       instrumentation::build_private_load_b32(*owner_epoch_vgprs.epoch, layout.epoch_offset, arch);
-  const auto load_owner = instrumentation::build_private_load_b32(
-      *owner_epoch_vgprs.owner, *layout.owner_offset, arch);
+  const auto load_owner =
+      instrumentation::build_private_load_b32(*owner_epoch_vgprs.owner, *layout.owner_offset, arch);
   const auto wait = instrumentation::build_s_wait_private_load0(arch);
   const auto owner =
       owner_shift ? instrumentation::build_v_lshrrev_b32(*owner_epoch_vgprs.owner,
@@ -250,11 +249,11 @@ uint16_t sampled_atomic_scratch_vgpr_count(const ConSanAtomicLoweringForm &,
   return sampled_atomic_scratch_count();
 }
 
-MoiPersistentStateDemand plan_sampled_persistent_state_demand(
-    const ConSanRequest &request, const BoundRuntimeResources &,
-    const ConSanMoiOperatingPoint &point, const MoiPersistentStateFacts &facts) {
-  MoiPersistentStateDemand demand =
-      make_exact_workgroup_capture_demand(point, facts);
+MoiPersistentStateDemand
+plan_sampled_persistent_state_demand(const ConSanRequest &request, const BoundRuntimeResources &,
+                                     const ConSanMoiOperatingPoint &point,
+                                     const MoiPersistentStateFacts &facts) {
+  MoiPersistentStateDemand demand = make_exact_workgroup_capture_demand(point, facts);
   demand.private_workgroup_tuple_supported = demand.needs_entry_workgroup_tuple;
   // A synchronization-aware Sampled probe must preserve one owner identity
   // from kernel entry through both access and sync sites. Access-only Sampled
@@ -391,9 +390,9 @@ const MoiModeOperations kSampledModeOperations = {
     .reconstruct_report_inventory = reconstruct_sampled_report_inventory,
 };
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_access.inc"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_access.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_sync.inc"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_sync.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

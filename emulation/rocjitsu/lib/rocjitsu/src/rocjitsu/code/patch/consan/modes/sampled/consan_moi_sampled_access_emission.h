@@ -4,7 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_contracts.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_contracts.h"
 
 namespace rocjitsu::consan_moi_impl {
 

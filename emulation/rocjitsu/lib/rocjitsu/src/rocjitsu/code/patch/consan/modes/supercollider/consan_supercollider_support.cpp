@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_support.h"
 
 #include <cstdint>
 #include <optional>

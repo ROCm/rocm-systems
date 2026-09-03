@@ -6,7 +6,7 @@
 // visible to MOI orchestration; exact-shadow representation and route choices
 // remain owned by this engine component.
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/analysis/kernel_scope.h"
@@ -23,7 +23,6 @@
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_engine_contracts.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_local_island_allocator.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
@@ -35,6 +34,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_runtime_workgroup_gate.h"
 #include "rocjitsu/code/patch/consan/consan_moi_shared_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi_sync_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
@@ -421,9 +421,9 @@ const MoiModeOperations kInlineShadowModeOperations = {
     .reconstruct_report_inventory = reconstruct_inline_shadow_report_inventory,
 };
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.inc"
 
-#include "rocjitsu/code/patch/consan/consan_moi_inline_atomic.inc"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_atomic.inc"
 
 } // namespace consan_moi_impl
 } // namespace rocjitsu

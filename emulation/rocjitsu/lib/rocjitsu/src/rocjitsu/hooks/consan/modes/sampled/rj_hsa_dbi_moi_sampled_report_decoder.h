@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/hooks/consan/modes/sampled/rj_hsa_dbi_sampled_sync.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_moi_report_pipeline.h"
-#include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
 
 #include <array>
 #include <cstdint>

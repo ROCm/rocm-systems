@@ -16,6 +16,73 @@ set(
     "${ROCJITSU_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/hooks/consan"
 )
 
+# Physical ownership is part of the architecture. A reader can skip every
+# concrete target or mode by skipping these directories, and a new extension
+# has one visible home. Cross-target encoding families remain explicit under
+# targets/shared rather than being copied into marketed-architecture owners.
+foreach(_directory IN ITEMS
+    targets/rdna3
+    targets/rdna4
+    targets/cdna3
+    targets/cdna4
+    targets/cdna5
+    targets/shared/cdna3_cdna4
+    targets/shared/gfx11_gfx12
+    targets/shared/gfx12
+    targets/shared/pregfx12
+    targets/shared/rdna3_rdna4
+    modes/record_replay
+    modes/sampled
+    modes/inline_shadow
+    modes/supercollider
+)
+    if(NOT IS_DIRECTORY "${_consan_dir}/${_directory}")
+        message(FATAL_ERROR "ConSan physical ownership is missing ${_directory}")
+    endif()
+endforeach()
+
+file(GLOB_RECURSE _consan_layout_files
+    "${_consan_dir}/*.cpp"
+    "${_consan_dir}/*.h"
+    "${_consan_dir}/*.inc"
+)
+foreach(_file IN LISTS _consan_layout_files)
+    file(RELATIVE_PATH _relative "${_consan_dir}" "${_file}")
+    get_filename_component(_name "${_file}" NAME)
+    if(_name MATCHES "^consan_(gfx[0-9]|rdna[0-9]|cdna[0-9])" AND
+       NOT _relative MATCHES "^targets/")
+        message(FATAL_ERROR
+            "ConSan target-specific file escaped targets/: ${_relative}")
+    endif()
+    if(_name MATCHES
+           "^consan_(moi_(record_replay|sampled|inline_shadow)|supercollider)" AND
+       NOT _relative MATCHES "^(modes|targets)/")
+        message(FATAL_ERROR
+            "ConSan mode-specific file escaped modes/: ${_relative}")
+    endif()
+    if(_relative MATCHES "^modes/" AND _name MATCHES "target_ops")
+        message(FATAL_ERROR
+            "ConSan target operations escaped into mode ownership: ${_relative}")
+    endif()
+endforeach()
+
+foreach(_directory IN ITEMS record_replay sampled inline_shadow)
+    if(NOT IS_DIRECTORY "${_hook_dir}/modes/${_directory}")
+        message(FATAL_ERROR "ConSan hook mode ownership is missing ${_directory}")
+    endif()
+endforeach()
+file(GLOB_RECURSE _hook_layout_files "${_hook_dir}/*.cpp" "${_hook_dir}/*.h")
+foreach(_file IN LISTS _hook_layout_files)
+    file(RELATIVE_PATH _relative "${_hook_dir}" "${_file}")
+    get_filename_component(_name "${_file}" NAME)
+    if(_name MATCHES
+           "^rj_hsa_dbi_(moi_(record_replay|sampled|inline_shadow)|replay_provenance|sampled_sync)" AND
+       NOT _relative MATCHES "^modes/")
+        message(FATAL_ERROR
+            "ConSan hook mode-specific file escaped modes/: ${_relative}")
+    endif()
+endforeach()
+
 function(_consan_assert_no_match file regex rule)
     if(NOT EXISTS "${file}")
         message(FATAL_ERROR "ConSan boundary check is missing ${file}")
@@ -195,9 +262,9 @@ endforeach()
 file(
     GLOB _transform_component_sources
     "${_consan_dir}/consan_moi*.cpp"
-    "${_consan_dir}/consan_supercollider.cpp"
-    "${_consan_dir}/consan_supercollider_report_plan.cpp"
-    "${_consan_dir}/consan_supercollider_support.cpp"
+    "${_consan_dir}/modes/supercollider/consan_supercollider.cpp"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_report_plan.cpp"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_support.cpp"
     "${_consan_dir}/consan_fault_injection.cpp"
     "${_consan_dir}/consan_perturbation.cpp"
     "${_consan_dir}/consan_barrier_move_proof.cpp"
@@ -221,8 +288,8 @@ set(
     _descriptor_mutation_clients
     "${_consan_dir}/consan_descriptor_growth.cpp"
     "${_consan_dir}/consan_moi_shared_lowering.cpp"
-    "${_consan_dir}/consan_supercollider_flat.inc"
-    "${_consan_dir}/consan_supercollider_lds.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_lds.inc"
 )
 foreach(_file IN LISTS _consan_sources)
     if(_file IN_LIST _descriptor_mutation_clients)
@@ -349,15 +416,10 @@ _consan_assert_no_match(
 )
 
 file(
-    GLOB _extension_mode_sources
-    "${_consan_dir}/consan_moi_record*.cpp"
-    "${_consan_dir}/consan_moi_record*.inc"
-    "${_consan_dir}/consan_moi_sampled*.cpp"
-    "${_consan_dir}/consan_moi_sampled*.inc"
-    "${_consan_dir}/consan_moi_inline*.cpp"
-    "${_consan_dir}/consan_moi_inline*.inc"
-    "${_consan_dir}/consan_supercollider.cpp"
-    "${_consan_dir}/consan_supercollider.inc"
+    GLOB_RECURSE _extension_mode_sources
+    "${_consan_dir}/modes/*.cpp"
+    "${_consan_dir}/modes/*.h"
+    "${_consan_dir}/modes/*.inc"
 )
 foreach(_file IN LISTS _extension_mode_sources)
     _consan_assert_no_match(
@@ -367,45 +429,45 @@ foreach(_file IN LISTS _extension_mode_sources)
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_model.h.inc"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_model.h.inc"
     "ConSanMoiInlineReleaseClaim|ConSanMoiInlineVersionedReleaseState|ConSanMoiInlineReleaseClaimResult|ConSanMoiInlineReleaseTransactionEvent|consan_moi_inline_plan_release_claim|consan_moi_inline_release_transaction_is_sound|consan_moi_inline_release_snapshot_is_stable|ConSanMoiInlineCausalTokenView|consan_moi_inline_capture_causal_snapshot|ConSanMoiInlineStableReleaseEvidence|ConSanMoiInlineQualificationExpectation|ConSanMoiInlineQualificationResult|consan_moi_inline_qualify_token_evidence|ConSanMoiInlineCausalImportPlan|consan_moi_inline_plan_causal_import"
     "host-only InlineShadow reference oracles must not return to the production report contract"
 )
 _consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.h.inc"
     "consan_moi_record_replay_access_records"
     1
     "production Record/Replay must expose only the complete replay boundary"
 )
 _consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.h.inc"
     "consan_moi_record_replay_atomic_release"
     1
     "production Record/Replay must expose only the causal-state-aware release boundary"
 )
 _consan_assert_match_count_at_most(
-    "${_consan_dir}/consan_moi_record_replay_model.cpp"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.cpp"
     "consan_moi_record_replay_access_records"
     1
     "production Record/Replay must implement only the complete replay boundary"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_exact_model.h.inc"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_exact_model.h.inc"
     "ConSanMoiInlineAcquiredEpochTokenPublishResult|consan_moi_inline_publish_acquired_epoch_token|consan_moi_inline_acquired_epoch_orders|consan_moi_inline_acquired_epoch_orders_pair|consan_moi_inline_stable_token_orders\\(|ConSanMoiInlineWorkgroupKey|consan_moi_inline_workgroup_key|consan_moi_exact_(byte_cells|shadow_entries)_conflict"
     "host-only InlineShadow reference oracles must not return to the production InlineShadow contract"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_model.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_model.cpp"
     "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
     "host-only Sampled publication and replay oracles must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_model.h.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_model.h.inc"
     "consan_moi_sampled_(publish_sync_metadata|publish_access_records|publish_causal_windows|replay_entries|replay_snapshots|replay_causal_windows|begin_causal_claim|commit_causal_claim|abort_causal_claim)"
     "host-only Sampled publication and replay oracle declarations must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_model.h.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_model.h.inc"
     "consan_moi_sampled_(causal_mix|causal_window_selected)|pack_consan_moi_sampled_watchpoint_entry"
     "host-only Sampled selection and encoding oracles must remain test-owned"
 )
@@ -430,7 +492,7 @@ _consan_assert_no_match(
     "host-only exact byte-cell emission oracles must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_exact_model.h.inc"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_exact_model.h.inc"
     "ConSanMoi(Sampled|RecordReplay)|consan_moi_(sampled|record_replay)|ConSanMoiDispatchId|consan_moi_(amdhsa_)?dispatch_id"
     "the InlineShadow exact contract must not acquire other-mode policy or dispatch-preload planning"
 )
@@ -455,27 +517,27 @@ _consan_assert_no_match(
     "the report contract must not acquire dispatch-preload planning"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_model.h.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_model.h.inc"
     "ConSanMoi(RecordReplay|Inline)|consan_moi_(record_replay|inline)|consan_moi_exact_shadow"
     "the Sampled report contract must consume shared mechanics without other mode policy"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_replay_model.h.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.h.inc"
     "ConSanMoi(Sampled|Inline)|consan_moi_(sampled|inline)"
     "the Record/Replay report contract must not acquire Sampled or InlineShadow policy"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_replay_model.cpp"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.cpp"
     "consan_moi_(compact_record_replay_trace|plan_record_replay_capture|replay_record_replay_capture)"
     "host-only Record/Replay capture oracles must remain test-owned"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_replay_model.cpp"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_model.cpp"
     "ConSanMoiSampled|consan_moi_sampled"
     "Record/Replay report analysis must not reacquire Sampled behavior"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_model.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_model.cpp"
     "ConSanMoiRecordReplay|consan_moi_record_replay"
     "Sampled report analysis must not reacquire Record/Replay behavior"
 )
@@ -503,24 +565,24 @@ foreach(_mode_report_owner IN ITEMS record_replay sampled inline_shadow)
     endif()
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_replay_report_contract.h.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_report_contract.h.inc"
     "ConSanMoiEngine::(Sampled|InlineShadow)"
     "Record/Replay report construction must not select another mode"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_report_contract.h.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_report_contract.h.inc"
     "ConSanMoiEngine::(RecordReplay|InlineShadow)"
     "Sampled report construction must not select another mode"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow_report_contract.h.inc"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_report_contract.h.inc"
     "ConSanMoiEngine::(RecordReplay|Sampled)"
     "InlineShadow report construction must not select another mode"
 )
 foreach(
     _record_replay_capture_type_owner
     IN ITEMS
-        consan_moi_record_replay_types.h.inc
+        modes/record_replay/consan_moi_record_replay_types.h.inc
         consan_moi_engine_results.h.inc
 )
     _consan_assert_no_match(
@@ -551,7 +613,7 @@ if(NOT _mode_extension_test MATCHES "barrier_scratch_vgpr_count" OR
 endif()
 foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
     file(
-        READ "${_consan_dir}/consan_moi_${_barrier_scratch_mode}.cpp"
+        READ "${_consan_dir}/modes/${_barrier_scratch_mode}/consan_moi_${_barrier_scratch_mode}.cpp"
         _barrier_scratch_mode_owner
     )
     if(NOT _barrier_scratch_mode_owner MATCHES
@@ -564,7 +626,7 @@ foreach(_barrier_scratch_mode IN ITEMS record_replay sampled inline_shadow)
 endforeach()
 foreach(_atomic_scratch_mode IN ITEMS record_replay sampled inline_shadow)
     file(
-        READ "${_consan_dir}/consan_moi_${_atomic_scratch_mode}.cpp"
+        READ "${_consan_dir}/modes/${_atomic_scratch_mode}/consan_moi_${_atomic_scratch_mode}.cpp"
         _atomic_scratch_mode_owner
     )
     if(NOT _atomic_scratch_mode_owner MATCHES
@@ -581,7 +643,7 @@ if(NOT _moi_mode_planning_contract MATCHES "ConSanMoiModePolicy policy")
 endif()
 foreach(_report_capacity_mode IN ITEMS record_replay sampled inline_shadow)
     file(
-        READ "${_consan_dir}/consan_moi_${_report_capacity_mode}.cpp"
+        READ "${_consan_dir}/modes/${_report_capacity_mode}/consan_moi_${_report_capacity_mode}.cpp"
         _report_capacity_mode_owner
     )
     if(NOT _report_capacity_mode_owner MATCHES "[.]policy[ ]*=" OR
@@ -635,7 +697,7 @@ if(_exact_capture_demand_contract MATCHES
     )
 endif()
 foreach(_exact_capture_mode IN ITEMS record_replay sampled)
-    file(READ "${_consan_dir}/consan_moi_${_exact_capture_mode}.cpp"
+    file(READ "${_consan_dir}/modes/${_exact_capture_mode}/consan_moi_${_exact_capture_mode}.cpp"
          _exact_capture_mode_owner)
     if(NOT _exact_capture_mode_owner MATCHES
        "private_workgroup_tuple_supported[ ]*=")
@@ -683,24 +745,24 @@ foreach(_common_sampled_private_emitter_owner IN ITEMS
         "Sampled private owner/epoch emission must remain in its mode owner"
     )
 endforeach()
-file(READ "${_consan_dir}/consan_moi_sampled.cpp" _sampled_mode_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled.cpp" _sampled_mode_owner)
 if(NOT _sampled_mode_owner MATCHES "append_sampled_private_owner_epoch_load")
     message(FATAL_ERROR "Sampled private owner/epoch emission lost its mode owner")
 endif()
 file(READ
-    "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_access_emission.cpp"
     _record_replay_access_emission
 )
 if(NOT _record_replay_access_emission MATCHES "build_first_light_access_record_words")
     message(FATAL_ERROR "Record/Replay access emission lost its physical mode owner")
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled.cpp"
     "automatic_banked_record_capture[ ]*="
     "Sampled must not acquire Record/Replay banked-capture policy"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.cpp"
     "automatic_banked_record_capture[ ]*="
     "InlineShadow must not acquire Record/Replay banked-capture policy"
 )
@@ -731,7 +793,7 @@ _consan_assert_no_match(
     "operational_barrier_scratch_count"
     "exact-subset barrier lowering must consume the mode-owned scratch contract"
 )
-file(READ "${_consan_dir}/consan_moi_inline_shadow.cpp" _inline_shadow_mode_owner)
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.cpp" _inline_shadow_mode_owner)
 if(NOT _inline_shadow_mode_owner MATCHES
    "inline_shadow_atomic_scratch_vgpr_count[^}]*MoiTargetFacts")
     message(
@@ -822,9 +884,9 @@ foreach(_policy_owner IN ITEMS
 endforeach()
 foreach(_mode_registry_owner IN ITEMS
     consan_moi_mode_planning.h
-    consan_moi_record_replay.cpp
-    consan_moi_sampled.cpp
-    consan_moi_inline_shadow.cpp
+    modes/record_replay/consan_moi_record_replay.cpp
+    modes/sampled/consan_moi_sampled.cpp
+    modes/inline_shadow/consan_moi_inline_shadow.cpp
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_mode_registry_owner}"
@@ -981,12 +1043,12 @@ if(NOT _record_event_contract MATCHES
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_fence.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_fence.inc"
     "moi_scalar_router_call|automatic_moi_record_replay_sgpr_spill|moi_exec_save_sgpr[ \t]*[+]"
     "Record/Replay fence lowering must not reconstruct dense-router registers"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_sync.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc"
     "moi_scalar_router_call|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
     "Sampled dense synchronization must consume the mode-owned router plan"
 )
@@ -996,7 +1058,7 @@ _consan_assert_no_match(
     "shared dense-barrier lowering must consume the mode-owned barrier router plan"
 )
 file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_planning)
-file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier_planning.inc"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_barrier_planning.inc"
      _inline_barrier_planning_owner)
 if(NOT _moi_barrier_planning MATCHES
        "using MoiBarrierBodyPlan[^;]*std::variant<MoiRecordEventEmissionPlan, MoiInlineBarrierEpochEmissionPlan," OR
@@ -1022,32 +1084,32 @@ if(NOT _moi_barrier_planning MATCHES "moi_barrier_body_indirect_jump" OR
         "planned barriers must derive routing, scalar-epoch, and owner facts from their retained products"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_inline_shadow_private_barrier.inc"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc"
      _inline_private_barrier_owner)
-file(READ "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_barrier.inc"
      _inline_barrier_owner)
-file(READ "${_consan_dir}/consan_moi_record_replay_barrier.inc"
+file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay_barrier.inc"
      _record_replay_barrier_owner)
 file(READ "${_consan_dir}/consan_moi_barrier.cpp" _moi_barrier_source)
 file(READ "${_consan_dir}/consan_moi_barrier.h" _moi_barrier_contract)
-file(READ "${_consan_dir}/consan_moi_record_replay.h"
+file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay.h"
      _record_replay_contract)
-file(READ "${_consan_dir}/consan_moi_inline_shadow.inc"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.inc"
      _inline_shadow_access_owner)
-file(READ "${_consan_dir}/consan_moi_inline_shadow.h"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.h"
      _inline_shadow_contract)
-file(READ "${_consan_dir}/consan_moi_record_replay.inc"
+file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay.inc"
      _record_replay_access_owner)
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h"
      _moi_placement_contract)
 if(NOT _moi_barrier_source MATCHES
-       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier_planning.inc\"" OR
+       "#include \"rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier_planning.inc\"" OR
    NOT _moi_barrier_source MATCHES
-       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_private_barrier.inc\"" OR
+       "#include \"rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
-       "#include \"rocjitsu/code/patch/consan/consan_moi_inline_shadow_barrier.inc\"" OR
+       "#include \"rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow_barrier.inc\"" OR
    NOT _moi_barrier_source MATCHES
-       "#include \"rocjitsu/code/patch/consan/consan_moi_record_replay_barrier.inc\"" OR
+       "#include \"rocjitsu/code/patch/consan/modes/record_replay/consan_moi_record_replay_barrier.inc\"" OR
    NOT _inline_private_barrier_owner MATCHES
        "build_inline_shadow_private_epoch_barrier_cave_words" OR
    NOT _inline_barrier_owner MATCHES
@@ -1259,8 +1321,8 @@ foreach(
     IN ITEMS
         consan_moi_placement_contracts.h
         consan_moi_barrier.inc
-        consan_moi_sampled_access.inc
-        consan_moi_sampled_sync.inc
+        modes/sampled/consan_moi_sampled_access.inc
+        modes/sampled/consan_moi_sampled_sync.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_compact_entry_consumer}"
@@ -1269,7 +1331,7 @@ foreach(
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_record_replay_barrier.inc"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_barrier.inc"
     "const MoiRecordEventEmissionPlan [*]emission[ \t]*=[ \t]*nullptr|uint64_t[ \t]+cave_text_offset[ \t]*=[ \t]*0u|bool[ \t]+branch_only_scalar_spill[ \t]*=[ \t]*false"
     "staged Record/Replay barriers must derive emission, body offset, and route class from retained products"
 )
@@ -1295,7 +1357,7 @@ file(READ "${_consan_dir}/targets/shared/cdna3_cdna4/consan_gfx9_cdna_target_pro
      _gfx9_visible_evidence_profile)
 file(READ "${_consan_dir}/consan_moi_dynamic_record_emission.cpp"
      _visible_evidence_mechanism)
-file(READ "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.cpp"
      _inline_shadow_emission_owner)
 if(NOT _visible_evidence_target_contract MATCHES
        "moi_visible_evidence_address_precedes_result" OR
@@ -1312,7 +1374,7 @@ if(NOT _visible_evidence_target_contract MATCHES
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow_barrier.inc"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_barrier.inc"
     "consan_uses_gfx|build_v_mbcnt_(lo|hi)_u32_b32|moi_visible_evidence_vgpr_layout"
     "InlineShadow barrier emission must consume the target-normalized visible-evidence mechanism"
 )
@@ -1432,11 +1494,11 @@ _consan_assert_no_match(
     "Sampled workgroup-source fallback must not return to a shared public contract"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled.cpp"
     "sampled_workgroup_sources|moi_descriptor_workgroup_sources"
     "Sampled probes must not restore descriptor fallback after exact-entry placement"
 )
-file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
 string(FIND "${_moi_sampled_sync_owner}" "plan_sampled_sync_emission"
        _sampled_sync_plan_begin)
 string(FIND "${_moi_sampled_sync_owner}" "struct SampledDenseSyncRoute"
@@ -1504,7 +1566,7 @@ endforeach()
 # reconstructing the broad operating point inside each router planner.
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_implementation)
-file(READ "${_consan_dir}/consan_moi_sampled_contracts.h" _moi_sampled_contract)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_contracts.h" _moi_sampled_contract)
 if(NOT _moi_placement_contract MATCHES "struct MoiScalarRoutingState" OR
    NOT _moi_placement_contract MATCHES "moi_scalar_routing_state")
     message(FATAL_ERROR
@@ -1574,7 +1636,7 @@ endforeach()
 foreach(_patch_commit_client IN ITEMS
     consan_moi_access_apply.cpp
     consan_moi_sync_emission.cpp
-    consan_supercollider_common.inc
+    modes/supercollider/consan_supercollider_common.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_patch_commit_client}"
@@ -1588,11 +1650,11 @@ foreach(_patch_commit_client IN ITEMS
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_common.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_common.inc"
     "ConSanTransformArtifacts|sc_pending_access_intent_ids"
     "SuperCollider rejection publication must consume one exact ledger and diagnostic sink"
 )
-file(READ "${_consan_dir}/consan_supercollider.h" _supercollider_contract)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider.h" _supercollider_contract)
 if(NOT _supercollider_contract MATCHES
        "publish_unplaced_sc_access_rejections[^;]*ConSanCoverageLedger[^;]*vector<std::string>" OR
    _supercollider_contract MATCHES
@@ -1915,7 +1977,7 @@ _consan_assert_no_match(
 # borrowed scalar source, vector reservoir, and strategy must not return as
 # three independently mutable candidate, patch, or diagnostic fields.
 file(READ
-    "${_consan_dir}/consan_supercollider_scalar_vcc_spill.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_scalar_vcc_spill.h.inc"
     _sc_scalar_vcc_spill_contract
 )
 file(READ
@@ -1937,8 +1999,8 @@ endif()
 foreach(_supercollider_scalar_spill_owner IN ITEMS
     consan_code_object_types.h.inc
     consan_transform_diagnostics.h
-    consan_supercollider_flat.inc
-    consan_supercollider_lds.inc
+    modes/supercollider/consan_supercollider_flat.inc
+    modes/supercollider/consan_supercollider_lds.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_supercollider_scalar_spill_owner}"
@@ -1947,7 +2009,7 @@ foreach(_supercollider_scalar_spill_owner IN ITEMS
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_scalar_vcc_spill.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_scalar_vcc_spill.h.inc"
     "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|consan_moi_"
     "SuperCollider scalar-VCC spill effects must remain target independent"
 )
@@ -1956,7 +2018,7 @@ _consan_assert_no_match(
 # dispatcher, relocated host, and bodies must not reconstruct that route from
 # generic indirect fields or the former three independently optional fields.
 file(READ
-    "${_consan_dir}/consan_supercollider_dense_route.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_dense_route.h.inc"
     _sc_dense_route_contract
 )
 if(NOT _shared_aggregate_contract MATCHES
@@ -1983,7 +2045,7 @@ foreach(_sc_dense_route_owner IN LISTS _consan_production_files)
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_dense_route.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_dense_route.h.inc"
     "rj_code_arch|ConSanMoiEngine|ConSanCapabilityEngine|ConSanFlavor|consan_moi_|ConSanTargetProfile"
     "SuperCollider dense-route effects must remain target and MOI independent"
 )
@@ -1996,7 +2058,7 @@ file(READ
     _indirect_jump_contract
 )
 file(READ
-    "${_consan_dir}/consan_supercollider_indirect_route.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_indirect_route.h.inc"
     _sc_indirect_route_contract
 )
 file(READ
@@ -2055,7 +2117,7 @@ _consan_assert_no_match(
 foreach(_indirect_contract IN ITEMS
     consan_indirect_jump_sgprs.h.inc
     consan_branch_only_continuation.h.inc
-    consan_supercollider_indirect_route.h.inc
+    modes/supercollider/consan_supercollider_indirect_route.h.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_indirect_contract}"
@@ -2064,7 +2126,7 @@ foreach(_indirect_contract IN ITEMS
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_indirect_route.h.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_indirect_route.h.inc"
     "consan_moi_|ConSanMoi"
     "SuperCollider indirect route effects must remain MOI independent"
 )
@@ -2152,7 +2214,7 @@ endif()
 foreach(_persistent_sgpr_consumer IN ITEMS
     consan_moi_placement.inc
     consan_moi_prologue.cpp
-    consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_sync.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_persistent_sgpr_consumer}"
@@ -2260,8 +2322,8 @@ foreach(_scope_semantic_consumer IN ITEMS
     consan_atomic_fence_policy.cpp
     consan_fault_selection.cpp
     consan_moi_record_event_emission.cpp
-    consan_moi_sampled_atomic_emission.cpp
-    consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_atomic_emission.cpp
+    modes/sampled/consan_moi_sampled_sync.inc
     consan_moi_sync_emission.cpp
     consan_perturbation_policy.cpp
     consan_sync_analysis.inc
@@ -2277,8 +2339,8 @@ foreach(_scope_semantic_only_consumer IN ITEMS
     consan_atomic_classifier.cpp
     consan_fault_selection.cpp
     consan_moi_record_event_emission.cpp
-    consan_moi_sampled_atomic_emission.cpp
-    consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_atomic_emission.cpp
+    modes/sampled/consan_moi_sampled_sync.inc
     consan_perturbation_policy.cpp
     consan_sync_metadata.cpp
 )
@@ -2296,11 +2358,11 @@ if(NOT _gfx12_program_analysis_contract MATCHES "normalize_gfx12_memory_scope")
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_atomic_emission.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_atomic_emission.cpp"
     "sampled_atomic_scope"
     "Sampled emitters must share the mode-owned normalized scope-to-report mapping"
 )
-file(READ "${_consan_dir}/consan_moi_record_replay_types.h.inc"
+file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay_types.h.inc"
      _record_replay_scope_contract)
 if(NOT _record_replay_scope_contract MATCHES "consan_moi_record_replay_scope")
     message(FATAL_ERROR
@@ -2318,7 +2380,7 @@ _consan_assert_no_match(
     "mode code must consume an exact wait operation rather than a broad encoding-family fact"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_flat.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc"
     "ConSanWaitCounterFamily|wait_counter_family|build_s_wait_flat_load0"
     "SuperCollider flat lowering must consume its target-owned completion-wait operation"
 )
@@ -2349,9 +2411,9 @@ _consan_assert_no_match(
     "shared MOI support must consume target-neutral mechanism operations"
 )
 foreach(_relocation_client IN ITEMS
-    consan_moi_sampled_access_emission.cpp
+    modes/sampled/consan_moi_sampled_access_emission.cpp
     consan_moi_shared_lowering.cpp
-    consan_moi_inline_shadow_emission.cpp
+    modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_relocation_client}"
@@ -2363,18 +2425,18 @@ endforeach()
 # emission. Keep its exact state contract in the mode owner so body emission
 # and entry prologues cannot regain independent broad-state helpers.
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow_emission.h"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.h"
     "inline_shadow_(scratch_count|spill_backed_scratch_count|visible_evidence_sgpr)|validate_inline_shadow_exec_save_sgpr"
     "InlineShadow planning helpers must not return to the emission contract"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.cpp"
     "inline_shadow_(scratch_count|spill_backed_scratch_count|visible_evidence_sgpr)[(].*ConSan(Request|MoiOperatingPoint)"
     "InlineShadow emission must consume exact scalar and resource facts"
 )
 foreach(_inline_emission_file IN ITEMS
-    consan_moi_inline_shadow_emission.h
-    consan_moi_inline_shadow_emission.cpp
+    modes/inline_shadow/consan_moi_inline_shadow_emission.h
+    modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_inline_emission_file}"
@@ -2383,11 +2445,11 @@ foreach(_inline_emission_file IN ITEMS
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow_emission.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.cpp"
     "resolve_moi_access_resource_facts|resolve_moi_exec_save_requirement|moi_target_dispatch_id_sources|moi_special_state_sgprs|moi_has_runtime_hardware_dispatch_id"
     "InlineShadow body emission must not reconstruct resource, scalar, or dispatch plans"
 )
-file(READ "${_consan_dir}/consan_moi_inline_shadow_emission.h" _moi_inline_emission_contract)
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow_emission.h" _moi_inline_emission_contract)
 if(NOT _moi_inline_emission_contract MATCHES "struct MoiInlineShadowEmissionPlan" OR
    NOT _moi_inline_emission_contract MATCHES
        "build_inline_shadow_words[^;]*const MoiInlineShadowEmissionPlan &plan")
@@ -2405,12 +2467,12 @@ _consan_assert_no_match(
     "consan_moi_inline_shadow_emission[.]h"
     "common prologue planning must not depend on a mode body emitter"
 )
-file(READ "${_consan_dir}/consan_moi_inline_shadow.h" _moi_inline_shadow_contract)
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.h" _moi_inline_shadow_contract)
 if(NOT _moi_inline_shadow_contract MATCHES "struct MoiInlineShadowScalarState")
     message(FATAL_ERROR "ConSan InlineShadow lost its exact scalar-state product")
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_inline_shadow.cpp"
+    "${_consan_dir}/modes/inline_shadow/consan_moi_inline_shadow.cpp"
     "inline_shadow_(scratch_count|spill_backed_scratch_count)[(]const ConSanRequest"
     "InlineShadow scratch sizing must consume its exact atomic-tracking fact"
 )
@@ -2427,8 +2489,8 @@ endif()
 # identity policy. Keep that policy in its mode-local emission owner instead of
 # allowing the two lowering routes to drift apart again.
 foreach(_sampled_window_client IN ITEMS
-    consan_moi_sampled_sync.inc
-    consan_moi_sampled_atomic_emission.cpp
+    modes/sampled/consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_atomic_emission.cpp
 )
     file(READ "${_consan_dir}/${_sampled_window_client}" _sampled_window_client_source)
     string(REGEX MATCHALL "append_sampled_causal_window_validation"
@@ -2512,9 +2574,9 @@ _consan_assert_no_match(
 )
 foreach(
     _source IN ITEMS
-    consan_moi_sampled_access_emission.cpp
-    consan_moi_sampled_atomic_emission.cpp
-    consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_access_emission.cpp
+    modes/sampled/consan_moi_sampled_atomic_emission.cpp
+    modes/sampled/consan_moi_sampled_sync.inc
     consan_moi_shared_lowering.cpp
 )
     _consan_assert_no_match(
@@ -2525,10 +2587,10 @@ foreach(
 endforeach()
 foreach(
     _source IN ITEMS
-    consan_moi_sampled_access_emission.h
-    consan_moi_sampled_access_emission.cpp
-    consan_moi_sampled_atomic_emission.cpp
-    consan_moi_sampled_sync.inc
+    modes/sampled/consan_moi_sampled_access_emission.h
+    modes/sampled/consan_moi_sampled_access_emission.cpp
+    modes/sampled/consan_moi_sampled_atomic_emission.cpp
+    modes/sampled/consan_moi_sampled_sync.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_source}"
@@ -2561,7 +2623,7 @@ if(NOT _moi_dynamic_indexed_address_call_count EQUAL 1)
         "ConSan dynamic records must share the target-normalized indexed-address operation"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_sampled_access_emission.cpp" _moi_sampled_access_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_access_emission.cpp" _moi_sampled_access_owner)
 string(
     REGEX MATCHALL
     "consan_detail::append_moi_indexed_address"
@@ -2574,12 +2636,12 @@ if(NOT _moi_sampled_indexed_address_call_count EQUAL 2)
         "ConSan Sampled indexed and banked tables must share indexed addressing"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_sampled_atomic_emission.cpp" _moi_sampled_atomic_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_atomic_emission.cpp" _moi_sampled_atomic_owner)
 foreach(
     _sampled_sync_emitter
     IN ITEMS
-        consan_moi_sampled_atomic_emission.cpp
-        consan_moi_sampled_atomic_emission.h
+        modes/sampled/consan_moi_sampled_atomic_emission.cpp
+        modes/sampled/consan_moi_sampled_atomic_emission.h
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_sampled_sync_emitter}"
@@ -2588,7 +2650,7 @@ foreach(
     )
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_sync.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc"
     "SampledSyncProbeState|resolve_sampled_sync_probe_state"
     "Sampled synchronization must not retain its superseded broad probe state"
 )
@@ -2607,7 +2669,7 @@ if(NOT _moi_sampled_atomic_indexed_address_count EQUAL 6)
         "ConSan Sampled atomic tables must share indexed addressing"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc" _moi_sampled_sync_owner)
 if(NOT _moi_sampled_sync_owner MATCHES
    "build_sampled_barrier_sync_cave_words[(][^)]*const MoiSampledSyncEmissionPlan [&]plan")
     message(FATAL_ERROR "ConSan Sampled barrier emission lost its exact retained plan")
@@ -2617,7 +2679,11 @@ _consan_assert_no_match(
     "descriptor_file_offset, const ConSanMoiOperatingPoint"
     "Sampled private-state emission must consume the exact epoch policy"
 )
-foreach(_sampled_owner IN ITEMS consan_moi_sampled.h consan_moi_sampled_access.inc consan_moi_sampled_sync.inc)
+foreach(_sampled_owner IN ITEMS
+    modes/sampled/consan_moi_sampled.h
+    modes/sampled/consan_moi_sampled_access.inc
+    modes/sampled/consan_moi_sampled_sync.inc
+)
     _consan_assert_no_match(
         "${_consan_dir}/${_sampled_owner}"
         "MoiOptions|static_cast<const ConSan(Request|MoiOperatingPoint|BoundRuntimeResources)"
@@ -2661,7 +2727,7 @@ foreach(_recipe IN ITEMS
     endif()
 endforeach()
 file(READ
-    "${_consan_dir}/consan_moi_record_replay_access_emission.cpp"
+    "${_consan_dir}/modes/record_replay/consan_moi_record_replay_access_emission.cpp"
     _moi_record_replay_access_emission_owner
 )
 string(
@@ -2679,11 +2745,11 @@ endif()
 foreach(
     _record_replay_owner
     IN ITEMS
-        consan_moi_record_replay.h
-        consan_moi_record_replay_access_emission.cpp
-        consan_moi_record_replay.inc
-        consan_moi_record_atomic.inc
-        consan_moi_record_fence.inc
+        modes/record_replay/consan_moi_record_replay.h
+        modes/record_replay/consan_moi_record_replay_access_emission.cpp
+        modes/record_replay/consan_moi_record_replay.inc
+        modes/record_replay/consan_moi_record_atomic.inc
+        modes/record_replay/consan_moi_record_fence.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_record_replay_owner}"
@@ -2691,7 +2757,10 @@ foreach(
         "Record/Replay components must separate immutable input from operating-point state"
     )
 endforeach()
-foreach(_sampling_mode_owner IN ITEMS consan_moi_record_replay.inc consan_moi_sampled_access.inc)
+foreach(_sampling_mode_owner IN ITEMS
+    modes/record_replay/consan_moi_record_replay.inc
+    modes/sampled/consan_moi_sampled_access.inc
+)
     _consan_assert_no_match(
         "${_consan_dir}/${_sampling_mode_owner}"
         "moi_(runtime_)?sample_stride[ \t]*==[ \t]*0|moi_(runtime_)?sample_offset[ \t]*>="
@@ -2701,9 +2770,9 @@ endforeach()
 foreach(
     _inline_shadow_owner
     IN ITEMS
-        consan_moi_inline_shadow.h
-        consan_moi_inline_shadow.inc
-        consan_moi_inline_atomic.inc
+        modes/inline_shadow/consan_moi_inline_shadow.h
+        modes/inline_shadow/consan_moi_inline_shadow.inc
+        modes/inline_shadow/consan_moi_inline_atomic.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_inline_shadow_owner}"
@@ -2801,8 +2870,8 @@ _consan_assert_no_match(
     "shared access mechanics must not construct mode-owned runtime mappings"
 )
 foreach(_access_mapping_owner IN ITEMS
-    consan_moi_record_replay.cpp
-    consan_moi_sampled.cpp
+    modes/record_replay/consan_moi_record_replay.cpp
+    modes/sampled/consan_moi_sampled.cpp
 )
     file(READ "${_consan_dir}/${_access_mapping_owner}" _access_mapping_text)
     if(NOT _access_mapping_text MATCHES "access_runtime_mapping")
@@ -2883,8 +2952,8 @@ foreach(_common_report_layout_owner IN ITEMS
     )
 endforeach()
 foreach(_inline_report_layout_owner IN ITEMS
-    consan_moi_inline_shadow_report_contract.h.inc
-    consan_moi_inline_shadow_report_plan.cpp
+    modes/inline_shadow/consan_moi_inline_shadow_report_contract.h.inc
+    modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp
 )
     file(READ "${_consan_dir}/${_inline_report_layout_owner}" _inline_report_layout_text)
     if(NOT _inline_report_layout_text MATCHES
@@ -2901,7 +2970,7 @@ foreach(_read_only_transaction_client IN ITEMS
     consan_moi_shared_lowering.h
     consan_moi_shared_lowering.cpp
     consan_moi_barrier.inc
-    consan_supercollider_common.inc
+    modes/supercollider/consan_supercollider_common.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_read_only_transaction_client}"
@@ -2937,9 +3006,9 @@ endif()
 # lowering; a mode-local copy would allow tuple and operand exclusions to
 # drift again.
 file(READ "${_consan_dir}/consan_placement.inc" _access_scratch_owner)
-file(READ "${_consan_dir}/consan_supercollider_support.h" _sc_support_contract)
-file(READ "${_consan_dir}/consan_supercollider_support.cpp" _sc_support_body)
-file(READ "${_consan_dir}/consan_supercollider_flat.inc" _sc_flat_body)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_support.h" _sc_support_contract)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_support.cpp" _sc_support_body)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider_flat.inc" _sc_flat_body)
 foreach(_operation IN ITEMS
     access_dword_count
     access_scratch_tuple_base_is_valid
@@ -2995,18 +3064,10 @@ _consan_assert_match_count_at_most(
 # Mode implementations may select typed target capabilities, but may not see
 # product constants, generated ISA declarations, or member namespaces.
 file(
-    GLOB _mode_sources
-    "${_consan_dir}/consan_moi_record*.cpp"
-    "${_consan_dir}/consan_moi_record*.inc"
-    "${_consan_dir}/consan_moi_sampled*.cpp"
-    "${_consan_dir}/consan_moi_sampled*.inc"
-    "${_consan_dir}/consan_moi_inline*.cpp"
-    "${_consan_dir}/consan_moi_inline*.inc"
-    "${_consan_dir}/consan_supercollider.cpp"
-    "${_consan_dir}/consan_supercollider.inc"
-    "${_consan_dir}/consan_supercollider_common.inc"
-    "${_consan_dir}/consan_supercollider_flat.inc"
-    "${_consan_dir}/consan_supercollider_lds.inc"
+    GLOB_RECURSE _mode_sources
+    "${_consan_dir}/modes/*.cpp"
+    "${_consan_dir}/modes/*.h"
+    "${_consan_dir}/modes/*.inc"
 )
 foreach(_file IN LISTS _mode_sources)
     if(_file MATCHES "target_ops" OR _file MATCHES "[.]h[.]inc$")
@@ -3030,7 +3091,7 @@ foreach(_file IN LISTS _consan_production_files)
     )
 endforeach()
 foreach(_mode IN ITEMS record_replay sampled inline_shadow)
-    set(_mode_owner "${_consan_dir}/consan_moi_${_mode}.cpp")
+    set(_mode_owner "${_consan_dir}/modes/${_mode}/consan_moi_${_mode}.cpp")
     file(READ "${_mode_owner}" _mode_owner_contents)
     if(NOT _mode_owner_contents MATCHES "[.]dense_router[ 	]*=")
         message(FATAL_ERROR
@@ -3162,7 +3223,7 @@ _consan_assert_no_match(
     "consan_target_profile|consan_capability_contract[.]h"
     "shared runtime gate planning must consume the caller's normalized call form"
 )
-file(READ "${_consan_dir}/consan_moi_record_replay.inc" _moi_record_replay_access_owner)
+file(READ "${_consan_dir}/modes/record_replay/consan_moi_record_replay.inc" _moi_record_replay_access_owner)
 string(
     REGEX MATCHALL
     "plan_moi_runtime_workgroup_gate[(]"
@@ -3178,7 +3239,7 @@ if(NOT _moi_record_replay_gate_planner_count EQUAL 1 OR
         "ConSan Record/Replay access lowering must retain one selected runtime gate plan"
     )
 endif()
-file(READ "${_consan_dir}/consan_moi_sampled_access.inc" _moi_sampled_access_owner)
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_access.inc" _moi_sampled_access_owner)
 foreach(_selected_sampled_helper IN ITEMS
     "plan_moi_runtime_workgroup_gate[(]"
     "moi_exact_entry_workgroup_sources[(]"
@@ -3198,16 +3259,16 @@ foreach(_selected_sampled_helper IN ITEMS
     endif()
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_access.inc"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_access.inc"
     "planned(_patch)?[.]dense_runtime_fast_gate"
     "ConSan Sampled access lowering must derive fast-gate placement from its retained plan"
 )
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_access_emission.cpp"
     "sampled_workgroup_sources|moi_exact_entry_workgroup_sources"
     "Sampled access emission must consume its retained workgroup-source product"
 )
-file(READ "${_consan_dir}/consan_moi_sampled_access_emission.h"
+file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_access_emission.h"
      _moi_sampled_access_emission_contract)
 if(_moi_sampled_access_emission_contract MATCHES
    "append_sampled_window_bank_index[^;]*(ConSanMoiOperatingPoint|BoundRuntimeResources)")
@@ -3224,7 +3285,7 @@ if(_moi_sampled_access_emission_contract MATCHES
     )
 endif()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_moi_sampled_access_emission.cpp"
+    "${_consan_dir}/modes/sampled/consan_moi_sampled_access_emission.cpp"
     "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|resolve_moi_access_resource_facts|direct_sampled_scratch_count|moi_bound_dispatch_id_sources"
     "Sampled access emission may not rediscover retained mode, resource, or placement facts"
 )
@@ -3248,7 +3309,7 @@ _consan_assert_no_match(
     "ConSanRequest|BoundRuntimeResources|ConSanMoiOperatingPoint|MoiObjectModeSemantics|moi_special_state_sgprs|moi_target_dispatch_id_sources|moi_workgroup_key_register_plan|validate_inline_atomic_exec_save_sgpr|resolve_moi_target_facts"
     "InlineShadow atomic body emission may not rediscover retained mode, resource, placement, or target facts"
 )
-file(READ "${_consan_dir}/consan_moi_inline_atomic.inc" _moi_inline_atomic_owner)
+file(READ "${_consan_dir}/modes/inline_shadow/consan_moi_inline_atomic.inc" _moi_inline_atomic_owner)
 foreach(_inline_atomic_assignment IN ITEMS
     apply_moi_transient_sgpr_assignment
     apply_moi_persistent_vgpr_assignment
@@ -3477,7 +3538,7 @@ foreach(
 endforeach()
 
 # The HSA hook consumes public pipeline/report/diagnostic projections only.
-file(GLOB _hook_sources "${_hook_dir}/*.cpp" "${_hook_dir}/*.h")
+file(GLOB_RECURSE _hook_sources "${_hook_dir}/*.cpp" "${_hook_dir}/*.h")
 foreach(_file IN LISTS _hook_sources)
     _consan_assert_no_match(
         "${_file}"
@@ -3559,16 +3620,16 @@ foreach(_file IN LISTS _consan_production_files)
     endif()
 endforeach()
 _consan_assert_no_match(
-    "${_consan_dir}/consan_supercollider_lds.inc"
+    "${_consan_dir}/modes/supercollider/consan_supercollider_lds.inc"
     "result[.](patches|replacement|mark_modified)|discard_candidate_modification|publish_lowering_commits"
     "SuperCollider LDS access construction must publish local bytes and proof through the shared access transaction"
 )
 foreach(
     _access_mode_source
     IN ITEMS
-        consan_moi_record_replay.inc
-        consan_moi_sampled_access.inc
-        consan_moi_inline_shadow.inc
+        modes/record_replay/consan_moi_record_replay.inc
+        modes/sampled/consan_moi_sampled_access.inc
+        modes/inline_shadow/consan_moi_inline_shadow.inc
 )
     _consan_assert_no_match(
         "${_consan_dir}/${_access_mode_source}"
@@ -3777,28 +3838,28 @@ set(
     _runtime_analysis_sources
     rj_hsa_dbi_moi_report_analyzer.cpp
     rj_hsa_dbi_moi_report_analyzer.h
-    rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
-    rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
-    rj_hsa_dbi_moi_inline_shadow_report_decoder.h
-    rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
-    rj_hsa_dbi_moi_inline_shadow_report_renderer.h
-    rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
-    rj_hsa_dbi_moi_record_replay_report_analyzer.h
-    rj_hsa_dbi_moi_record_replay_report_decoder.cpp
-    rj_hsa_dbi_moi_record_replay_report_decoder.h
-    rj_hsa_dbi_moi_record_replay_report_renderer.cpp
-    rj_hsa_dbi_moi_record_replay_report_renderer.h
+    modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_analyzer.h
+    modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
+    modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.h
+    modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+    modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.h
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.h
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.cpp
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.h
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+    modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.h
     rj_hsa_dbi_moi_report_decoder.cpp
     rj_hsa_dbi_moi_report_decoder.h
     rj_hsa_dbi_moi_report_pipeline.cpp
     rj_hsa_dbi_moi_report_pipeline.h
     rj_hsa_dbi_moi_report_rendering.h
-    rj_hsa_dbi_moi_sampled_report_analyzer.cpp
-    rj_hsa_dbi_moi_sampled_report_analyzer.h
-    rj_hsa_dbi_moi_sampled_report_decoder.cpp
-    rj_hsa_dbi_moi_sampled_report_decoder.h
-    rj_hsa_dbi_moi_sampled_report_renderer.cpp
-    rj_hsa_dbi_moi_sampled_report_renderer.h
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.h
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.cpp
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.h
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.cpp
+    modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.h
 )
 foreach(_source IN LISTS _runtime_analysis_sources)
     _consan_assert_no_match(
@@ -3863,10 +3924,10 @@ _consan_assert_match_count_at_most(
 foreach(
     _mode_analyzer
     IN ITEMS
-        rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
-        rj_hsa_dbi_moi_record_replay_report_analyzer.h
-        rj_hsa_dbi_moi_sampled_report_analyzer.cpp
-        rj_hsa_dbi_moi_sampled_report_analyzer.h
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.h
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_mode_analyzer}"
@@ -3875,7 +3936,7 @@ foreach(
     )
 endforeach()
 _consan_assert_no_match(
-    "${_hook_dir}/rj_hsa_dbi_moi_record_replay_report_analyzer.h"
+    "${_hook_dir}/modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.h"
     "NotRecordReplay"
     "Record/Replay analysis must not model calls for another mode"
 )
@@ -3893,8 +3954,8 @@ file(READ "${_hook_dir}/CMakeLists.txt" _runtime_analysis_build)
 foreach(
     _mode_analyzer_source
     IN ITEMS
-        rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
-        rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.cpp
 )
     if(NOT _runtime_analysis_build MATCHES "${_mode_analyzer_source}")
         message(FATAL_ERROR
@@ -3951,8 +4012,8 @@ endforeach()
 foreach(
     _record_replay_decoder
     IN ITEMS
-        rj_hsa_dbi_moi_record_replay_report_decoder.cpp
-        rj_hsa_dbi_moi_record_replay_report_decoder.h
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_record_replay_decoder}"
@@ -3968,8 +4029,8 @@ _consan_assert_no_match(
 foreach(
     _inline_shadow_decoder
     IN ITEMS
-        rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
-        rj_hsa_dbi_moi_inline_shadow_report_decoder.h
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_inline_shadow_decoder}"
@@ -3985,8 +4046,8 @@ _consan_assert_no_match(
 foreach(
     _sampled_decoder
     IN ITEMS
-        rj_hsa_dbi_moi_sampled_report_decoder.cpp
-        rj_hsa_dbi_moi_sampled_report_decoder.h
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_sampled_decoder}"
@@ -4007,9 +4068,9 @@ _consan_assert_no_match(
 foreach(
     _mode_renderer_source
     IN ITEMS
-        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
-        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
-        rj_hsa_dbi_moi_sampled_report_renderer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.cpp
 )
     if(NOT _runtime_analysis_build MATCHES "${_mode_renderer_source}")
         message(FATAL_ERROR
@@ -4025,8 +4086,8 @@ endforeach()
 foreach(
     _record_replay_renderer
     IN ITEMS
-        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
-        rj_hsa_dbi_moi_record_replay_report_renderer.h
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_record_replay_renderer}"
@@ -4037,8 +4098,8 @@ endforeach()
 foreach(
     _inline_shadow_renderer
     IN ITEMS
-        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
-        rj_hsa_dbi_moi_inline_shadow_report_renderer.h
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_inline_shadow_renderer}"
@@ -4049,8 +4110,8 @@ endforeach()
 foreach(
     _sampled_renderer
     IN ITEMS
-        rj_hsa_dbi_moi_sampled_report_renderer.cpp
-        rj_hsa_dbi_moi_sampled_report_renderer.h
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.h
 )
     _consan_assert_no_match(
         "${_hook_dir}/${_sampled_renderer}"
@@ -4074,23 +4135,23 @@ set(
     consan_fault_injection.inc
     consan_moi_barrier.inc
     consan_moi_common_emission.inc
-    consan_moi_inline_atomic.inc
-    consan_moi_inline_shadow_barrier.inc
-    consan_moi_inline_shadow_private_barrier.inc
-    consan_moi_inline_shadow.inc
+    modes/inline_shadow/consan_moi_inline_atomic.inc
+    modes/inline_shadow/consan_moi_inline_shadow_barrier.inc
+    modes/inline_shadow/consan_moi_inline_shadow_private_barrier.inc
+    modes/inline_shadow/consan_moi_inline_shadow.inc
     consan_moi_pipeline.inc
-    consan_moi_record_replay_barrier.inc
+    modes/record_replay/consan_moi_record_replay_barrier.inc
     consan_moi_placement.inc
-    consan_moi_record_atomic.inc
-    consan_moi_record_fence.inc
-    consan_moi_record_replay.inc
-    consan_moi_sampled_access.inc
-    consan_moi_sampled_sync.inc
+    modes/record_replay/consan_moi_record_atomic.inc
+    modes/record_replay/consan_moi_record_fence.inc
+    modes/record_replay/consan_moi_record_replay.inc
+    modes/sampled/consan_moi_sampled_access.inc
+    modes/sampled/consan_moi_sampled_sync.inc
     consan_placement.inc
-    consan_supercollider.inc
-    consan_supercollider_common.inc
-    consan_supercollider_flat.inc
-    consan_supercollider_lds.inc
+    modes/supercollider/consan_supercollider.inc
+    modes/supercollider/consan_supercollider_common.inc
+    modes/supercollider/consan_supercollider_flat.inc
+    modes/supercollider/consan_supercollider_lds.inc
     consan_sync_analysis.inc
     consan_validation.inc
 )
@@ -4126,10 +4187,10 @@ foreach(_file IN LISTS _implementation_fragments)
         "implementation components must meet through declared interfaces"
     )
 endforeach()
-file(READ "${_consan_dir}/consan_supercollider.inc" _supercollider_wrapper)
+file(READ "${_consan_dir}/modes/supercollider/consan_supercollider.inc" _supercollider_wrapper)
 set(
     _expected_supercollider_wrapper
-    "#include \"rocjitsu/code/patch/consan/consan_supercollider_common.inc\"\n\n#include \"rocjitsu/code/patch/consan/consan_supercollider_lds.inc\"\n\n#include \"rocjitsu/code/patch/consan/consan_supercollider_flat.inc\"\n"
+    "#include \"rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_common.inc\"\n\n#include \"rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_lds.inc\"\n\n#include \"rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_flat.inc\"\n"
 )
 if(NOT _supercollider_wrapper STREQUAL _expected_supercollider_wrapper)
     message(FATAL_ERROR "ConSan SuperCollider implementation wrapper changed without review")
@@ -4142,14 +4203,14 @@ set(
     consan_moi_access_apply.inc
     consan_moi_candidates.inc
     consan_moi_emission.inc
-    consan_moi_inline_shadow_emission.inc
+    modes/inline_shadow/consan_moi_inline_shadow_emission.inc
     consan_moi_probe_planning.inc
     consan_moi_prologue.inc
     consan_moi_record_event_emission.inc
     consan_moi_record_planning.inc
     consan_moi_runtime_workgroup_gate_emission.inc
-    consan_moi_sampled_access_emission.inc
-    consan_moi_sampled_atomic_emission.inc
+    modes/sampled/consan_moi_sampled_access_emission.inc
+    modes/sampled/consan_moi_sampled_atomic_emission.inc
     consan_moi_sync_common.inc
 )
 foreach(_fragment IN LISTS _retired_fragments)
@@ -4197,10 +4258,11 @@ _consan_assert_reviewed_mode_switch_budget(
     consan_moi_prologue.cpp 0 "mode-neutral MOI entry-state construction"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_record_replay_model.cpp 4 "mode-owned replay diagnostic provenance constants"
+    modes/record_replay/consan_moi_record_replay_model.cpp 4
+    "mode-owned replay diagnostic provenance constants"
 )
 _consan_assert_reviewed_mode_switch_budget(
-    consan_moi_sampled_model.cpp 0 "Sampled-only report model"
+    modes/sampled/consan_moi_sampled_model.cpp 0 "Sampled-only report model"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_model.cpp"

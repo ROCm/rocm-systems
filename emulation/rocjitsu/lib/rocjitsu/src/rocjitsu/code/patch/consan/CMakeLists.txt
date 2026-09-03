@@ -75,9 +75,9 @@ rj_add_object_library(
         consan_moi_engine_contracts.cpp
         consan_moi_evidence_planning.cpp
         consan_moi_exact_shadow_emission.cpp
-        consan_moi_inline_shadow_emission.cpp
-        consan_moi_inline_shadow.cpp
-        consan_moi_inline_shadow_report_plan.cpp
+        modes/inline_shadow/consan_moi_inline_shadow_emission.cpp
+        modes/inline_shadow/consan_moi_inline_shadow.cpp
+        modes/inline_shadow/consan_moi_inline_shadow_report_plan.cpp
         consan_moi_memory_emission.cpp
         consan_moi_mode_planning.cpp
         consan_moi_model.cpp
@@ -92,18 +92,18 @@ rj_add_object_library(
         consan_moi_report_emission.cpp
         consan_moi_record_event_emission.cpp
         consan_moi_record_planning.cpp
-        consan_moi_record_replay.cpp
-        consan_moi_record_replay_access_emission.cpp
-        consan_moi_record_replay_model.cpp
-        consan_moi_record_replay_report_plan.cpp
+        modes/record_replay/consan_moi_record_replay.cpp
+        modes/record_replay/consan_moi_record_replay_access_emission.cpp
+        modes/record_replay/consan_moi_record_replay_model.cpp
+        modes/record_replay/consan_moi_record_replay_report_plan.cpp
         consan_moi_runtime_workgroup_gate.cpp
-        consan_moi_sampled_access_emission.cpp
-        consan_moi_sampled_contracts.cpp
-        consan_moi_sampled.cpp
-        consan_moi_sampled_model.cpp
-        consan_moi_sampled_report_plan.cpp
-        consan_moi_sampled_atomic_emission.cpp
-        consan_moi_sampled_window_emission.cpp
+        modes/sampled/consan_moi_sampled_access_emission.cpp
+        modes/sampled/consan_moi_sampled_contracts.cpp
+        modes/sampled/consan_moi_sampled.cpp
+        modes/sampled/consan_moi_sampled_model.cpp
+        modes/sampled/consan_moi_sampled_report_plan.cpp
+        modes/sampled/consan_moi_sampled_atomic_emission.cpp
+        modes/sampled/consan_moi_sampled_window_emission.cpp
         consan_moi_shared_lowering.cpp
         consan_moi_support.cpp
         consan_moi_sync_emission.cpp
@@ -111,9 +111,9 @@ rj_add_object_library(
         consan_perturbation.cpp
         consan_placement.cpp
         consan_resource.cpp
-        consan_supercollider.cpp
-        consan_supercollider_report_plan.cpp
-        consan_supercollider_support.cpp
+        modes/supercollider/consan_supercollider.cpp
+        modes/supercollider/consan_supercollider_report_plan.cpp
+        modes/supercollider/consan_supercollider_support.cpp
         consan_unmatched_barrier_abort.cpp
 )
 target_link_libraries(

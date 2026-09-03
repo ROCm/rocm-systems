@@ -5,10 +5,10 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi_access_target.h"
 #include "rocjitsu/code/patch/consan/consan_moi_exact_shadow_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_inline_shadow.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_moi_mode_planning.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
+#include "rocjitsu/code/patch/consan/modes/inline_shadow/consan_moi_inline_shadow.h"
 
 namespace rocjitsu::consan_moi_impl {
 

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_window_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_window_emission.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_moi_memory_emission.h"

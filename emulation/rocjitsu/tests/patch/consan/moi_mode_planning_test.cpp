@@ -43,7 +43,7 @@ uint16_t hypothetical_exec_save_sgpr_count(const MoiExecSaveRequirement &require
 }
 
 TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChanges) {
-  enum class HypotheticalModeKey : uint8_t { FifthMode };
+  enum class HypotheticalModeKey : uint8_t { FifthMode, SixthMode, Unregistered };
   consan_moi_impl::MoiModeOperations operations{};
   operations.plan = plan_hypothetical_mode;
   operations.barrier_scratch_vgpr_count =
@@ -62,9 +62,13 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
                        .default_runtime_sample_stride = 32u,
                        .initialize_owner_epoch_by_default = true,
                        .owner_source_applies_without_initialization = true};
+  auto sibling_operations = operations;
+  sibling_operations.policy.default_runtime_sample_stride = 64u;
   const std::array registrations{
       consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::FifthMode,
                                                                    &operations},
+      consan_moi_impl::MoiModeRegistrationFor<HypotheticalModeKey>{HypotheticalModeKey::SixthMode,
+                                                                   &sibling_operations},
   };
 
   const auto *selected =
@@ -85,6 +89,14 @@ TEST(ConSanMoiModePlanning, HypotheticalModeRegistersWithoutConcreteTargetChange
                                            {.direct_call_form = ConSanDirectCallForm::SCallI64}),
             3u);
   EXPECT_TRUE(selected->prologue.one_based_owner_ids);
+
+  const auto *sibling =
+      find_moi_mode_operations<HypotheticalModeKey>(registrations, HypotheticalModeKey::SixthMode);
+  ASSERT_EQ(sibling, &sibling_operations);
+  EXPECT_EQ(sibling->policy.default_runtime_sample_stride, 64u);
+  EXPECT_EQ(find_moi_mode_operations<HypotheticalModeKey>(registrations,
+                                                          HypotheticalModeKey::Unregistered),
+            nullptr);
 }
 
 TEST(ConSanMoiModePlanning, EachEngineOwnsItsAutomaticOwnerDefault) {
@@ -504,8 +516,7 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarRoutingProducts) {
   resources.moi_report_buffer_address = 0x100000u;
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
-  point.moi_persistent_sgprs.exact_workgroup =
-      ConSanMoiPersistentWorkgroupRegisters{6u, 7u, 8u};
+  point.moi_persistent_sgprs.exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{6u, 7u, 8u};
 
   auto scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
   auto emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,

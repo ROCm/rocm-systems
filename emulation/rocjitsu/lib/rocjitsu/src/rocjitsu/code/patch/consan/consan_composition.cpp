@@ -22,7 +22,6 @@
 #include "rocjitsu/code/patch/consan/consan_descriptor_growth.h"
 #include "rocjitsu/code/patch/consan/consan_fault_injection.h"
 #include "rocjitsu/code/patch/consan/consan_fault_selection.h"
-#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_final_validation.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
 #include "rocjitsu/code/patch/consan/consan_input_layout.h"
@@ -35,16 +34,17 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/consan_placement.h"
 #include "rocjitsu/code/patch/consan/consan_program_analysis.h"
-#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/code/patch/consan/consan_runtime_kernel.h"
 #include "rocjitsu/code/patch/consan/consan_semantic_classifiers.h"
-#include "rocjitsu/code/patch/consan/consan_supercollider.h"
-#include "rocjitsu/code/patch/consan/consan_supercollider_support.h"
-#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/consan/consan_sync_analysis.h"
 #include "rocjitsu/code/patch/consan/consan_sync_event_index.h"
 #include "rocjitsu/code/patch/consan/consan_sync_metadata.h"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider.h"
+#include "rocjitsu/code/patch/consan/modes/supercollider/consan_supercollider_support.h"
+#include "rocjitsu/code/patch/consan/targets/consan_fault_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_relay_target_ops.h"
+#include "rocjitsu/code/patch/consan/targets/consan_supercollider_target_ops.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -91,8 +91,8 @@ compose_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSan
                         ConSanLoweringExecution *execution, ConSanLoweringExtent extent,
                         const ConSanLoweringObservation *observation) {
   return try_patch_consan_impl(code_object_bytes, options, initial_operating_point, {},
-                               inspected_perturbation, preapplied_mutation, false, false,
-                               execution, extent, observation);
+                               inspected_perturbation, preapplied_mutation, false, false, execution,
+                               extent, observation);
 }
 
 bool compose_consan_observation(const ConSanOptions &options, ConSanTransformArtifacts &result,

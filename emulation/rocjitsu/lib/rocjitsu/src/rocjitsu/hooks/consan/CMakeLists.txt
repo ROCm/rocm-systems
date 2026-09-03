@@ -28,10 +28,10 @@ target_link_libraries(rocjitsu_consan_report_snapshot PRIVATE util)
 add_library(
     rocjitsu_consan_report_decoder
     STATIC
-        rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
-        rj_hsa_dbi_moi_record_replay_report_decoder.cpp
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_decoder.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_decoder.cpp
         rj_hsa_dbi_moi_report_decoder.cpp
-        rj_hsa_dbi_moi_sampled_report_decoder.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_decoder.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_decoder
@@ -46,9 +46,9 @@ target_link_libraries(rocjitsu_consan_report_decoder PRIVATE util)
 add_library(
     rocjitsu_consan_report_analyzer
     STATIC
-        rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_analyzer.cpp
         rj_hsa_dbi_moi_report_analyzer.cpp
-        rj_hsa_dbi_moi_sampled_report_analyzer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_analyzer.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_analyzer
@@ -63,10 +63,10 @@ target_link_libraries(rocjitsu_consan_report_analyzer PRIVATE util)
 add_library(
     rocjitsu_consan_report_renderer
     STATIC
-        rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
-        rj_hsa_dbi_moi_record_replay_report_renderer.cpp
+        modes/inline_shadow/rj_hsa_dbi_moi_inline_shadow_report_renderer.cpp
+        modes/record_replay/rj_hsa_dbi_moi_record_replay_report_renderer.cpp
         rj_hsa_dbi_moi_report_renderer.cpp
-        rj_hsa_dbi_moi_sampled_report_renderer.cpp
+        modes/sampled/rj_hsa_dbi_moi_sampled_report_renderer.cpp
 )
 set_target_properties(
     rocjitsu_consan_report_renderer

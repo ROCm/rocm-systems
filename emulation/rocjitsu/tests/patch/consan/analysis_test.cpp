@@ -98,13 +98,21 @@ TEST(ConSan, Gfx12TargetsPublishRawAndNormalizedScopeIndependently) {
 }
 
 TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
-  enum class HypotheticalTargetKey : uint8_t { GfxFuture };
+  enum class HypotheticalTargetKey : uint8_t { GfxFuture, GfxFutureSibling, Unregistered };
   const ConSanProgramAnalysisTargetOperations operations{
       .decode_flat_memory = decode_hypothetical_target_flat,
+  };
+  const ConSanProgramAnalysisTargetOperations sibling_operations{
+      .classify_cache_operation =
+          [](std::string_view) {
+            return ConSanCacheOperationEncoding{.operation = ConSanCacheOperation::Release};
+          },
   };
   const std::array registrations{
       ConSanProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
           HypotheticalTargetKey::GfxFuture, &operations},
+      ConSanProgramAnalysisTargetRegistrationFor<HypotheticalTargetKey>{
+          HypotheticalTargetKey::GfxFutureSibling, &sibling_operations},
   };
 
   const ConSanProgramAnalysisTargetOperations *selected =
@@ -115,6 +123,16 @@ TEST(ConSan, HypotheticalTargetRegistersNormalizedAnalysisWithoutModeChanges) {
   const ConSanVectorMemoryDecode decoded = selected->decode_flat_memory({});
   EXPECT_EQ(decoded.status, ConSanTargetDecodeStatus::Decoded);
   EXPECT_EQ(decoded.encoding.raw_op, 0x5aU);
+
+  const auto *sibling = find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+      registrations, HypotheticalTargetKey::GfxFutureSibling);
+  ASSERT_EQ(sibling, &sibling_operations);
+  ASSERT_NE(sibling->classify_cache_operation, nullptr);
+  EXPECT_EQ(sibling->classify_cache_operation("future_release").operation,
+            ConSanCacheOperation::Release);
+  EXPECT_EQ(find_consan_program_analysis_target_operations<HypotheticalTargetKey>(
+                registrations, HypotheticalTargetKey::Unregistered),
+            nullptr);
 }
 
 TEST(ConSan, EveryTargetNormalizesItsWorkgroupAcquireOrdering) {

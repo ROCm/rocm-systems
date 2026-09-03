@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_atomic_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_atomic_emission.h"
 
-#include "rocjitsu/code/patch/consan/consan_moi_sampled.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/consan/consan_atomic_classifier.h"
@@ -13,7 +13,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi_native_abi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_relocation.h"
 #include "rocjitsu/code/patch/consan/consan_moi_report_emission.h"
-#include "rocjitsu/code/patch/consan/consan_moi_sampled_window_emission.h"
+#include "rocjitsu/code/patch/consan/modes/sampled/consan_moi_sampled_window_emission.h"
 #include "rocjitsu/code/patch/instruction_sequence.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 
