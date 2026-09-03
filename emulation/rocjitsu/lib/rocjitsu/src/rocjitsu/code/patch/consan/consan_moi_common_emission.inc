@@ -5,9 +5,9 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
     std::span<const MoiDenseRelayRoute> routes, uint16_t jump_pc_sgpr,
     uint16_t saved_scc_sgpr, uint16_t key_sgpr, uint16_t call_return_sgpr,
     bool derive_key_at_entry, bool key_encodes_scc, bool match_call_return,
-    bool clone_local_routes, bool explicit_key, bool restore_scc_before_route,
-    bool normalize_encoded_scc, uint64_t dispatcher_offset, uint64_t island_offset,
-    const ConSanTargetProfile &target, rj_code_arch_t arch) {
+    bool clone_local_routes, bool explicit_key, bool normalize_encoded_scc,
+    uint64_t dispatcher_offset, uint64_t island_offset, const ConSanTargetProfile &target,
+    rj_code_arch_t arch) {
   std::vector<uint32_t> words;
   InstructionSequence sequence(words);
   if (key_encodes_scc) {
@@ -39,30 +39,13 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
                       (key_encodes_scc ? 2u : 1u));
     }
     std::vector<uint32_t> matched_words;
-    if (restore_scc_before_route) {
-      if (key_encodes_scc) {
-        if (!consan_detail::append_restore_moi_scc_from_route_key(
-                matched_words,
-                {.encoded_sgpr = key_sgpr,
-                 .normalize_encoded_sgpr = normalize_encoded_scc},
-                target))
-          return std::nullopt;
-      } else {
-        const auto restore = instrumentation::build_s_cmp_lg_u32(
-            saved_scc_sgpr, scalar_positive_inline_u32(0u), arch);
-        if (!restore)
-          return std::nullopt;
-        matched_words.push_back(*restore);
-      }
-    }
-    if (route.call_return_adjustment != 0u) {
-      matched_words.push_back(
-          build_s_add_u32(call_return_sgpr, call_return_sgpr, /*literal=*/255u, arch));
-      matched_words.push_back(route.call_return_adjustment);
-      matched_words.push_back(build_s_addc_u32(
-          static_cast<uint16_t>(call_return_sgpr + 1u),
-          static_cast<uint16_t>(call_return_sgpr + 1u), scalar_positive_inline_u32(0u), arch));
-    }
+    if (key_encodes_scc &&
+        !consan_detail::append_restore_moi_scc_from_route_key(
+            matched_words,
+            {.encoded_sgpr = key_sgpr,
+             .normalize_encoded_sgpr = normalize_encoded_scc},
+            target))
+      return std::nullopt;
     const uint64_t matched_offset =
         dispatcher_offset + (words.size() + 1u) * sizeof(uint32_t);
     const uint64_t direct_branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
@@ -84,53 +67,6 @@ std::optional<std::vector<uint32_t>> build_moi_dense_relay_dispatcher(
       return std::nullopt;
   }
   words.push_back(build_s_endpgm(arch));
-  return words;
-}
-
-std::optional<std::vector<uint32_t>> build_moi_dense_relay_anchor(
-    const MoiDenseRelayRoute &route, ConSanDirectCallForm call_form, uint16_t key_sgpr,
-    uint16_t call_return_sgpr, bool explicit_key, bool key_encodes_scc,
-    bool clone_local_routes, uint64_t island_offset, rj_code_arch_t arch) {
-  const uint32_t minimum_words = explicit_key ? 2u : 1u;
-  if (route.anchor_size < minimum_words * sizeof(uint32_t) ||
-      route.anchor_size % sizeof(uint32_t) != 0u)
-    return std::nullopt;
-  std::vector<uint32_t> words(route.anchor_size / sizeof(uint32_t), build_s_nop(0, arch));
-  if (explicit_key) {
-    if (route.identity > 64u)
-      return std::nullopt;
-    const uint16_t identity = static_cast<uint16_t>(route.identity);
-    const uint16_t tagged_identity = static_cast<uint16_t>(2u * identity);
-    const auto key =
-        key_encodes_scc
-            ? instrumentation::build_s_cselect_b32(
-                  key_sgpr, scalar_positive_inline_u32(tagged_identity + 1u),
-                  scalar_positive_inline_u32(tagged_identity), arch)
-            : std::optional<uint32_t>(
-                  build_s_mov_b32(key_sgpr, scalar_positive_inline_u32(identity), arch));
-    const auto branch = compute_sopp_branch_simm16(
-        route.anchor + sizeof(uint32_t), island_offset);
-    if (!key || !branch)
-      return std::nullopt;
-    words[0] = *key;
-    words[1] = build_s_branch(*branch, arch);
-    return words;
-  }
-
-  const uint64_t target = clone_local_routes
-                              ? island_offset + 2u * route.identity * sizeof(uint32_t)
-                              : island_offset;
-  const auto delta = compute_sopp_branch_simm16(route.anchor, target);
-  if (!delta)
-    return std::nullopt;
-  std::optional<uint32_t> call;
-  if (call_form == ConSanDirectCallForm::SCallI64)
-    call = instrumentation::build_s_call_i64(call_return_sgpr, *delta, arch);
-  else if (call_form == ConSanDirectCallForm::SCallB64)
-    call = build_s_call_b64(call_return_sgpr, *delta, arch);
-  if (!call)
-    return std::nullopt;
-  words[0] = *call;
   return words;
 }
 
@@ -257,8 +193,7 @@ bool emit_moi_dense_relay(const MoiDenseRelayPlan &plan, rj_code_arch_t arch,
       plan.routes, plan.indirect_jump.pc_sgpr, plan.indirect_jump.scc_save_sgpr,
       plan.key_sgpr, plan.call_return_sgpr, plan.derive_key_at_entry, plan.key_encodes_scc,
       plan.match_call_return, plan.clone_local_routes, plan.explicit_key,
-      plan.restore_scc_before_route || plan.key_encodes_scc, plan.normalize_encoded_scc,
-      plan.dispatcher_offset, plan.island_offset, *target, arch);
+      plan.normalize_encoded_scc, plan.dispatcher_offset, plan.island_offset, *target, arch);
   if (!dispatcher_words ||
       dispatcher_words->size() * sizeof(uint32_t) > plan.dispatcher_capacity_bytes ||
       plan.dispatcher_offset > new_text.size() ||
@@ -270,15 +205,40 @@ bool emit_moi_dense_relay(const MoiDenseRelayPlan &plan, rj_code_arch_t arch,
   for (const MoiDenseRelayRoute &route : plan.routes) {
     if (route.anchor_size == 0u)
       continue;
-    if (route.anchor > new_text.size() || route.anchor_size > new_text.size() - route.anchor)
+    if (route.anchor > new_text.size() ||
+        route.anchor_size > new_text.size() - route.anchor ||
+        route.anchor_size < (plan.explicit_key ? 2u : 1u) * sizeof(uint32_t))
       return fail("could not encode a semantic route anchor");
-    const auto anchor_words = build_moi_dense_relay_anchor(
-        route, plan.call_form, plan.key_sgpr, plan.call_return_sgpr,
-        plan.explicit_key, plan.key_encodes_scc, plan.clone_local_routes,
-        plan.island_offset, arch);
-    if (!anchor_words)
-      return fail("could not encode a semantic route anchor");
-    std::memcpy(new_text.data() + route.anchor, anchor_words->data(), route.anchor_size);
+    std::vector<uint32_t> anchor_words(route.anchor_size / sizeof(uint32_t),
+                                       build_s_nop(0, arch));
+    if (plan.explicit_key) {
+      const uint16_t identity = static_cast<uint16_t>(route.identity);
+      const uint16_t tagged_identity = static_cast<uint16_t>(2u * identity);
+      const auto route_key =
+          plan.key_encodes_scc
+              ? instrumentation::build_s_cselect_b32(
+                    plan.key_sgpr, scalar_positive_inline_u32(tagged_identity + 1u),
+                    scalar_positive_inline_u32(tagged_identity), arch)
+              : std::optional<uint32_t>(build_s_mov_b32(
+                    plan.key_sgpr, scalar_positive_inline_u32(identity), arch));
+      const auto branch_delta =
+          compute_sopp_branch_simm16(route.anchor + sizeof(uint32_t), plan.island_offset);
+      if (!route_key || !branch_delta)
+        return fail("could not encode a keyed semantic route anchor");
+      anchor_words[0] = *route_key;
+      anchor_words[1] = build_s_branch(*branch_delta, arch);
+    } else {
+      const uint64_t call_target =
+          plan.clone_local_routes
+              ? plan.island_offset + 2u * route.identity * sizeof(uint32_t)
+              : plan.island_offset;
+      const auto call_delta = compute_sopp_branch_simm16(route.anchor, call_target);
+      const auto call = call_delta ? build_call(*call_delta) : std::nullopt;
+      if (!call)
+        return fail("could not encode a semantic call anchor");
+      anchor_words.front() = *call;
+    }
+    std::memcpy(new_text.data() + route.anchor, anchor_words.data(), route.anchor_size);
   }
 
   ConSanPatchInfo host;
@@ -397,52 +357,138 @@ bool emit_moi_dense_relay(const MoiDenseRelayPlan &plan, rj_code_arch_t arch,
       group.front()->resources.owner_descriptor_file_offsets;
   patches.push_back(std::move(island_info));
 
-  std::vector<MoiDenseRelayRoute> routes;
-  routes.reserve(group.size() + (entry_host != entry_hosts.end() ? 1u : 0u));
-  if (entry_host != entry_hosts.end()) {
-    routes.push_back({.identity = 0u,
-                      .caller_return = entry_host->second.host_offset + sizeof(uint32_t),
-                      .target = entry_host->second.body_offset});
+  std::vector<uint32_t> dispatcher_words;
+  if (key_encodes_scc) {
+    // The low bit retains the caller's SCC and the remaining inline-constant
+    // bits select the route. Comparisons consume the normalized route number
+    // in the now-disposable indirect-PC low register.
+    dispatcher_words.push_back(
+        build_s_lshr_b32(pc_sgpr, key_sgpr, scalar_positive_inline_u32(1), arch));
   }
+  const uint16_t route_key_sgpr = key_encodes_scc ? pc_sgpr : key_sgpr;
+  const auto append_route_scc_restore = [&](std::vector<uint32_t> &words) {
+    if (!key_encodes_scc) {
+      const auto restore =
+          instrumentation::build_s_cmp_lg_u32(scc_save_sgpr, scalar_positive_inline_u32(0), arch);
+      if (!restore)
+        return false;
+      words.push_back(*restore);
+      return true;
+    }
+    return consan_detail::append_restore_moi_scc_from_route_key(words, {.encoded_sgpr = key_sgpr},
+                                                                *target);
+  };
+  if (entry_host != entry_hosts.end()) {
+    if (consan_arch_has_s_call_i64(arch)) {
+      if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
+                                        entry_host->second.host_offset + sizeof(uint32_t), pc_sgpr,
+                                        call_match_sgpr, arch)) {
+        return fail("could not encode its relocatable entry-host match");
+      }
+    } else {
+      const auto compare =
+          instrumentation::build_s_cmp_eq_u32(route_key_sgpr, scalar_positive_inline_u32(0), arch);
+      if (!compare)
+        return fail("could not encode its dense entry-host comparison");
+      dispatcher_words.push_back(*compare);
+    }
+
+    std::vector<uint32_t> matched_words;
+    if (router.restore_scc_before_route && !append_route_scc_restore(matched_words))
+      return fail("could not restore its dense entry-host SCC");
+    const uint64_t matched_offset =
+        dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+    const uint64_t matched_branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
+    const auto direct = explicit_key ? compute_sopp_branch_simm16(matched_branch_offset,
+                                                                  entry_host->second.body_offset)
+                                     : std::nullopt;
+    if (direct) {
+      matched_words.push_back(build_s_branch(*direct, arch));
+    } else if (!append_moi_scc_preserving_indirect_jump(
+                   matched_words, matched_offset, entry_host->second.body_offset, pc_sgpr,
+                   scc_save_sgpr, /*capture_scc=*/false, arch)) {
+      return fail("could not encode its dense entry-host target");
+    }
+    if (key_encodes_scc && !direct)
+      matched_words[matched_words.size() - 2u] = matched_words.front();
+    const auto skip =
+        instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
+    if (!skip)
+      return fail("could not encode its dense entry-host branch");
+    dispatcher_words.push_back(*skip);
+    dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
+  }
+
   for (size_t route = 0; route < group.size(); ++route) {
     const MoiPlannedAccessPatch &planned = *group[route];
     const ConSanMoiCandidate &candidate = *planned.candidate;
-    routes.push_back({.identity = static_cast<uint32_t>(route + 1u),
-                      .anchor = candidate.anchor(),
-                      .anchor_size = candidate.size(),
-                      .caller_return = candidate.anchor() + sizeof(uint32_t),
-                      .call_return_adjustment =
-                          static_cast<uint32_t>(
-                              !explicit_key && !collapsed_spill_router &&
-                                      candidate.size() > sizeof(uint32_t)
-                                  ? candidate.size() - sizeof(uint32_t)
-                                  : 0u),
-                      .target = planned.placement.body_offset});
+    if (consan_arch_has_s_call_i64(arch)) {
+      if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
+                                        candidate.anchor() + sizeof(uint32_t), pc_sgpr,
+                                        call_match_sgpr, arch)) {
+        return fail("could not encode its relocatable caller match");
+      }
+    } else {
+      const auto compare = instrumentation::build_s_cmp_eq_u32(
+          route_key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route + 1u)), arch);
+      if (!compare)
+        return fail("could not encode its dense dispatch comparison");
+      dispatcher_words.push_back(*compare);
+    }
+
+    std::vector<uint32_t> matched_words;
+    if (router.restore_scc_before_route && !append_route_scc_restore(matched_words))
+      return fail("could not restore its dense route SCC");
+    if (!explicit_key && !collapsed_spill_router && candidate.size() > sizeof(uint32_t)) {
+      const uint32_t adjustment = candidate.size() - sizeof(uint32_t);
+      matched_words.push_back(
+          build_s_add_u32(*call_return_sgpr, *call_return_sgpr, /*literal=*/255u, arch));
+      matched_words.push_back(adjustment);
+      matched_words.push_back(build_s_addc_u32(static_cast<uint16_t>(*call_return_sgpr + 1u),
+                                               static_cast<uint16_t>(*call_return_sgpr + 1u),
+                                               scalar_positive_inline_u32(0), arch));
+    }
+    const uint64_t matched_offset =
+        dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
+    const uint64_t matched_branch_offset = matched_offset + matched_words.size() * sizeof(uint32_t);
+    const auto direct = explicit_key ? compute_sopp_branch_simm16(matched_branch_offset,
+                                                                  planned.placement.body_offset)
+                                     : std::nullopt;
+    if (direct) {
+      matched_words.push_back(build_s_branch(*direct, arch));
+    } else if (!append_moi_scc_preserving_indirect_jump(
+                   matched_words, matched_offset, planned.placement.body_offset, pc_sgpr,
+                   scc_save_sgpr, /*capture_scc=*/false, arch)) {
+      return fail("could not encode a dense dispatch target");
+    }
+    if (key_encodes_scc && !direct)
+      matched_words[matched_words.size() - 2u] = matched_words.front();
+    if (matched_words.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+      return fail("dense dispatch stub is too large");
+    const auto skip =
+        instrumentation::build_s_cbranch_scc0(static_cast<int16_t>(matched_words.size()), arch);
+    if (!skip)
+      return fail("could not encode a dense dispatch branch");
+    dispatcher_words.push_back(*skip);
+    dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
   }
-  const auto dispatcher_words = build_moi_dense_relay_dispatcher(
-      routes, pc_sgpr, scc_save_sgpr, key_sgpr, call_match_sgpr,
-      /*derive_key_at_entry=*/false, key_encodes_scc,
-      /*match_call_return=*/consan_arch_has_s_call_i64(arch),
-      /*clone_local_routes=*/false, explicit_key, router.restore_scc_before_route,
-      /*normalize_encoded_scc=*/true, dispatcher_offset, island_offset, *target, arch);
+  dispatcher_words.push_back(build_s_endpgm(arch));
   const uint64_t reserved_words = group.size() * dispatcher_words_per_site;
-  if (!dispatcher_words || dispatcher_words->size() > reserved_words ||
-      dispatcher_offset > new_text.size() ||
-      dispatcher_words->size() * sizeof(uint32_t) > new_text.size() - dispatcher_offset) {
-    const std::string required = dispatcher_words ? std::to_string(dispatcher_words->size()) : "?";
-    return fail("dense dispatcher requires " + required +
+  if (dispatcher_words.size() > reserved_words || dispatcher_offset > new_text.size() ||
+      dispatcher_words.size() * sizeof(uint32_t) > new_text.size() - dispatcher_offset) {
+    return fail("dense dispatcher requires " + std::to_string(dispatcher_words.size()) +
                 " words for " + std::to_string(group.size()) + " sites, but reserved " +
                 std::to_string(reserved_words));
   }
-  std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words->data(),
-              dispatcher_words->size() * sizeof(uint32_t));
+  std::memcpy(new_text.data() + dispatcher_offset, dispatcher_words.data(),
+              dispatcher_words.size() * sizeof(uint32_t));
 
   ConSanPatchInfo dispatcher_info;
   dispatcher_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
   dispatcher_info.anchor_offset = group.front()->candidate->anchor();
   dispatcher_info.trampoline_offset = dispatcher_offset;
   dispatcher_info.trampoline_size =
-      static_cast<uint32_t>(dispatcher_words->size() * sizeof(uint32_t));
+      static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
   if (router.publish_entry_island_offset)
     dispatcher_info.moi_dense_entry_island_offset = island_offset;
   dispatcher_info.owner_descriptor_file_offsets =
@@ -467,18 +513,41 @@ bool emit_moi_dense_relay(const MoiDenseRelayPlan &plan, rj_code_arch_t arch,
     std::memcpy(new_text.data() + entry_host->second.host_offset, &*host_entry, sizeof(uint32_t));
   }
 
-  for (const MoiDenseRelayRoute &route : routes) {
-    if (route.anchor_size == 0u)
-      continue;
-    const auto anchor_words = build_moi_dense_relay_anchor(
-        route, ConSanDirectCallForm::SCallI64, key_sgpr,
-        call_return_sgpr.value_or(0u), explicit_key, key_encodes_scc,
-        /*clone_local_routes=*/false, island_offset, arch);
-    if (!anchor_words || route.anchor > new_text.size() ||
-        route.anchor_size > new_text.size() - route.anchor) {
+  for (size_t route = 0; route < group.size(); ++route) {
+    const ConSanMoiCandidate &candidate = *group[route]->candidate;
+    const uint64_t branch_offset = candidate.anchor() + (explicit_key ? sizeof(uint32_t) : 0u);
+    const auto call_delta = compute_sopp_branch_simm16(branch_offset, island_offset);
+    const std::optional<uint32_t> call =
+        !call_delta || !call_return_sgpr
+            ? std::nullopt
+            : instrumentation::build_s_call_i64(*call_return_sgpr, *call_delta, arch);
+    if ((!explicit_key && !call) ||
+        candidate.size() < (explicit_key ? 2u : 1u) * sizeof(uint32_t) ||
+        candidate.anchor() > new_text.size() ||
+        candidate.size() > new_text.size() - candidate.anchor()) {
       return fail("could not encode a dense call anchor");
     }
-    std::memcpy(new_text.data() + route.anchor, anchor_words->data(), route.anchor_size);
+    std::vector<uint32_t> anchor_words(candidate.size() / sizeof(uint32_t), build_s_nop(0, arch));
+    if (explicit_key) {
+      if (!call_delta || route >= 64u)
+        return fail("could not encode an explicit dense branch key");
+      if (key_encodes_scc) {
+        const uint16_t route_key = static_cast<uint16_t>(2u * (route + 1u));
+        const auto tagged_key = instrumentation::build_s_cselect_b32(
+            key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_key + 1u)),
+            scalar_positive_inline_u32(route_key), arch);
+        if (!tagged_key)
+          return fail("could not encode a tagged dense branch key");
+        anchor_words[0] = *tagged_key;
+      } else {
+        anchor_words[0] = build_s_mov_b32(
+            key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route + 1u)), arch);
+      }
+      anchor_words[1] = build_s_branch(*call_delta, arch);
+    } else {
+      anchor_words.front() = *call;
+    }
+    std::memcpy(new_text.data() + candidate.anchor(), anchor_words.data(), candidate.size());
   }
   return true;
 }
