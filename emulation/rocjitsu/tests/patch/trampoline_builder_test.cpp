@@ -329,7 +329,7 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
 //==============================================================================
 
 // The only verified convention today; its link pair is s[30:31].
-constexpr ProbeCallingConvention kNoArgsCc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+constexpr ProbeAbi kProbeAbi = *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
 
 RegisterSet make_sgpr_set(std::initializer_list<uint16_t> indices) {
   RegisterSet set;
@@ -356,7 +356,7 @@ bool has_sgpr(const RegisterSet &set, uint16_t index) {
 TEST(TrampolineBuilderPlan, LiveLinkPairFails) {
   TrampolinePlan plan;
   std::string err;
-  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({30}),
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({30}),
                                                   /*probe_body_clobbers=*/{}, &err));
   EXPECT_NE(err.find("s[30:31]"), std::string::npos);
   EXPECT_FALSE(plan.is_probe_call); // plan left unmodified on failure.
@@ -367,7 +367,7 @@ TEST(TrampolineBuilderPlan, LiveLinkPairFails) {
 TEST(TrampolineBuilderPlan, NoDeadTargetPairFails) {
   TrampolinePlan plan;
   std::string err;
-  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, all_sgprs_live_except({30, 31}),
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, all_sgprs_live_except({30, 31}),
                                                   /*probe_body_clobbers=*/{}, &err));
   EXPECT_NE(err.find("target"), std::string::npos);
 }
@@ -379,7 +379,7 @@ TEST(TrampolineBuilderPlan, NoSccTempFails) {
   std::string err;
   // s[0:1] is a dead even pair (the target); s30/s31 are the reserved link pair;
   // every other SGPR is live, so no SCC temp remains.
-  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc,
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi,
                                                   all_sgprs_live_except({0, 1, 30, 31}),
                                                   /*probe_body_clobbers=*/{}, &err));
   EXPECT_NE(err.find("SCC"), std::string::npos);
@@ -395,7 +395,7 @@ TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
   std::string err;
   // Same dead set as NoSccTempFails: only the link pair s[30:31] and the target
   // pair s[0:1] are dead; nothing remains for an SCC temp.
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc,
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi,
                                                  all_sgprs_live_except({0, 1, 30, 31}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
@@ -421,7 +421,7 @@ TEST(TrampolineBuilderPlan, TempPastKernelAllocationFailsClosed) {
   TrampolinePlan plan;
   plan.kernel_sgpr_count = 32; // kernel owns s0..s31 only.
   std::string err;
-  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live,
                                                   /*probe_body_clobbers=*/{}, &err));
   EXPECT_NE(err.find("target"), std::string::npos);
   EXPECT_FALSE(plan.is_probe_call); // plan left unmodified on failure.
@@ -437,7 +437,7 @@ TEST(TrampolineBuilderPlan, TempAboveKernelLineAllowedWithoutCap) {
 
   TrampolinePlan plan; // default kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS.
   std::string err;
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live,
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
   EXPECT_GE(plan.target_pair_base, 32u); // absent from a 32-SGPR kernel.
@@ -449,7 +449,7 @@ TEST(TrampolineBuilderPlan, SelectsDeadResourcesAndReportsClobbers) {
   std::string err;
   // s4 live; everything else dead. Target pair and SCC temp must avoid s4 and the
   // link pair s[30:31].
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err));
   EXPECT_TRUE(plan.is_probe_call);
   EXPECT_EQ(plan.link_pair_base, 30u);
@@ -485,7 +485,7 @@ TEST(TrampolineBuilderPlan, SccTempAvoidsProbeBodyClobbers) {
   // on s4, the only dead SGPR that survives the call.
   RegisterSet live = all_sgprs_live_except({0, 1, 2, 3, 4, 30, 31});
   RegisterSet probe_clobbers = make_sgpr_set({2, 3});
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live, probe_clobbers, &err));
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, probe_clobbers, &err));
   EXPECT_EQ(plan.target_pair_base, 0u);
   EXPECT_EQ(plan.scc_temp, 4u);
 }
@@ -495,26 +495,38 @@ TEST(TrampolineBuilderPlan, SccTempAvoidsProbeBodyClobbers) {
 TEST(TrampolineBuilderPlan, BeforeWordCountReflectsEnvelope) {
   TrampolinePlan with_scc;
   std::string err;
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(with_scc, kNoArgsCc, make_sgpr_set({4}),
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(with_scc, kProbeAbi, make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err));
   EXPECT_TRUE(with_scc.preserve_scc);
   EXPECT_EQ(with_scc.before_word_count, 8u);
 
   TrampolinePlan no_scc;
   no_scc.preserve_scc = false;
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(no_scc, kNoArgsCc, make_sgpr_set({4}),
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(no_scc, kProbeAbi, make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err));
   EXPECT_EQ(no_scc.before_word_count, 6u);
 }
 
-// An unknown calling convention has no link pair, so planning fails closed.
-TEST(TrampolineBuilderPlan, UnknownCcFails) {
+// An ABI that never came out of derive_probe_abi() names no link pair worth
+// trusting, so planning fails closed. Both disqualifiers are exercised: the
+// planner must consult the whole predicate, not just the convention.
+TEST(TrampolineBuilderPlan, DefaultConstructedAbiFails) {
   TrampolinePlan plan;
   std::string err;
-  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, ProbeCallingConvention::Unknown,
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, ProbeAbi{},
                                                   /*live_at_anchor=*/{}, /*probe_body_clobbers=*/{},
                                                   &err));
-  EXPECT_NE(err.find("calling convention"), std::string::npos);
+  EXPECT_NE(err.find("probe ABI"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+TEST(TrampolineBuilderPlan, OddLinkPairBaseFails) {
+  TrampolinePlan plan;
+  std::string err;
+  const ProbeAbi odd{.cc = ProbeCallingConvention::AmdGpuFuncReturnS30S31, .link_pair_base = 31};
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, odd, /*live_at_anchor=*/{},
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("probe ABI"), std::string::npos);
   EXPECT_FALSE(plan.is_probe_call);
 }
 
@@ -543,7 +555,7 @@ TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2) {
   plan.return_target = plan.anchor_offset + plan.original_size;
   plan.probe_target_offset = 0x3000;
   std::string err;
-  EXPECT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+  EXPECT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
   return plan;
@@ -583,11 +595,9 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
   const uint32_t swappc = w[d + 6];
   EXPECT_EQ(decode_sop1_op(swappc), sop1_op_swappc_b64(plan.arch));
 
-  // sdst is the link pair; it must equal the pair link_pair_for(cc) reports, the
-  // same pair the probe's s_setpc_b64 returns through.
-  const std::optional<uint16_t> cc_link = link_pair_for(kNoArgsCc);
-  ASSERT_TRUE(cc_link.has_value());
-  EXPECT_EQ(decode_sop1_sdst(swappc), *cc_link);
+  // sdst is the link pair; it must equal the pair the ABI names, the same pair
+  // the probe's s_setpc_b64 returns through.
+  EXPECT_EQ(decode_sop1_sdst(swappc), kProbeAbi.link_pair_base);
   EXPECT_EQ(decode_sop1_sdst(swappc), plan.link_pair_base);
   // ssrc0 is the materialized target pair.
   EXPECT_EQ(decode_sop1_ssrc0(swappc), plan.target_pair_base);
@@ -632,7 +642,7 @@ TEST(TrampolineBuilderEmit, NoSccPreserveShrinksEnvelope) {
   // Re-plan without SCC preservation so before_word_count is consistent.
   std::string err;
   plan.preserve_scc = false;
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, make_sgpr_set({4}),
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({4}),
                                                  /*probe_body_clobbers=*/{}, &err));
   ASSERT_EQ(plan.before_word_count, 6u);
 

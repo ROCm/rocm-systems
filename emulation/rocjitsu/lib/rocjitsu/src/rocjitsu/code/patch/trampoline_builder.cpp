@@ -179,24 +179,23 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   return out;
 }
 
-bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConvention cc,
+bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
   // The link pair is whatever the probe's calling convention returns through,
-  // so the call site and the probe body agree on one pair. An unknown
-  // convention cannot be called.
-  const std::optional<uint16_t> link_base = link_pair_for(cc);
-  if (!link_base) {
-    report(error_out, "probe-call resource planning: unknown probe calling convention; cannot "
-                      "derive the return-link pair");
+  // so the call site and the probe body agree on one pair. An ABI that could
+  // not have come from derive_probe_abi() names no pair worth trusting.
+  if (!is_valid_probe_abi(abi)) {
+    report(error_out, "probe-call resource planning: unusable probe ABI; cannot derive the "
+                      "return-link pair");
     return false;
   }
-  const uint16_t kLinkPairBase = *link_base;
+  const uint16_t kLinkPairBase = abi.link_pair_base;
 
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
-  if (live_at_anchor.intersects(RegisterRef{RegClass::SGPR, kLinkPairBase, 2})) {
+  if (live_at_anchor.intersects(probe_link_pair(abi))) {
     report(error_out, ("probe-call resource planning: return-link pair s[" +
                        std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
                        "] is live at the anchor; cannot yet save a live link pair")
@@ -205,7 +204,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   }
 
   RegisterSet link_pair;
-  link_pair.expand(RegisterRef{RegClass::SGPR, kLinkPairBase, 2});
+  link_pair.expand(probe_link_pair(abi));
 
   // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
   // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel

@@ -90,7 +90,7 @@ TEST(ProbeFixture, NopProbeBuildsCallable) {
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_nop_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words.size(), resolved->body_size / sizeof(uint32_t));
   EXPECT_EQ(callable->output_text_offset, 0u);
 }
