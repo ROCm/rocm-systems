@@ -427,7 +427,9 @@ struct MoiKernelResourceContext {
   bool can_move_empty_accumulator_boundary = false;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
+  uint16_t initialized_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
+  std::optional<bool> uses_dynamic_stack;
   bool has_indirect_sgpr_access = false;
   bool sgpr_reference_coverage_complete = false;
   bool has_indirect_vgpr_access = false;
@@ -979,7 +981,16 @@ struct MoiResourcePlanningState {
       }
       stored.current_sgpr_count =
           static_cast<uint16_t>(descriptor_sgpr_allocation_count(*descriptor, arch));
+      stored.initialized_sgpr_count =
+          static_cast<uint16_t>(moi_descriptor_user_sgpr_count(*descriptor) +
+                                moi_descriptor_system_sgpr_count(*descriptor));
       stored.original_private_segment_size = descriptor->private_segment_fixed_size;
+      stored.uses_dynamic_stack = kernel.uses_dynamic_stack;
+      if (!stored.uses_dynamic_stack &&
+          AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u) {
+        stored.uses_dynamic_stack = false;
+      }
       stored.descriptor_valid = true;
     }
     context_by_descriptor.reserve(contexts.size());
@@ -1352,6 +1363,9 @@ struct MoiScalarOwnerContextResolution {
   std::vector<const MoiKernelResourceContext *> contexts;
   std::vector<consan_detail::ScalarOwnerContextSummary> summaries;
   uint32_t tail_floor = 0;
+  uint32_t initialized_sgpr_count = 0;
+  bool all_use_dynamic_stack = true;
+  bool all_use_fixed_stack = true;
 };
 
 [[nodiscard]] std::optional<MoiScalarOwnerContextResolution>
@@ -1372,6 +1386,12 @@ resolve_moi_scalar_owner_contexts(const MoiResourcePlanningState &state,
   for (size_t context_index : resolved->context_indices) {
     result.contexts.push_back(&state.contexts[context_index]);
     result.summaries.push_back(summaries[context_index]);
+    const MoiKernelResourceContext &context = state.contexts[context_index];
+    result.initialized_sgpr_count =
+        std::max<uint32_t>(result.initialized_sgpr_count, context.initialized_sgpr_count);
+    result.all_use_dynamic_stack &= context.uses_dynamic_stack.value_or(false);
+    result.all_use_fixed_stack &=
+        context.uses_dynamic_stack.has_value() && !*context.uses_dynamic_stack;
   }
   result.tail_floor = resolved->tail_floor;
   return result;
@@ -1442,6 +1462,10 @@ collect_moi_scalar_owner_contexts(std::span<const MoiScalarOwnerContextGroup> gr
       result.contexts.push_back(context);
       result.summaries.push_back(group.owners.summaries[index]);
       result.tail_floor = std::max<uint32_t>(result.tail_floor, group.owners.tail_floor);
+      result.initialized_sgpr_count =
+          std::max(result.initialized_sgpr_count, group.owners.initialized_sgpr_count);
+      result.all_use_dynamic_stack &= group.owners.all_use_dynamic_stack;
+      result.all_use_fixed_stack &= group.owners.all_use_fixed_stack;
     }
   }
   return result;
@@ -3124,7 +3148,6 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     const MoiResourcePlanningState &planning_state, bool dispatch_only = false) {
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
       options.owner_transient_sgprs;
-  const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   const ConSanRequest &request = problem.request();
   const BoundRuntimeResources &resources = problem.resources();
@@ -3233,15 +3256,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     }
     if (!selected.valid && inline_layout && capability_target &&
         consan_address_free_private_limit(arch)) {
-      uint32_t initialized_end = 0u;
-      for (uint64_t owner : owners) {
-        const auto descriptor = read_kernel_descriptor(bytes, owner);
-        if (!descriptor)
-          continue;
-        initialized_end =
-            std::max<uint32_t>(initialized_end, moi_descriptor_user_sgpr_count(*descriptor) +
-                                                    moi_descriptor_system_sgpr_count(*descriptor));
-      }
+      const uint32_t initialized_end = component_contexts->initialized_sgpr_count;
       MoiScalarPlacementDomain component_domain(arch, limit, component_contexts->summaries,
                                                 &unavailable);
       component_domain.occupy(options.moi_owner_sgpr.base(), 1u);
@@ -3303,38 +3318,11 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       // while establishing their private frame. Every choice stays inside
       // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
-      const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) -> std::optional<bool> {
-        const ConSanKernelInfo *kernel =
-            problem.inventory().find_kernel_by_descriptor(descriptor_offset);
-        if (kernel == nullptr)
-          return std::nullopt;
-        if (kernel->uses_dynamic_stack)
-          return kernel->uses_dynamic_stack;
-        const auto descriptor = read_kernel_descriptor(state.bytes, descriptor_offset);
-        if (!descriptor)
-          return std::nullopt;
-        // A runtime-sized frame requires the private-segment ABI. Its absence
-        // is an architectural fixed-stack proof even when older metadata omits
-        // the optional stack marker. A scratch-enabled owner without a marker
-        // remains unknown and must fail closed.
-        if (AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
-                            kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u) {
-          return false;
-        }
-        return std::nullopt;
-      };
-      const bool all_owners_use_dynamic_stack =
-          consan_uses_gfx12_encoding(arch) && !owners.empty() &&
-          std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            return owner_uses_dynamic_stack(descriptor_offset).value_or(false);
-          });
-      const bool all_owners_use_fixed_stack =
-          consan_uses_gfx12_encoding(arch) && !owners.empty() &&
-          std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const std::optional<bool> uses_dynamic_stack =
-                owner_uses_dynamic_stack(descriptor_offset);
-            return uses_dynamic_stack.has_value() && !*uses_dynamic_stack;
-          });
+      const bool all_owners_use_dynamic_stack = consan_uses_gfx12_encoding(arch) &&
+                                                !owners.empty() &&
+                                                component_contexts->all_use_dynamic_stack;
+      const bool all_owners_use_fixed_stack = consan_uses_gfx12_encoding(arch) && !owners.empty() &&
+                                              component_contexts->all_use_fixed_stack;
       // Fixed-stack RDNA4-family owners can return through direct SOPP relay
       // hops without borrowing any live-through router SGPR. Prefer that
       // stronger contract even when a compact indirect router happens to fit:
@@ -3434,17 +3422,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     if (!selected.valid && supports_compact_scalar_spill && consan_arch_is_cdna(arch) &&
         consan_address_free_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
-          !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const ConSanKernelInfo *kernel =
-                problem.inventory().find_kernel_by_descriptor(descriptor_offset);
-            if (kernel != nullptr && kernel->uses_dynamic_stack)
-              return !*kernel->uses_dynamic_stack;
-            const auto descriptor = read_kernel_descriptor(state.bytes, descriptor_offset);
-            if (!descriptor)
-              return false;
-            return AMDHSA_BITS_GET(descriptor->compute_pgm_rsrc2,
-                                   kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) == 0u;
-          });
+          !owners.empty() && component_contexts->all_use_fixed_stack;
       uint16_t allocated_limit = limit;
       for (const auto &summary : component_contexts->summaries)
         allocated_limit = std::min(allocated_limit, summary.current_sgpr_count);
@@ -3751,23 +3729,14 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
           return !candidate.container.is_kernel() && (candidate.kind == ConSanLdsAccessKind::Read ||
                                                       candidate.kind == ConSanLdsAccessKind::Write);
         });
-    uint32_t initialized_end = 0u;
-    for (const ConSanCandidateResourcePlan &plan : site_plans) {
-      for (uint64_t offset : plan.owner_descriptor_file_offsets) {
-        if (const auto descriptor = read_kernel_descriptor(state.bytes, offset)) {
-          initialized_end = std::max<uint32_t>(initialized_end,
-                                               moi_descriptor_user_sgpr_count(*descriptor) +
-                                                   moi_descriptor_system_sgpr_count(*descriptor));
-        }
-      }
-    }
     MoiScalarPlacementDomain domain(arch, ordinary_sgpr_limit, scalar_contexts.summaries,
                                     &unavailable);
     domain.occupy(options.moi_owner_sgpr.base(), 1u);
     domain.occupy(options.moi_dispatch_identity.sgpr(), kMoiDispatchStateSgprCount);
     if (options.moi_dynamic_stack_spill)
       domain.occupy_dynamic_stack_state();
-    const auto spill = domain.select_first(initialized_end, count, 2u, /*require_dead=*/false);
+    const auto spill = domain.select_first(scalar_contexts.initialized_sgpr_count, count, 2u,
+                                           /*require_dead=*/false);
     const auto visible = spill ? domain.select_first(first, 1u) : std::nullopt;
     const auto pc = spill ? domain.select_first(0u, 2u, 2u) : std::nullopt;
     auto call_return = dense_router && pc ? domain.select_first(first, 2u, 2u) : pc;
