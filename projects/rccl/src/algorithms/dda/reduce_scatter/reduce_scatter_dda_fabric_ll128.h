@@ -74,7 +74,8 @@ __launch_bounds__(512)
                                               uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                               int epochLen, // number of cells in epochDev
                                               size_t slicesTotal, // slices per shard this call uses
-                                              size_t bankSize) { // scratch bank size (from host)
+                                              size_t bankSize, // scratch bank size (from host)
+                                              const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -147,7 +148,10 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane);
+      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, abortFlag)) {
+        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+        return;
+      }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
