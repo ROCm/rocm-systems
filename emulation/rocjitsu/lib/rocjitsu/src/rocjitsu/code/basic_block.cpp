@@ -3,8 +3,8 @@
 
 #include "rocjitsu/code/basic_block.h"
 
-#include "rocjitsu/analysis/control_flow.h"
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/control_flow.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
