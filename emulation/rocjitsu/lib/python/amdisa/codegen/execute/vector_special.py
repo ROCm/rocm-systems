@@ -736,22 +736,19 @@ def gen_vector_mad_64_32(
             f'    int64_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
         L.append(
-            f'    int64_t s2 = std::bit_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane));'
+            f'    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);'
         )
-        L.append('    __int128 wide = static_cast<__int128>(s0) * s1 + s2;')
-        L.append('    uint64_t result = static_cast<uint64_t>(wide);')
+        L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
+        L.append('    uint64_t result = product + s2;')
+        if writes_carry or integer_clamp:
+            L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append(
-                '    if (wide < std::numeric_limits<int64_t>::min() || wide > std::numeric_limits<int64_t>::max())'
-            )
+            L.append('    if (overflow)')
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
-            L.append('    if (inst_.clamp) {')
+            L.append('    if (inst_.clamp && overflow) {')
             L.append(
-                '      if (wide < std::numeric_limits<int64_t>::min()) result = std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min());'
-            )
-            L.append(
-                '      else if (wide > std::numeric_limits<int64_t>::max()) result = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());'
+                '      result = (product & (1ULL << 63)) ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min()) : static_cast<uint64_t>(std::numeric_limits<int64_t>::max());'
             )
             L.append('    }')
         L.append(
@@ -767,16 +764,16 @@ def gen_vector_mad_64_32(
         L.append(
             f'    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64({src[2]}, lane);'
         )
-        L.append(
-            '    unsigned __int128 wide = static_cast<unsigned __int128>(s0) * s1 + s2;'
-        )
-        L.append('    uint64_t result = static_cast<uint64_t>(wide);')
+        L.append('    uint64_t product = s0 * s1;')
+        L.append('    uint64_t result = product + s2;')
+        if writes_carry or integer_clamp:
+            L.append('    bool overflow = result < product;')
         if writes_carry:
-            L.append('    if (wide > std::numeric_limits<uint64_t>::max())')
+            L.append('    if (overflow)')
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
             L.append(
-                '    if (inst_.clamp && wide > std::numeric_limits<uint64_t>::max()) result = std::numeric_limits<uint64_t>::max();'
+                '    if (inst_.clamp && overflow) result = std::numeric_limits<uint64_t>::max();'
             )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane64({dst[0]}, lane, result);'

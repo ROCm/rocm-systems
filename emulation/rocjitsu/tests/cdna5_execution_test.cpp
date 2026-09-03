@@ -473,8 +473,9 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
                               (static_cast<uint64_t>(cu->read_vgpr(base + 5, 0)) << 32);
       EXPECT_EQ(result, test.expected)
           << "signed " << test.is_signed << " co " << test.writes_carry << " dpp " << dpp;
-      if (test.writes_carry)
+      if (test.writes_carry) {
         EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2) & 1u, test.expected_carry);
+      }
     }
   }
 

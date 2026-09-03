@@ -13200,16 +13200,16 @@ inline void execute_v_mad_co_i64_i32_vop3([[maybe_unused]] Inst &inst,
       continue;
     int64_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     int64_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    int64_t s2 = std::bit_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane));
-    __int128 wide = static_cast<__int128>(s0) * s1 + s2;
-    uint64_t result = static_cast<uint64_t>(wide);
-    if (wide < std::numeric_limits<int64_t>::min() || wide > std::numeric_limits<int64_t>::max())
+    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
+    uint64_t product = static_cast<uint64_t>(s0 * s1);
+    uint64_t result = product + s2;
+    bool overflow = amdgpu::signed_add_overflows(product, s2);
+    if (overflow)
       carry |= 1ULL << lane;
-    if (inst.inst_.clamp) {
-      if (wide < std::numeric_limits<int64_t>::min())
-        result = std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min());
-      else if (wide > std::numeric_limits<int64_t>::max())
-        result = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    if (inst.inst_.clamp && overflow) {
+      result = (product & (1ULL << 63))
+                   ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min())
+                   : static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     }
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
@@ -13228,11 +13228,12 @@ inline void execute_v_mad_co_u64_u32_vop3([[maybe_unused]] Inst &inst,
     uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
-    unsigned __int128 wide = static_cast<unsigned __int128>(s0) * s1 + s2;
-    uint64_t result = static_cast<uint64_t>(wide);
-    if (wide > std::numeric_limits<uint64_t>::max())
+    uint64_t product = s0 * s1;
+    uint64_t result = product + s2;
+    bool overflow = result < product;
+    if (overflow)
       carry |= 1ULL << lane;
-    if (inst.inst_.clamp && wide > std::numeric_limits<uint64_t>::max())
+    if (inst.inst_.clamp && overflow)
       result = std::numeric_limits<uint64_t>::max();
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
@@ -13377,16 +13378,16 @@ inline void execute_v_mad_i64_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
       continue;
     int64_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     int64_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-    int64_t s2 = std::bit_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane));
-    __int128 wide = static_cast<__int128>(s0) * s1 + s2;
-    uint64_t result = static_cast<uint64_t>(wide);
-    if (wide < std::numeric_limits<int64_t>::min() || wide > std::numeric_limits<int64_t>::max())
+    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
+    uint64_t product = static_cast<uint64_t>(s0 * s1);
+    uint64_t result = product + s2;
+    bool overflow = amdgpu::signed_add_overflows(product, s2);
+    if (overflow)
       carry |= 1ULL << lane;
-    if (inst.inst_.clamp) {
-      if (wide < std::numeric_limits<int64_t>::min())
-        result = std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min());
-      else if (wide > std::numeric_limits<int64_t>::max())
-        result = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    if (inst.inst_.clamp && overflow) {
+      result = (product & (1ULL << 63))
+                   ? std::bit_cast<uint64_t>(std::numeric_limits<int64_t>::min())
+                   : static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     }
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }
@@ -13646,11 +13647,12 @@ inline void execute_v_mad_u64_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
     uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
-    unsigned __int128 wide = static_cast<unsigned __int128>(s0) * s1 + s2;
-    uint64_t result = static_cast<uint64_t>(wide);
-    if (wide > std::numeric_limits<uint64_t>::max())
+    uint64_t product = s0 * s1;
+    uint64_t result = product + s2;
+    bool overflow = result < product;
+    if (overflow)
       carry |= 1ULL << lane;
-    if (inst.inst_.clamp && wide > std::numeric_limits<uint64_t>::max())
+    if (inst.inst_.clamp && overflow)
       result = std::numeric_limits<uint64_t>::max();
     sdwa::write_lane64<false>(inst, wf, inst.vdst, lane, result);
   }

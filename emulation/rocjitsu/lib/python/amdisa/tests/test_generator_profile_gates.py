@@ -1754,8 +1754,8 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     body = gen_vector_mad_64_32(['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'u64')
 
     assert 'uint64_t carry = 0;' in body
-    assert 'unsigned __int128 wide' in body
-    assert 'if (wide > std::numeric_limits<uint64_t>::max())' in body
+    assert 'uint64_t product = s0 * s1;' in body
+    assert 'bool overflow = result < product;' in body
     assert 'carry |= 1ULL << lane;' in body
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
     assert 'wf.set_vcc' not in body
@@ -1784,13 +1784,15 @@ def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
         integer_clamp=True,
     )
 
-    assert 'unsigned __int128 wide' in unsigned
-    assert 'inst_.clamp && wide > std::numeric_limits<uint64_t>::max()' in unsigned
-    assert unsigned.index('if (wide >') < unsigned.index('if (inst_.clamp')
-    assert '__int128 wide' in signed
-    assert 'wide < std::numeric_limits<int64_t>::min()' in signed
-    assert 'if (inst_.clamp)' in signed
-    assert signed.index('carry |= 1ULL << lane') < signed.index('if (inst_.clamp)')
+    assert 'bool overflow = result < product;' in unsigned
+    assert 'inst_.clamp && overflow' in unsigned
+    assert unsigned.index('carry |= 1ULL << lane') < unsigned.index('inst_.clamp')
+    assert 'amdgpu::signed_add_overflows(product, s2)' in signed
+    assert 'inst_.clamp && overflow' in signed
+    assert '(product & (1ULL << 63))' in signed
+    assert signed.index('carry |= 1ULL << lane') < signed.index('inst_.clamp')
+    assert '__int128' not in unsigned
+    assert '__int128' not in signed
 
     policy = Cdna4Profile().integer_clamp_dtypes
     assert policy['V_MAD_U64_U32'] == 'u64'
@@ -4159,7 +4161,8 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
         ('V_MAD_CO_I64_I32', 'VOP3_SDST_ENC', 'commit_result'),
     ):
         body = generated_body(name, enc_name, result_writer=result_writer)
-        assert '__int128 wide' in body
+        assert 'bool overflow' in body
+        assert '__int128' not in body
         assert 'inst_.clamp' in body
 
     for name, helper in (
