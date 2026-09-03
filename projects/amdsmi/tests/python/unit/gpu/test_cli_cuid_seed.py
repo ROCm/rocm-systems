@@ -263,7 +263,7 @@ class TestCuidSeedLengthIsEnforced(_CuidSeedTestBase):
         # against a command that refused everything.
         _source, _out, _err = self._provision(SEED_32)
         self.assertEqual(self.set_calls, [SEED_32])
-        self.assertEqual(self.logger.output["cuid_seed_provisioned"], True)
+        self.assertEqual(self.logger.output["seed_provisioned"], True)
 
 
 class TestCuidSeedNeverReachesOutput(_CuidSeedTestBase):
@@ -316,10 +316,8 @@ class TestCuidSeedNeverReachesOutput(_CuidSeedTestBase):
         # "nothing was leaked" is trivially true of a command that prints
         # nothing. These two keys, and no third one carrying the secret.
         self._provision(SEED_32)
-        self.assertEqual(
-            sorted(self.logger.output), ["cuid_seed_fingerprint", "cuid_seed_provisioned"]
-        )
-        self.assertEqual(self.logger.output["cuid_seed_fingerprint"], PROVISIONED_FINGERPRINT)
+        self.assertEqual(sorted(self.logger.output), ["seed_fingerprint", "seed_provisioned"])
+        self.assertEqual(self.logger.output["seed_fingerprint"], PROVISIONED_FINGERPRINT)
 
 
 class TestCuidSeedLengthEnforcedInTheBinding(unittest.TestCase):
