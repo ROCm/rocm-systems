@@ -80,7 +80,8 @@ struct cache_policy
         constexpr const char* COMPONENT        = "";
         constexpr const char* BLOCK            = "";
         constexpr const char* EXPRESSION       = "";
-        constexpr const char* TARGET_ARCH      = "NIC";
+        // NOLINTNEXTLINE(readability-identifier-naming)
+        constexpr const char* TARGET_ARCH = "NIC";
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,

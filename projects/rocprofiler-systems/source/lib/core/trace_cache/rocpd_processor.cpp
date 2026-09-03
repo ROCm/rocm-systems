@@ -1267,15 +1267,15 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        constexpr std::array<agent_type, 3> known_agent_types = {
+        constexpr std::array<agent_type, 3> k_known_agent_types = {
             agent_type::GPU,
             agent_type::CPU,
             agent_type::NIC,
         };
 
         const bool agent_type_found =
-            std::find(known_agent_types.begin(), known_agent_types.end(),
-                      pmc_info.type) != known_agent_types.end();
+            std::ranges::find(k_known_agent_types, pmc_info.type) !=
+            k_known_agent_types.end();
 
         const agent* pmc_agent_ptr = nullptr;
         try

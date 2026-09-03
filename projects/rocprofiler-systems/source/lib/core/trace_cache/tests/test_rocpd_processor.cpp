@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -49,6 +50,104 @@ make_test_agent(agent_type type, size_t device_type_idx)
     result.logical_node_type_id = 0;
     result.device_type_index    = device_type_idx;
     return result;
+}
+
+struct nic_pmc_spec
+{
+    const char* name;
+    const char* units;
+};
+
+constexpr std::array k_nic_pmcs{
+    nic_pmc_spec{ .name = "nic_rx_ucast_pkts", .units = "packets" },
+    nic_pmc_spec{ .name = "nic_tx_ucast_pkts", .units = "packets" },
+    nic_pmc_spec{ .name = "nic_rx_cnp_pkts", .units = "packets" },
+    nic_pmc_spec{ .name = "nic_tx_cnp_pkts", .units = "packets" },
+    nic_pmc_spec{ .name = "nic_rx_ucast_bytes", .units = "bytes" },
+    nic_pmc_spec{ .name = "nic_tx_ucast_bytes", .units = "bytes" },
+    nic_pmc_spec{ .name = "nic_tx_rdma_ack_timeout", .units = "timeouts" },
+    nic_pmc_spec{ .name = "nic_resp_tx_pkt_seq_err", .units = "errors" },
+    nic_pmc_spec{ .name = "nic_req_rx_pkt_seq_err", .units = "errors" },
+    nic_pmc_spec{ .name = "nic_req_rx_impl_nak_seq_err", .units = "errors" },
+};
+
+template <typename PmcRow>
+void
+expect_nic_pmc_row(const PmcRow& pmc_row)
+{
+    EXPECT_EQ(pmc_row->target_arch, "NIC") << pmc_row->name;
+    ASSERT_NE(pmc_row->agent_info, nullptr) << pmc_row->name;
+    EXPECT_EQ(pmc_row->agent_info->agent_type, "NIC") << pmc_row->name;
+}
+
+template <typename PmcList>
+void
+expect_nic_pmc_rows(const PmcList& pmc_infos)
+{
+    for(const auto& pmc_row : pmc_infos)
+    {
+        expect_nic_pmc_row(pmc_row);
+    }
+}
+
+template <typename PmcList>
+void
+expect_nic_pmc_catalog(const PmcList& pmc_infos)
+{
+    ASSERT_EQ(pmc_infos.size(), k_nic_pmcs.size());
+
+    std::unordered_set<std::string> seen;
+    for(const auto& pmc_row : pmc_infos)
+    {
+        expect_nic_pmc_row(pmc_row);
+        seen.insert(pmc_row->name);
+    }
+
+    for(const auto& spec : k_nic_pmcs)
+    {
+        EXPECT_TRUE(seen.count(spec.name)) << "missing PMC " << spec.name;
+    }
+}
+
+template <typename PmcList>
+void
+expect_named_pmc_arch(const PmcList& pmc_infos, const char* name,
+                      const char* expected_arch, const char* expected_agent_type)
+{
+    bool found = false;
+    for(const auto& pmc_row : pmc_infos)
+    {
+        if(pmc_row->name != name)
+        {
+            continue;
+        }
+        found = true;
+        EXPECT_EQ(pmc_row->target_arch, expected_arch) << pmc_row->name;
+        ASSERT_NE(pmc_row->agent_info, nullptr) << pmc_row->name;
+        EXPECT_EQ(pmc_row->agent_info->agent_type, expected_agent_type) << pmc_row->name;
+    }
+    EXPECT_TRUE(found) << "missing PMC " << name;
+}
+
+bool
+agent_id_has_type(
+    const std::optional<profiler_hub::writer_types::agent_unique_id_t>& agent_id,
+    const char* expected_type, size_t expected_index)
+{
+    if(!agent_id.has_value())
+    {
+        ADD_FAILURE() << "expected agent_id";
+        return false;
+    }
+    const auto& uid = *agent_id;
+    if(!uid.agent_type.has_value())
+    {
+        ADD_FAILURE() << "expected agent_type";
+        return false;
+    }
+    EXPECT_EQ(*uid.agent_type, expected_type);
+    EXPECT_EQ(uid.type_index, expected_index);
+    return true;
 }
 }  // namespace
 
@@ -133,10 +232,7 @@ TEST(make_trace_env_test, with_agent_populates_agent_id)
 {
     auto env = make_trace_env_with_agent(1, 2, 3, make_test_agent(agent_type::GPU, 5));
 
-    ASSERT_TRUE(env.agent_id.has_value());
-    ASSERT_TRUE(env.agent_id->agent_type.has_value());
-    EXPECT_EQ(env.agent_id->agent_type.value(), "GPU");
-    EXPECT_EQ(env.agent_id->type_index, 5U);
+    ASSERT_TRUE(agent_id_has_type(env.agent_id, "GPU", 5));
     EXPECT_EQ(env.node_id.value(), 1U);
     EXPECT_EQ(env.process_id.value(), 2U);
     EXPECT_EQ(env.thread_id.value(), 3U);
@@ -146,10 +242,7 @@ TEST(make_trace_env_test, with_nic_agent_populates_agent_id)
 {
     auto env = make_trace_env_with_agent(1, 2, 3, make_test_agent(agent_type::NIC, 4));
 
-    ASSERT_TRUE(env.agent_id.has_value());
-    ASSERT_TRUE(env.agent_id->agent_type.has_value());
-    EXPECT_EQ(env.agent_id->agent_type.value(), "NIC");
-    EXPECT_EQ(env.agent_id->type_index, 4U);
+    ASSERT_TRUE(agent_id_has_type(env.agent_id, "NIC", 4));
 }
 
 TEST(make_trace_env_test, with_queue_stream_populates_all)
@@ -323,6 +416,55 @@ protected:
         info.node_id        = NODE_ID;
         info.process_id     = PID;
         m_writer->register_agent_info(info);
+    }
+
+    void register_pmc_info(const agent& agent_obj, const char* name,
+                           const char* target_arch, const char* units = "")
+    {
+        profiler_hub::writer_types::pmc_info_t pmc_info{};
+        pmc_info.unique_id.name     = name;
+        pmc_info.unique_id.agent_id = make_agent_uid(agent_obj);
+        pmc_info.symbol             = name;
+        pmc_info.description        = name;
+        pmc_info.target_arch        = target_arch;
+        pmc_info.units              = units;
+        pmc_info.value_type         = "ABS";
+        pmc_info.node_id            = NODE_ID;
+        pmc_info.process_id         = PID;
+        m_writer->register_pmc_info(pmc_info);
+    }
+
+    void insert_pmc_sample(const profiler_hub::writer_types::event_data_t&      event,
+                           const profiler_hub::writer_types::agent_unique_id_t& agent_uid,
+                           const char* pmc_name, const char* track_name, double value,
+                           size_t timestamp)
+    {
+        profiler_hub::writer_types::track_info_t track{};
+        track.name       = track_name;
+        track.node_id    = NODE_ID;
+        track.process_id = PID;
+        m_writer->register_track_info(track);
+
+        profiler_hub::writer_types::pmc_event_data_t pmc_data{};
+        pmc_data.event = event;
+        pmc_data.value = value;
+        profiler_hub::writer_types::sample_data_t sample{};
+        sample.timestamp = timestamp;
+        sample.track     = track;
+        pmc_data.sample  = sample;
+
+        profiler_hub::writer_types::pmc_info_unique_id_t uid{};
+        uid.name     = pmc_name;
+        uid.agent_id = agent_uid;
+        m_writer->insert_pmc_event_data(pmc_data, uid);
+    }
+
+    void register_nic_pmc_catalog()
+    {
+        for(const auto& spec : k_nic_pmcs)
+        {
+            register_pmc_info(nic_agent(), spec.name, "NIC", spec.units);
+        }
     }
 
     void register_queue_and_stream()
@@ -1184,14 +1326,14 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
     auto agent_uid = make_agent_uid(gpu_agent());
 
     auto register_pmc = [&](const char* name, const char* desc) {
-        profiler_hub::writer_types::pmc_info_t pi{};
-        pi.unique_id.name     = name;
-        pi.unique_id.agent_id = agent_uid;
-        pi.symbol             = name;
-        pi.description        = desc;
-        pi.node_id            = NODE_ID;
-        pi.process_id         = PID;
-        m_writer->register_pmc_info(pi);
+        profiler_hub::writer_types::pmc_info_t pmc_info{};
+        pmc_info.unique_id.name     = name;
+        pmc_info.unique_id.agent_id = agent_uid;
+        pmc_info.symbol             = name;
+        pmc_info.description        = desc;
+        pmc_info.node_id            = NODE_ID;
+        pmc_info.process_id         = PID;
+        m_writer->register_pmc_info(pmc_info);
     };
 
     register_pmc("gfx_busy", "GFX activity");
@@ -1234,11 +1376,11 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
     ASSERT_EQ(pmc_infos.size(), 3U);
 
     bool found_gfx = false, found_umc = false, found_temp = false;
-    for(const auto& pi : pmc_infos)
+    for(const auto& pmc_row : pmc_infos)
     {
-        if(pi->symbol == "gfx_busy") found_gfx = true;
-        if(pi->symbol == "umc_busy") found_umc = true;
-        if(pi->symbol == "gpu_temperature") found_temp = true;
+        if(pmc_row->symbol == "gfx_busy") found_gfx = true;
+        if(pmc_row->symbol == "umc_busy") found_umc = true;
+        if(pmc_row->symbol == "gpu_temperature") found_temp = true;
     }
     EXPECT_TRUE(found_gfx) << "gfx_busy PMC info not found";
     EXPECT_TRUE(found_umc) << "umc_busy PMC info not found";
@@ -1255,61 +1397,21 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
 TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 {
     register_base_metadata();
+    register_nic_agent();
 
-    auto nic = nic_agent();
+    const auto nic_uid = make_agent_uid(nic_agent());
+    const auto event   = make_event(0, 0, 0, "amd_smi_nic");
 
-    profiler_hub::writer_types::agent_info_t nic_info{};
-    nic_info.unique_id    = make_agent_uid(nic);
-    nic_info.name         = nic.name;
-    nic_info.model_name   = nic.model_name;
-    nic_info.vendor_name  = nic.vendor_name;
-    nic_info.product_name = nic.product_name;
-    nic_info.node_id      = NODE_ID;
-    nic_info.process_id   = PID;
-    m_writer->register_agent_info(nic_info);
+    constexpr double k_rx_ucast_bytes   = 1048576.0;
+    constexpr double k_tx_ucast_bytes   = 524288.0;
+    constexpr size_t k_sample_timestamp = 12000;
 
-    auto nic_uid = make_agent_uid(nic);
-
-    auto ev = make_event(0, 0, 0, "amd_smi_nic");
-
-    auto register_and_insert_nic_pmc = [&](const char* pmc_name, const char* track_name,
-                                           double value, size_t timestamp) {
-        profiler_hub::writer_types::pmc_info_t pi{};
-        pi.unique_id.name     = pmc_name;
-        pi.unique_id.agent_id = nic_uid;
-        pi.symbol             = pmc_name;
-        pi.description        = pmc_name;
-        pi.target_arch        = "NIC";
-        pi.node_id            = NODE_ID;
-        pi.process_id         = PID;
-        m_writer->register_pmc_info(pi);
-
-        profiler_hub::writer_types::track_info_t track{};
-        track.name       = track_name;
-        track.node_id    = NODE_ID;
-        track.process_id = PID;
-        m_writer->register_track_info(track);
-
-        profiler_hub::writer_types::pmc_event_data_t pmc_data{};
-        pmc_data.event = ev;
-        pmc_data.value = value;
-
-        profiler_hub::writer_types::sample_data_t sample{};
-        sample.timestamp = timestamp;
-        sample.track     = track;
-        pmc_data.sample  = sample;
-
-        profiler_hub::writer_types::pmc_info_unique_id_t uid{};
-        uid.name     = pmc_name;
-        uid.agent_id = nic_uid;
-
-        m_writer->insert_pmc_event_data(pmc_data, uid);
-    };
-
-    register_and_insert_nic_pmc("nic_rx_ucast_bytes", "ainic_rx_rdma_ucast_bytes",
-                                1048576.0, 12000);
-    register_and_insert_nic_pmc("nic_tx_ucast_bytes", "ainic_tx_rdma_ucast_bytes",
-                                524288.0, 12000);
+    register_pmc_info(nic_agent(), "nic_rx_ucast_bytes", "NIC");
+    register_pmc_info(nic_agent(), "nic_tx_ucast_bytes", "NIC");
+    insert_pmc_sample(event, nic_uid, "nic_rx_ucast_bytes", "ainic_rx_rdma_ucast_bytes",
+                      k_rx_ucast_bytes, k_sample_timestamp);
+    insert_pmc_sample(event, nic_uid, "nic_tx_ucast_bytes", "ainic_tx_rdma_ucast_bytes",
+                      k_tx_ucast_bytes, k_sample_timestamp);
 
     flush_and_open_reader();
 
@@ -1319,12 +1421,7 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 
     auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 2U);
-    for(const auto& pi : pmc_infos)
-    {
-        EXPECT_EQ(pi->target_arch, "NIC") << pi->name;
-        ASSERT_NE(pi->agent_info, nullptr) << pi->name;
-        EXPECT_EQ(pi->agent_info->agent_type, "NIC") << pi->name;
-    }
+    expect_nic_pmc_rows(pmc_infos);
 }
 
 // Mirrors tests/rocpd-validation-rules/ainic/ainic-rdma-rules.json: every
@@ -1333,61 +1430,9 @@ TEST_F(rocpd_write_read_test, nic_rdma_pmc_catalog_target_arch)
 {
     register_base_metadata();
     register_nic_agent();
-
-    const auto nic_uid = make_agent_uid(nic_agent());
-
-    struct nic_pmc_spec
-    {
-        const char* name;
-        const char* units;
-    };
-
-    constexpr nic_pmc_spec k_nic_pmcs[] = {
-        { "nic_rx_ucast_pkts", "packets" },
-        { "nic_tx_ucast_pkts", "packets" },
-        { "nic_rx_cnp_pkts", "packets" },
-        { "nic_tx_cnp_pkts", "packets" },
-        { "nic_rx_ucast_bytes", "bytes" },
-        { "nic_tx_ucast_bytes", "bytes" },
-        { "nic_tx_rdma_ack_timeout", "timeouts" },
-        { "nic_resp_tx_pkt_seq_err", "errors" },
-        { "nic_req_rx_pkt_seq_err", "errors" },
-        { "nic_req_rx_impl_nak_seq_err", "errors" },
-    };
-
-    for(const auto& spec : k_nic_pmcs)
-    {
-        profiler_hub::writer_types::pmc_info_t pi{};
-        pi.unique_id.name     = spec.name;
-        pi.unique_id.agent_id = nic_uid;
-        pi.symbol             = spec.name;
-        pi.description        = spec.name;
-        pi.target_arch        = "NIC";
-        pi.units              = spec.units;
-        pi.value_type         = "ABS";
-        pi.node_id            = NODE_ID;
-        pi.process_id         = PID;
-        m_writer->register_pmc_info(pi);
-    }
-
+    register_nic_pmc_catalog();
     flush_and_open_reader();
-
-    auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 10U);
-
-    std::unordered_set<std::string> seen;
-    for(const auto& pi : pmc_infos)
-    {
-        EXPECT_EQ(pi->target_arch, "NIC") << pi->name;
-        ASSERT_NE(pi->agent_info, nullptr) << pi->name;
-        EXPECT_EQ(pi->agent_info->agent_type, "NIC") << pi->name;
-        seen.insert(pi->name);
-    }
-
-    for(const auto& spec : k_nic_pmcs)
-    {
-        EXPECT_TRUE(seen.count(spec.name)) << "missing PMC " << spec.name;
-    }
+    expect_nic_pmc_catalog(m_reader->get_all_pmc_info());
 }
 
 TEST_F(rocpd_write_read_test, nic_pmc_info_invalid_target_arch_rejected)
@@ -1395,15 +1440,14 @@ TEST_F(rocpd_write_read_test, nic_pmc_info_invalid_target_arch_rejected)
     register_base_metadata();
     register_nic_agent();
 
-    profiler_hub::writer_types::pmc_info_t pi{};
-    pi.unique_id.name     = "nic_rx_ucast_bytes";
-    pi.unique_id.agent_id = make_agent_uid(nic_agent());
-    pi.symbol             = "nic_rx_ucast_bytes";
-    pi.target_arch        = "AINIC";
-    pi.node_id            = NODE_ID;
-    pi.process_id         = PID;
-
-    EXPECT_THROW(m_writer->register_pmc_info(pi), std::invalid_argument);
+    profiler_hub::writer_types::pmc_info_t pmc_info{};
+    pmc_info.unique_id.name     = "nic_rx_ucast_bytes";
+    pmc_info.unique_id.agent_id = make_agent_uid(nic_agent());
+    pmc_info.symbol             = "nic_rx_ucast_bytes";
+    pmc_info.target_arch        = "AINIC";
+    pmc_info.node_id            = NODE_ID;
+    pmc_info.process_id         = PID;
+    EXPECT_THROW(m_writer->register_pmc_info(pmc_info), std::invalid_argument);
 }
 
 TEST_F(rocpd_write_read_test, gpu_and_nic_pmc_keep_distinct_target_arch)
@@ -1412,47 +1456,15 @@ TEST_F(rocpd_write_read_test, gpu_and_nic_pmc_keep_distinct_target_arch)
     register_gpu_agent();
     register_nic_agent();
 
-    auto register_pmc = [&](const agent& agent_obj, const char* name,
-                            const char* target_arch) {
-        profiler_hub::writer_types::pmc_info_t pi{};
-        pi.unique_id.name     = name;
-        pi.unique_id.agent_id = make_agent_uid(agent_obj);
-        pi.symbol             = name;
-        pi.target_arch        = target_arch;
-        pi.node_id            = NODE_ID;
-        pi.process_id         = PID;
-        m_writer->register_pmc_info(pi);
-    };
-
-    register_pmc(gpu_agent(), "gfx_busy", "GPU");
-    register_pmc(nic_agent(), "nic_rx_ucast_bytes", "NIC");
+    register_pmc_info(gpu_agent(), "gfx_busy", "GPU");
+    register_pmc_info(nic_agent(), "nic_rx_ucast_bytes", "NIC");
 
     flush_and_open_reader();
 
     auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 2U);
-
-    bool found_gpu = false;
-    bool found_nic = false;
-    for(const auto& pi : pmc_infos)
-    {
-        if(pi->name == "gfx_busy")
-        {
-            found_gpu = true;
-            EXPECT_EQ(pi->target_arch, "GPU");
-            ASSERT_NE(pi->agent_info, nullptr);
-            EXPECT_EQ(pi->agent_info->agent_type, "GPU");
-        }
-        else if(pi->name == "nic_rx_ucast_bytes")
-        {
-            found_nic = true;
-            EXPECT_EQ(pi->target_arch, "NIC");
-            ASSERT_NE(pi->agent_info, nullptr);
-            EXPECT_EQ(pi->agent_info->agent_type, "NIC");
-        }
-    }
-    EXPECT_TRUE(found_gpu);
-    EXPECT_TRUE(found_nic);
+    expect_named_pmc_arch(pmc_infos, "gfx_busy", "GPU", "GPU");
+    expect_named_pmc_arch(pmc_infos, "nic_rx_ucast_bytes", "NIC", "NIC");
 }
 
 // ---------------------------------------------------------------------------
@@ -1478,14 +1490,14 @@ TEST_F(rocpd_write_read_test, handle_cpu_pmc_sample_pathway)
     auto agent_uid = make_agent_uid(cpu);
 
     auto register_pmc = [&](const char* name, const char* desc) {
-        profiler_hub::writer_types::pmc_info_t pi{};
-        pi.unique_id.name     = name;
-        pi.unique_id.agent_id = agent_uid;
-        pi.symbol             = name;
-        pi.description        = desc;
-        pi.node_id            = NODE_ID;
-        pi.process_id         = PID;
-        m_writer->register_pmc_info(pi);
+        profiler_hub::writer_types::pmc_info_t pmc_info{};
+        pmc_info.unique_id.name     = name;
+        pmc_info.unique_id.agent_id = agent_uid;
+        pmc_info.symbol             = name;
+        pmc_info.description        = desc;
+        pmc_info.node_id            = NODE_ID;
+        pmc_info.process_id         = PID;
+        m_writer->register_pmc_info(pmc_info);
     };
 
     register_pmc("process_page_rss", "Process RSS");
