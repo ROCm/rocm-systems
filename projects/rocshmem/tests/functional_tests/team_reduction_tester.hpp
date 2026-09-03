@@ -41,6 +41,8 @@ class TeamReductionTester : public Tester {
       std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
   virtual ~TeamReductionTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 

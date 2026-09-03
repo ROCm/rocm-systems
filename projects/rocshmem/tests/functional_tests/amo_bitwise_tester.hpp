@@ -36,6 +36,8 @@ class AMOBitwiseTester : public Tester {
   explicit AMOBitwiseTester(TesterArguments args);
   virtual ~AMOBitwiseTester();
 
+  std::string typeName() const override { return type_name<T>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 
