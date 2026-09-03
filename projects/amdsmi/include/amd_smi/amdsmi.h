@@ -1283,6 +1283,20 @@ typedef enum {
 } amdsmi_link_status_t;
 
 /**
+ * @brief Unified link topology information between two processors
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint64_t weight;                   //!< link weight
+  amdsmi_link_status_t link_status;  //!< link status, derived from link type (not live HW status)
+  amdsmi_link_type_t link_type;      //!< type of the link
+  uint8_t num_hops;                  //!< number of hops
+  uint8_t fb_sharing;                //!< 1 if P2P framebuffer access is available, 0 otherwise
+  uint32_t reserved[10];
+} amdsmi_link_topology_t;
+
+/**
  * @brief Link Metrics
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -6870,6 +6884,47 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
+
+/**
+ *  @brief Retrieve the unified link topology information between 2 GPUs
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Aggregates the link weight, status, type, abstracted hop count, and
+ *  framebuffer-sharing flag for the connection between @p processor_handle_src
+ *  and @p processor_handle_dst into a single ::amdsmi_link_topology_t, mirroring
+ *  the host interface.
+ *
+ *  @note @p num_hops is the abstracted topology step count from
+ *  ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
+ *
+ *  @note On @platform{gpu_bm_linux}, @p link_status is derived from the resolved
+ *  link type, not live hardware state. Every successful query resolves either
+ *  xGMI or PCIe, so a successful call always reports ::AMDSMI_LINK_STATUS_ENABLED.
+ *  ::AMDSMI_LINK_STATUS_DISABLED is only the initialized default returned with a
+ *  failure status; ::AMDSMI_LINK_STATUS_INACTIVE and ::AMDSMI_LINK_STATUS_ERROR
+ *  are host-only and never produced on baremetal.
+ *
+ *  @note @p fb_sharing is best-effort: a P2P query that cannot complete is
+ *  reported as 0, indistinguishable from a genuine "not shared" result.
+ *
+ *  @note link type, weight, and fb_sharing are queried sequentially, not
+ *  atomically, so a concurrent topology change may skew the returned fields.
+ *
+ *  @param[in] processor_handle_src the source processor handle
+ *
+ *  @param[in] processor_handle_dst the destination processor handle
+ *
+ *  @param[out] topology_info A pointer to an ::amdsmi_link_topology_t to
+ *  which the link topology information should be written.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info);
 
 /**
  *  @brief Retrieve the set of GPUs that are nearest to a given device

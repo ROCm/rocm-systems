@@ -18,6 +18,7 @@
 
 typedef struct {
   std::string type;
+  amdsmi_link_type_t link_type;
   uint64_t hops;
   uint64_t weight;
   bool accessible;
@@ -106,11 +107,34 @@ void TestHWTopologyRead::Run(void) {
     for (uint32_t dv_ind_dst = 0; dv_ind_dst < num_devices; dv_ind_dst++) {
       if (dv_ind_src == dv_ind_dst) {
         gpu_links[dv_ind_src][dv_ind_dst].type = "X";
+        gpu_links[dv_ind_src][dv_ind_dst].link_type = AMDSMI_LINK_TYPE_INTERNAL;
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
         gpu_links[dv_ind_src][dv_ind_dst].accessible = true;
         gpu_links[dv_ind_src][dv_ind_dst].cap = {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX,
                                                  UINT8_MAX};
+
+        // Self-pair: the unified API short-circuits a device to itself.
+        amdsmi_link_topology_t self_topology = {};
+        DISPLAY_AMDSMI_API("amdsmi_get_link_topology",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
+        err = amdsmi_get_link_topology(processor_handles_[dv_ind_src],
+                                       processor_handles_[dv_ind_dst], &self_topology);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+            return;
+          } else {
+            CHK_ERR_ASRT(err)
+          }
+        } else {
+          EXPECT_EQ(self_topology.link_type, AMDSMI_LINK_TYPE_INTERNAL);
+          EXPECT_EQ(self_topology.link_status, AMDSMI_LINK_STATUS_ENABLED);
+          EXPECT_EQ(self_topology.num_hops, 0);
+          EXPECT_EQ(self_topology.weight, static_cast<uint64_t>(0));
+          EXPECT_EQ(self_topology.fb_sharing, 1);
+        }
       } else {
         amdsmi_link_type_t type;
         DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type",
@@ -127,6 +151,7 @@ void TestHWTopologyRead::Run(void) {
             CHK_ERR_ASRT(err)
           }
         } else {
+          gpu_links[dv_ind_src][dv_ind_dst].link_type = type;
           switch (type) {
             case AMDSMI_LINK_TYPE_PCIE:
               gpu_links[dv_ind_src][dv_ind_dst].type = "PCIE";
@@ -196,6 +221,34 @@ void TestHWTopologyRead::Run(void) {
           } else {
             CHK_ERR_ASRT(err)
           }
+        }
+
+        // Unified query: cross-check amdsmi_get_link_topology against the components.
+        amdsmi_link_topology_t topology = {};
+        DISPLAY_AMDSMI_API("amdsmi_get_link_topology",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
+        err = amdsmi_get_link_topology(processor_handles_[dv_ind_src],
+                                       processor_handles_[dv_ind_dst], &topology);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+            return;
+          } else {
+            CHK_ERR_ASRT(err)
+          }
+        } else {
+          // The unified API must agree with the component queries it aggregates.
+          const gpu_link_t& link = gpu_links[dv_ind_src][dv_ind_dst];
+          EXPECT_EQ(topology.weight, link.weight);
+          EXPECT_EQ(topology.link_type, link.link_type);
+          EXPECT_EQ(topology.num_hops, link.hops > 255 ? 255 : static_cast<uint8_t>(link.hops));
+          EXPECT_EQ(topology.fb_sharing, link.accessible ? 1 : 0);
+          // A successful query resolves PCIe or xGMI, so status must be ENABLED.
+          // This fires if the code ever resolves another type on success.
+          EXPECT_TRUE(topology.link_type == AMDSMI_LINK_TYPE_PCIE ||
+                      topology.link_type == AMDSMI_LINK_TYPE_XGMI);
+          EXPECT_EQ(topology.link_status, AMDSMI_LINK_STATUS_ENABLED);
         }
       }
     }

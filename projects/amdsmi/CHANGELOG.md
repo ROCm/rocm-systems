@@ -145,6 +145,11 @@ GPU: 0
   - Both are UALoE-backed and report `AMDSMI_STATUS_NOT_SUPPORTED` (or the `UINT32_MAX` sentinel for `physical_acc_id`) on systems without an active UALoE session.
   - CLI: `amd-smi static --asic` now includes `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` flag prints tray type and accelerator count.
 
+- **Added unified `amdsmi_get_link_topology()` API (baremetal and host)**.  
+  - New C API `amdsmi_get_link_topology()` returns a single `amdsmi_link_topology_t` aggregating link weight, link status, link type, hop count, and framebuffer-sharing capability between two GPUs.
+  - New Python API `amdsmi_get_link_topology()` exposes the same data, mirroring the host interface for API parity.
+  - Behavior note for callers migrating from the component APIs: for a self-pair (identical source and destination), the call short-circuits to `link_type = AMDSMI_LINK_TYPE_INTERNAL`, `num_hops = 0`, `weight = 0`, `fb_sharing = 1`, and `link_status = AMDSMI_LINK_STATUS_ENABLED`. This is intentionally different from the underlying calls, where `amdsmi_topo_get_link_type(j, j)` reports PCIe with 2 hops and `amdsmi_topo_get_link_weight(j, j)` reports twice the NUMA node weight (typically 40).
+
 ### Changed
 
 - **Bumped the library major version to 27.0.0** (breaking).  
