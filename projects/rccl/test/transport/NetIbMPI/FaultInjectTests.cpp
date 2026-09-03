@@ -1076,7 +1076,8 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
 
                 return WorkerCastFailoverTransfer(rank, pair, buffer, size, 601, mhandle,
                                                   WorkerSeed(threadIdx, 1), /*messages=*/1, &atFailure,
-                                                  MPIEnvironment::nThreads);
+                                                  MPIEnvironment::nThreads,
+                                                  &mhandleGuard, &bufferGuard);
             });
         MPI_Barrier(MPI_COMM_WORLD);
         return;
@@ -1521,7 +1522,8 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
 
                 return WorkerCastFailoverTransfer(rank, pair, buffer, size, 901, mhandle,
                                                   WorkerSeed(threadIdx, 1), /*messages=*/1, &atFailure,
-                                                  MPIEnvironment::nThreads);
+                                                  MPIEnvironment::nThreads,
+                                                  &mhandleGuard, &bufferGuard);
             });
         MPI_Barrier(MPI_COMM_WORLD);
         return;

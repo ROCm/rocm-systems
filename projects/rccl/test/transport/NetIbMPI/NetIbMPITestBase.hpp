@@ -1673,7 +1673,9 @@ protected:
     ThreadResult WorkerCastFailoverTransfer(int rank, ConnectionPair& pair, void* buffer,
                                             size_t size, int tag, void* mhandle, int seed,
                                             int messages = 1, std::atomic<int>* arrived = nullptr,
-                                            int expected = 0) {
+                                            int expected = 0,
+                                            NetMHandleWorkerGuard* registration = nullptr,
+                                            HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         // Without a gate here the failures are merely started from several workers,
         // not overlapping: each worker allocates, registers and warms up first, so a
@@ -1697,6 +1699,13 @@ protected:
                                            kLargeTransferTimeoutMs);
             if (!result.ok) {
                 result.msg = "after driving QP 0 to error: " + result.msg;
+                // A timed-out wait leaves the request posted: WorkerSendRecvPattern
+                // drops the pointer without cancelling it, so returning straight to
+                // the caller would let its guards free memory the NIC may still be
+                // writing into. Same treatment as WorkerTransferAcrossQpFailure.
+                if (registration || allocation)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration,
+                                                             allocation);
                 return result;
             }
         }

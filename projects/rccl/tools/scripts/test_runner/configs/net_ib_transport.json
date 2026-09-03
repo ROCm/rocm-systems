@@ -1292,7 +1292,7 @@
         },
         {
           "name": "FaultInj_MultiThread_FailoverCqeErrorRecovered",
-          "description": "N links fail at once, so the process-global recovery thread serves several communicators",
+          "description": "N workers break their own QP 0 at the same moment on one fused device, so the failovers overlap and each worker must keep routing over the surviving member. Port recovery is off in this suite, so the recovery thread is not involved -- the recovery configurations below cover that",
           "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
         },
         {
