@@ -83,6 +83,145 @@ TEST_F(Gfx950RaceTest, vgpr_waitcnt_race) {
   ExpectRace(kVgprWaitcntRaceExpectation);
 }
 
+// --- All-ones wait operands ---
+
+// Legacy CDNA uses the all-ones wait operand as both its no-wait encoding and
+// the maximum number of outstanding counter tokens.
+static constexpr int kCdnaLgkmcntCapacity = 15;
+static constexpr int kCdnaVmcntCapacity = 63;
+
+__global__ void vmcnt_no_wait_race_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float val;
+  asm volatile(
+      "global_load_dword %[value], %[address], off\n"
+      "s_waitcnt vmcnt(%c[no_wait])\n"
+      : [value] "=v"(val)
+      : [address] "v"(&src[tid]), [no_wait] "n"(kCdnaVmcntCapacity));
+  dst[tid] = val;
+}
+
+__global__ void lgkmcnt_no_wait_race_kernel(int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int val;
+  asm volatile(
+      "ds_read_b32 %[value], %[address]\n"
+      "s_waitcnt lgkmcnt(%c[no_wait])\n"
+      : [value] "=v"(val)
+      : [address] "v"(tid * 4), [no_wait] "n"(kCdnaLgkmcntCapacity)
+      : "memory");
+  dst[tid] = val;
+}
+
+static constexpr RaceExpectation kVmcntNoWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+    .consumer = "global_store_dword",
+};
+
+static constexpr RaceExpectation kLgkmcntNoWaitRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "ds_read_b32",
+    .consumer = "global_store_dword",
+};
+
+TEST_F(Gfx950RaceTest, vmcnt_no_wait_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_no_wait_race_kernel<<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kVmcntNoWaitRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, lgkmcnt_no_wait_race) {
+  auto *dst = alloc<int>(64);
+  lgkmcnt_no_wait_race_kernel<<<1, 64>>>(dst);
+  sync();
+  ExpectRace(kLgkmcntNoWaitRaceExpectation);
+}
+
+// --- Counter-capacity backpressure ---
+
+template <int YoungerReads> __global__ void lgkmcnt_capacity_kernel(int *dst) {
+  __shared__ int lds[64];
+  int tid = threadIdx.x;
+  lds[tid] = tid + 1;
+  __syncthreads();
+
+  int producer, younger, result;
+  asm volatile(
+      "ds_read_b32 %[producer], %[address]\n"
+      ".rept %c[younger_reads]\n"
+      "ds_read_b32 %[younger], %[address]\n"
+      ".endr\n"
+      "v_mov_b32 %[result], %[producer]\n"
+      : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+      : [address] "v"(tid * 4), [younger_reads] "n"(YoungerReads)
+      : "memory");
+  dst[tid] = result;
+}
+
+template <int YoungerLoads>
+__global__ void vmcnt_capacity_kernel(const float *src, float *dst) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  float producer, younger, result;
+  asm volatile(
+      "global_load_dword %[producer], %[address], off\n"
+      ".rept %c[younger_loads]\n"
+      "global_load_dword %[younger], %[address], off\n"
+      ".endr\n"
+      "v_mov_b32 %[result], %[producer]\n"
+      : [producer] "=&v"(producer), [younger] "=&v"(younger), [result] "=&v"(result)
+      : [address] "v"(&src[tid]), [younger_loads] "n"(YoungerLoads)
+      : "memory");
+  dst[tid] = result;
+}
+
+static constexpr RaceExpectation kLgkmcntBelowCapacityRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "ds_read_b32",
+    .consumer = "v_mov_b32",
+};
+
+static constexpr RaceExpectation kVmcntBelowCapacityRaceExpectation{
+    .findings = FindingCount::OneOrMore,
+    .type = "VGPR",
+    .producer = "global_load_dword",
+    .consumer = "v_mov_b32",
+};
+
+TEST_F(Gfx950RaceTest, lgkmcnt_capacity_boundary) {
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, lgkmcnt_below_capacity_race) {
+  lgkmcnt_capacity_kernel<kCdnaLgkmcntCapacity - 1><<<1, 64>>>(alloc<int>(64));
+  sync();
+  ExpectRace(kLgkmcntBelowCapacityRaceExpectation);
+}
+
+TEST_F(Gfx950RaceTest, vmcnt_capacity_boundary) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity><<<1, 64>>>(src, dst);
+  sync();
+  ExpectNoRace();
+}
+
+TEST_F(Gfx950RaceTest, vmcnt_below_capacity_race) {
+  auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
+  vmcnt_capacity_kernel<kCdnaVmcntCapacity - 1><<<1, 64>>>(src, dst);
+  sync();
+  ExpectRace(kVmcntBelowCapacityRaceExpectation);
+}
+
 // --- SGPR waitcnt ---
 
 __global__ void sgpr_no_race_kernel(const int *src, int *dst) {

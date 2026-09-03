@@ -6,6 +6,7 @@
 
 #include <ostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace rocjitsu::plugins::race_detector {
@@ -33,6 +34,15 @@ enum class MemoryEventType {
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
   N
+};
+
+/// Hardware ordering class. This is deliberately separate from
+/// MemoryEventType and WaitCounterType: operations can share a race-event type
+/// or hardware counter without sharing a completion order.
+enum class MemoryOrderClass {
+  UNORDERED, ///< No usable completion-order guarantee.
+  VMEM,      ///< Non-FLAT VMEM operations sharing an ordered counter stream.
+  LDS,       ///< Native local-DS operations.
 };
 
 /// Event direction helpers: "to VGPR" means a load writing into a VGPR,
@@ -63,13 +73,45 @@ inline bool isFromVgpr(MemoryEventType t) {
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
 
-/// Legacy wait-counter assignment for core callers without dynamic
+/// Default combined-counter assignment for core callers without dynamic
 /// instruction state. Runtime integration passes the exact counter explicitly.
 inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
-  if (t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::VGPR_TO_GLOBAL ||
-      t == MemoryEventType::GLOBAL_TO_LDS)
+  switch (t) {
+  case MemoryEventType::GLOBAL_TO_VGPR:
+  case MemoryEventType::VGPR_TO_GLOBAL:
+  case MemoryEventType::GLOBAL_TO_LDS:
     return amdgpu::WaitCounterType::VMCNT;
-  return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::LDS_TO_VGPR:
+  case MemoryEventType::VGPR_TO_LDS:
+  case MemoryEventType::GLOBAL_TO_SGPR:
+  case MemoryEventType::GLOBAL_TO_TTMP:
+  case MemoryEventType::SCALAR_TO_GLOBAL:
+    return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::N:
+    break;
+  }
+  throw std::invalid_argument("invalid memory event type");
+}
+
+/// Ordering used by architecture-neutral unit-test helpers. Runtime callers
+/// pass instruction-specific ordering explicitly.
+inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
+  switch (t) {
+  case MemoryEventType::GLOBAL_TO_VGPR:
+  case MemoryEventType::VGPR_TO_GLOBAL:
+  case MemoryEventType::GLOBAL_TO_LDS:
+    return MemoryOrderClass::VMEM;
+  case MemoryEventType::LDS_TO_VGPR:
+  case MemoryEventType::VGPR_TO_LDS:
+    return MemoryOrderClass::LDS;
+  case MemoryEventType::GLOBAL_TO_SGPR:
+  case MemoryEventType::GLOBAL_TO_TTMP:
+  case MemoryEventType::SCALAR_TO_GLOBAL:
+    return MemoryOrderClass::UNORDERED;
+  case MemoryEventType::N:
+    break;
+  }
+  throw std::invalid_argument("invalid memory event type");
 }
 
 /// A register reference (type + index).

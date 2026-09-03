@@ -9,11 +9,12 @@
 namespace rocjitsu::plugins::race_detector {
 
 RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-                           std::function<void(RaceViolation)> raceHandler)
+                           std::function<void(RaceViolation)> raceHandler,
+                           CounterCapacities counterCapacities)
     : workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
-    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this);
+    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
   }
 }
 
@@ -31,10 +32,11 @@ void RaceDetector::setProfiler(ProfilerInterface &p) {
 EventId RaceDetector::allocateEventId(WaveId waveId, uint64_t pc, MemoryEventType type,
                                       std::vector<uint32_t> registers, uint64_t execMask,
                                       uint8_t byteMask, IntervalSet ldsIntervals,
-                                      amdgpu::WaitCounterType waitCounterType) {
+                                      amdgpu::WaitCounterType waitCounterType,
+                                      MemoryOrderClass memoryOrder) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, pc, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), waitCounterType);
+                            std::move(ldsIntervals), waitCounterType, memoryOrder);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     if (isToLds(type)) {

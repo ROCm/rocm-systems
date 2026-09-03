@@ -19,7 +19,8 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// Event lifecycle:
 ///   1. allocateEventId() — registers a new event (ACTIVE).
-///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE (s_waitcnt).
+///   2. markEventWaveComplete() — transitions to WAVE_COMPLETE after a wait or
+///      ordered counter-capacity backpressure.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
 ///      marks RETIRED (for LDS events, called at s_barrier via
 ///      flushBarrierPendingEvents).
@@ -33,13 +34,17 @@ class RaceDetector {
   friend class Workgroup;
 
 public:
+  /// Architecture-neutral core callers use CDNA capacities by default. The
+  /// runtime plugin passes capacities selected from the executing target.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler);
+               std::function<void(RaceViolation)> raceHandler,
+               CounterCapacities = kCdnaCounterCapacities);
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                           uint64_t execMask, uint8_t byteMask = 0xF, IntervalSet ldsIntervals = {},
-                          amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::VMCNT);
+                          amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::VMCNT,
+                          MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
