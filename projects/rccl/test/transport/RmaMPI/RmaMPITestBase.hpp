@@ -105,6 +105,17 @@ protected:
 
     std::string skipReason_;
 
+    // Agree on whether anyone failed, so a test body can bail out on every rank
+    // at once. A rank that returns on its own leaves the others in the next
+    // barrier until the suite times out, which replaces the real failure with a
+    // hang. Only the ranks that actually failed should record the failure.
+    bool AnyRankFailed(bool localFailure)
+    {
+        int v = localFailure ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &v, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return v != 0;
+    }
+
     void SetUp() override
     {
         MPITestBase::SetUp();
