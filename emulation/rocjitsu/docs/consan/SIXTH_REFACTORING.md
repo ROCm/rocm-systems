@@ -1004,3 +1004,47 @@ validation across all five emulated targets. Existing tests that manufacture
 or corrupt the deleted internal plan bridge will be replaced by tests of the
 new resolver boundary and unchanged externally visible behavior, not silently
 dropped. The cutover gate remains the complete nonphysical RocJitsu matrix.
+
+The replacement converged as one private resolution-and-application
+transaction. `resolve_consan_fault_mutations` now selects and qualifies each
+semantic target once, retains direct immutable references to the selected
+sites and lifecycle facts, and either projects the existing diagnostic
+presentation or continues directly into byte emission. Live application no
+longer consumes the diagnostic plan. Atomic and ordinary multi-effect faults
+therefore remain one transaction without a second identity scan, while the
+diagnostic plan is now presentation-only.
+
+The cutover deleted the public planning input/result pair, the split planning
+entry point, the public stale-plan application API, the public single-mutation
+composition helper, reconstruction-only source identities and payload fields,
+the kind redispatch bridge, and the 137-line wide-plan shape validator. The
+kind-specific qualification and encoding remain explicit. Final validation
+also remains independent: it still derives its verdict from pristine and
+replacement bytes, patch geometry, inventory, and mutation proof, and receives
+none of the resolver's target references.
+
+The production accounting from the committed thesis through the completed
+cutover is:
+
+| Signal | Before | After | Change |
+|---|---:|---:|---:|
+| tracked production files | 312 | 312 | 0 |
+| physical production lines | 98,645 | 98,060 | -585 |
+| nonblank production lines | 92,222 | 91,656 | -566 |
+| implementation lines | 84,536 | 84,017 | **-519** |
+
+The nine affected production files contain 259 added and 844 deleted physical
+lines. The governing 519-line net implementation reduction clears the
+500-line abort floor, although it is 31 lines short of the deliberately
+conservative 550-line target. The campaign is now **3,998 net implementation
+lines below the 88,015-line baseline**, leaving 1,002 lines to the stretch
+milestone.
+
+The behavioral fault matrix passed 132/132 tests. The architecture-boundary
+test initially rejected stale expectations for the removed planning bridge; it
+was updated to require the single private transaction and forbid resurrection
+of the deleted APIs and types, then passed. The complete nonphysical ConSan
+matrix passed 4,787/4,787 tests across all four modes and all five target
+architectures. The complete nonphysical RocJitsu matrix then completed 9,572
+CTest entries with 9,557 passes, 15 explicit environment-dependent skips, and
+zero failures. No physical-GPU test was run for this slice.
