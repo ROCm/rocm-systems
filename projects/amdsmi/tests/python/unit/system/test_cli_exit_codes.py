@@ -526,6 +526,50 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
+    def test_handle_gpus_aggregates_multiple_device_failures_to_mixed(self):
+        """`-g all` counterpart of the handle_cores test above. Guards
+        handle_gpus' own gating arithmetic: only a list of length > 1 enters the
+        loop, so an off-by-one there would silently skip every device.
+        """
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def __init__(self):
+                self.printed_multiple = False
+
+            def print_output(self, multiple_device_enabled=False):
+                self.printed_multiple = multiple_device_enabled
+
+        class _FakeLibErr(amdsmi.AmdSmiLibraryException):
+            def __init__(self, code):
+                self._code = code
+
+            def get_error_code(self):
+                return self._code
+
+        codes = {
+            "gpu-0": amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            "gpu-1": amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        }
+        visited = []
+
+        def fake_subcommand(args, multiple_devices=False, gpu=""):
+            visited.append(gpu)
+            raise _FakeLibErr(codes[gpu])
+
+        helpers = AMDSMIHelpers()
+        logger = _FakeLogger()
+        args = argparse.Namespace(gpu=["gpu-0", "gpu-1"])
+        handled, _ = helpers.handle_gpus(args, logger, fake_subcommand)
+        self.assertTrue(handled)
+        self.assertEqual(visited, ["gpu-0", "gpu-1"], "loop did not visit every device")
+        self.assertTrue(logger.printed_multiple)
+        self.assertEqual(
+            helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
+        )
+
     # ---- rocm-smi compat exit-code contract ----
     def test_rocm_smi_compat_exit_codes_stay_binary(self):
         """The --rocm-smi shim intentionally follows rocm-smi's BINARY 0/1 exit
@@ -881,7 +925,9 @@ def _gpu_set_args(set_value, **option):
     src = inspect.getsource(set_value.SetValueCommands.set_gpu)
     names = set(re.findall(r"args\.(\w+)", src))
     ns = argparse.Namespace(**{n: None for n in names})
-    ns.gpu = "fake-gpu-handle"  # non-list, non-None -> single-device path
+    # Deliberately non-list: the single-device path has no run_device_subcommand
+    # wrapper, so it is the only place a handler that raises is still detectable.
+    ns.gpu = "fake-gpu-handle"
     for key, value in option.items():
         setattr(ns, key, value)
     return ns
@@ -905,8 +951,7 @@ def _build_set_specs(set_value):
     (set_gpu reads it up front to build the error string).
 
     The registry keys are the single source of truth for the completeness test,
-    so adding a new GPU ``set`` option without a spec here fails the suite --
-    that is the forcing function that blocks a future ``-g all`` regression.
+    so adding a new GPU ``set`` option without a spec here fails the suite.
     """
     import collections
 
@@ -1106,8 +1151,9 @@ class TestSetGpuGAllFailureGuards(unittest.TestCase):
         """Generic exerciser: drive each GPU `set` option through set_gpu with a
         per-device library failure injected, and assert the record-then-finalize
         contract holds -- the failure is recorded (exit != 0) and the handler
-        returns instead of raising. This is the class of bug that broke
-        `amd-smi set ... -g all` for -M/-C in #862."""
+        returns instead of raising. This is the single-device (`-g 0`) contract;
+        `test_handle_gpus_aggregates_multiple_device_failures_to_mixed` covers
+        the `-g all` loop. Both stem from the bug that broke -M/-C in #862."""
         set_value = _load_set_value()
         specs = _build_set_specs(set_value)
         for name in sorted(specs):
@@ -1293,7 +1339,9 @@ def _reset_args(reset, **option):
     src = inspect.getsource(reset.ResetCommands.reset)
     names = set(re.findall(r"args\.(\w+)", src))
     ns = argparse.Namespace(**{n: None for n in names})
-    ns.gpu = "fake-gpu-handle"  # non-list, non-None -> single-device path
+    # Deliberately non-list: the single-device path has no run_device_subcommand
+    # wrapper, so it is the only place a handler that raises is still detectable.
+    ns.gpu = "fake-gpu-handle"
     for key, value in option.items():
         setattr(ns, key, value)
     return ns
@@ -1314,7 +1362,7 @@ def _build_reset_specs(reset):
 
     The registry keys are the single source of truth for the completeness test,
     so adding a new per-device ``reset`` option without a spec here fails the
-    suite -- the forcing function that blocks a future ``-g all`` regression.
+    suite.
     """
 
     def gpureset(cmd, mode):
