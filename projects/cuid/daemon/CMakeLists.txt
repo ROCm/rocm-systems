@@ -1,32 +1,9 @@
-# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
-message(
-    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
-)
-message(
-    "                           Cmake amdcuid_daemon                           "
-)
-message(
-    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
-)
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                           Cmake amdcuid_daemon                           ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 message("")
 message("Build Configuration:")
@@ -61,24 +38,13 @@ target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 # Pass the resolved config install directory to the daemon at compile time so
 # the HMAC key and daemon configuration paths are always built from a concrete
 # location.
-target_compile_definitions(
-    ${AMDCUID_DAEMON_EXECUTABLE}
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
-)
+target_compile_definitions(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
 # Link against the CUID library
-target_link_libraries(
-    ${AMDCUID_DAEMON_EXECUTABLE}
-    amdcuid_static
-    Threads::Threads
-)
+target_link_libraries(${AMDCUID_DAEMON_EXECUTABLE} amdcuid_static Threads::Threads)
 
 # Install the daemon
-install(
-    TARGETS ${AMDCUID_DAEMON_EXECUTABLE}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT ${DAEMON_COMPONENT}
-)
+install(TARGETS ${AMDCUID_DAEMON_EXECUTABLE} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ${DAEMON_COMPONENT})
 
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
 install(
@@ -120,19 +86,11 @@ if(UNIX AND NOT APPLE)
 
     # Generate the post-install shell script from a template, substituting the
     # install prefix and config directory baked-in at cmake configure time.
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/postinst.in
-        ${CMAKE_CURRENT_BINARY_DIR}/postinst
-        @ONLY
-    )
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/postinst.in ${CMAKE_CURRENT_BINARY_DIR}/postinst @ONLY)
 
     # Configure the pre-removal script (mirrors postinst: stops service, removes
     # udev rules, cron job, and systemd service symlink).
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/prerm.in
-        ${CMAKE_CURRENT_BINARY_DIR}/prerm
-        @ONLY
-    )
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/prerm.in ${CMAKE_CURRENT_BINARY_DIR}/prerm @ONLY)
 
     # Also install both scripts so they can be re-run manually after a cmake --install.
     install(

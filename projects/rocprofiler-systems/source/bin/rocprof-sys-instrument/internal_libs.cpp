@@ -17,7 +17,7 @@
 #include "fwd.hpp"
 #include "log.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
@@ -411,7 +411,8 @@ get_internal_libs_data_impl()
     for(const auto* lib_dir : { "lib", "lib64" })
     {
         for(const auto* lib_fname :
-            { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
+            { "librocprof-sys-dl.so", "librocprof-sys-causal-api.so",
+              "librocprof-sys-rt.so" })
         {
             auto libpath = fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
             if(rocprofsys::path::is_regular_file(libpath))

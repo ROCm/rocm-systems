@@ -478,7 +478,7 @@ def _all_field_names_from_encodings(encodings):
     multiple ISAs' encodings for the same format.
 
     Returned sorted alphabetically so the emitted struct layout is stable
-    across `--multi` argument orderings. Field order in these structs is
+    across ISA argument orderings. Field order in these structs is
     cosmetic (every read/write in the generated code is by name) but a
     deterministic order avoids gratuitous diff churn on regeneration.
     """

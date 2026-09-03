@@ -19,6 +19,8 @@
 
 // PCI device class for NVSwitch (used to identify remote NVLink targets)
 #define PCI_NVSWITCH_CLASS "0x068000"
+// PCI device class for AMD accelerators ("Processing accelerators"), mapped to GPU in kvDictPciClass
+#define PCI_ACCELERATOR_CLASS "0x120000"
 
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255

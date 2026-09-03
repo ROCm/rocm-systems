@@ -800,8 +800,7 @@ graph:
     tags: [query]
   Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphUserObj_Int_float_Objects:
     <<: *level_2
@@ -1408,7 +1407,7 @@ graph:
     <<: *level_2
     tags: [exec]
     # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows. amd_linux]
+    disabled: [amd_windows, amd_linux]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
@@ -1431,7 +1430,7 @@ graph:
   Unit_hipStreamEndCapture_later_and_add_a_node_inbetween:
     <<: *level_2
     # AIRUNTIME-2335: temporarily disabled (intermittent failure in CI)
-    disabled: [amd_windows, amd_wsl, amd_linux]
+    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipStreamEndCapture_first_and_add_a_node_later:
     <<: *level_2
@@ -1535,9 +1534,8 @@ graph:
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
     <<: *level_2
-    # (amd_linux) Rock_Linux_Failures_on_gfx94X
     # (amd_wsl) SWDEV-430116:Below tests failed in stress test on 27/10/23
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_wsl]
     tags: [query]
   Unit_hipGraphAddMemAllocNode_Negative_Params:
     <<: *level_2

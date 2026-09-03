@@ -14,6 +14,8 @@ subtrees:
       title: Build from source
   - caption: Quick Reference
     entries:
+    - file: quick-reference/rocprofiler-sdk-at-a-glance
+      title: ROCprofiler-SDK at a glance
     - file: quick-reference/quick_guide
       title: Quick reference guide
     - file: quick-reference/rocprofv3-cli-options
@@ -33,6 +35,7 @@ subtrees:
     - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
     - file: how-to/using-spm
+    - file: how-to/using-kernel-replay
     - file: how-to/samples
       title: Samples
   - caption: API reference
@@ -57,6 +60,8 @@ subtrees:
       title: Thread trace and ROCprof Trace Decoder
     - file: api-reference/spm
       title: Streaming Performance Monitor (SPM)
+    - file: api-reference/kernel_replay
+      title: Kernel replay (experimental)
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:
@@ -105,6 +110,24 @@ subtrees:
   - caption: Conceptual
     entries:
     - file: conceptual/comparing-with-legacy-tools
+    - file: conceptual/kernel_replay/index
+      title: Kernel replay (experimental)
+      subtrees:
+      - entries:
+        - file: conceptual/kernel_replay/kernel_replay_callback_api
+          title: Callback API and tool configuration
+        - file: conceptual/kernel_replay/kernel_replay_concurrency_and_isolation
+          title: Concurrency and isolation
+        - file: conceptual/kernel_replay/kernel_replay_memory_snapshot
+          title: Memory snapshot and restore
+        - file: conceptual/kernel_replay/kernel_replay_performance
+          title: Performance assessment
+        - file: conceptual/kernel_replay/kernel_replay_testing
+          title: Test coverage
+        - file: conceptual/kernel_replay/kernel_replay_downstream_tools
+          title: Downstream tools
+        - file: conceptual/kernel_replay/kernel_replay_callback_api_design
+          title: Design history
   - caption: License
     entries:
     - file: license

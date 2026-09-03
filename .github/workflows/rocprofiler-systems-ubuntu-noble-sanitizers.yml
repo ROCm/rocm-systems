@@ -182,7 +182,7 @@ jobs:
             -DROCPROFSYS_BUILD_ELFUTILS=OFF \
             -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
             -DROCPROFSYS_MAX_THREADS=64 \
-            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;user-api;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
+            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -- \
