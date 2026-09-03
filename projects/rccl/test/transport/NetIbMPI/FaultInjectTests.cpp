@@ -125,7 +125,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                     result = WorkerPostRecv(pair.recvComm, buffer, size, 301, mhandle, &request);
                     if (!result.ok) return result;
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
+                                                        &bufferGuard);
                 }
 
                 int liveNqps = 0;
@@ -735,7 +736,8 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
                                             &request);
                     if (!result.ok) return result;
                     if (!WorkerDrainRecv(request, 100)) {
-                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request);
+                        result = WorkerCastFlushAbandonedRecv(faulted.recvComm, request,
+                                                              &faultedGuard, &bufferGuard);
                         if (!result.ok) return result;
                     }
                 } else {
@@ -2495,8 +2497,14 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
 // message apart -- the sender exhausting its FIFO-slot retries on message n+1 while
 // the receiver waits for n, both devices Ok. Not reproducible on demand, so no rate
 // is quoted; the figure from before the recoveryCount guard measured runs where
-// recovery never happened. Nightly only (suite "A20. Nightly - ..."), since it is
-// expected to fail some runs until the plugin side is understood.
+// recovery never happened.
+//
+// Nightly rather than a gate, since it is expected to fail some runs until the plugin
+// side is understood. That is arranged by the plan entry, not by the suite's name:
+// a_fault_recovery_nightly in the AINIC configuration carries no "smoke" flag, and a
+// labelled pull request runs only the smoke entries. In net_ib_transport.json the same
+// suite is fault_recovery_nightly_drift, reported as "NET IB - CAST Recovery Nightly
+// Drift (2)".
 //
 // The serial body does not drift: its MPI handshakes resynchronize the two sides
 // between phases, which a worker cannot do.
@@ -4157,7 +4165,8 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     if (!result.ok) return result;
                     faultArmed.store(true, std::memory_order_release);
                     if (WorkerDrainRecv(request, 100)) return result;
-                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request);
+                    return WorkerCastFlushAbandonedRecv(pair.recvComm, request, &mhandleGuard,
+                                                        &bufferGuard);
                 }
 
                 int liveNqps = 0;
