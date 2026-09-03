@@ -1957,8 +1957,8 @@ class SetValueCommands:
 
         seed_info = amdsmi_interface.amdsmi_get_cuid_seed_info()
         # The fingerprint, never the seed: this output gets pasted into tickets.
-        self.logger.output["cuid_seed_provisioned"] = seed_info["provisioned"]
-        self.logger.output["cuid_seed_fingerprint"] = seed_info["fingerprint"]
+        self.logger.output["seed_provisioned"] = seed_info["provisioned"]
+        self.logger.output["seed_fingerprint"] = seed_info["fingerprint"]
         self.logger.print_output()
 
     def set_value(
@@ -2006,6 +2006,7 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        cuid_seed=None,
     ):
         """Issue reset commands to target gpu(s)
 
