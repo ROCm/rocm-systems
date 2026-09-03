@@ -1659,6 +1659,17 @@ ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count,
   return ncclSuccess;
 }
 
+// An unroll factor is usable only if its device function table was generated in
+// this build AND compiled for the running arch. generate.py guards some unrolls
+// behind a single arch (see ncclDevFuncUnrollArch), and a multi-arch build marks
+// every unroll as generated, so checking ncclDevFuncUnrollGenerated alone lets a
+// gfx1250-only unroll through on other GPUs and traps on the device.
+static bool unrollUsableOnArch(int unroll, char const* archName) {
+  if (!ncclDevFuncUnrollGenerated[unroll]) return false;
+  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
+  return requiredArch == nullptr || IsArchMatch(archName, requiredArch);
+}
+
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   if (rcclParamUnrollFactor() != -1) {
     comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
@@ -1668,7 +1679,7 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
            comm->unroll, NCCL_NUM_UNROLLS - 1);
       return ncclInvalidArgument;
     }
-    if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+    if (!unrollUsableOnArch(comm->unroll, comm->archName)) {
       WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not built for arch %s; its device function table is empty and "
            "dispatching to it would crash. "
            "Rebuild with this unroll factor, or select one that was generated for this build.",
@@ -1688,10 +1699,10 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
 
   // Guard against a default that wasn't built for this arch (e.g. the generation
   // matrix was narrowed). Fall back to any generated unroll rather than segfault.
-  if (!ncclDevFuncUnrollGenerated[comm->unroll]) {
+  if (!unrollUsableOnArch(comm->unroll, comm->archName)) {
     int fallback = -1;
     for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
-      if (ncclDevFuncUnrollGenerated[u]) {
+      if (unrollUsableOnArch(u, comm->archName)) {
         fallback = u;
         break;
       }
