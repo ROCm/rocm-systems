@@ -23,3 +23,4 @@ contexts.
 
 .. doxygengroup:: batch
    :content-only:
+   :members:
