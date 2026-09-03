@@ -195,6 +195,9 @@ get_use_causal() ROCPROFSYS_HOT;
 bool
 get_use_amd_smi() ROCPROFSYS_HOT;
 
+bool
+get_use_hipfile() ROCPROFSYS_HOT;
+
 bool&
 get_use_sampling() ROCPROFSYS_HOT;
 
@@ -254,12 +257,6 @@ get_perfetto_combined_traces();
 
 std::string
 get_perfetto_fill_policy();
-
-std::set<std::string>
-get_enabled_categories();
-
-std::set<std::string>
-get_disabled_categories();
 
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;

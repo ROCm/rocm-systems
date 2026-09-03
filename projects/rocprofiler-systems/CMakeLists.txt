@@ -222,6 +222,37 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
     "Enable AI NIC profiling through AMD SMI" ON
 )
+# Previous BOOL cache: ON meant "build if possible", which is AUTO now. STRING ON is a
+# hard requirement and fails configure when hipFile is missing or too old.
+if(DEFINED CACHE{ROCPROFSYS_BUILD_HIPFILE})
+    get_property(
+        _rocprofsys_build_hipfile_cache_type
+        CACHE ROCPROFSYS_BUILD_HIPFILE
+        PROPERTY TYPE
+    )
+    if(_rocprofsys_build_hipfile_cache_type STREQUAL "BOOL")
+        if(ROCPROFSYS_BUILD_HIPFILE)
+            set(_rocprofsys_build_hipfile_migrated "AUTO")
+        else()
+            set(_rocprofsys_build_hipfile_migrated "OFF")
+        endif()
+        unset(ROCPROFSYS_BUILD_HIPFILE CACHE)
+        set(ROCPROFSYS_BUILD_HIPFILE
+            "${_rocprofsys_build_hipfile_migrated}"
+            CACHE STRING
+            "Build hipFile GPU-direct storage I/O telemetry (ON, OFF, or AUTO)"
+        )
+        unset(_rocprofsys_build_hipfile_migrated)
+    endif()
+    unset(_rocprofsys_build_hipfile_cache_type)
+endif()
+rocprofiler_systems_add_cache_option(
+    ROCPROFSYS_BUILD_HIPFILE
+    "Build hipFile GPU-direct storage I/O telemetry (ON, OFF, or AUTO)"
+    STRING
+    "AUTO"
+)
+set_property(CACHE ROCPROFSYS_BUILD_HIPFILE PROPERTY STRINGS ON OFF AUTO)
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
     "Compiler specific language extensions" OFF
 )

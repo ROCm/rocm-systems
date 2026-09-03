@@ -272,7 +272,28 @@ if __name__ == "__main__":
     parser.add_argument(
         "--counter-names",
         type=str,
-        help="Require counter name in the traces",
+        help="Require counter name in the traces, with a positive total",
+        default=[],
+        nargs="*",
+    )
+    parser.add_argument(
+        "--counter-names-zero",
+        type=str,
+        help=(
+            "Require the counter track to exist, be sampled, and stay zero throughout. "
+            "Use where the run deterministically drives a counter to zero, so that a "
+            "counter wired to the wrong source is caught rather than passing silently"
+        ),
+        default=[],
+        nargs="*",
+    )
+    parser.add_argument(
+        "--counter-names-present",
+        type=str,
+        help=(
+            "Require the counter track to exist and be sampled, whatever its values. "
+            "Use for counters that are legitimately zero in some environments"
+        ),
         default=[],
         nargs="*",
     )
@@ -400,7 +421,9 @@ if __name__ == "__main__":
         if key_count != count:
             ret = 1
 
-    if args.counter_names and args.print:
+    if (
+        args.counter_names or args.counter_names_present or args.counter_names_zero
+    ) and args.print:
         all_counter_tracks = tp.query(
             "SELECT DISTINCT name FROM counter_track ORDER BY name"
         )
@@ -444,6 +467,52 @@ if __name__ == "__main__":
 
         if total_value <= 0:
             print(f"Fail: Counter {counter_name} is not found in the traces")
+            ret = 1
+
+    for counter_name in args.counter_names_zero:
+        counter_stats = tp.query(
+            f"""SELECT COUNT(counter.id) AS num_entries, MAX(ABS(counter.value)) AS peak
+              FROM counter_track JOIN counter ON counter.track_id = counter_track.id
+              WHERE counter_track.name LIKE '%{counter_name}%'"""
+        )
+        num_entries = 0
+        peak = 0
+
+        for row in counter_stats:
+            num_entries = row.num_entries if row.num_entries is not None else 0
+            peak = row.peak if row.peak is not None else 0
+
+        if args.print:
+            print(f"Peak value of {counter_name} is {peak} over {num_entries} samples")
+
+        # Presence is checked alongside the value: a misspelled name matches no track,
+        # which would otherwise satisfy a zero assertion vacuously.
+        if num_entries <= 0:
+            print(f"Fail: Counter {counter_name} is not present in the traces")
+            ret = 1
+        elif peak != 0:
+            print(
+                f"Fail: Counter {counter_name} is expected to stay zero "
+                f"but reached {peak}"
+            )
+            ret = 1
+
+    for counter_name in args.counter_names_present:
+        counter_entries = tp.query(
+            f"""SELECT COUNT(counter.id) AS num_entries FROM counter_track JOIN counter ON
+              counter.track_id = counter_track.id WHERE counter_track.name LIKE
+              '%{counter_name}%'"""
+        )
+        num_entries = 0
+
+        for row in counter_entries:
+            num_entries = row.num_entries if row.num_entries is not None else 0
+
+        if args.print:
+            print(f"Number of samples on {counter_name} is {num_entries}")
+
+        if num_entries <= 0:
+            print(f"Fail: Counter {counter_name} is not present in the traces")
             ret = 1
 
     if args.check_counter_pairing and args.counter_names:

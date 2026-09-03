@@ -7,7 +7,9 @@
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -66,8 +68,8 @@ struct migration_stats
         count++;
         total_size_bytes += size_bytes;
         total_time_ns += duration_ns;
-        if(size_bytes < min_size_bytes) min_size_bytes = size_bytes;
-        if(size_bytes > max_size_bytes) max_size_bytes = size_bytes;
+        min_size_bytes = std::min(min_size_bytes, size_bytes);
+        max_size_bytes = std::max(max_size_bytes, size_bytes);
     }
 
     [[nodiscard]] double avg_size_bytes() const noexcept
@@ -171,6 +173,9 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) -- needs a refactor
+    // of sample_processor's handle for all modes
+    void handle(const hipfile_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 
 private:

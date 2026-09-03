@@ -36,6 +36,18 @@ else()
     endif()
 endif()
 
+# Conditionally compile the hipFile collector when cmake/Packages.cmake resolved
+# ROCPROFSYS_HIPFILE_SUPPORT (derived from ROCPROFSYS_BUILD_HIPFILE=ON/OFF/AUTO).
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    add_subdirectory(hipfile)
+else()
+    set(pmc_hipfile_sources "")
+    # hipFile collector tests use a mock backend with no hipFile dependency
+    if(ROCPROFSYS_BUILD_TESTING)
+        add_subdirectory(hipfile/tests)
+    endif()
+endif()
+
 # Collect all sources
 set(pmc_collectors_sources
     ${pmc_common_sources}
@@ -44,6 +56,7 @@ set(pmc_collectors_sources
     ${pmc_cpu_sources}
     ${pmc_gpu_perf_counter_sources}
     ${pmc_nic_sources}
+    ${pmc_hipfile_sources}
 )
 
 # Add to parent variable

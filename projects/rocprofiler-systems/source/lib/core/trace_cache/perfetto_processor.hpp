@@ -9,6 +9,7 @@
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
@@ -57,6 +58,9 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) -- needs a refactor
+    // of sample_processor's handle for all modes
+    void handle(const hipfile_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 

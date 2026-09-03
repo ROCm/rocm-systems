@@ -14,6 +14,7 @@
     }  // namespace ::tim::cereal
 
 #include "common/defines.h"
+#include "common/environment.hpp"
 #include "common/pci_bdf.hpp"
 #include "core/gpu_visibility.hpp"
 #include "gpu.hpp"
@@ -35,11 +36,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cstddef>
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys
@@ -146,6 +150,116 @@ query_rocm_agents()
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
     return _dev_cnt;
 }
+
+/// @brief Whether @p value is an increasing integer list (e.g. "4,5"), not a permutation
+///        ("5,4") or UUID list. HIP ordinals follow the env-var order; this mapping uses
+///        agent order, so only an increasing subset is reliable.
+[[nodiscard]] bool
+visibility_mask_is_ordered_subset(std::string_view value)
+{
+    std::size_t       previous      = 0;
+    bool              have_previous = false;
+    std::string       token;
+    std::stringstream stream{ std::string{ value } };
+    while(std::getline(stream, token, ','))
+    {
+        const auto first = token.find_first_not_of(" \t");
+        if(first == std::string::npos)
+        {
+            continue;
+        }
+        const auto last = token.find_last_not_of(" \t");
+        token           = token.substr(first, last - first + 1);
+
+        std::size_t ordinal        = 0;
+        const auto* token_end      = token.data() + token.size();
+        const auto [parse_end, ec] = std::from_chars(token.data(), token_end, ordinal);
+        if(ec != std::errc{} || parse_end != token_end)
+        {
+            return false;
+        }
+
+        if(have_previous && ordinal <= previous)
+        {
+            return false;
+        }
+        previous      = ordinal;
+        have_previous = true;
+    }
+    return true;
+}
+
+struct visibility_env
+{
+    const char* name;
+    std::string value;
+};
+
+[[nodiscard]] std::optional<visibility_env>
+mask_if_unreliable(const char* name, std::string_view value)
+{
+    if(value.empty() || visibility_mask_is_ordered_subset(value))
+    {
+        return std::nullopt;
+    }
+    return visibility_env{ name, std::string{ value } };
+}
+
+/// @brief First visibility mask that would put HIP ordinals in a different order
+///        from agent-manager (physical) order. @c ROCR_VISIBLE_DEVICES is always
+///        considered; then @c HIP_VISIBLE_DEVICES, else CUDA / @c GPU_DEVICE_ORDINAL.
+[[nodiscard]] std::optional<visibility_env>
+unreliable_hip_ordinal_mask()
+{
+    if(auto rocr = mask_if_unreliable(
+           "ROCR_VISIBLE_DEVICES",
+           rocprofsys::get_env<std::string>("ROCR_VISIBLE_DEVICES", "")))
+    {
+        return rocr;
+    }
+
+    const auto hip = rocprofsys::get_env<std::string>("HIP_VISIBLE_DEVICES", "");
+    if(!hip.empty())
+    {
+        return mask_if_unreliable("HIP_VISIBLE_DEVICES", hip);
+    }
+
+    // SDK also reads CUDA_VISIBLE_DEVICES/GPU_DEVICE_ORDINAL to determine visible GPUs
+    const auto cuda = rocprofsys::get_env<std::string>("CUDA_VISIBLE_DEVICES", "");
+    if(!cuda.empty())
+    {
+        return mask_if_unreliable("CUDA_VISIBLE_DEVICES", cuda);
+    }
+
+    return mask_if_unreliable("GPU_DEVICE_ORDINAL",
+                              rocprofsys::get_env<std::string>("GPU_DEVICE_ORDINAL", ""));
+}
+
+/// @brief Whether HIP ordinal k can be treated as the k-th hip-visible agent.
+///
+/// Logs once and returns false when a permutation or UUID list would mislabel
+/// hipFile slots. AMD SMI uses BDF membership and is not gated by this check.
+[[nodiscard]] bool
+hip_ordinal_mapping_is_reliable()
+{
+    static const bool reliable = [] {
+        const auto unreliable = unreliable_hip_ordinal_mask();
+        if(!unreliable)
+        {
+            return true;
+        }
+
+        LOG_WARNING("hipFile telemetry disabled: {}={} is a permutation or UUID "
+                    "list, not an increasing integer subset. hipFile per-GPU stats "
+                    "are indexed by HIP ordinal and would be recorded under the "
+                    "wrong profiler GPU. Use an increasing mask such as "
+                    "HIP_VISIBLE_DEVICES=4,5. AMD SMI and rocprofiler-sdk GPU "
+                    "metrics are unaffected.",
+                    unreliable->name, unreliable->value);
+        return false;
+    }();
+    return reliable;
+}
 }  // namespace
 
 int
@@ -161,18 +275,61 @@ get_visible_gpu_bdfs()
     // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
     // No GPU agents means the query found nothing to report on (or failed), so runtime
     // visibility is unknown rather than empty.
-    if(device_count() == 0) return std::nullopt;
+    if(device_count() == 0)
+    {
+        return std::nullopt;
+    }
 
     std::set<std::string> _bdfs;
     for(const auto& _agent :
         get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
     {
-        if(!_agent) continue;
-        if(!_agent->hip_visible) continue;
+        if(!_agent)
+        {
+            continue;
+        }
+        if(!_agent->hip_visible)
+        {
+            continue;
+        }
         _bdfs.insert(
             common::format_pci_bdf_from_location_id(_agent->domain, _agent->location_id));
     }
     return _bdfs;
+}
+
+std::vector<std::size_t>
+get_visible_gpu_type_indices()
+{
+    // Ensure agents (and runtime_visibility.hip) are populated.
+    if(device_count() == 0)
+    {
+        return {};
+    }
+
+    // hipFile indexes per_gpu_stats by HIP ordinal (hipGetDevice()). rocprofiler-sdk
+    // agents only store a hip_visible bit, so HIP ordinal k is taken to be the k-th
+    // hip_visible agent in physical order. That is correct for an increasing integer
+    // mask (HIP_VISIBLE_DEVICES=4,5) and wrong for a permutation (5,4) or a UUID list.
+    // When the hipFile project fills each slot's UUID or PCI BDF, match that identity
+    // to the rocprofiler agent (the same join AMD SMI already does with BDF) and this
+    // fail-closed gate can be replaced with a real mapping for permutations.
+    if(!hip_ordinal_mapping_is_reliable())
+    {
+        return {};
+    }
+
+    std::vector<std::size_t> indices;
+    for(const auto& gpu_agent :
+        get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
+    {
+        if(!gpu_agent || !gpu_agent->hip_visible)
+        {
+            continue;
+        }
+        indices.push_back(gpu_agent->device_type_index);
+    }
+    return indices;
 }
 
 bool

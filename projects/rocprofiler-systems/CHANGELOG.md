@@ -6,6 +6,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
+### Added
+
+- hipFile GPU-direct storage I/O telemetry (`ROCPROFSYS_USE_HIPFILE=ON`;
+  requires hipFile 0.5.0 or later). See
+  [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+
 ### Changed
 
 - **rocpd is now the default output format.** When no output format is specified,
