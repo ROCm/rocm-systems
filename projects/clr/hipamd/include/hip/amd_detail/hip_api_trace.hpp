@@ -99,7 +99,7 @@ typedef hipError_t (*t_hipBindTextureToArray)(const textureReference* tex, hipAr
 typedef hipError_t (*t_hipBindTextureToMipmappedArray)(const textureReference* tex,
                                                        hipMipmappedArray_const_t mipmappedArray,
                                                        const hipChannelFormatDesc* desc);
-typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_tR0600* prop);
+typedef hipError_t (*t_hipChooseDevice)(int* device, const hipDeviceProp_t* prop);
 typedef hipError_t (*t_hipChooseDeviceR0000)(int* device, const hipDeviceProp_tR0000* properties);
 typedef hipError_t (*t_hipConfigureCall)(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                          hipStream_t stream);

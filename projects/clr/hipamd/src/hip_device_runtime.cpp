@@ -9,6 +9,9 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 
+#undef hipChooseDevice
+#undef hipDeviceProp_t
+
 namespace hip {
 
 hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device);
@@ -916,3 +919,7 @@ hipError_t hipSetValidDevices(int* device_arr, int len) {
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip
+
+extern "C" hipError_t hipChooseDevice(int* device, const hipDeviceProp_tR0000* properties) {
+  return hip::hipChooseDeviceR0000(device, properties);
+}

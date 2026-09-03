@@ -108,11 +108,6 @@ function(hip_gen_exe_target)
 
     # Add dependency on build_tests to build it on this custom target
     add_dependencies(${_TEST_TARGET_NAME} ${_EXE_NAME})
-    # Test deprecated functions too. We would like to stay on the
-    # latest API, so define HIP_ABI_IMPL to access deprecated
-    # APIs. The cost of this is that we lose access to wrapper
-    # functions.
-    target_compile_definitions(${_EXE_NAME} PRIVATE HIP_ABI_IMPL)
 
     if (DEFINED _COMPILE_OPTIONS)
       target_compile_options(${_EXE_NAME} PUBLIC ${_COMPILE_OPTIONS})
