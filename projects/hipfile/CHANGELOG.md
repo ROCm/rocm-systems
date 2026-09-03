@@ -23,6 +23,8 @@
 
 ### Known issues
 
+* Asynchronous operations that use the fastpath backend will not retry on the fallback backend. If asynchronous operations have proper alignment, they now run on the fastpath backend. If the fastpath device lookup fails or the P2P DMA transfer is not supported between the devices, the asynchronous operation will now fail.
+
 ## hipFile 0.4.0 for ROCm 10.0.0
 
 ### Added
