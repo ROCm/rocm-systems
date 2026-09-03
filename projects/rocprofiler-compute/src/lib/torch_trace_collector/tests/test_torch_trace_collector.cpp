@@ -722,6 +722,28 @@ TEST_F(TorchTraceCollectorTest, InstallIsIdempotent)
     EXPECT_TRUE(is_installed());
 }
 
+TEST_F(TorchTraceCollectorTest, InstallIgnoresConfigurationChanges)
+{
+    const auto handle = install(/*capture_args=*/true, /*capture_values=*/false);
+
+    testing::internal::CaptureStderr();
+    const auto values_handle = install(/*capture_args=*/true, /*capture_values=*/true);
+    const auto args_handle   = install(/*capture_args=*/false, /*capture_values=*/false);
+    const auto warning       = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(warning.find("call uninstall() before changing configuration"), std::string::npos);
+    EXPECT_EQ(values_handle, handle);
+    EXPECT_EQ(args_handle, handle);
+    EXPECT_TRUE(args_capture_enabled());
+    EXPECT_FALSE(args_values_enabled());
+
+    uninstall();
+    const auto new_handle = install(/*capture_args=*/true, /*capture_values=*/true);
+    EXPECT_NE(new_handle, static_cast<std::int64_t>(at::INVALID_CALLBACK_HANDLE));
+    EXPECT_TRUE(args_capture_enabled());
+    EXPECT_TRUE(args_values_enabled());
+}
+
 TEST_F(TorchTraceCollectorTest, UninstallClearsState)
 {
     install();

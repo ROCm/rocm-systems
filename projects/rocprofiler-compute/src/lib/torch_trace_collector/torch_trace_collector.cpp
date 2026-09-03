@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -371,13 +372,19 @@ void pop_user_scope()
 std::int64_t install(bool capture_args, bool capture_values)
 {
     ProcessState& process = process_state();
-    process.capture_args.store(capture_args);
-    process.capture_values.store(capture_values);
     return process.install.wlock(
-        [capture_args](InstallState& state)
+        [&process, capture_args, capture_values](InstallState& state)
         {
             if (state.handle != at::INVALID_CALLBACK_HANDLE)
             {
+                if (process.capture_args.load() != capture_args ||
+                    process.capture_values.load() != capture_values)
+                {
+                    std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                              << "] WARNING: torch_trace_collector is already installed; call "
+                                 "uninstall() before changing configuration\033[0m"
+                              << std::endl;
+                }
                 return static_cast<std::int64_t>(state.handle);
             }
             auto callback = at::RecordFunctionCallback(start_cb, end_cb)
@@ -386,6 +393,8 @@ std::int64_t install(bool capture_args, bool capture_values)
             {
                 callback.needsInputs(true);
             }
+            process.capture_args.store(capture_args);
+            process.capture_values.store(capture_values);
             state.handle = at::addGlobalCallback(callback);
             return static_cast<std::int64_t>(state.handle);
         });
