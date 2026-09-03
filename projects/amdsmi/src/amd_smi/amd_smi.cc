@@ -1492,6 +1492,9 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
     copy_cuid_string(primary, info->primary, sizeof(info->primary));
   }
 
+  // The type is answered by the handle's own device class rather than by any
+  // privileged read, so a failure here means the handle died between calls.
+  // UNKNOWN is already set, and that is what such a handle should report.
   amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_NONE;
   length = sizeof(device_type);
   if (amdcuid_query_device_property(handle, AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length) ==
@@ -1538,7 +1541,9 @@ amdsmi_status_t amdsmi_set_cuid_seed(const uint8_t seed[AMDSMI_CUID_SEED_SIZE]) 
   amdcuid_status_t status = amdcuid_set_hash_key(seed);
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
-      // Refresh the CUID after setting the new seed to ensure it takes effect.
+      // set_hash_key() only replaces the key in memory. The refresh is what
+      // re-derives every derived CUID under it, so without this the call
+      // reports success while every reader still sees the old values.
       status = amdcuid_refresh();
       if (status != AMDCUID_STATUS_SUCCESS) {
         return AMDSMI_STATUS_API_FAILED;
