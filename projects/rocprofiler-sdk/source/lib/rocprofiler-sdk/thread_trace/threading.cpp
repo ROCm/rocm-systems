@@ -224,6 +224,12 @@ producer_loop(
         size_t idx  = wait_for_free_slot();
         auto   wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
+        if(wptr.status != HSA_STATUS_SUCCESS || wptr.data == nullptr || wptr.size == 0)
+        {
+            ROCP_WARNING << "Discarding ATT drain: status " << wptr.status << ", size "
+                         << wptr.size;
+            return;
+        }
         ROCP_INFO << "Iterate data with size: " << wptr.size;
         send_to_consumer(wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
     };

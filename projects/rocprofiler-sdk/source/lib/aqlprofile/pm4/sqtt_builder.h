@@ -549,8 +549,6 @@ public:
     void End(CmdBuffer* cmd_buffer, TraceConfig* config) override
     {
         SetGRBMToBroadcast(cmd_buffer);
-        // Issue a CSPartialFlush cmd including cache flush
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
         const uint32_t se_number_xcc = se_number_total / std::max(1u, GetXCCNumber());
 
         if(Primitives::GFXIP_LEVEL == 9)
@@ -566,15 +564,12 @@ public:
                         reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
                     InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_end);
                 }
-                builder.BuildWriteWaitIdlePacket(cmd_buffer);
             }
 
             // Program the thread trace mode register to disable thread trace
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_MODE_ADDR,
                                                Primitives::sqtt_mode_off_value());
-            // Issue a CSPartialFlush cmd including cache flush
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
             if(config->perfcounters.size()) StopPerfMon(cmd_buffer);
 
@@ -595,26 +590,10 @@ public:
                 // Issue WaitRegMem command to wait until SQTT event has completed
                 const uint32_t mask_val      = Primitives::sqtt_busy_mask();
                 auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-                builder.BuildWaitRegMemCommand(
-                    cmd_buffer, false, status_offset, false, mask_val, 1);
+                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
                 ReadValues(cmd_buffer, config, se_index);
             }
-            // Reset the GRBM to broadcast mode
-            SetGRBMToBroadcast(cmd_buffer);
-            // Initialize cache flush request object
-            builder.BuildCacheFlushPacket(
-                cmd_buffer, size_t(config->control_buffer_ptr), config->control_buffer_size);
-            // Program zero size of thread trace buffer
-            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                               Primitives::SQ_THREAD_TRACE_SIZE_ADDR,
-                                               Primitives::sqtt_zero_size_value());
-            // Program the thread trace ctrl register
-            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                               Primitives::SQ_THREAD_TRACE_CTRL_ADDR,
-                                               Primitives::sqtt_ctrl_value(true, false));
-            // Issue a CSPartialFlush cmd including cache flush
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
         }
         else
         {
@@ -653,15 +632,12 @@ public:
                     ReadValues(cmd_buffer, config, index + xcc * se_number_xcc);
                 }
             }
-
-            // Reset the GRBM to broadcast mode
-            SetGRBMToBroadcast(cmd_buffer);
         }
+        SetGRBMToBroadcast(cmd_buffer);
 
         if(Primitives::GFXIP_LEVEL != 10)
             builder.BuildCacheFlushPacket(
                 cmd_buffer, size_t(config->control_buffer_ptr), config->control_buffer_size);
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
     void ReadValues(CmdBuffer* cmd_buffer, const TraceConfig* config, size_t se_index)
@@ -772,13 +748,6 @@ public:
         XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), se_id / se_per_xcc);
         Select_GRBM_SE_SH0(cmd_buffer, se_id % se_per_xcc);
 
-        if(Primitives::GFXIP_LEVEL == 9)
-        {
-            const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-            auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
-        }
-
         auto status_addr = (Primitives::GFXIP_LEVEL >= 12)
                                ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR
                                : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
@@ -815,7 +784,7 @@ public:
         {
             const uint32_t mask_val      = Primitives::sqtt_busy_mask();
             auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_OFFSET;
-            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, false, mask_val, 1);
+            builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
 
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::SQ_THREAD_TRACE_BASE_ADDR,

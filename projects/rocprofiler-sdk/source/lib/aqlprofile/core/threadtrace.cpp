@@ -36,6 +36,7 @@
 #include "lib/aqlprofile/pm4/sqtt_builder.h"
 
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/aqlprofile/core/memorymanager.hpp"
 
 #define THREAD_TRACE_PREFIX_SIZE  0x100
@@ -74,6 +75,9 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
     auto                shared_memorymgr = MemoryManager::GetManager(handle.handle);
     TraceMemoryManager* memorymgr = dynamic_cast<TraceMemoryManager*>(shared_memorymgr.get());
     if(!memorymgr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto reset_swaps =
+        rocprofiler::common::scope_destructor{[memorymgr]() { memorymgr->buffer_swaps = 0; }};
 
     aql_profile::Pm4Factory* pm4_factory =
         aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
@@ -138,8 +142,6 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
             sample_ptr     = memorymgr->config.buffer_data.at(
                 se_index)[(memorymgr->buffer_swaps + buf_num - 1) % buf_num];
             callback(se_index, sample_ptr, sample_size, userdata);
-            // Reset swaps for next thread trace start
-            memorymgr->buffer_swaps = 0;
             return status;
         }
     }
@@ -174,9 +176,6 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         memorymgr->CopyMemory((void*) sample_data_ptr, sample_ptr, sample_size);
         callback(se_index, (void*) cpu_sample, sample_size_plus_header, userdata);
     }
-
-    // Reset swaps for next thread trace start
-    memorymgr->buffer_swaps = 0;
 
     return status;
 }
@@ -439,6 +438,8 @@ aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
                                          ->GetSqttBuilder()
                                          ->GetLockDownFailMask()) != 0;
 
+        ROCP_WARNING_IF(out->is_too_late) << "GPU buffer full!";
+
         auto& buffer_data = it->second;
         out->read_size    = manager->config.capacity_per_se;
         out->num_swaps    = manager->buffer_swaps.fetch_add(1);
@@ -490,10 +491,11 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
     for(size_t i = 0; i < buffers.size(); i++)
     {
         pm4_builder::CmdBuffer commands;
+        // Swap and then flush the buffer this packet retires so SDMA picks up changes in VRAM
         sqttbuilder->Swapbuffer(&commands,
                                 &manager->config,
                                 buffers.at((i + 1) % buffers.size()),
-                                buffers.at(i % buffers.size()),
+                                buffers.at((i + buffers.size() - 1) % buffers.size()),
                                 shader_engine_id,
                                 i % 2);
 
