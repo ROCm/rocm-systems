@@ -16,11 +16,17 @@ crashes and reports ``N/A`` in both human-readable and JSON output.
 """
 
 import argparse
-import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
@@ -71,12 +77,7 @@ def _fake_modules(pcie_static):
 
 
 def _load_static_module():
-    spec = importlib.util.spec_from_file_location("static_under_test", STATIC_PATH)
-    if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"amd-smi CLI static.py is not loadable ({STATIC_PATH})")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("static_under_test", STATIC_PATH)
 
 
 class _FakeLogger:

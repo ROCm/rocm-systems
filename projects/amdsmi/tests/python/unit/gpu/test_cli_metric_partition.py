@@ -23,12 +23,18 @@ non-baremetal platforms, so ``args`` has no ``partition`` attribute and
 """
 
 import argparse
-import importlib.util
 import os
 import types
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
 # checkout wins. None -> setUpClass skips.
@@ -118,12 +124,7 @@ def _build_fake_amdsmi(**interface_overrides):
 
 
 def _load_metric_module():
-    spec = importlib.util.spec_from_file_location("metric_under_test", METRIC_PATH)
-    if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"amd-smi CLI metric.py is not loadable ({METRIC_PATH})")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("metric_under_test", METRIC_PATH)
 
 
 class _FakeLogger:

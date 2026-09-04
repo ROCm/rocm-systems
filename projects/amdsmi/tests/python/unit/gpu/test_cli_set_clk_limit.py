@@ -11,9 +11,7 @@ to the largest reachable DPM level, never exceeding the request) and the safe
 """
 
 import collections
-import importlib.util
 import os
-import sys
 import types
 import unittest
 
@@ -23,7 +21,13 @@ import unittest
 # degrade gracefully rather than erroring at import; without the harness there is
 # no resolver, and the suite skips with the reason below.
 try:
-    from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
+    from common.common import (
+        amdsmi_path,
+        cli_search_order,
+        find_cli_dir,
+        load_cli_module,
+        stub_modules,
+    )
 except (ImportError, FileNotFoundError):  # pragma: no cover - harness/install unavailable
     amdsmi_path = None
     cli_search_order = None
@@ -94,12 +98,7 @@ def _build_fake_amdsmi():
 def _load_set_value_module():
     # set_value.py imports the sibling ``amdsmi_cli_exceptions`` module by bare
     # name, so the CLI dir must be importable before the module is executed.
-    if _CLI_DIR and _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
-    spec = importlib.util.spec_from_file_location("set_value_under_test", SET_VALUE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("set_value_under_test", SET_VALUE_PATH, sys_path_dir=_CLI_DIR)
 
 
 class TestSnapClkLimitToDpm(unittest.TestCase):
