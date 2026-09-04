@@ -53,12 +53,15 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   std::promise<void> callback_entered;
   std::promise<void> release_callback;
   std::atomic<uint32_t> calls = 0;
-  cp.set_interrupt_callback([&](uint32_t, uint32_t) {
+  cp.set_interrupt_callback([&](uint32_t, uint32_t event_id) {
     ++calls;
+    if (event_id == 1)
+      return;
     callback_entered.set_value();
     release_callback.get_future().wait();
   });
 
+  cp.invoke_completion_interrupt_callback_for_test(1, 1);
   std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
   callback_entered.get_future().wait();
   std::promise<void> removal_started;
@@ -73,19 +76,31 @@ TEST(CommandProcessorTest, InterruptCallbackRemovalWaitsForActiveCall) {
   EXPECT_EQ(removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
   caller.join();
   cp.invoke_completion_interrupt_callback_for_test(1, 2);
-  EXPECT_EQ(calls.load(), 1u);
+  EXPECT_EQ(calls.load(), 2u);
   cp.shutdown();
 }
 
 TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
   rocjitsu::amdgpu::CommandProcessor cp("cp");
+  std::promise<void> callback_removed_itself;
+  std::promise<void> release_callback;
   std::atomic<uint32_t> calls = 0;
   cp.set_interrupt_callback([&](uint32_t, uint32_t) {
     ++calls;
     cp.set_interrupt_callback(nullptr);
+    callback_removed_itself.set_value();
+    release_callback.get_future().wait();
   });
 
-  cp.invoke_interrupt_callback_for_test(1, 2);
+  std::jthread caller([&] { cp.invoke_interrupt_callback_for_test(1, 2); });
+  callback_removed_itself.get_future().wait();
+  auto external_removal =
+      std::async(std::launch::async, [&] { cp.set_interrupt_callback(nullptr); });
+  EXPECT_EQ(external_removal.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  release_callback.set_value();
+  EXPECT_EQ(external_removal.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  caller.join();
   cp.invoke_interrupt_callback_for_test(1, 2);
   EXPECT_EQ(calls.load(), 1u);
 }

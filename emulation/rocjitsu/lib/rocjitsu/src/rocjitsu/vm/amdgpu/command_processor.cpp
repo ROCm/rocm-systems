@@ -40,16 +40,24 @@ namespace amdgpu {
 
 void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
   auto replacement = std::make_shared<InterruptCallbackState>(std::move(cb));
-  std::shared_ptr<InterruptCallbackState> previous;
+  std::vector<std::shared_ptr<InterruptCallbackState>> retired;
   {
     std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
-    previous = std::exchange(interrupt_cb_state_, std::move(replacement));
+    retired_interrupt_cb_states_.push_back(
+        std::exchange(interrupt_cb_state_, std::move(replacement)));
+    retired = retired_interrupt_cb_states_;
   }
-  std::unique_lock<std::mutex> previous_lock(previous->mutex);
-  const auto self = previous->calls_by_thread.find(std::this_thread::get_id());
-  const size_t self_calls = self == previous->calls_by_thread.end() ? 0 : self->second;
-  previous->cv.wait(previous_lock,
-                    [&previous, self_calls] { return previous->active_calls == self_calls; });
+  const bool reentrant = std::any_of(retired.begin(), retired.end(), [](const auto &state) {
+    std::lock_guard<std::mutex> state_lock(state->mutex);
+    return state->calls_by_thread.contains(std::this_thread::get_id());
+  });
+  if (!reentrant) {
+    for (const auto &state : retired) {
+      std::unique_lock<std::mutex> state_lock(state->mutex);
+      state->cv.wait(state_lock, [&state] { return state->active_calls == 0; });
+    }
+  }
+  prune_retired_interrupt_callbacks();
 }
 
 CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_callback() {
@@ -61,12 +69,20 @@ CommandProcessor::InterruptCallbackLease CommandProcessor::acquire_interrupt_cal
   const std::thread::id thread_id = std::this_thread::get_id();
   ++state->active_calls;
   ++state->calls_by_thread[thread_id];
-  return InterruptCallbackLease(std::move(state), thread_id);
+  return InterruptCallbackLease(this, std::move(state), thread_id);
 }
 
 void CommandProcessor::invoke_interrupt_callback(uint32_t process_id, uint32_t event_id) {
   if (auto interrupt = acquire_interrupt_callback())
     interrupt(process_id, event_id);
+}
+
+void CommandProcessor::prune_retired_interrupt_callbacks() {
+  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+  std::erase_if(retired_interrupt_cb_states_, [](const auto &state) {
+    std::lock_guard<std::mutex> state_lock(state->mutex);
+    return state->active_calls == 0;
+  });
 }
 
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {

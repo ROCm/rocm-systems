@@ -159,9 +159,11 @@ public:
   void set_doorbell_base(uint32_t process_id, void *base);
 
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
-  /// @brief Replace the interrupt sink after all calls to the previous sink finish.
-  /// @details Replacement is a quiescence point: once this returns, no worker
-  /// can retain or invoke the previous callback.
+  /// @brief Replace the interrupt sink and drain callbacks from older generations.
+  /// @details External replacement is a quiescence point: once this returns, no
+  /// worker can retain or invoke an older callback. Reentrant replacement only
+  /// publishes the new generation; a later external replacement drains all
+  /// retained generations after the invoking callback unwinds.
   void set_interrupt_callback(InterruptCallback cb);
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
@@ -412,21 +414,26 @@ private:
   class InterruptCallbackLease {
   public:
     InterruptCallbackLease() = default;
-    InterruptCallbackLease(std::shared_ptr<InterruptCallbackState> state, std::thread::id thread_id)
-        : state_(std::move(state)), thread_id_(thread_id) {}
+    InterruptCallbackLease(CommandProcessor *owner, std::shared_ptr<InterruptCallbackState> state,
+                           std::thread::id thread_id)
+        : owner_(owner), state_(std::move(state)), thread_id_(thread_id) {}
     InterruptCallbackLease(const InterruptCallbackLease &) = delete;
     InterruptCallbackLease &operator=(const InterruptCallbackLease &) = delete;
     InterruptCallbackLease(InterruptCallbackLease &&other) noexcept
-        : state_(std::move(other.state_)), thread_id_(other.thread_id_) {}
+        : owner_(std::exchange(other.owner_, nullptr)), state_(std::move(other.state_)),
+          thread_id_(other.thread_id_) {}
     ~InterruptCallbackLease() {
       if (!state_)
         return;
-      std::lock_guard<std::mutex> lock(state_->mutex);
-      --state_->active_calls;
-      auto calls = state_->calls_by_thread.find(thread_id_);
-      if (--calls->second == 0)
-        state_->calls_by_thread.erase(calls);
-      state_->cv.notify_all();
+      {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        --state_->active_calls;
+        auto calls = state_->calls_by_thread.find(thread_id_);
+        if (--calls->second == 0)
+          state_->calls_by_thread.erase(calls);
+        state_->cv.notify_all();
+      }
+      owner_->prune_retired_interrupt_callbacks();
     }
 
     explicit operator bool() const { return static_cast<bool>(state_); }
@@ -435,6 +442,7 @@ private:
     }
 
   private:
+    CommandProcessor *owner_ = nullptr;
     std::shared_ptr<InterruptCallbackState> state_;
     std::thread::id thread_id_;
   };
@@ -765,6 +773,7 @@ private:
   bool scan_doorbells();
   [[nodiscard]] InterruptCallbackLease acquire_interrupt_callback();
   void invoke_interrupt_callback(uint32_t process_id, uint32_t event_id);
+  void prune_retired_interrupt_callbacks();
 
   /// @brief Guards the current generation of the external interrupt callback.
   /// @details Callers lease one immutable generation under this leaf mutex and
@@ -773,6 +782,7 @@ private:
   std::mutex interrupt_cb_mutex_;
   std::shared_ptr<InterruptCallbackState> interrupt_cb_state_ =
       std::make_shared<InterruptCallbackState>();
+  std::vector<std::shared_ptr<InterruptCallbackState>> retired_interrupt_cb_states_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
   uint32_t scratch_wave_divisor_ = 1;
