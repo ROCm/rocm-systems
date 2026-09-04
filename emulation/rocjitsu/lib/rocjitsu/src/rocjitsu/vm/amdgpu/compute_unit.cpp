@@ -161,6 +161,17 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                                         uint32_t num_vgprs, uint32_t wave_size) {
+  const uint32_t ordinary_vgprs =
+      std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
+  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+                                        : 0;
+  return dispatch_wf(wg_id, pc, num_sgprs,
+                     WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                                        WaveVgprAllocation vgprs, uint32_t wave_size) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
@@ -180,11 +191,23 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, num_vgprs, wave_size);
+  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, vgprs, wave_size);
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, uint32_t num_vgprs,
+                                           uint32_t wave_size) {
+  const uint32_t ordinary_vgprs =
+      std::min(num_vgprs, isa_properties(arch()).max_addressable_vgprs_per_wf);
+  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+                                        : 0;
+  return dispatch_wf_at(wf_id, wg_id, pc, num_sgprs,
+                        WaveVgprAllocation{num_vgprs, ordinary_vgprs, accvgpr_capacity}, wave_size);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, WaveVgprAllocation vgprs,
                                            uint32_t wave_size) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
@@ -195,20 +218,25 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
       dispatched_wave_size > wf->max_wf_size_)
     return nullptr;
-  if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || num_vgprs == 0 ||
-      num_vgprs > vgpr_allocation_block_size())
+  const uint32_t ordinary_limit = isa_properties(arch()).max_addressable_vgprs_per_wf;
+  const uint32_t accvgpr_capacity = vgpr_allocation_block_size() > ACC_VGPR_OFFSET
+                                        ? vgpr_allocation_block_size() - ACC_VGPR_OFFSET
+                                        : 0;
+  if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || vgprs.total == 0 ||
+      vgprs.total > vgpr_allocation_block_size() || vgprs.ordinary > ordinary_limit ||
+      vgprs.accumulator > accvgpr_capacity)
     return nullptr;
 
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(num_vgprs);
+  int32_t vgpr_base = allocate_vgprs(vgprs.total);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
-  if (!reserve_physical_registers(wf_id, num_sgprs, num_vgprs, dispatched_wave_size)) {
+  if (!reserve_physical_registers(wf_id, num_sgprs, vgprs.total, dispatched_wave_size)) {
     free_vgprs(static_cast<uint32_t>(vgpr_base));
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -223,9 +251,11 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->wg_id_ = wg_id;
   wf->pc = pc;
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
-  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
+  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs.total};
   wf->num_sgprs_ = num_sgprs;
-  wf->num_vgprs_ = num_vgprs;
+  wf->num_vgprs_ = vgprs.total;
+  wf->num_ordinary_vgprs_ = vgprs.ordinary;
+  wf->num_accvgprs_ = vgprs.accumulator;
   wf->exec_ = wf->lane_mask();
   wf->vgpr_write_mask_ = wf->lane_mask();
   wf->vcc_ = 0;

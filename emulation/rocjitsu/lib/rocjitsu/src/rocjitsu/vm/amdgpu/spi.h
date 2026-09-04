@@ -108,9 +108,11 @@ public:
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
-        Wavefront *wf =
-            cu->dispatch_wf(wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
-                            wg.entry->vgprs_per_wf, wg.entry->kernel_wave_size);
+        Wavefront *wf = cu->dispatch_wf(
+            wg.global_wg_id, wg.entry->kernel_entry_pc, wg.entry->sgprs_per_wf,
+            WaveVgprAllocation{wg.entry->vgprs_per_wf, wg.entry->ordinary_vgprs_per_wf,
+                               wg.entry->accvgprs_per_wf},
+            wg.entry->kernel_wave_size);
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
         wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));

@@ -135,11 +135,19 @@ public:
   Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs,
                          uint32_t wave_size = 0);
 
+  /// @brief Activate a wave with an explicit ordinary/accumulator VGPR split.
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, WaveVgprAllocation vgprs,
+                         uint32_t wave_size = 0);
+
   /// @brief Activate a specific idle wavefront slot.
   /// @details Used by checkpoint restoration when hardware slot identity is
   /// execution state. Returns nullptr when the requested slot is invalid or busy.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                             uint32_t num_vgprs, uint32_t wave_size = 0);
+
+  /// @brief Activate a specific slot with an explicit VGPR allocation split.
+  Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                            WaveVgprAllocation vgprs, uint32_t wave_size = 0);
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -583,18 +591,30 @@ public:
     if (!owns_storage || physical_base < wf.vgpr_alloc().base)
       return false;
 
-    // COMPUTE_PGM_RSRC1 describes the allocated ordinary VGPR prefix. AccVGPR
-    // operands use a separate physical bank and separate architecture rules;
-    // this first allocation check deliberately leaves that bank to a future
-    // architecture-aware allocation contract rather than rejecting it by a
-    // comparison that is known to be wrong.
     const uint32_t relative_base = physical_base - wf.vgpr_alloc().base;
-    if (relative_base >= isa_properties(arch()).max_addressable_vgprs_per_wf)
-      return owns_storage;
-    if (wf.vgpr_alloc().contains(physical_base, physical_count))
+    const uint32_t ordinary_limit = isa_properties(arch()).max_addressable_vgprs_per_wf;
+    if (relative_base < ordinary_limit) {
+      const bool owns_ordinary = relative_base < wf.num_ordinary_vgprs() &&
+                                 physical_count <= wf.num_ordinary_vgprs() - relative_base;
+      if (owns_ordinary)
+        return owns_storage;
+      report_vgpr_allocation_violation(wf, relative_base, physical_count, false);
+      return false;
+    }
+
+    if (relative_base >= ACC_VGPR_OFFSET) {
+      const uint32_t acc_base = relative_base - ACC_VGPR_OFFSET;
+      const bool owns_accumulator =
+          acc_base < wf.num_accvgprs() && physical_count <= wf.num_accvgprs() - acc_base;
+      if (owns_accumulator)
+        return owns_storage;
+      report_vgpr_allocation_violation(wf, acc_base, physical_count, true);
+      return false;
+    }
+
+    if (owns_storage)
       return owns_storage;
 
-    report_vgpr_allocation_violation(wf, relative_base, physical_count);
     return false;
   }
 
@@ -1027,16 +1047,18 @@ protected:
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
 
   void report_vgpr_allocation_violation(const Wavefront &wf, uint32_t relative_base,
-                                        uint32_t register_count) const {
+                                        uint32_t register_count, bool accumulator) const {
     const uint64_t prior =
         register_allocation_violation_count_.fetch_add(1, std::memory_order_relaxed);
     if (prior != 0)
       return;
-    util::Logger::warn(
-        "RocJitsu register allocation violation: wave accessed ordinary VGPR range v",
-        relative_base, ":v", relative_base + register_count - 1,
-        " outside descriptor allocation v0:v", wf.num_vgprs() - 1, " at pc=0x", std::hex, wf.pc,
-        std::dec, " arch=", static_cast<int>(arch()));
+    util::Logger::warn("RocJitsu register allocation violation: wave accessed ",
+                       accumulator ? "accumulator VGPR range acc" : "ordinary VGPR range v",
+                       relative_base, ":", accumulator ? "acc" : "v",
+                       relative_base + register_count - 1, " outside descriptor allocation (",
+                       accumulator ? "accumulator" : "ordinary",
+                       " count=", accumulator ? wf.num_accvgprs() : wf.num_ordinary_vgprs(),
+                       ") at pc=0x", std::hex, wf.pc, std::dec, " arch=", static_cast<int>(arch()));
     if (engine())
       engine()->request_exit("VGPR access exceeds descriptor allocation", 1);
   }

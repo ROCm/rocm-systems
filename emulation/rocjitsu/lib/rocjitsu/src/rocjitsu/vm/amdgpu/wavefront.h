@@ -101,8 +101,14 @@ public:
   uint32_t num_sgprs() const { return num_sgprs_; }
 
   /// @brief Return the number of allocated vector registers.
-  /// @returns Per-dispatch VGPR allocation count.
+  /// @returns Per-dispatch total/unified VGPR allocation count.
   uint32_t num_vgprs() const { return num_vgprs_; }
+
+  /// @brief Return the descriptor-owned ordinary VGPR prefix length.
+  uint32_t num_ordinary_vgprs() const { return num_ordinary_vgprs_; }
+
+  /// @brief Return the descriptor-owned accumulator VGPR window length.
+  uint32_t num_accvgprs() const { return num_accvgprs_; }
 
   /// @brief Read the raw status register value.
   /// @returns Status register as a raw uint32_t.
@@ -840,6 +846,8 @@ public:
     cluster_size_ = 1;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
+    num_ordinary_vgprs_ = 0;
+    num_accvgprs_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
     wf_size_ = default_wf_size_;
@@ -919,13 +927,15 @@ protected:
   uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.
 
-  uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
-  uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
-  uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
-  uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
-  uint32_t num_vgprs_ = 0;       ///< Allocated vector registers (set at dispatch).
-  uint32_t max_sgprs_ = 0;       ///< ISA maximum SGPRs per wavefront.
-  uint32_t max_vgprs_ = 0;       ///< ISA maximum VGPRs per wavefront.
+  uint32_t wf_size_ = 0;            ///< Lanes in the current dispatched wavefront.
+  uint32_t default_wf_size_ = 0;    ///< ISA default wavefront width.
+  uint32_t max_wf_size_ = 0;        ///< Maximum wavefront width supported by the ISA.
+  uint32_t num_sgprs_ = 0;          ///< Allocated scalar registers (set at dispatch).
+  uint32_t num_vgprs_ = 0;          ///< Total/unified vector allocation (set at dispatch).
+  uint32_t num_ordinary_vgprs_ = 0; ///< Descriptor-owned ordinary VGPR prefix.
+  uint32_t num_accvgprs_ = 0;       ///< Descriptor-owned AccVGPR window.
+  uint32_t max_sgprs_ = 0;          ///< ISA maximum SGPRs per wavefront.
+  uint32_t max_vgprs_ = 0;          ///< ISA maximum VGPRs per wavefront.
 
   RegAllocation sgpr_alloc_; ///< Slice in CU's SGPR file.
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.

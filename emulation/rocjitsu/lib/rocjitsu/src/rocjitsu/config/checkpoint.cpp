@@ -224,11 +224,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto &wg_coord = w->wg_coord();
           auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
-          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
-                                              w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
-                                              sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
-                                              w->kernel_wave_size(), w->wf_size());
+          auto wfs = fb::CreateWavefrontState(
+              builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
+              w->wf_size(), w->num_vgprs(), w->num_ordinary_vgprs(), w->num_accvgprs(), true);
           wf_offsets.push_back(wfs);
         }
 
@@ -336,12 +336,30 @@ LoadedConfig restore_checkpoint(const std::string &path) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
-          uint32_t num_vgprs = cu->config().vgprs_per_wf;
+          // The serialized VGPR bytes cover the whole fixed backing block, not
+          // the descriptor-owned extent. New checkpoints therefore carry the
+          // allocation shape separately. Old checkpoints retain their historic
+          // full-block restore semantics because no narrower bound can be
+          // reconstructed from their payload.
+          amdgpu::WaveVgprAllocation vgprs;
+          if (wf_state->has_vgpr_allocation()) {
+            vgprs = {wf_state->vgpr_allocation_count(), wf_state->ordinary_vgpr_count(),
+                     wf_state->accvgpr_count()};
+          } else {
+            const uint32_t total = cu->config().vgprs_per_wf;
+            const uint32_t ordinary =
+                std::min(total, isa_properties(cu->arch()).max_addressable_vgprs_per_wf);
+            const uint32_t accvgpr_capacity =
+                cu->vgpr_allocation_block_size() > amdgpu::ACC_VGPR_OFFSET
+                    ? cu->vgpr_allocation_block_size() - amdgpu::ACC_VGPR_OFFSET
+                    : 0;
+            vgprs = {total, ordinary, accvgpr_capacity};
+          }
 
           const uint32_t wave_size =
               wf_state->kernel_wave_size() == 0 ? cu->wf_size() : wf_state->kernel_wave_size();
           auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
-                                        num_sgprs, num_vgprs, wave_size);
+                                        num_sgprs, vgprs, wave_size);
           if (!wf)
             throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 

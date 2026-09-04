@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -183,7 +184,7 @@ struct VmFixture {
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
                         uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
-                        bool wave32 = true) {
+                        bool wave32 = true, uint32_t accum_vgpr_base = 192) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -198,6 +199,16 @@ struct VmFixture {
                     ((vgprs / vgpr_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
+    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+      // CDNA2-4 split the unified RSRC1 count at ACCUM_OFFSET. Keep both halves
+      // available by default because this fixture exercises ordinary and
+      // accumulator instructions; small allocations remain entirely ordinary.
+      const uint32_t ordinary_vgprs = std::min(vgprs, accum_vgpr_base);
+      assert(ordinary_vgprs >= 4 && ordinary_vgprs % 4 == 0);
+      AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                      (ordinary_vgprs / 4 - 1));
+    }
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
     kd.group_segment_fixed_size = group_segment_fixed_size;
@@ -3015,6 +3026,41 @@ TEST(AqlDispatchTest, ExecutedVgprOutsideDescriptorAllocationFails) {
   EXPECT_EQ(status.code, 1);
   EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
   EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+}
+
+TEST(AqlDispatchTest, CdnaUnifiedAllocationRejectsOrdinaryVgprInAccumulatorWindow) {
+  for (std::string_view arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/512);
+    const uint32_t code[] = {
+        enc::sopp(/*s_branch=*/2, /*simm16=-1=*/0xFFFF),
+    };
+    const uint64_t kernel_object =
+        f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104,
+                       /*vgprs=*/128, /*user_sgprs=*/2,
+                       /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+                       /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0,
+                       /*wave32=*/false, /*accum_vgpr_base=*/80);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
+
+    for (uint32_t step = 0; step < 10 && f.cu()->num_wfs() == 0; ++step)
+      ASSERT_TRUE(f.engine->step());
+    auto *wave = f.cu()->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_EQ(wave->num_vgprs(), 128u);
+    EXPECT_EQ(wave->num_ordinary_vgprs(), 80u);
+    EXPECT_EQ(wave->num_accvgprs(), 48u);
+
+    const uint32_t ordinary_v100 = wave->vgpr_alloc().base + 100;
+    EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(ordinary_v100, /*lane=*/0), 0u);
+    EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+    const simdojo::ExitStatus status = f.engine->run();
+    EXPECT_EQ(status.code, 1);
+    EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
+  }
 }
 
 TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
