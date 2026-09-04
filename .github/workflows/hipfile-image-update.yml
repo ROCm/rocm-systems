@@ -55,10 +55,8 @@ jobs:
           - suse
           - ubuntu
         rocm_versions:
-          - 7.2.2
-        include:
-          - supported_platforms: ubuntu
-            rocm_versions: 7.13.0
+          - 7.14.0
+          - 10.0.0
     steps:
       - name: Fetching code repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

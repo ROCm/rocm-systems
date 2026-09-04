@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
@@ -33,6 +34,15 @@ public:
   void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                      uint64_t execMask, uint8_t byteMask = 0xF);
 
+  /// Register an event with the exact hardware counter that orders it.
+  void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+                     uint64_t execMask, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType);
+
+  /// Register an in-flight scalar load using its architectural destination.
+  void
+  registerScalarLoad(uint64_t pc, RegisterRef destination, uint64_t execMask,
+                     amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT);
+
   /// Register an in-flight memory event that involves LDS.
   /// The LDS memory involved is defined by `laneBaseAddresses` and `bytesPerLane`. Each active lane
   /// contributes one interval of size `bytesPerLane`.
@@ -40,6 +50,10 @@ public:
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask = 0xF);
+  void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
+                        uint64_t execMask, int waveSize,
+                        std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
+                        uint8_t byteMask, amdgpu::WaitCounterType waitCounterType);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
@@ -49,19 +63,13 @@ public:
                                   std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                                   std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
                                   int32_t offset1);
+  void registerDualOffsetLdsEvent(uint64_t pc, MemoryEventType type,
+                                  std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                                  std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
+                                  int32_t offset1, amdgpu::WaitCounterType waitCounterType);
 
-  /// Retire global memory events until `vmcnt` or fewer remain outstanding. 'Retire' here means
-  /// marking the event as wave-complete.
-  void sWaitCntVmcnt(int vmcnt);
-
-  /// Retire LDS events until at `lgkmcnt` or fewer remain outstanding.
-  void sWaitCntLgkmcnt(int lgkmcnt);
-
-  /// Dispatch a pending memory event produced by an instruction executor.
-  void dispatch(PendingMemoryEvent);
-
-  /// Dispatch a pending wait count produced by an s_waitcnt executor.
-  void dispatch(PendingWaitCount);
+  /// Dispatch the counter thresholds changed by one wait instruction.
+  void dispatch(const PendingWaitCount &);
 
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
@@ -83,8 +91,12 @@ public:
   void checkVgprReadAllLanes(int reg) const;
 
   /// Check a scalar register read for races. Calls the RaceHandler on
-  /// violation (outstanding s_load targeting this SGPR).
-  void checkSgprRead(int reg) const;
+  /// violation (outstanding scalar load targeting the same register).
+  void checkScalarRead(RegisterRef reg) const;
+
+  /// Check a scalar instruction write for conflicts with pending scalar loads.
+  /// A wide write reports each conflicting memory event at most once.
+  void checkScalarWrite(RegisterRef reg) const;
 
   /// True if any outstanding global/LDS store reads from the given VGPR lane.
   bool isOutstandingFromVgpr(int lane, int reg) const;
@@ -109,10 +121,13 @@ public:
 
 private:
   void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals);
+                                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+                                  amdgpu::WaitCounterType waitCounterType);
   void retireEventRegisters(EventId);
+  void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
   template <typename Pred> void resolveWaitCnt(int limit, Pred isTargetType);
+  void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
 
   void regEventCountInc(MemoryEventType type, int reg) {
     regEventCount[static_cast<int>(type)][reg]++;
@@ -124,6 +139,8 @@ private:
   std::vector<std::vector<EventId>> vgprMemoryEvents;
   std::vector<std::vector<EventId>> sgprMemoryEvents;
   std::vector<int> sgprEventCount;
+  std::vector<std::vector<EventId>> ttmpMemoryEvents;
+  std::vector<int> ttmpEventCount;
 
   static constexpr int kNumEventTypes = static_cast<int>(MemoryEventType::N);
   std::array<std::vector<int>, kNumEventTypes> regEventCount;

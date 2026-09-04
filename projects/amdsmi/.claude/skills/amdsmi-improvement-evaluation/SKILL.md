@@ -176,7 +176,7 @@ For each issue or opportunity, capture:
 
 ## Sources
 
-- AMD SMI source repository: <https://github.com/ROCm/amdsmi>
-- AMD SMI active super-repo path: <https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi>
+- AMD SMI source repository: <https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi>
+- AMD SMI legacy repository (deprecated, superseded by the above): <https://github.com/ROCm/amdsmi>
 - AMD SMI documentation: <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>
 - AMD SMI examples: <https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example>
