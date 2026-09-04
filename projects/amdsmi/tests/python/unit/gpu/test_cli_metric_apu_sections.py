@@ -16,12 +16,11 @@ nothing, so ``--energy`` never exits 0 with an empty payload.
 """
 
 import argparse
-import importlib.util
 import os
 import types
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module, stub_modules
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
 # checkout wins. None -> setUpClass skips.
@@ -122,10 +121,7 @@ def _build_fake_amdsmi():
 
 
 def _load_metric_module():
-    spec = importlib.util.spec_from_file_location("metric_apu_under_test", METRIC_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("metric_apu_under_test", METRIC_PATH)
 
 
 class _FakeLogger:
