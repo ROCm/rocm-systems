@@ -101,7 +101,13 @@ TEST(CommandProcessorTest, InterruptCallbackCanRemoveItself) {
 
   // The hook runs after the reentrancy scan and immediately before the drain,
   // so the timeout cannot be explained by delayed async-worker scheduling.
-  drain_reached.get_future().wait();
+  auto drain_future = drain_reached.get_future();
+  if (drain_future.wait_for(std::chrono::seconds(1)) != std::future_status::ready) {
+    release_callback.set_value();
+    caller.join();
+    external_replacement.wait();
+    FAIL() << "external callback replacement did not reach its generation drain";
+  }
   EXPECT_EQ(external_replacement.wait_for(std::chrono::milliseconds(20)),
             std::future_status::timeout);
 
