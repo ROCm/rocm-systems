@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "bootstrap_stubs.h"  // g_bootstrapInit / g_bootstrapSplit / g_bootstrapCreateRoot (shared)
 #include "env_fakes.h"    // micro_getenv / SetMicroEnv / ClearMicroEnv (shared)
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
@@ -29,6 +30,7 @@ struct ncclTopoSystem;
 struct ncclBootstrapHandle;
 
 struct amdsmiFabricDeviceInfo;
+struct ncclComm;
 
 // fillInfo's UALoE/MNNVL probe. The default answers -1, i.e. what a host with no fabric device reports.
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char* busId, uint32_t* deviceIndex);
@@ -107,6 +109,10 @@ extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
 
 // g_recorderResult and the ncclGetUniqueId_impl argument recorder come from recorder_fakes.h.
+
+// A std::function on top of the result code: the grow path validates the magic the coordinator broadcast back.
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
+extern std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle;
 
 // The fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one; callers must supply storage.
 extern ncclResult_t g_initChannelResult;

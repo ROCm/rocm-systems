@@ -221,6 +221,12 @@ int g_bcastGrowHandleCalls                = 0;
 bool g_bcastGrowHandleIsRoot              = false;
 int g_bootstrapGetUniqueIdCalls           = 0;
 
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle*, struct ncclComm*, bool) {
+  return g_bcastGrowHandleResult;
+}
+std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle =
+    DefaultBcastGrowHandle;
+
 ncclResult_t g_initChannelResult        = ncclSuccess;
 int g_initChannelLastId                 = -1;
 // Default 1 (!= VerSuccess) means "version unknown".
@@ -326,6 +332,7 @@ void ResetInitFakes() {
   ResetRecorderFakes();
   ResetRcclWrapFakes();
   ResetNcclStubs();
+  ResetBootstrapStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();
@@ -364,6 +371,7 @@ void ResetInitFakes() {
   g_ncclEnvPluginInitResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_bcastGrowHandle = DefaultBcastGrowHandle;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;

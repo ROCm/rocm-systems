@@ -6656,3 +6656,1751 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBa
   EXPECT_TRUE(LogHas(log, "minCTAs 7 is larger than maxCTAs -2147483648, set both to -2147483648"))
       << "actual log:\n" << log;
 }
+
+// --- ncclCommInitRankFunc (init.cc:2631) and the entry points that funnel into it ---
+
+namespace {
+
+constexpr int Rank_kCudaDev = 5;
+constexpr int Rank_kArchMajor = 9;
+constexpr int Rank_kArchMinor = 4;
+constexpr int Rank_kCudaArch = 100 * Rank_kArchMajor + 10 * Rank_kArchMinor;
+constexpr int Rank_kMaxSharedMem = 65536;
+constexpr int Rank_kCuCount = 304;
+constexpr int Rank_kUntouchedNRanks = 77;
+constexpr char Rank_kGcnArchName[] = "gfx942:sramecc+:xnack-";
+
+// Distinct per-attribute values: with major == minor the 100* / 10* operands could be swapped unnoticed.
+hipError_t Rank_DeviceAttribute(int* pi, hipDeviceAttribute_t attr, int) {
+  if (!pi) {
+    return hipErrorInvalidValue;
+  }
+  switch (attr) {
+    case hipDeviceAttributeSharedMemPerBlockOptin: *pi = Rank_kMaxSharedMem; break;
+    case hipDeviceAttributeComputeCapabilityMajor: *pi = Rank_kArchMajor; break;
+    case hipDeviceAttributeComputeCapabilityMinor: *pi = Rank_kArchMinor; break;
+    case hipDeviceAttributeWarpSize: *pi = g_hipWarpSize; break;
+    case hipDeviceAttributeDirectManagedMemAccessFromHost: *pi = 1; break;
+    default: *pi = 0; break;
+  }
+  return hipSuccess;
+}
+
+hipError_t Rank_DeviceProperties(hipDeviceProp_t* prop, int) {
+  if (!prop) {
+    return hipErrorInvalidValue;
+  }
+  *prop = hipDeviceProp_t{};
+  std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", Rank_kGcnArchName);
+  prop->multiProcessorCount = Rank_kCuCount;
+  prop->warpSize = 64;
+  return hipSuccess;
+}
+
+hipError_t Rank_SetDeviceOk(int) { return hipSuccess; }
+
+ncclResult_t Rank_KernelInitOk(int, int, size_t* maxStackSize) {
+  if (maxStackSize) {
+    *maxStackSize = 0;
+  }
+  return ncclSuccess;
+}
+
+// Heap comm and job: channels[MAXCHANNELS] is inline, so a stack ncclComm overflows.
+class Rank_JobScene {
+ public:
+  Rank_JobScene(int nranks, int myrank)
+      : comm_(new ncclComm{}),
+        job_(new ncclCommInitRankAsyncJob{}),
+        attr_(g_hipDeviceGetAttribute, Rank_DeviceAttribute),
+        props_(g_hipGetDeviceProperties, Rank_DeviceProperties) {
+    InstallCommAllocSuccess();
+    job_->comm = comm_.get();
+    job_->nranks = nranks;
+    job_->myrank = myrank;
+    job_->nId = 1;
+    job_->cudaDev = Rank_kCudaDev;
+    job_->newcomm = &published_;
+    std::snprintf(job_->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "%s", "Rank_JobScene");
+  }
+  ~Rank_JobScene() {
+    free(comm_->archName);
+    free(comm_->peerInfo);
+  }
+  Rank_JobScene(const Rank_JobScene&) = delete;
+  Rank_JobScene& operator=(const Rank_JobScene&) = delete;
+
+  ncclComm* comm() { return comm_.get(); }
+  ncclCommInitRankAsyncJob* job() { return job_.get(); }
+  ncclComm* published() const { return published_; }
+  ncclResult_t Run() { return ncclCommInitRankFunc(reinterpret_cast<ncclAsyncJob*>(job_.get())); }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclCommInitRankAsyncJob> job_;
+  ncclComm* published_ = nullptr;
+  ScopedHook<hipError_t(int*, hipDeviceAttribute_t, int)> attr_;
+  ScopedHook<hipError_t(hipDeviceProp_t*, int)> props_;
+};
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommInitRankFunc_SetDeviceFails_PublishesTheErrorAsInitStateAndStillAssignsNewcomm) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  int seenDev = -1;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    seenDev = dev;
+    return hipErrorInvalidDevice;
+  });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(Rank_kCudaDev, seenDev);
+  EXPECT_EQ(1, setDevice.calls);
+  EXPECT_EQ(ncclUnhandledCudaError, s.comm()->initState);
+  EXPECT_EQ(s.comm(), s.published()) << "exit: publishes the comm even when init failed";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SharedMemAttributeFails_ReturnsBeforeReadingTheArch) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) {
+      *pi = 0;
+    }
+    return hipErrorInvalidValue;
+  });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(1, attr.calls) << "the two arch reads must not run after the shared-mem read failed";
+  EXPECT_EQ(ncclUnhandledCudaError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_DevicePropertiesFail_ReturnsBeforeKernelInit) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t*, int) { return hipErrorInvalidValue; });
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(0, kernels.calls);
+  EXPECT_EQ(nullptr, s.comm()->archName);
+  EXPECT_EQ(0, s.comm()->cuCount);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenReturnsWithoutPublishing) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  int seenArch = -1;
+  int seenSharedMem = -1;
+  ScopedHook kernels(g_ncclInitKernelsForDevice, [&](int arch, int sharedMem, size_t* out) {
+    seenArch = arch;
+    seenSharedMem = sharedMem;
+    if (out) {
+      *out = 0;
+    }
+    return ncclInternalError;
+  });
+
+  EXPECT_EQ(ncclInternalError, s.Run());
+  EXPECT_EQ(Rank_kCudaArch, seenArch);
+  EXPECT_EQ(Rank_kMaxSharedMem, seenSharedMem);
+  EXPECT_EQ(1, kernels.calls);
+  EXPECT_EQ(nullptr, s.published()) << "a bare NCCLCHECK returns directly, skipping the exit: publish";
+  EXPECT_EQ(ncclSuccess, s.comm()->initState) << "and skipping the fail: initState store";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantStackSpace_RaisesTheDeviceStackLimitToThatSize) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  const size_t kMaxLocalSizeBytes = 3072;
+  SetParams({{"SET_STACK_SIZE", 1}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, [kMaxLocalSizeBytes](int, int, size_t* out) {
+    if (out) {
+      *out = kMaxLocalSizeBytes;
+    }
+    return ncclSuccess;
+  });
+  size_t seenLimit = 0;
+  ScopedHook setLimit(g_hipDeviceSetLimit, [&](hipLimit_t limit, size_t value) {
+    if (limit == hipLimitStackSize) {
+      seenLimit = value;
+    }
+    return hipSuccess;
+  });
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(kMaxLocalSizeBytes, seenLimit);
+  EXPECT_EQ(1, setLimit.calls);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantNoStackSpace_LeavesTheDeviceStackLimitAlone) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  SetParams({{"SET_STACK_SIZE", 1}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+  ScopedHook setLimit(g_hipDeviceSetLimit, [](hipLimit_t, size_t) { return hipSuccess; });
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(0, setLimit.calls);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColor_ReturnsSuccessWithoutAllocatingTheChild) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = NCCL_SPLIT_NOCOLOR;
+  s.comm()->nRanks = Rank_kUntouchedNRanks;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {NCCL_SPLIT_NOCOLOR, 0}, {7, 2}, {7, 3}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(Rank_kUntouchedNRanks, s.comm()->nRanks) << "commAlloc must not run for NCCL_SPLIT_NOCOLOR";
+  EXPECT_EQ(nullptr, s.comm()->archName);
+  EXPECT_EQ(0u, s.comm()->commHash);
+  EXPECT_EQ(s.comm(), s.published());
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitWithColor_DerivesChildHashAndHandsItToBootstrapSplit) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  parent->commHash = 0xABCDEF0123456789ULL;
+  s.job()->parent = parent.get();
+  s.job()->childCount = 3;
+  s.job()->color = 7;
+  s.job()->key = 2;
+  s.comm()->isGrow = true;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 2}, {7, 4}, {7, 6}});
+
+  uint64_t hacc[2] = {1, 1};
+  eatHash(hacc, &parent->commHash);
+  eatHash(hacc, &s.job()->childCount);
+  eatHash(hacc, &s.job()->color);
+  const uint64_t expectedHash = digestHash(hacc);
+
+  uint64_t seenHash = 0;
+  ncclComm* seenComm = nullptr;
+  ncclComm* seenParent = nullptr;
+  int seenColor = -1;
+  int seenKey = -1;
+  std::vector<int> seenRanks;
+  ScopedHook split(g_bootstrapSplit,
+                   [&](uint64_t hash, ncclComm* comm, ncclComm* parentComm, int color, int key, int* ranks) {
+                     seenHash = hash;
+                     seenComm = comm;
+                     seenParent = parentComm;
+                     seenColor = color;
+                     seenKey = key;
+                     seenRanks.assign(ranks, ranks + 4);
+                     return ncclRemoteError;
+                   });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_EQ(expectedHash, seenHash);
+  EXPECT_EQ(s.comm(), seenComm);
+  EXPECT_EQ(parent.get(), seenParent);
+  EXPECT_EQ(7, seenColor);
+  EXPECT_EQ(2, seenKey);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), seenRanks);
+  EXPECT_EQ(4, s.job()->nranks);
+  EXPECT_EQ(1, s.job()->myrank);
+  EXPECT_EQ(4, s.comm()->nRanks);
+  EXPECT_EQ(1, s.comm()->rank);
+  EXPECT_FALSE(s.comm()->isGrow);
+  EXPECT_EQ(ncclRemoteError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitBootstrapSucceeds_CarriesOnIntoTheSharedArchBringup) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = 7;
+  s.job()->key = 2;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 2}, {7, 4}, {7, 6}});
+  ScopedHook split(g_bootstrapSplit, [](uint64_t, ncclComm*, ncclComm*, int, int, int*) {
+    g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+    return ncclSuccess;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_NE(ncclSuccess, s.Run()) << "initTransportsRank cannot complete host-only";
+  EXPECT_EQ(1, split.calls);
+  EXPECT_EQ(Rank_kCudaArch, s.comm()->cudaArch) << "the split arm reaches the same arch bringup as a normal init";
+  EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_ShrinkWithExcludeList_SkipsTheSplitInfoAllGather) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/5, /*rank=*/4);
+  s.job()->parent = parent.get();
+  int exclude[2] = {1, 3};
+  s.job()->excludeRanksList = exclude;
+  s.job()->excludeRanksCount = 2;
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void*, int) {
+    ADD_FAILURE() << "the shrink arm must not consult commGetSplitInfo";
+    return ncclInternalError;
+  });
+  std::vector<int> seenRanks;
+  ScopedHook split(g_bootstrapSplit, [&](uint64_t, ncclComm*, ncclComm*, int, int, int* ranks) {
+    seenRanks.assign(ranks, ranks + 3);
+    return ncclRemoteError;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(0, allGather.calls);
+  EXPECT_EQ(3, s.job()->nranks);
+  EXPECT_EQ(2, s.job()->myrank) << "rank 4 is the third survivor of {0,2,4}";
+  EXPECT_EQ(std::vector<int>({0, 2, 4}), seenRanks);
+  EXPECT_EQ(3, s.comm()->nRanks);
+  EXPECT_EQ(2, s.comm()->rank);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_NormalInit_DerivesCommHashFromTheCommIdAndClearsIsGrow) {
+  Rank_JobScene s(/*nranks=*/8, /*myrank=*/3);
+  ncclUniqueId id{};
+  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+    id.internal[i] = static_cast<char>(i + 1);
+  }
+  s.job()->commId = &id;
+  s.job()->nId = 2;
+  s.comm()->isGrow = true;
+  const uint64_t expectedHash = getHash(id.internal, NCCL_UNIQUE_ID_BYTES);
+
+  int seenHandles = -1;
+  void* seenHandle = nullptr;
+  ncclComm* seenComm = nullptr;
+  ncclComm* seenParent = s.comm();
+  ScopedHook bootInit(g_bootstrapInit, [&](int nHandles, void* handle, ncclComm* comm, ncclComm* parent) {
+    seenHandles = nHandles;
+    seenHandle = handle;
+    seenComm = comm;
+    seenParent = parent;
+    return ncclRemoteError;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_FALSE(s.comm()->isGrow);
+  EXPECT_EQ(2, seenHandles);
+  EXPECT_EQ(static_cast<void*>(&id), seenHandle);
+  EXPECT_EQ(s.comm(), seenComm);
+  EXPECT_EQ(nullptr, seenParent) << "the normal arm allocates and bootstraps with no parent";
+  EXPECT_EQ(8, s.comm()->nRanks);
+  EXPECT_EQ(3, s.comm()->rank);
+  EXPECT_EQ(ncclRemoteError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_Grow_DerivesCommHashFromTheHandleMagicAndNewRankCount) {
+  Rank_JobScene s(/*nranks=*/6, /*myrank=*/2);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/0);
+  parent->magic = 0xFEEDFACEULL;
+  parent->childCount = 9;
+  s.job()->parent = parent.get();
+  s.job()->isGrow = true;
+  ncclBootstrapHandle handle{};
+  handle.magic = 0x5A5A12345678ULL;
+  s.job()->commId = reinterpret_cast<ncclUniqueId*>(&handle);
+  const uint64_t expectedHash = hashCombine(handle.magic, s.job()->nranks);
+
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_TRUE(s.comm()->isGrow);
+  EXPECT_EQ(6, s.comm()->nRanks);
+  EXPECT_EQ(2, s.comm()->rank);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_GrowWithoutHandle_FallsBackToTheParentMagicAndChildCount) {
+  Rank_JobScene s(/*nranks=*/6, /*myrank=*/2);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/0);
+  parent->magic = 0xFEEDFACEULL;
+  parent->childCount = 9;
+  s.job()->parent = parent.get();
+  s.job()->isGrow = true;
+  s.job()->commId = nullptr;
+  const uint64_t expectedHash = hashCombine(hashCombine(parent->magic, parent->childCount), s.job()->nranks);
+
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_NE(hashCombine(parent->magic, s.job()->nranks), s.comm()->commHash)
+      << "the childCount must take part in the fallback base magic";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_TransportInitFails_StampsTheArchFieldsAndLeavesArchNameOwnedByTheComm) {
+  Rank_JobScene s(/*nranks=*/8, /*myrank=*/3);
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclSuccess; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  const ncclResult_t res = s.Run();
+  EXPECT_NE(ncclSuccess, res) << "initTransportsRank cannot complete host-only";
+  EXPECT_EQ(Rank_kCudaArch, s.comm()->cudaArch);
+  EXPECT_EQ(Rank_kCuCount, s.comm()->cuCount);
+  ASSERT_NE(nullptr, s.comm()->archName);
+  EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
+  EXPECT_EQ(rcclLL128LineElemsFromArch(Rank_kGcnArchName), s.comm()->ll128LineElems);
+  EXPECT_EQ(rcclLL128DataElemsFromArch(Rank_kGcnArchName), s.comm()->ll128DataElems);
+  EXPECT_EQ(res, s.comm()->initState);
+}
+
+namespace {
+
+constexpr int Rank_kEntryNRanks = 8;
+constexpr int Rank_kEntryMyRank = 3;
+constexpr int Rank_kEntryCudaDev = 6;
+constexpr int Rank_kEntryMinCTAs = 5;
+
+void Rank_FillUniqueId(ncclUniqueId* id, unsigned char seed) {
+  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+    id->internal[i] = static_cast<char>(seed + i);
+  }
+}
+
+ncclCommInitRankAsyncJob* Rank_LaunchedJob(const Teardown_LaunchRecord& rec) {
+  return reinterpret_cast<ncclCommInitRankAsyncJob*>(rec.job);
+}
+
+// The suppressed launch never runs commFree, so a success-path test owns everything the entry point allocated.
+void Rank_ReleaseComm(ncclComm* c, bool ownsAbortResources = true) {
+  if (!c) {
+    return;
+  }
+  if (ownsAbortResources) {
+    ::free(c->abortFlag);
+    ::free((void*)c->abortFlagDev);
+    ::free(c->abortFlagRefCount);
+  }
+  ::free((void*)c->config.netName);
+  ::free(c);
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommInitRankDev_HappyPath_LaunchesRankFuncWithTheJobItBuilt) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  Rank_FillUniqueId(&id, 0xA1);
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, Rank_kEntryNRanks, /*nId=*/1, &id, Rank_kEntryMyRank,
+                                             Rank_kEntryCudaDev, &cfg, "Rank_Dev"));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(ncclInProgress, nc->initState);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(ncclCommInitRankFunc), rec.func);
+  EXPECT_EQ(ncclCommInitJobFree, rec.destructor);
+  EXPECT_EQ(nc, rec.comm);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nc, job->comm);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(Rank_kEntryCudaDev, job->cudaDev);
+  EXPECT_EQ(1, job->nId);
+  EXPECT_STREQ("Rank_Dev", job->funcName);
+  ASSERT_NE(nullptr, job->commId);
+  EXPECT_NE(static_cast<const void*>(job->commId), static_cast<const void*>(&id)) << "the id must be copied";
+  EXPECT_EQ(0, std::memcmp(job->commId, &id, NCCL_UNIQUE_ID_BYTES));
+  rec.Release();
+  Rank_ReleaseComm(nc);
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_LaunchFails_ClearsNewcommAndReportsTheError) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  rec.result = ncclSystemError;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = reinterpret_cast<ncclComm_t>(0x1);
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSystemError, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
+  EXPECT_EQ(nullptr, nc) << "a failed init must not hand back a comm";
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_CommIdEnvOnRankZero_ClampsNIdToOneAndStartsTheBootstrapRoot) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  bool seenIdFromEnv = false;
+  ScopedHook root(g_bootstrapCreateRoot, [&](ncclBootstrapHandle*, bool idFromEnv) {
+    seenIdFromEnv = idFromEnv;
+    return ncclSuccess;
+  });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/2, ids, /*myrank=*/0, 0, &cfg, "t"));
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(1, Rank_LaunchedJob(rec)->nId) << "NCCL_COMM_ID cannot be combined with several unique ids";
+  EXPECT_EQ(1, root.calls);
+  EXPECT_TRUE(seenIdFromEnv);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_CommIdEnvOnNonZeroRank_KeepsNIdAndStartsNoRoot) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ScopedHook root(g_bootstrapCreateRoot, [](ncclBootstrapHandle*, bool) { return ncclSuccess; });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/2, ids, /*myrank=*/1, 0, &cfg, "t"));
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(2, Rank_LaunchedJob(rec)->nId);
+  EXPECT_EQ(0, root.calls) << "only rank 0 starts the bootstrap root";
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_BootstrapRootFails_ClearsNewcommAndSkipsTheLaunch) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ScopedHook root(g_bootstrapCreateRoot, [](ncclBootstrapHandle*, bool) { return ncclRemoteError; });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclRemoteError, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_EQ(nullptr, nc);
+}
+
+TEST_F(InitMicrotest, CommInitRank_ForwardsOneIdAndTheCurrentDeviceToRankDev) {
+  InstallDevCommSetupSuccess();
+  const int currentDev = 4;
+  ScopedHook getDevice(g_hipGetDevice, [currentDev](int* dev) {
+    if (dev) {
+      *dev = currentDev;
+    }
+    return hipSuccess;
+  });
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  Rank_FillUniqueId(&id, 0xB2);
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRank_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(1, job->nId);
+  EXPECT_EQ(currentDev, job->cudaDev);
+  EXPECT_EQ(0, std::memcmp(job->commId, &id, NCCL_UNIQUE_ID_BYTES));
+  EXPECT_STREQ("ncclCommInitRank_impl", job->funcName);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_NullConfig_StillLaunchesWithTheInternalDefaultConfig) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank,
+                                                     /*config=*/nullptr));
+  ASSERT_NE(nullptr, nc);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_NE(Rank_kEntryMinCTAs, nc->config.minCTAs) << "no user config was supplied to copy from";
+  EXPECT_EQ(Rank_kEntryMyRank, Rank_LaunchedJob(rec)->myrank);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_UserConfig_IsTheConfigParsedIntoTheComm) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = Rank_kEntryMinCTAs;
+  cfg.maxCTAs = Rank_kEntryMinCTAs;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank, &cfg));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(Rank_kEntryMinCTAs, nc->config.minCTAs);
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_NonBlockingComm_ReportsTheCommsAsyncErrorInsteadOfTheReturnCode) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, [&rec](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*),
+                                              void (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm* comm) {
+    rec.calls++;
+    rec.job = job;
+    rec.func = func;
+    rec.destructor = destructor;
+    rec.comm = comm;
+    comm->asyncResult = ncclInProgress;
+    return ncclSuccess;
+  });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.blocking = 0;
+
+  EXPECT_EQ(ncclInProgress, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank, &cfg));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(0, nc->config.blocking);
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankScalable_ForwardsNIdAndTheWholeCommIdArray) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  const int nId = 3;
+  ncclUniqueId ids[nId] = {};
+  for (int i = 0; i < nId; ++i) {
+    Rank_FillUniqueId(&ids[i], static_cast<unsigned char>(0x21 + i));
+  }
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess,
+            ncclCommInitRankScalable(&nc, Rank_kEntryNRanks, Rank_kEntryMyRank, nId, ids, &cfg));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nId, job->nId);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(0, std::memcmp(job->commId, ids, nId * NCCL_UNIQUE_ID_BYTES));
+  EXPECT_STREQ("ncclCommInitRankScalable", job->funcName);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankScalable_NIdAboveNranks_ReturnsInvalidArgumentWithoutLaunching) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankScalable(&nc, /*nranks=*/1, /*myrank=*/0, /*nId=*/2, ids, &cfg));
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_EQ(nullptr, nc);
+}
+
+TEST_F(InitMicrotest, CommInitAll_TwoDevices_LaunchesOncePerRankWithTheDeviceFromTheDevlist) {
+  InstallDevCommSetupSuccess();
+  std::vector<int> seenRanks;
+  std::vector<int> seenDevs;
+  std::vector<int> seenNranks;
+  ScopedHook launch(g_ncclAsyncLaunch, [&](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*),
+                                           void (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm*) {
+    auto* initJob = reinterpret_cast<ncclCommInitRankAsyncJob*>(job);
+    seenRanks.push_back(initJob->myrank);
+    seenDevs.push_back(initJob->cudaDev);
+    seenNranks.push_back(initJob->nranks);
+    destructor(job);
+    return ncclSuccess;
+  });
+  ncclComm_t comms[2] = {};
+  const int devlist[2] = {1, 0};
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitAll_impl(comms, 2, devlist));
+  EXPECT_EQ(2, launch.calls);
+  EXPECT_EQ(std::vector<int>({0, 1}), seenRanks);
+  EXPECT_EQ(std::vector<int>({1, 0}), seenDevs) << "rank i takes devlist[i], not i";
+  EXPECT_EQ(std::vector<int>({2, 2}), seenNranks);
+  EXPECT_NE(nullptr, comms[0]);
+  EXPECT_NE(nullptr, comms[1]);
+  Rank_ReleaseComm(comms[0]);
+  Rank_ReleaseComm(comms[1]);
+}
+
+TEST_F(InitMicrotest, CommSplit_NoColor_StillJoinsTheSplitCollectiveWithoutAChildComm) {
+  ReadyComm rc;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+
+  EXPECT_EQ(ncclSuccess, ncclCommSplit_impl(rc.get(), NCCL_SPLIT_NOCOLOR, /*key=*/0, &out, /*config=*/nullptr));
+  EXPECT_EQ(nullptr, out);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(ncclCommInitRankFunc), rec.func);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nullptr, job->comm) << "no child comm is allocated for NCCL_SPLIT_NOCOLOR";
+  EXPECT_EQ(rc.get(), job->parent);
+  EXPECT_EQ(NCCL_SPLIT_NOCOLOR, job->color);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommSplit_WithColor_ForwardsColourKeyAndTheIncrementedChildCount) {
+  InstallDevCommSetupSuccess();
+  ReadyComm rc;
+  rc.get()->childCount = 4;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = nullptr;
+  const int color = 7;
+  const int key = 2;
+
+  EXPECT_EQ(ncclSuccess, ncclCommSplit_impl(rc.get(), color, key, &out, /*config=*/nullptr));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(color, job->color);
+  EXPECT_EQ(key, job->key);
+  EXPECT_EQ(5, job->childCount) << "every split must take a fresh child index";
+  EXPECT_EQ(nullptr, job->excludeRanksList) << "a split is not a shrink";
+  EXPECT_NE(nullptr, job->comm);
+  EXPECT_EQ(rc.get(), job->parent);
+  ncclComm* const child = job->comm;
+  rec.Release();
+  Rank_ReleaseComm(child);
+}
+
+TEST_F(InitMicrotest, CommSplit_NotReadyComm_ReturnsInvalidArgumentWithoutLaunching) {
+  ReadyComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSplit_impl(rc.get(), /*color=*/1, /*key=*/0, &out, /*config=*/nullptr));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncFails_LeavesTheAbortFlagsRaised) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  g_ncclStrongStreamResult = ncclSystemError;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclSystemError, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/1, &out,
+                                                 /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
+  EXPECT_EQ(nullptr, out);
+}
+
+TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncSucceeds_LowersTheAbortFlagsBeforeTheChildInit) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  EXPECT_EQ(0u, c.abortFlag()) << "the abort window must close before the child comm is built";
+  EXPECT_EQ(0u, c.abortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  g_ncclStrongStreamResult = ncclSystemError;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, /*shrinkFlags=*/0));
+  EXPECT_EQ(0u, c.abortFlag()) << "without NCCL_SHRINK_ABORT nothing raises the flags";
+}
+
+
+namespace {
+
+constexpr uint64_t kGrow_ParentMagic = 0x5A5A0000BEEF0001ULL;
+constexpr int kGrow_ParentMinCTAs = 6;
+constexpr int kGrow_SuppliedMinCTAs = 3;
+constexpr int kGrow_ParentRanks = 4;
+constexpr int kGrow_ParentRank = 2;
+constexpr int kGrow_ParentCudaDev = 5;
+constexpr int kGrow_TargetRanks = 6;
+
+// A distinguishable non-null value for *newcomm, so "the store happened" and "the store was deleted" differ.
+ncclComm* const kGrow_NewcommPoison = reinterpret_cast<ncclComm*>(0xF00DULL);
+
+class Grow_ParentComm {
+ public:
+  Grow_ParentComm() : comm_(new ncclComm{}) {
+    comm_->startMagic = comm_->endMagic = NCCL_MAGIC;
+    comm_->abortFlag = &abortFlag_;
+    comm_->abortFlagDev = &abortFlagDev_;
+    comm_->abortFlagRefCount = &abortFlagRefCount_;
+    comm_->magic = kGrow_ParentMagic;
+    comm_->nRanks = kGrow_ParentRanks;
+    comm_->rank = kGrow_ParentRank;
+    comm_->cudaDev = kGrow_ParentCudaDev;
+    comm_->config.minCTAs = kGrow_ParentMinCTAs;
+    comm_->config.maxCTAs = kGrow_ParentMinCTAs;
+  }
+  ncclComm* get() { return comm_.get(); }
+  ncclComm* operator->() { return comm_.get(); }
+
+ private:
+  uint32_t abortFlag_ = 0;
+  uint32_t abortFlagDev_ = 0;
+  int abortFlagRefCount_ = 1;
+  std::unique_ptr<ncclComm> comm_;
+};
+
+struct Grow_LaunchRecord {
+  ncclResult_t (*func)(struct ncclAsyncJob*) = nullptr;
+  void (*undo)(struct ncclAsyncJob*) = nullptr;
+  void (*destructor)(void*) = nullptr;
+  ncclComm* launchComm = nullptr;
+  ncclCommInitRankAsyncJob* job = nullptr;
+  ncclComm* jobComm = nullptr;
+  ncclComm* jobParent = nullptr;
+  ncclComm** jobNewcomm = nullptr;
+  int cudaDev = -99, nranks = -99, myrank = -99, nId = -99;
+  int color = -99, key = -99, childCount = -99, excludeRanksCount = -99;
+  bool isGrow = true;
+  bool hasCommId = false;
+  ncclUniqueId commId{};
+  std::vector<int> excludeRanks;
+  std::string funcName;
+};
+
+// Suppresses ncclCommInitRankFunc and snapshots the job, so every field the caller computed stays observable.
+class Grow_LaunchSpy {
+ public:
+  explicit Grow_LaunchSpy(ncclResult_t result = ncclSuccess)
+      : hook_(g_ncclAsyncLaunch, [this, result](struct ncclAsyncJob* raw, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                                void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
+                                                ncclComm* comm) {
+          Capture(raw, func, undo, destructor, comm);
+          if (result != ncclSuccess) return result;
+          ReleaseCommId(raw);
+          if (destructor) destructor(raw);
+          return result;
+        }) {}
+
+  int calls() const { return hook_.calls; }
+  const Grow_LaunchRecord& rec() const { return rec_; }
+
+ private:
+  void Capture(struct ncclAsyncJob* raw, ncclResult_t (*func)(struct ncclAsyncJob*),
+               void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), ncclComm* comm) {
+    auto* job = reinterpret_cast<ncclCommInitRankAsyncJob*>(raw);
+    rec_.job = job;
+    rec_.func = func;
+    rec_.undo = undo;
+    rec_.destructor = destructor;
+    rec_.launchComm = comm;
+    rec_.jobComm = job->comm;
+    rec_.jobParent = job->parent;
+    rec_.jobNewcomm = job->newcomm;
+    rec_.cudaDev = job->cudaDev;
+    rec_.nranks = job->nranks;
+    rec_.myrank = job->myrank;
+    rec_.nId = job->nId;
+    rec_.color = job->color;
+    rec_.key = job->key;
+    rec_.childCount = job->childCount;
+    rec_.excludeRanksCount = job->excludeRanksCount;
+    rec_.isGrow = job->isGrow;
+    rec_.funcName = job->funcName;
+    rec_.hasCommId = job->commId != nullptr;
+    if (job->commId) {
+      std::memcpy(&rec_.commId, job->commId, sizeof(ncclUniqueId));
+    }
+    if (job->excludeRanksList) {
+      rec_.excludeRanks.assign(job->excludeRanksList, job->excludeRanksList + job->excludeRanksCount);
+    }
+  }
+
+  // Only the launched job's destructor releases commId; on a failed launch the unit's own fail path must do it.
+  static void ReleaseCommId(struct ncclAsyncJob* raw) {
+    auto* job = reinterpret_cast<ncclCommInitRankAsyncJob*>(raw);
+    ::free(job->commId);
+    job->commId = nullptr;
+  }
+
+  Grow_LaunchRecord rec_;
+  ScopedHook<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                          void (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm*)>
+      hook_;
+};
+
+// Records every free() the unit made and performs none of them, so the test can prove which release happened.
+class Grow_FreeSpy {
+ public:
+  Grow_FreeSpy() : hook_(g_microFree, [this](void* p) { freed_.push_back(p); }) {}
+  const std::vector<void*>& freed() const { return freed_; }
+
+ private:
+  std::vector<void*> freed_;
+  ScopedHook<void(void*)> hook_;
+};
+
+void Grow_ReleaseComm(ncclComm* c, bool ownsAbortResources) {
+  if (!c) {
+    return;
+  }
+  if (ownsAbortResources) {
+    ::free(c->abortFlag);
+    ::free((void*)c->abortFlagDev);
+    ::free(c->abortFlagRefCount);
+  }
+  ::free(c);
+}
+
+ncclResult_t Grow_RunExisting(ncclComm* parent, int nRanks, const ncclUniqueId* id, ncclComm_t* out,
+                              ncclConfig_t* config) {
+  return ncclCommGrow_impl(parent, nRanks, id, /*rank=*/-1, out, config);
+}
+
+// hipThreadExchangeStreamCaptureMode is fail-loud by default; the real one succeeds and ncclCudaHostCalloc needs it.
+void Grow_AllowHostAlloc() { g_hipAsyncOpsResult = hipSuccess; }
+
+ncclUniqueId Grow_MakeUniqueId(unsigned char fill) {
+  ncclUniqueId id{};
+  std::memset(&id, fill, sizeof(id));
+  return id;
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommGrow_NullNewcomm_ReturnsInvalidArgumentWithoutBroadcasting) {
+  Grow_ParentComm parent;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommGrow_impl(parent.get(), kGrow_TargetRanks, nullptr, /*rank=*/-1, nullptr, nullptr));
+  EXPECT_EQ(0, g_bcastGrowHandleCalls);
+}
+
+TEST_F(InitMicrotest, CommGrow_ZeroNRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&]() { res = Grow_RunExisting(parent.get(), 0, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "the nRanks guard returns before *newcomm is cleared";
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks must be positive, got 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NegativeNRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&]() { res = Grow_RunExisting(parent.get(), -3, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks must be positive, got -3")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NRanksEqualsParentRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_ParentRanks, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks 4 is less than current ranks 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NRanksBelowParentRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_ParentRanks - 1, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks 3 is less than current ranks 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_CorruptedParentComm_ReturnsInvalidArgumentAndClearsNewcomm) {
+  Grow_ParentComm parent;
+  parent->startMagic = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out) << "*newcomm is cleared before the CommCheck";
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankNotReady_ReturnsInvalidArgumentAndClearsNewcomm) {
+  Grow_ParentComm parent;
+  parent->asyncResult = ncclInProgress;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, parent->childCount) << "childCount must not advance for a comm that never grew";
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankPassesNonNegativeRank_WarnsAndLeavesChildCountUnchanged) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&]() {
+    res = ncclCommGrow_impl(parent.get(), kGrow_TargetRanks, nullptr, /*rank=*/0, &out, nullptr);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, parent->childCount);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: existing ranks must pass rank=-1, got 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNegativeRank_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x11);
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, &id, /*rank=*/-2, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new ranks must pass valid rank >= 0, got -2")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNullUniqueId_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, nullptr, /*rank=*/1, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new ranks must pass non-NULL uniqueId")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankAtNRanks_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x11);
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, &id, kGrow_TargetRanks, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new rank 6 exceeds total ranks 6")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_BoundaryRankMagicMismatch_WarnsAndBroadcastsAsNonRoot) {
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  const uint64_t wrongMagic = hashCombine(kGrow_ParentMagic, 1) ^ 0xFFULL;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = wrongMagic;
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(1, bcast.calls);
+  EXPECT_FALSE(g_bcastGrowHandleIsRoot) << "a growing member receives the handle, it does not mint it";
+  EXPECT_EQ(1, parent->childCount) << "childCount advances before the handle is validated";
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: magic mismatch computed by the root")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_BoundaryRankMagicMatches_ReplacesUniqueIdWithReceivedHandle) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  ncclBootstrapHandle sent{};
+  std::memset(&sent, 0x3C, sizeof(sent));
+  sent.magic = hashCombine(kGrow_ParentMagic, 1);
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    *h = sent;
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(1, bcast.calls);
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(1, spy.rec().nId) << "the received handle stands in for the caller's absent uniqueId";
+  ASSERT_TRUE(spy.rec().hasCommId);
+  EXPECT_EQ(0, std::memcmp(&spy.rec().commId, &sent, sizeof(sent)));
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_LastRankIsBoundary_ReceivesHandle) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->rank = kGrow_ParentRanks - 1;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = hashCombine(kGrow_ParentMagic, 1);
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(1, bcast.calls);
+  EXPECT_EQ(1, spy.rec().nId);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_MiddleRank_SkipsHandleBroadcastAndLaunchesWithoutCommId) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
+    ADD_FAILURE() << "only ranks 0 and N-1 receive the grow handle";
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(0, bcast.calls);
+  EXPECT_EQ(0, spy.rec().nId);
+  EXPECT_FALSE(spy.rec().hasCommId);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_SingleRankParent_SkipsHandleBroadcast) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->nRanks = 1;
+  parent->rank = 0;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
+    ADD_FAILURE() << "a one-rank parent has no coordinator to receive from";
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), /*nRanks=*/2, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(0, bcast.calls);
+  EXPECT_EQ(1, parent->childCount);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_BroadcastFails_PropagatesAndSkipsLaunch) {
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  g_bcastGrowHandleResult = ncclInternalError;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_CommAllocFails_ReturnsSystemErrorAndSkipsLaunch) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_AbortFlagAllocFails_ReturnsSystemErrorAndReleasesTheComm) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 1;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size()) << "the half-built comm and its two unset abort slots are all released";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_AbortFlagDevAllocFails_ReturnsCudaErrorAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ScopedHook hostMalloc(g_hipHostMalloc, [](void**, std::size_t, unsigned) { return hipErrorOutOfMemory; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(1, hostMalloc.calls);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size());
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_ParentDoesNotShare_FailPathReleasesAbortResourcesAndComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->shareResources = false;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the comm itself";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathReleasesOnlyTheComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->shareResources = true;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(1u, frees.freed().size()) << "a sharing parent keeps ownership of the abort resources";
+  auto* leaked = static_cast<ncclComm*>(frees.freed()[0]);
+  EXPECT_EQ(NCCL_MAGIC, leaked->startMagic);
+  Grow_ReleaseComm(leaked, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankNullConfig_CopiesParentConfigIntoNewComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, /*config=*/nullptr));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(kGrow_ParentMinCTAs, out->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, out->config.maxCTAs);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankWithConfig_ParsesSuppliedConfigOverParent) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &cfg));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, out->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, parent->config.minCTAs) << "the parent's config is a source, never a destination";
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_InvalidConfig_ReturnsInvalidArgumentAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.magic = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankHappyPath_LaunchesInitRankFuncOnTheNewComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog(
+        [&]() { res = Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr); });
+  }
+
+  ASSERT_EQ(ncclSuccess, res);
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(&ncclCommInitRankFunc, r.func);
+  EXPECT_EQ(nullptr, r.undo);
+  EXPECT_EQ(&childCommCleanupJob, r.destructor);
+  EXPECT_EQ(out, r.launchComm) << "grow launches against the new comm, not the parent";
+  EXPECT_EQ(out, r.jobComm);
+  EXPECT_EQ(parent.get(), r.jobParent);
+  EXPECT_EQ(&out, r.jobNewcomm);
+  EXPECT_EQ(kGrow_ParentCudaDev, r.cudaDev);
+  EXPECT_EQ(kGrow_TargetRanks, r.nranks) << "the grown size comes from the argument, not the parent";
+  EXPECT_EQ(kGrow_ParentRank, r.myrank);
+  EXPECT_EQ(kGrow_ParentRank, r.key);
+  EXPECT_EQ(0, r.color);
+  EXPECT_TRUE(r.isGrow);
+  EXPECT_EQ(1, r.nId);
+  EXPECT_EQ("ncclCommGrow", r.funcName);
+  ASSERT_TRUE(r.hasCommId);
+  EXPECT_EQ(0, std::memcmp(&r.commId, &id, sizeof(id)));
+  EXPECT_EQ(ncclInProgress, out->initState);
+  EXPECT_EQ(NCCL_MAGIC, out->startMagic);
+  EXPECT_EQ(NCCL_MAGIC, out->endMagic);
+  ASSERT_NE(nullptr, out->abortFlagRefCount);
+  EXPECT_EQ(1, *out->abortFlagRefCount);
+  EXPECT_NE(parent->abortFlag, out->abortFlag) << "a grown comm never shares the parent's abort flag";
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: existing rank creating new communicator with 6 total ranks"))
+      << "actual log:\n" << log;
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankHappyPath_UsesCurrentDeviceAndCallerRank) {
+  Grow_AllowHostAlloc();
+  constexpr int kNewRank = 3;
+  constexpr int kCurrentDevice = 6;
+  g_currentDevice = kCurrentDevice;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x2D);
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog([&]() {
+      res = ncclCommGrow_impl(/*comm=*/nullptr, /*nRanks=*/8, &id, kNewRank, &out, &cfg);
+    });
+  }
+
+  ASSERT_EQ(ncclSuccess, res);
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(nullptr, r.jobParent) << "a joining rank has no parent communicator";
+  EXPECT_EQ(kCurrentDevice, r.cudaDev);
+  EXPECT_EQ(kNewRank, r.myrank);
+  EXPECT_EQ(kNewRank, r.key);
+  EXPECT_EQ(8, r.nranks);
+  EXPECT_TRUE(r.isGrow);
+  EXPECT_EQ("ncclCommGrow", r.funcName);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, out->config.minCTAs);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new rank creating new communicator with 8 total ranks"))
+      << "actual log:\n" << log;
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNullConfig_UsesDefaultConfig) {
+  Grow_AllowHostAlloc();
+  const ncclUniqueId id = Grow_MakeUniqueId(0x2D);
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, ncclCommGrow_impl(nullptr, /*nRanks=*/8, &id, /*rank=*/0, &out, /*config=*/nullptr));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(1, out->config.blocking) << "an absent config is parsed as defaults, never copied from a null parent";
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 3;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy(ncclInternalError);
+  ncclComm_t out = nullptr;
+  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, out) << "a failed launch must not publish a half-built comm";
+}
+
+namespace {
+
+constexpr int kGrow_SplitColor = 3;
+constexpr int kGrow_SplitKey = 9;
+constexpr int kGrow_ParentChildCount = 7;
+constexpr char kGrow_Caller[] = "microCaller";
+
+ncclResult_t Grow_RunSplit(ncclComm* parent, int color, int key, ncclComm_t* out, ncclConfig_t* config) {
+  return ncclCommInitChildComm(parent, out, /*isShrink=*/false, NCCL_SHRINK_DEFAULT, color, key,
+                               /*excludeRanksList=*/nullptr, /*excludeRanksCount=*/0, config, kGrow_Caller);
+}
+
+ncclResult_t Grow_RunShrink(ncclComm* parent, int flags, int* excludeRanksList, int excludeRanksCount,
+                            ncclComm_t* out) {
+  return ncclCommInitChildComm(parent, out, /*isShrink=*/true, flags, /*color=*/0, parent->rank, excludeRanksList,
+                               excludeRanksCount, /*config=*/nullptr, kGrow_Caller);
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, InitChildComm_GetDeviceFails_ReturnsCudaErrorBeforeAnyValidation) {
+  ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(/*parent=*/nullptr, kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "the device query precedes every write to *newcomm";
+  EXPECT_EQ(1, getDevice.calls);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SetDeviceFails_ReturnsCudaErrorAndRestoresDevice) {
+  Grow_ParentComm parent;
+  constexpr int kOldDevice = 1;
+  g_currentDevice = kOldDevice;
+  int setCalls = 0;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) -> hipError_t {
+    if (++setCalls == 1) return hipErrorInvalidValue;
+    g_currentDevice = dev;
+    return hipSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "*newcomm is cleared only after the device switch succeeds";
+  EXPECT_EQ(2, setDevice.calls);
+  EXPECT_EQ(kOldDevice, g_currentDevice);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitNoColor_LaunchesWithoutAllocatingChild) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog(
+        [&]() { res = Grow_RunSplit(parent.get(), NCCL_SPLIT_NOCOLOR, kGrow_SplitKey, &out, nullptr); });
+  }
+
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(nullptr, out);
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, spy.rec().jobComm) << "a colourless rank still joins the job, with no child of its own";
+  EXPECT_EQ(NCCL_SPLIT_NOCOLOR, spy.rec().color);
+  EXPECT_EQ(parent.get(), spy.rec().launchComm);
+  EXPECT_TRUE(LogHas(log, "Rank 2 has color with NCCL_SPLIT_NOCOLOR, not creating a new communicator"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkIgnoresNoColor_StillAllocatesChild) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, ncclCommInitChildComm(parent.get(), &out, /*isShrink=*/true, NCCL_SHRINK_DEFAULT,
+                                               NCCL_SPLIT_NOCOLOR, parent->rank, exclude, 1, nullptr, kGrow_Caller));
+
+  ASSERT_EQ(1, spy.calls());
+  ASSERT_NE(nullptr, spy.rec().jobComm) << "NCCL_SPLIT_NOCOLOR is a split concept and must not skip a shrink child";
+  Grow_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_Split_AllocatesChildAndLaunchesOnTheParent) {
+  Grow_AllowHostAlloc();
+  constexpr int kSplitOldDevice = 1;
+  g_currentDevice = kSplitOldDevice;
+  Grow_ParentComm parent;
+  parent->childCount = kGrow_ParentChildCount;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out) << "*newcomm stays null until the async job completes";
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  ncclComm* child = r.jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_EQ(&ncclCommInitRankFunc, r.func);
+  EXPECT_EQ(nullptr, r.undo);
+  EXPECT_EQ(&childCommCleanupJob, r.destructor);
+  EXPECT_EQ(parent.get(), r.launchComm) << "a split launches against the parent, not the child";
+  EXPECT_EQ(parent.get(), r.jobParent);
+  EXPECT_EQ(&out, r.jobNewcomm);
+  EXPECT_EQ(kGrow_SplitColor, r.color);
+  EXPECT_EQ(kGrow_SplitKey, r.key);
+  EXPECT_EQ(kGrow_ParentChildCount + 1, r.childCount);
+  EXPECT_EQ(kGrow_ParentChildCount + 1, parent->childCount);
+  EXPECT_EQ(kGrow_ParentCudaDev, r.cudaDev);
+  EXPECT_EQ(kGrow_Caller, r.funcName);
+  EXPECT_FALSE(r.isGrow);
+  EXPECT_EQ(NCCL_MAGIC, child->startMagic);
+  EXPECT_EQ(NCCL_MAGIC, child->endMagic);
+  EXPECT_EQ(ncclInternalError, child->initState);
+  EXPECT_FALSE(parent->shareResources);
+  ASSERT_NE(nullptr, child->abortFlag);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(child->abortFlag, parent->childAbortFlag);
+  EXPECT_EQ(child->abortFlagDev, parent->childAbortFlagDev);
+  ASSERT_NE(nullptr, child->abortFlagRefCount);
+  EXPECT_EQ(1, *child->abortFlagRefCount);
+  EXPECT_EQ(kGrow_ParentMinCTAs, child->config.minCTAs);
+  EXPECT_EQ(kSplitOldDevice, g_currentDevice) << "the caller's device is restored before returning";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitShareEnabled_ReusesParentAbortResources) {
+  Grow_ParentComm parent;
+  parent->config.splitShare = 1;
+  parent->childAbortFlag = parent->abortFlag;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_TRUE(parent->shareResources);
+  EXPECT_EQ(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(parent->abortFlagDev, child->abortFlagDev);
+  EXPECT_EQ(parent->abortFlagRefCount, child->abortFlagRefCount);
+  EXPECT_EQ(nullptr, parent->childAbortFlag) << "a sharing parent has no separate child abort flag to watch";
+  EXPECT_EQ(2, *parent->abortFlagRefCount);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/false);
+}
+
+TEST_F(InitMicrotest, InitChildComm_RevokedParent_ForcesFreshAbortResources) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.splitShare = 1;
+  parent->revokedFlag = 1;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(1, *parent->abortFlagRefCount) << "a revoked parent's refcount must not be taken";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkDefaultMode_SharesWhenShrinkShareIsSet) {
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  parent->config.splitShare = 0;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_TRUE(parent->shareResources) << "a shrink consults shrinkShare, never splitShare";
+  EXPECT_EQ(parent->abortFlag, child->abortFlag);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/false);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkAbortMode_DoesNotShareEvenWithShrinkShareSet) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitShareUnsetWithShrinkShareSet_DoesNotShare) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  parent->config.splitShare = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources) << "a split consults splitShare, never shrinkShare";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->childCount = kGrow_ParentChildCount;
+  int exclude[3] = {5, 1, 3};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 3, &out));
+
+  EXPECT_EQ(1, exclude[0]);
+  EXPECT_EQ(3, exclude[1]);
+  EXPECT_EQ(5, exclude[2]);
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(3, r.excludeRanksCount);
+  EXPECT_EQ(std::vector<int>({1, 3, 5}), r.excludeRanks);
+  EXPECT_EQ(0, r.childCount) << "a shrink does not consume a childCount slot";
+  EXPECT_EQ(kGrow_ParentChildCount, parent->childCount);
+  Grow_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ConfigProvided_ParsesInsteadOfCopyingParent) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, &cfg));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, child->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, parent->config.minCTAs);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ChildAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
+  constexpr int kSplitOldDevice = 1;
+  g_currentDevice = kSplitOldDevice;
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_EQ(kSplitOldDevice, g_currentDevice);
+}
+
+TEST_F(InitMicrotest, InitChildComm_AbortFlagDevAllocFails_ReleasesChildAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ScopedHook hostMalloc(g_hipHostMalloc, [](void**, std::size_t, unsigned) { return hipErrorOutOfMemory; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(2u, frees.freed().size()) << "the child's abort flag and the child itself";
+  EXPECT_NE(frees.freed()[0], frees.freed()[1]);
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  int exclude[2] = {0, 1};
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 3;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 2, &out));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDeviceAndLeavesTheJobAllocated) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  constexpr int kOldDevice = 1;
+  g_currentDevice = kOldDevice;
+  Grow_LaunchSpy spy(ncclInternalError);
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclInternalError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(kOldDevice, g_currentDevice);
+
+  ASSERT_NE(nullptr, spy.rec().job);
+  std::unique_ptr<ncclCommInitRankAsyncJob> orphan(spy.rec().job);
+  auto* reused = new ncclCommInitRankAsyncJob{};
+  const bool recycled = (reused == spy.rec().job);
+  delete reused;
+  if (Dtor_kHeapSlotRecycles) {
+    EXPECT_FALSE(recycled) << "the fail path released the job: its heap slot was reused";
+  }
+}

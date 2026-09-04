@@ -85,6 +85,8 @@ extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // the happy path, or leave one at the error value to exercise a specific
 // CUDACHECK early-return. g_hipWarpSize backs
 // hipDeviceGetAttribute(hipDeviceAttributeWarpSize).
+extern std::function<hipError_t(int* /*pi*/, hipDeviceAttribute_t /*attr*/, int /*dev*/)> g_hipDeviceGetAttribute;
+extern std::function<hipError_t(hipLimit_t /*limit*/, size_t /*value*/)> g_hipDeviceSetLimit;
 extern hipError_t g_hipDeviceGetAttributeResult;
 extern hipError_t g_hipDeviceGetPCIBusIdResult;
 extern hipError_t g_hipEventCreateResult;
