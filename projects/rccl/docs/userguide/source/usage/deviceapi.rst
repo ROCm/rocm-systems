@@ -371,8 +371,8 @@ barrier so blocks can coordinate with corresponding blocks on other nodes. A sin
 :c:type:`ncclGin` with context index ``0``. Each thread block reads its own per-CTA signal slot (``signalIndex == blockIdx.x``)
 before :c:func:`bar.sync` at kernel entry. The :cpp:class:`ncclGinBarrierSession`
 uses ``ncclTeamTagWorld()`` and ``blockIdx.x``. The barrier ensures all ranks are ready before the AlltoAll exchange (:c:func:`bar.sync`
-at kernel entry). This sample passes ``ncclGinFenceLevel::None`` because the kernel already waits on the remote signal
-and calls ``gin.flush``; a ``Put``/``Get`` fence would be redundant here.
+at kernel entry). Both barriers in this sample pass ``ncclGinFenceLevel::None``: the entry barrier has no prior GIN
+traffic to drain, and before the exit barrier the kernel has already waited on the remote signal and called ``gin.flush``.
 
 Unlike AllReduce-style kernels, for AlltoAll the per-thread index only needs to be unique *within this rank*. That index
 then selects the destination peer. The main data transfer is performed using the one-sided :c:func:`put`, launched in parallel on all

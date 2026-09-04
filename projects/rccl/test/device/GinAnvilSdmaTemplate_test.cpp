@@ -21,6 +21,10 @@ __device__ unsigned long long g_sdmaStubThreadfenceCount = 0;
 #undef NCCL_GIN_THREADFENCE_SYSTEM
 #define NCCL_GIN_THREADFENCE_SYSTEM() atomicAdd(&g_sdmaStubThreadfenceCount, 1ULL)
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma.h"
+
+namespace sdma_anvil {
+__device__ unsigned long long g_sdmaStubQuietCount = 0;
+}
 #endif
 
 #include <cstring>
@@ -538,19 +542,6 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_IpcCopiesRemoteToLocal) {
 }
 
 // H14: Get above the threshold goes through the peer queue and marks dirty.
-__global__ void kernelGetSdma(TemplateHarness* h, uint64_t* dirtyOut, size_t bytes) {
-  if (threadIdx.x != 0) return;
-  ncclGinCtx ginCtx{};
-  ginCtx.handle = &h->ctx;
-  ginCtx.nRanks = 2;
-  ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0,
-      reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, bytes, false, nullptr);
-  if (h->ctx.sdmaDirty) {
-    dirtyOut[0] = __hip_atomic_load(h->ctx.sdmaDirty, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  }
-}
-
 TEST_F(GinAnvilSdmaTemplateTest, Get_SdmaPathSetsDirty) {
   constexpr int kN = 256;
   std::vector<uint8_t> pat(kN);
@@ -570,9 +561,9 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_SdmaPathSetsDirty) {
   mapIpcTo(&host, &d_entry, &d_src, static_cast<size_t>(kN));
   host.ctx.sdmaDirty = d_dirty.ptr;
   d_h.upload(host);
-  kernelGetSdma<<<1, 1>>>(d_h.ptr, d_dirty.ptr, static_cast<size_t>(kN));
+  kernelGetIpc<<<1, 1>>>(d_h.ptr, static_cast<size_t>(kN));
   syncAndCheck();
-  EXPECT_NE(d_dirty.download(), 0ULL);
+  EXPECT_EQ(d_dirty.download(), 1ULL << 1);  // peer 1, channel 0
   auto got = d_dst.copyTo();
   for (int i = 0; i < kN; ++i) {
     EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
@@ -671,6 +662,31 @@ TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CompletesWithoutClearingDirty) {
   EXPECT_EQ(readQuietCount(), 1ULL);
 }
 
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
+  DeviceBuffer<uint8_t> d_src(1);
+  DeviceBuffer<uint8_t> d_dst(1);
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
+  DeviceBuffer<TemplateHarness> d_h(1);
+  DeviceBuffer<uint64_t> d_dirty(1);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  DeviceBuffer<uint32_t> d_complete(1);
+  d_dirty.zero();
+  d_req.zero();
+  d_complete.zero();
+  TemplateHarness host{};
+  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
+  host.ctx.sdmaDirty = d_dirty.ptr;
+  d_h.upload(host);
+  resetQuietCount();
+  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_complete.download(), 1u);
+  EXPECT_EQ(d_dirty.download(), 0ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+}
+
 // H18: invalid ctx still completes the request so Wait will not hang.
 TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxCompletes) {
   DeviceBuffer<uint8_t> d_src(1);
@@ -760,10 +776,12 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_StandaloneSignalResolvesQueue) {
   host.ctx.ipcTableCount = 1;
   d_h.upload(host);
   resetQuietCount();
+  resetThreadfenceCount();
   kernelPutStandaloneSignal<<<1, 1>>>(d_h.ptr);
   syncAndCheck();
   EXPECT_EQ(d_signals.download(), 1ULL);
   EXPECT_EQ(readQuietCount(), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE

@@ -171,9 +171,9 @@ ncclGinBarrierSession
 
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagWorld tag, uint32_t index)
 
-      Same as the single-context constructors, but the fence iterates every GIN context on the comm. Arrival signaling
-      still uses context 0. Use this when puts or gets were sharded across ``ginContextCount`` contexts and a ``Put`` or
-      ``Get`` fence must drain all of them.
+      Same as the single-context constructors, but arrival signaling and fencing iterate every GIN context on the comm.
+      Signaling on each context preserves ordering when puts and signals use different network queue pairs. Use this when
+      puts or gets were sharded across ``ginContextCount`` contexts and a ``Put`` or ``Get`` fence must drain all of them.
 
    .. cpp:function:: void sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get)
 

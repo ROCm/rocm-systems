@@ -5,7 +5,7 @@
 
 namespace sdma_anvil {
 
-__device__ unsigned long long g_sdmaStubQuietCount = 0;
+extern __device__ unsigned long long g_sdmaStubQuietCount;
 
 struct SdmaQueueDeviceHandle {
   int tag;

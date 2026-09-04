@@ -46,10 +46,6 @@ if(BUILD_TESTS)
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_BINARY_DIR}/hipify/src/devcomm   # devcomm_v22902.h, included unqualified
     ${RCCL_COMMON_INCLUDE_DIRS})
-  if(ENABLE_ROCSHMEM_GIN)
-    target_include_directories(rccl-UnitTestsMicro BEFORE PRIVATE
-      ${PROJECT_SOURCE_DIR}/test/device)
-  endif()
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
 
   # Mirrors the opt-out in test/CMakeLists.txt, whose loop does not reach this target.
@@ -195,10 +191,6 @@ if(BUILD_TESTS)
     target_include_directories(${_init_tgt} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${RCCL_COMMON_INCLUDE_DIRS})
-    if(ENABLE_ROCSHMEM_GIN)
-      target_include_directories(${_init_tgt} BEFORE PRIVATE
-        ${PROJECT_SOURCE_DIR}/test/device)
-    endif()
     # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
     # init.cc), so hipify keeps its name -- no _tmp suffix.
     target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
