@@ -12,6 +12,7 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include "rocjitsu/vm/amdgpu/physical_register_resources.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
 #include <array>
@@ -112,6 +113,10 @@ struct DispatchEntry {
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  /// Descriptor-derived ordinary/accumulator split. `vgprs_per_wf` remains
+  /// the unified count used for physical occupancy.
+  uint32_t ordinary_vgprs_per_wf = 256;
+  uint32_t accvgprs_per_wf = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;

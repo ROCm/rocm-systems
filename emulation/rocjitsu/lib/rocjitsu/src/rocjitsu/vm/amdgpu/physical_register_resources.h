@@ -13,6 +13,18 @@
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Descriptor-derived VGPR allocation carried with one wave.
+///
+/// @details `total` is the physical allocation charged to SIMD occupancy. On
+/// CDNA2-4 that unified allocation is split at COMPUTE_PGM_RSRC3.ACCUM_OFFSET:
+/// `ordinary` names the v0-based prefix and `accumulator` names the acc0-based
+/// suffix. Other architectures use only the ordinary component.
+struct WaveVgprAllocation {
+  uint32_t total = 0;
+  uint32_t ordinary = 0;
+  uint32_t accumulator = 0;
+};
+
 /// @brief Register resources owned by one physical SIMD and the CU layout.
 ///
 /// VGPR counts use register names at @ref native_wave_size lanes. A Wave64

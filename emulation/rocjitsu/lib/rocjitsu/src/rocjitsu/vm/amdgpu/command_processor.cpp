@@ -1545,8 +1545,11 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       cu->maybe_reset_lds_alloc();
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
-      Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf, entry.kernel_wave_size);
+      Wavefront *wf =
+          cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
+                          WaveVgprAllocation{entry.vgprs_per_wf, entry.ordinary_vgprs_per_wf,
+                                             entry.accvgprs_per_wf},
+                          entry.kernel_wave_size);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
         free_reserved();
@@ -1903,6 +1906,16 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // different, apparently runnable one.
   dp.sgprs_per_wf = required_sgprs;
   dp.vgprs_per_wf = vgprs > 0 ? vgprs : vgpr_limit;
+  dp.ordinary_vgprs_per_wf = dp.vgprs_per_wf;
+  dp.accvgprs_per_wf = 0;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    const uint32_t accum_offset =
+        AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+    const uint32_t accumulator_base = (accum_offset + 1) * 4;
+    dp.ordinary_vgprs_per_wf = std::min(dp.vgprs_per_wf, accumulator_base);
+    dp.accvgprs_per_wf = dp.vgprs_per_wf - dp.ordinary_vgprs_per_wf;
+  }
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;
