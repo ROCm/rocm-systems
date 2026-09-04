@@ -86,17 +86,6 @@ static unsigned long long readThreadfenceCount() {
 
 static void resetQuietCount() {
   unsigned long long z = 0;
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_sdmaStubQuietCount), &z, sizeof(z)));
-}
-
-static unsigned long long readQuietCount() {
-  unsigned long long c = 0;
-  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(g_sdmaStubQuietCount), sizeof(c)));
-  return c;
-}
-
-static void resetQuietCount() {
-  unsigned long long z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(sdma_anvil::g_sdmaStubQuietCount), &z, sizeof(z)));
 }
 
