@@ -15,7 +15,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Resolved Issues
 
-- **Fixed health watches on gfx950 (MI355) and stopped the 1 Hz fetch error flood**.
+- **Fixed health watches on MI300-series and later GPUs and stopped the 1 Hz fetch error flood**.
   - `rdci health -s` / `-c` no longer abort priming, refreshing, or `memory_check` on the first field that fails; each sub-check is evaluated independently.
   - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable.
   - Health fields the platform cannot serve are probed at `rdci health -s`, reported per GPU at default verbosity (naming the fallback source where one exists), and left out of the 1 s watch.
