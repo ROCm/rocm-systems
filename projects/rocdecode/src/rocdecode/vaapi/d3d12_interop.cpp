@@ -59,7 +59,7 @@ D3D12Interop::~D3D12Interop() {
     }
 }
 
-D3D12Interop::SurfaceLayout D3D12Interop::GetSurfaceLayout() const {
+SurfaceLayout D3D12Interop::GetSurfaceLayout() const {
     SurfaceLayout layout = {};
     rocDecVideoSurfaceFormat fmt = output_format_;
     uint32_t width = width_;
@@ -205,11 +205,14 @@ rocDecStatus D3D12Interop::CreateSharedResources(rocDecVideoSurfaceFormat format
         }
     }
 
-    // Release any previously created shared resources (reconfigure path).
+    // Release any previously created shared resources (reconfigure path), then reset every
+    // slot to nullptr. Use assign (not resize) so pre-existing slots are cleared too --
+    // otherwise the just-released pointers would dangle and the slot-0 probe below, or the
+    // destructor, would act on freed resources.
     for (auto* res : d3d12_shared_resources_) {
         if (res) res->Release();
     }
-    d3d12_shared_resources_.resize(num_surfaces, nullptr);
+    d3d12_shared_resources_.assign(num_surfaces, nullptr);
 
     D3D12_RESOURCE_DESC res_desc = {};
     res_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -306,8 +309,9 @@ rocDecStatus D3D12Interop::CreateStagingInfrastructure(uint32_t num_surfaces) {
         SurfaceLayout layout = GetSurfaceLayout();
         UINT64 staging_size = layout.total_size;
 
+        // assign (not resize) so pre-existing slots are cleared too -- see note above.
         for (auto* buf : d3d12_staging_buffers_) { if (buf) buf->Release(); }
-        d3d12_staging_buffers_.resize(num_surfaces, nullptr);
+        d3d12_staging_buffers_.assign(num_surfaces, nullptr);
 
         D3D12_RESOURCE_DESC buf_desc = {};
         buf_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -384,14 +388,12 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
     // We override Offset and RowPitch to match the expected linear layout, but keep Width/Height/Format
     // from D3D12's GetCopyableFootprints so the copy source is read correctly.
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprints[3] = {};
-    UINT src_num_rows[3] = {};
-    UINT64 src_row_sizes[3] = {};
-    UINT64 src_total = 0;
     // NV12/P010: 2 subresources. Planar YUV: may need more, but D3D12 NV12 is always 2.
     UINT num_subresources = (tex_desc.Format == DXGI_FORMAT_NV12 || tex_desc.Format == DXGI_FORMAT_P010 ||
                              tex_desc.Format == DXGI_FORMAT_P016) ? 2 : 1;
+    // Only the footprints are used below; pass nullptr for the optional row-count/size/total out-params.
     d3d12_device_->GetCopyableFootprints(&tex_desc, 0, num_subresources, 0,
-                                         src_footprints, src_num_rows, src_row_sizes, &src_total);
+                                         src_footprints, nullptr, nullptr, nullptr);
 
     // Record copy commands: texture (tiled) -> buffer (linear) for each subresource.
     // This is a COPY-type queue/command list: D3D12 does not track resource states on
@@ -441,8 +443,13 @@ rocDecStatus D3D12Interop::CopyToStagingBuffer(int pic_idx) {
         // If SetEventOnCompletion fails, the event is never signaled and the wait below
         // would block forever -- fail here instead of hanging.
         CHECK_D3D12(d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_));
-        WaitForSingleObject(d3d12_fence_event_, INFINITE);
-    }
+        DWORD wait = WaitForSingleObject(d3d12_fence_event_, INFINITE);
+        if (wait != WAIT_OBJECT_0) {
+            CriticalLog(g_rocdec_logger, "WaitForSingleObject for D3D12 fence failed, result=" + ROCDEC_TOSTR(wait) +
+                        " GetLastError=" + ROCDEC_TOSTR(GetLastError()));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
 
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
