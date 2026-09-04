@@ -438,16 +438,7 @@ rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus 
     return ROCDEC_SUCCESS;
 }
 
-#ifdef _WIN32
-// Thin forwarders into the D3D12Interop helper (implementation in d3d12_interop.cpp).
-rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
-    return d3d12_interop_->CopyToStagingBuffer(pic_idx);
-}
-
-rocDecStatus VaapiVideoDecoder::ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out) {
-    return d3d12_interop_->ExportStagingInterop(pic_idx, out);
-}
-#else
+#ifndef _WIN32
 rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc) {
     FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
@@ -462,6 +453,15 @@ rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDesc
 
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
+}
+#else
+// Thin forwarders into the D3D12Interop helper (implementation in d3d12_interop.cpp).
+rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
+    return d3d12_interop_->CopyToStagingBuffer(pic_idx);
+}
+
+rocDecStatus VaapiVideoDecoder::ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out) {
+    return d3d12_interop_->ExportStagingInterop(pic_idx, out);
 }
 #endif
 
@@ -676,7 +676,21 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             return ROCDEC_NOT_SUPPORTED;
     }
     surf_attribs.push_back(surf_attrib);
-#ifdef _WIN32
+#ifndef _WIN32
+    uint64_t mod_linear = 0;
+    VADRMFormatModifierList modifier_list = {
+        .num_modifiers = 1,
+        .modifiers = &mod_linear,
+    };
+    if (supports_modifiers_) {
+        surf_attrib.type = VASurfaceAttribDRMFormatModifiers;
+        surf_attrib.value.type = VAGenericValueTypePointer;
+        surf_attrib.value.value.p = &modifier_list;
+        surf_attribs.push_back(surf_attrib);
+    }
+    CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
+        decoder_create_info_.height, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
+#else
     // Windows (vaon12): pre-create shared D3D12 decode textures, hand them to VA-API as
     // external surfaces, then build the staging infrastructure. All D3D12 work lives in the
     // D3D12Interop helper; the VA display concern (adapter LUID) is resolved here.
@@ -724,20 +738,6 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
         FunctionExitLog(g_rocdec_logger);
         return d3d12_status;
     }
-#else
-    uint64_t mod_linear = 0;
-    VADRMFormatModifierList modifier_list = {
-        .num_modifiers = 1,
-        .modifiers = &mod_linear,
-    };
-    if (supports_modifiers_) {
-        surf_attrib.type = VASurfaceAttribDRMFormatModifiers;
-        surf_attrib.value.type = VAGenericValueTypePointer;
-        surf_attrib.value.value.p = &modifier_list;
-        surf_attribs.push_back(surf_attrib);
-    }
-    CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, decoder_create_info_.width,
-        decoder_create_info_.height, va_surface_ids_.data(), static_cast<int>(va_surface_ids_.size()), surf_attribs.data(), static_cast<int>(surf_attribs.size())));
 #endif
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
@@ -860,25 +860,17 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         va_contexts_[va_ctx_idx].gpu_uuid.assign(gpu_uuid);
         va_contexts_[va_ctx_idx].gpu_pci_bdf = gpu_pci_bdf;
         va_contexts_[va_ctx_idx].hip_dev_prop = hip_dev_prop;
-#ifdef _WIN32
-        memcpy(&va_contexts_[va_ctx_idx].adapter_luid, hip_dev_prop.luid, sizeof(LUID));
-#else
+#ifndef _WIN32
         va_contexts_[va_ctx_idx].drm_fd = -1;
+#else
+        memcpy(&va_contexts_[va_ctx_idx].adapter_luid, hip_dev_prop.luid, sizeof(LUID));
 #endif
         va_contexts_[va_ctx_idx].va_display = 0;
         va_contexts_[va_ctx_idx].num_dec_engines = 1;
         va_contexts_[va_ctx_idx].va_profile = VAProfileNone;
         va_contexts_[va_ctx_idx].config_attributes_probed = false;
 
-#ifdef _WIN32
-        rocdec_status = InitVAAPI(va_ctx_idx, &va_contexts_[va_ctx_idx].adapter_luid);
-        if (rocdec_status != ROCDEC_SUCCESS) {
-            CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI via vaon12.");
-            va_contexts_.pop_back();
-            FunctionExitLog(g_rocdec_logger);
-            return rocdec_status;
-        }
-#else
+#ifndef _WIN32
         std::vector<int> visible_devices;
         GetVisibleDevices(visible_devices);
 
@@ -964,6 +956,14 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
             CriticalLog(g_rocdec_logger, "Failed to get the number of video decode engines.");
         }
         amdgpu_device_deinitialize(dev_handle);
+#else
+        rocdec_status = InitVAAPI(va_ctx_idx, &va_contexts_[va_ctx_idx].adapter_luid);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI via vaon12.");
+            va_contexts_.pop_back();
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
 #endif
 
         // Probe VA profiles
@@ -985,10 +985,10 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     } else {
-#ifdef _WIN32
-        VADisplay new_va_display = vaGetDisplayWin32(&va_contexts_[va_ctx_id].adapter_luid);
-#else
+#ifndef _WIN32
         VADisplay new_va_display = vaGetDisplayDRM(va_contexts_[va_ctx_id].drm_fd);
+#else
+        VADisplay new_va_display = vaGetDisplayWin32(&va_contexts_[va_ctx_id].adapter_luid);
 #endif
         if (!new_va_display) {
             CriticalLog(g_rocdec_logger, "Failed to create VA display.");
@@ -1247,15 +1247,19 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
     return ROCDEC_SUCCESS;
 }
 
-#ifdef _WIN32
-rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, const LUID* adapter_luid) {
-    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx));
-    InfoLog(g_rocdec_logger, "Initializing VA-API via vaon12 (LUID: " +
-            ROCDEC_TOSTR(adapter_luid->HighPart) + ":" + ROCDEC_TOSTR(adapter_luid->LowPart) + ")");
-
-    va_contexts_[va_ctx_idx].va_display = vaGetDisplayWin32(adapter_luid);
+#ifndef _WIN32
+rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx) + ", " + drm_node);
+    InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
+    va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
+    if (va_contexts_[va_ctx_idx].drm_fd < 0) {
+        CriticalLog(g_rocdec_logger, "Failed to open drm node: " + drm_node);
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
+    va_contexts_[va_ctx_idx].va_display = vaGetDisplayDRM(va_contexts_[va_ctx_idx].drm_fd);
     if (!va_contexts_[va_ctx_idx].va_display) {
-        CriticalLog(g_rocdec_logger, "Failed to create VA display via vaGetDisplayWin32.");
+        CriticalLog(g_rocdec_logger, "Failed to create VA display.");
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
@@ -1284,18 +1288,14 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, const LUID* adapter_luid) {
     return ROCDEC_SUCCESS;
 }
 #else
-rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
-    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx) + ", " + drm_node);
-    InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
-    va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
-    if (va_contexts_[va_ctx_idx].drm_fd < 0) {
-        CriticalLog(g_rocdec_logger, "Failed to open drm node: " + drm_node);
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_NOT_INITIALIZED;
-    }
-    va_contexts_[va_ctx_idx].va_display = vaGetDisplayDRM(va_contexts_[va_ctx_idx].drm_fd);
+rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, const LUID* adapter_luid) {
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx));
+    InfoLog(g_rocdec_logger, "Initializing VA-API via vaon12 (LUID: " +
+            ROCDEC_TOSTR(adapter_luid->HighPart) + ":" + ROCDEC_TOSTR(adapter_luid->LowPart) + ")");
+
+    va_contexts_[va_ctx_idx].va_display = vaGetDisplayWin32(adapter_luid);
     if (!va_contexts_[va_ctx_idx].va_display) {
-        CriticalLog(g_rocdec_logger, "Failed to create VA display.");
+        CriticalLog(g_rocdec_logger, "Failed to create VA display via vaGetDisplayWin32.");
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }

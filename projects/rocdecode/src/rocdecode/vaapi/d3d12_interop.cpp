@@ -59,7 +59,7 @@ D3D12Interop::~D3D12Interop() {
     }
 }
 
-D3D12Interop::SurfaceLayout D3D12Interop::GetSurfaceLayout() const {
+SurfaceLayout D3D12Interop::GetSurfaceLayout() const {
     SurfaceLayout layout = {};
     rocDecVideoSurfaceFormat fmt = output_format_;
     uint32_t width = width_;

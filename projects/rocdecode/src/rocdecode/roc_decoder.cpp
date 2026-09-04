@@ -140,7 +140,51 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         return rocdec_status;
     }
 
-#ifdef _WIN32
+#ifndef _WIN32
+    // do the VA-API/HIP interop once per surface and save it for reusing
+    if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
+        hipExternalMemoryHandleDesc external_mem_handle_desc = {};
+        hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
+        // Linux path: export as DRM PRIME FD
+        VADRMPRIMESurfaceDescriptor va_drm_prime_surface_desc = {};
+
+        rocdec_status = va_video_decoder_.ExportSurface(pic_idx, va_drm_prime_surface_desc);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+
+        if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
+            ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
+        external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
+        external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
+
+        CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+
+        external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
+        CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
+
+        hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
+        hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
+
+        for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
+            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
+            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
+        }
+
+        hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
+
+        for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
+            close(va_drm_prime_surface_desc.objects[i].fd);
+        }
+    }
+#else
     // Windows interop: D3D12 NV12/P016 surfaces are tiled on AMD, so each frame is
     // GPU-copied (CopyTextureRegion) from the tiled decode texture into a linear staging
     // buffer, which is then imported into HIP. The HIP import is set up once per surface
@@ -198,50 +242,6 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         }
         hip_interop_[pic_idx].d3d12_shared_handle = interop.shared_handle;
         InfoLog(g_rocdec_logger, "Staging D3D12<->HIP interop active for pic_idx=" + ROCDEC_TOSTR(pic_idx));
-    }
-#else
-    // do the VA-API/HIP interop once per surface and save it for reusing
-    if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
-        hipExternalMemoryHandleDesc external_mem_handle_desc = {};
-        hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
-        // Linux path: export as DRM PRIME FD
-        VADRMPRIMESurfaceDescriptor va_drm_prime_surface_desc = {};
-
-        rocdec_status = va_video_decoder_.ExportSurface(pic_idx, va_drm_prime_surface_desc);
-        if (rocdec_status != ROCDEC_SUCCESS) {
-            ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + ROCDEC_TOSTR(pic_idx));
-            FunctionExitLog(g_rocdec_logger);
-            return rocdec_status;
-        }
-
-        if (va_drm_prime_surface_desc.num_layers == 0 || va_drm_prime_surface_desc.num_layers > 3) {
-            ErrorLog(g_rocdec_logger, "VA-API returned an unsupported value for num_layers. num_layers = " + ROCDEC_TOSTR(va_drm_prime_surface_desc.num_layers));
-            FunctionExitLog(g_rocdec_logger);
-            return ROCDEC_RUNTIME_ERROR;
-        }
-
-        external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
-        external_mem_handle_desc.handle.fd = va_drm_prime_surface_desc.objects[0].fd;
-        external_mem_handle_desc.size = va_drm_prime_surface_desc.objects[0].size;
-
-        CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
-
-        external_mem_buffer_desc.size = va_drm_prime_surface_desc.objects[0].size;
-        CHECK_HIP(hipExternalMemoryGetMappedBuffer((void**)&hip_interop_[pic_idx].hip_mapped_device_mem, hip_interop_[pic_idx].hip_ext_mem, &external_mem_buffer_desc));
-
-        hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
-        hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
-
-        for (int i = 0; i < va_drm_prime_surface_desc.num_layers; i++) {
-            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
-            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
-        }
-
-        hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
-
-        for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
-            close(va_drm_prime_surface_desc.objects[i].fd);
-        }
     }
 #endif
 

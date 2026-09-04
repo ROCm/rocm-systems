@@ -95,10 +95,10 @@ typedef struct {
     int device_id;
     std::string gpu_uuid;
     std::string gpu_pci_bdf;
-#ifdef _WIN32
-    LUID adapter_luid;
-#else
+#ifndef _WIN32
     int drm_fd;
+#else
+    LUID adapter_luid;
 #endif
     VADisplay va_display;
     hipDeviceProp_t hip_dev_prop;
@@ -123,13 +123,13 @@ public:
     rocDecStatus InitializeDecoder();
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
-#ifdef _WIN32
+#ifndef _WIN32
+    rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
+#else
     // Interop path (forwarders into D3D12Interop): tiled D3D12 decode texture ->
     // linear staging buffer -> HIP import. Implementation lives in d3d12_interop.cpp.
     rocDecStatus CopyToStagingBuffer(int pic_idx);
     rocDecStatus ExportStagingInterop(int pic_idx, D3D12Interop::StagingInteropInfo &out);
-#else
-    rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
 #endif
     rocDecStatus SyncSurface(int pic_idx);
     rocDecStatus ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params);
@@ -209,9 +209,7 @@ private:
 #endif
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
-#ifdef _WIN32
-    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
-#else
+#ifndef _WIN32
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);
     void GetVisibleDevices(std::vector<int>& visible_devices_vetor);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices, ComputePartition current_compute_partition, int &offset);
@@ -222,5 +220,7 @@ private:
 
     // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
     std::string GetFirstAvailableDrmNode();
+#else
+    rocDecStatus InitVAAPI(int va_ctx_idx, const LUID* adapter_luid);
 #endif
 };

@@ -53,6 +53,17 @@ THE SOFTWARE.
     }\
 }
 
+// Surface layout info (computed from decoder config, matches GetSurfaceStrideInternal).
+struct SurfaceLayout {
+    uint32_t pitch;             // Row pitch in bytes (luma and chroma share this for NV12/P016)
+    uint32_t vstride;           // Aligned height
+    uint32_t num_planes;        // Total planes (luma + chroma): 1 for mono, 2 for NV12/P016, 3 for planar YUV
+    uint32_t plane_offset[3];   // Byte offset of each plane
+    uint32_t plane_pitch[3];    // Byte pitch of each plane
+    uint32_t plane_height[3];   // Row count of each plane
+    uint64_t total_size;        // Total buffer size in bytes
+};
+
 // Owns all Direct3D12 interop state for the Windows (vaon12) decode path:
 // the D3D12 device, the shared decode textures handed to VA-API as external
 // surfaces, and the linear staging buffers + copy infrastructure used to turn
@@ -66,17 +77,6 @@ THE SOFTWARE.
 //   ExportStagingInterop()         -> once per surface slot (feeds the HIP import)
 class D3D12Interop {
 public:
-    // Surface layout info (computed from decoder config, matches GetSurfaceStrideInternal).
-    struct SurfaceLayout {
-        uint32_t pitch;             // Row pitch in bytes (luma and chroma share this for NV12/P016)
-        uint32_t vstride;           // Aligned height
-        uint32_t num_planes;        // Total planes (luma + chroma): 1 for mono, 2 for NV12/P016, 3 for planar YUV
-        uint32_t plane_offset[3];   // Byte offset of each plane
-        uint32_t plane_pitch[3];    // Byte pitch of each plane
-        uint32_t plane_height[3];   // Row count of each plane
-        uint64_t total_size;        // Total buffer size in bytes
-    };
-
     // Everything the caller needs to set up the HIP import for one surface slot.
     // Produced once per slot by ExportStagingInterop().
     struct StagingInteropInfo {
