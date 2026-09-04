@@ -43,6 +43,19 @@ static ncclResult_t MicroCalloc(const char* file, int line, const char* fn, Args
 #undef ncclCalloc
 #define ncclCalloc(...) MicroCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
+// Seam for the UUT's bare malloc(). Armed by exact byte count, not a call index, so a test targets one
+// allocation without depending on how many mallocs the surrounding code happens to make.
+// TRAP: textual and TU-wide -- pick a request size no unrelated allocation can plausibly match.
+static std::size_t g_mallocFailSize = 0;  // 0 = never fail; reset in TearDown, both statics are TU-local
+static void* MicroMalloc(std::size_t n) {
+  return (g_mallocFailSize != 0 && n == g_mallocFailSize) ? nullptr : std::malloc(n);
+}
+#define malloc(n) MicroMalloc(n)
+// commCleanup's tuner->finalize seam. TU-local (needs ncclTuner_t), so the reset lives in TearDown.
+static int g_tunerFinalizeCalls = 0;
+static void* g_tunerFinalizeLastContext = nullptr;
+static ncclResult_t g_tunerFinalizeResult = ncclSuccess;
+
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before init.cc includes it
 
 // INIT_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/init.cc -- NOT init_tmp.cc, which shares the basename.
@@ -91,6 +104,10 @@ class InitMicrotest : public ::testing::Test {
     ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
     g_callocCallIndex = 0;
     g_callocFailAt = -1;
+    g_mallocFailSize = 0;
+    g_tunerFinalizeCalls = 0;
+    g_tunerFinalizeLastContext = nullptr;
+    g_tunerFinalizeResult = ncclSuccess;
   }
 };
 
@@ -1162,6 +1179,186 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
 }
 // TODO(AICOMRCCL-1685): a MIN_CTAS override does not apply, unlike COMM_BLOCKING on the same g_loadParam path.
 
+namespace {
+constexpr char kParentNetName[] = "parent-net";
+constexpr char kChildNetName[] = "child-net";
+// Deliberately odd length: the malloc seam is armed by request size, so this must not collide with another alloc.
+constexpr char kUnallocatableNetName[] = "net-whose-strlen-plus-one-is-the-armed-malloc-failure-size-xyz";
+
+// Every field differs from FillChildConfig's AND is post-validation stable, so envConfigOverride's clamps
+// rewrite none of them; anything that differs after the copy is a defect, not a validation rewrite.
+void FillParentConfig(ncclConfig_t& c) {
+  c.size = 0x5A5A;
+  c.magic = 0x00C0FFEEu;
+  c.version = 0x00BEEF01u;
+  c.blocking = 0;
+  c.cgaClusterSize = 3;
+  c.minCTAs = 5;
+  c.maxCTAs = 11;
+  c.netName = kParentNetName;
+  c.splitShare = 1;
+  c.trafficClass = 17;
+  c.commName = "parent-comm";
+  c.collnetEnable = 1;
+  c.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  c.shrinkShare = 1;
+  c.nvlsCTAs = 7;
+  c.nChannelsPerNetPeer = 9;
+  c.nvlinkCentricSched = 1;
+  c.graphUsageMode = 2;
+  c.numRmaCtx = 4;
+  c.maxP2pPeers = 13;
+  c.graphStreamOrdering = 1;
+}
+
+void FillChildConfig(ncclConfig_t& c) {
+  c.size = 0xA5A5;
+  c.magic = 0x00DEAD02u;
+  c.version = 0x00FEED03u;
+  c.blocking = 1;
+  c.cgaClusterSize = 2;
+  c.minCTAs = 6;
+  c.maxCTAs = 12;
+  c.netName = kChildNetName;
+  c.splitShare = 0;
+  c.trafficClass = 18;
+  c.commName = "child-comm";
+  c.collnetEnable = 0;
+  c.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  c.shrinkShare = 0;
+  c.nvlsCTAs = 8;
+  c.nChannelsPerNetPeer = 10;
+  c.nvlinkCentricSched = 0;
+  c.graphUsageMode = 1;
+  c.numRmaCtx = 5;
+  c.maxP2pPeers = 14;
+  c.graphStreamOrdering = 0;
+}
+
+// TRIPWIRE: a new ncclConfig_t field must be added to both fills and to ExpectConfigFieldsEqual, or a
+// memcpy truncated just before it would go unnoticed. Update all four sites together.
+static_assert(sizeof(ncclConfig_t) == 96, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
+
+// Field-by-field so a failure names the field. netName by content: envConfigOverride re-mallocs it.
+void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) {
+  EXPECT_EQ(want.size, got.size);
+  EXPECT_EQ(want.magic, got.magic);
+  EXPECT_EQ(want.version, got.version);
+  EXPECT_EQ(want.blocking, got.blocking);
+  EXPECT_EQ(want.cgaClusterSize, got.cgaClusterSize);
+  EXPECT_EQ(want.minCTAs, got.minCTAs);
+  EXPECT_EQ(want.maxCTAs, got.maxCTAs);
+  ASSERT_NE(nullptr, got.netName);
+  EXPECT_STREQ(want.netName, got.netName);
+  EXPECT_EQ(want.splitShare, got.splitShare);
+  EXPECT_EQ(want.trafficClass, got.trafficClass);
+  EXPECT_STREQ(want.commName, got.commName);
+  EXPECT_EQ(want.collnetEnable, got.collnetEnable);
+  EXPECT_EQ(want.CTAPolicy, got.CTAPolicy);
+  EXPECT_EQ(want.shrinkShare, got.shrinkShare);
+  EXPECT_EQ(want.nvlsCTAs, got.nvlsCTAs);
+  EXPECT_EQ(want.nChannelsPerNetPeer, got.nChannelsPerNetPeer);
+  EXPECT_EQ(want.nvlinkCentricSched, got.nvlinkCentricSched);
+  EXPECT_EQ(want.graphUsageMode, got.graphUsageMode);
+  EXPECT_EQ(want.numRmaCtx, got.numRmaCtx);
+  EXPECT_EQ(want.maxP2pPeers, got.maxP2pPeers);
+  EXPECT_EQ(want.graphStreamOrdering, got.graphStreamOrdering);
+}
+
+// envConfigOverride always replaces config.netName with a fresh malloc; free it so the copy tests do not leak.
+// TRAP: skip the literals -- a defect that stops the override leaves one in place, and free()ing it would
+// abort the process instead of letting the assertions report what actually went wrong.
+struct ScopedNetName {
+  explicit ScopedNetName(ncclComm* c) : comm(c) {}
+  ~ScopedNetName() {
+    const char* p = comm->config.netName;
+    if (p != kParentNetName && p != kChildNetName && p != kUnallocatableNetName) free(const_cast<char*>(p));
+  }
+  ncclComm* comm;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CopyCommConfig_OverwritesEveryChildConfigField) {
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  FillChildConfig(child->config);  // every field differs, so a truncated memcpy leaves a stale value behind
+  const ncclConfig_t want = parent->config;
+  ScopedNetName freeNetName(child.get());
+
+  ASSERT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
+
+  ExpectConfigFieldsEqual(want, child->config);
+  EXPECT_STRNE(kChildNetName, child->config.netName);
+  EXPECT_NE(parent->config.netName, child->config.netName);  // the override re-mallocs it; aliasing means it skipped
+}
+
+TEST_F(InitMicrotest, CopyCommConfig_LeavesParentConfigUntouched) {
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  FillChildConfig(child->config);
+  const ncclConfig_t want = parent->config;
+  ScopedNetName freeNetName(child.get());
+
+  ASSERT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
+
+  ExpectConfigFieldsEqual(want, parent->config);       // src/dst swapped would push the child's values here
+  EXPECT_EQ(kParentNetName, parent->config.netName);   // and would retarget the parent at the child's literal
+}
+
+TEST_F(InitMicrotest, CopyCommConfig_EnvOverrideLandsOnTopOfTheCopy) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "COMM_BLOCKING") == 0 ? int64_t(1) : deft;
+  };
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  FillChildConfig(child->config);
+  child->config.blocking = 0;  // both sides 0, so blocking==1 can only come from the override running after the copy
+  ScopedNetName freeNetName(child.get());
+
+  ASSERT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
+
+  EXPECT_EQ(1, child->config.blocking);
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, child->config.CTAPolicy);  // anchor: the copy still landed
+  // The override re-mallocs netName, so aliasing the parent's buffer would mean the copy ran last.
+  EXPECT_NE(parent->config.netName, child->config.netName);
+  EXPECT_STREQ(kParentNetName, child->config.netName);
+}
+
+TEST_F(InitMicrotest, CopyCommConfig_CtaPolicyEnvOverridesCopiedPolicy) {
+  SetMicroEnv("NCCL_CTA_POLICY", "EFFICIENCY");
+  // envConfigOverride's call_once may already be burnt; parse here so ctaPolicyEnv is set whatever the shuffle order.
+  getEnvCtaPolicyOnce();
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  FillChildConfig(child->config);
+  child->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;  // both sides ZERO, so EFFICIENCY can only come from the env
+  ScopedNetName freeNetName(child.get());
+
+  ASSERT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
+
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, child->config.CTAPolicy);
+  EXPECT_EQ(13, child->config.maxP2pPeers);  // anchor: the copy still landed
+}
+
+TEST_F(InitMicrotest, CopyCommConfig_EnvConfigOverrideFails_PropagatesErrorAfterCopying) {
+  auto parent = std::make_unique<ncclComm>();
+  auto child = std::make_unique<ncclComm>();
+  FillParentConfig(parent->config);
+  FillChildConfig(child->config);
+  parent->config.netName = kUnallocatableNetName;
+  g_mallocFailSize = std::strlen(kUnallocatableNetName) + 1;  // the only allocation envConfigOverride makes
+
+  EXPECT_EQ(ncclSystemError, copyCommConfig(child.get(), parent.get()));
+
+  EXPECT_EQ(nullptr, child->config.netName);                 // the failing allocation, not a stale child value
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, child->config.CTAPolicy);  // the copy still ran before the failure
+  EXPECT_EQ(13, child->config.maxP2pPeers);
+}
+
 TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeOwner_UsesDefaultsAndSetsShared) {
   auto comm = std::make_unique<ncclComm>();
   auto sr = std::make_unique<ncclSharedResources>();
@@ -1698,6 +1895,158 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   comm->abortFlagRefCount = &abortRef;
   EXPECT_EQ(ncclSuccess, commFree(comm));          // frees comm; do not touch it afterwards
   EXPECT_EQ(1, abortRef);
+}
+
+// ===========================================================================
+// commCleanup (init.cc:3696). Pure ordering + error propagation: set the device,
+// optionally finalize-then-unload the tuner, then commFree. Every assertion below
+// keys on g_cleanupCallOrder, because a return code alone cannot see a swapped or
+// dropped step. See init_fakes.h for who appends which name.
+// ===========================================================================
+
+namespace {
+int kTunerContextSentinel = 0;  // distinct from comm, so forwarding the wrong pointer is visible
+
+ncclResult_t FakeTunerFinalize(void* context) {
+  ++g_tunerFinalizeCalls;
+  g_tunerFinalizeLastContext = context;
+  g_cleanupCallOrder.push_back("tunerFinalize");
+  return g_tunerFinalizeResult;
+}
+
+// commCleanup ends in commFree, which free()s comm, so comm MUST be ncclCalloc'd, never new'd.
+// abortFlag/abortRef are members so they outlive the call the comm points at them for.
+struct CleanupComm {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  ncclTuner_t tuner{};
+};
+
+// cudaDev defaults to 5, never 0: g_currentDevice starts at 0, so dev 0 could not tell a real
+// hipSetDevice(comm->cudaDev) from a dropped call.
+void MakeCleanupComm(CleanupComm& c, bool withTuner, int cudaDev = 5) {
+  InstallCommAllocSuccess();
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&c.comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(c.comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  c.comm->abortFlag = &c.abortFlag;
+  c.comm->abortFlagRefCount = &c.abortRef;
+  c.comm->cudaDev = cudaDev;
+  if (withTuner) {
+    c.tuner.finalize = FakeTunerFinalize;
+    c.comm->tuner = &c.tuner;
+    c.comm->tunerContext = &kTunerContextSentinel;
+  }
+}
+
+// Release a comm whose commCleanup returned early, so the test does not leak it. The abortRef guard
+// keeps a regression that let commFree run anyway from turning into a double-free crash here.
+void ReleaseUncleanedComm(CleanupComm& c) {
+  ASSERT_EQ(2, c.abortRef) << "commFree already ran to completion; the comm is gone";
+  g_ncclCeFinalizeResult = ncclSuccess;
+  ASSERT_EQ(ncclSuccess, commFree(c.comm));
+}
+}  // namespace
+
+// --- tuner == NULL arm ---
+TEST_F(InitMicrotest, CommCleanup_NoTuner_SetsDeviceAndFreesCommOnly) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  g_currentDevice = 3;  // != cudaDev, so the set is observable
+
+  EXPECT_EQ(ncclSuccess, commCleanup(c.comm));  // frees c.comm; do not touch it afterwards
+
+  EXPECT_EQ(std::vector<std::string>({"commFree"}), g_cleanupCallOrder);
+  EXPECT_EQ(5, g_currentDevice);
+  EXPECT_EQ(0, g_tunerFinalizeCalls);
+  EXPECT_EQ(nullptr, g_ncclTunerPluginUnloadLastComm);
+  EXPECT_EQ(1, c.abortRef);  // commFree really ran, not just the marker
+}
+
+// --- tuner != NULL arm: the whole ordering contract ---
+TEST_F(InitMicrotest, CommCleanup_WithTuner_FinalizesThenUnloadsThenFrees) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
+  ncclComm* const commAddr = c.comm;
+  g_currentDevice = 3;
+
+  EXPECT_EQ(ncclSuccess, commCleanup(c.comm));  // frees c.comm; do not touch it afterwards
+
+  EXPECT_EQ(std::vector<std::string>({"tunerFinalize", "tunerUnload", "commFree"}), g_cleanupCallOrder);
+  EXPECT_EQ(5, g_currentDevice);
+  EXPECT_EQ(1, g_tunerFinalizeCalls);
+  EXPECT_EQ(static_cast<void*>(&kTunerContextSentinel), g_tunerFinalizeLastContext);
+  EXPECT_EQ(commAddr, g_ncclTunerPluginUnloadLastComm);
+  EXPECT_EQ(1, c.abortRef);
+}
+
+// --- cudaSetDevice failure arm: short-circuits before the tuner guard ---
+TEST_F(InitMicrotest, CommCleanup_SetDeviceFails_ReturnsCudaErrorAndRunsNothingElse) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
+  g_currentDevice = 3;
+  auto savedSetDevice = g_hipSetDevice;
+  g_hipSetDevice = [](int) { return hipErrorInvalidDevice; };
+
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // positive anchor for the empty-order check
+  EXPECT_TRUE(g_cleanupCallOrder.empty());
+  EXPECT_EQ(0, g_tunerFinalizeCalls);
+  EXPECT_EQ(3, g_currentDevice);
+  EXPECT_EQ(2, c.abortRef);  // pins current behaviour: a device error skips commFree, so the comm leaks
+
+  // Restore only this hook: ResetHipFakes() would also revert the InstallCommAllocSuccess results commFree needs.
+  g_hipSetDevice = savedSetDevice;
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+}
+
+// --- tuner->finalize failure arm: unload and commFree must not run ---
+TEST_F(InitMicrotest, CommCleanup_TunerFinalizeFails_SkipsUnloadAndFree) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
+  g_currentDevice = 3;
+  g_tunerFinalizeResult = ncclInvalidUsage;  // distinct from every other arm's code
+
+  EXPECT_EQ(ncclInvalidUsage, commCleanup(c.comm));
+
+  EXPECT_EQ(std::vector<std::string>({"tunerFinalize"}), g_cleanupCallOrder);
+  EXPECT_EQ(nullptr, g_ncclTunerPluginUnloadLastComm);
+  EXPECT_EQ(5, g_currentDevice);  // the device was set before the failure
+  EXPECT_EQ(2, c.abortRef);       // pins current behaviour: a tuner plugin error leaks the whole comm
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+}
+
+// --- ncclTunerPluginUnload failure arm: commFree must not run ---
+TEST_F(InitMicrotest, CommCleanup_TunerUnloadFails_SkipsFree) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
+  g_ncclTunerPluginUnloadResult = ncclSystemError;
+
+  EXPECT_EQ(ncclSystemError, commCleanup(c.comm));
+
+  EXPECT_EQ(std::vector<std::string>({"tunerFinalize", "tunerUnload"}), g_cleanupCallOrder);
+  EXPECT_EQ(1, g_tunerFinalizeCalls);
+  EXPECT_EQ(2, c.abortRef);
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+}
+
+// --- commFree failure arm: the error reaches the caller unchanged ---
+TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/true));
+  g_ncclCeFinalizeResult = ncclInternalError;  // commFree's first NCCLCHECK; it bails before free(comm)
+
+  EXPECT_EQ(ncclInternalError, commCleanup(c.comm));
+
+  EXPECT_EQ(std::vector<std::string>({"tunerFinalize", "tunerUnload", "commFree"}), g_cleanupCallOrder);
+  EXPECT_EQ(2, c.abortRef);
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
 
 // ===========================================================================
@@ -3072,4 +3421,252 @@ TEST_F(InitMicrotest, InitTransportsRank_P2pChannelsPerPeerFails_PropagatesAndRu
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(2, g_ncclOsCpuCountCalls);  // :1608 and exit::2403 -- fail: fell through to exit:
+}
+
+// setCommAbortFlags writes four INDEPENDENT uint32_t* on comm; distinct non-zero sentinels make a
+// dropped or mis-targeted store visible instead of coinciding with the value being stored.
+namespace {
+class AbortFlagsComm {
+ public:
+  static constexpr uint32_t kParentSentinel = 0xA1A1A1A1u;
+  static constexpr uint32_t kParentDevSentinel = 0xB2B2B2B2u;
+  static constexpr uint32_t kChildSentinel = 0xC3C3C3C3u;
+  static constexpr uint32_t kChildDevSentinel = 0xD4D4D4D4u;
+
+  AbortFlagsComm() : comm_(new ncclComm{}) {
+    comm_->abortFlag = &slots_[0];
+    comm_->abortFlagDev = &slots_[1];
+    comm_->childAbortFlag = &slots_[2];
+    comm_->childAbortFlagDev = &slots_[3];
+  }
+  ncclComm* get() { return comm_.get(); }
+  void detachChild() { comm_->childAbortFlag = nullptr; }
+  uint32_t parent() const { return slots_[0]; }
+  uint32_t parentDev() const { return slots_[1]; }
+  uint32_t child() const { return slots_[2]; }
+  uint32_t childDev() const { return slots_[3]; }
+
+ private:
+  uint32_t slots_[4] = {kParentSentinel, kParentDevSentinel, kChildSentinel, kChildDevSentinel};
+  std::unique_ptr<ncclComm> comm_;
+};
+}  // namespace
+
+// Arm: childAbortFlag != nullptr TRUE -- all four flags written. The distinctness check is load-bearing:
+// without it four equal reads could come from one slot being aliased four times.
+TEST_F(InitMicrotest, SetCommAbortFlags_ChildAttached_WritesAllFourFlags) {
+  AbortFlagsComm c;
+  ASSERT_NE(c.get()->abortFlag, c.get()->abortFlagDev);
+  ASSERT_NE(c.get()->abortFlag, c.get()->childAbortFlag);
+  ASSERT_NE(c.get()->abortFlag, c.get()->childAbortFlagDev);
+  ASSERT_NE(c.get()->abortFlagDev, c.get()->childAbortFlag);
+  ASSERT_NE(c.get()->abortFlagDev, c.get()->childAbortFlagDev);
+  ASSERT_NE(c.get()->childAbortFlag, c.get()->childAbortFlagDev);
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(1u, c.parent());
+  EXPECT_EQ(1u, c.parentDev());
+  EXPECT_EQ(1u, c.child());
+  EXPECT_EQ(1u, c.childDev());
+}
+
+// Arm: childAbortFlag == nullptr FALSE -- the child pair must stay untouched while the parent pair is
+// still written; the parent assertions are the positive anchor for the two "unchanged" checks.
+TEST_F(InitMicrotest, SetCommAbortFlags_ChildDetached_WritesOnlyParentFlags) {
+  AbortFlagsComm c;
+  c.detachChild();
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(1u, c.parent());
+  EXPECT_EQ(1u, c.parentDev());
+  EXPECT_EQ(AbortFlagsComm::kChildSentinel, c.child());
+  EXPECT_EQ(AbortFlagsComm::kChildDevSentinel, c.childDev());
+}
+
+// value 0 is the un-abort path (init.cc:3921, :4152): the stores must be unconditional, not "set only".
+TEST_F(InitMicrotest, SetCommAbortFlags_ZeroAfterOne_ClearsAllFourFlags) {
+  AbortFlagsComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  ASSERT_EQ(1u, c.parent());
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 0));
+  EXPECT_EQ(0u, c.parent());
+  EXPECT_EQ(0u, c.parentDev());
+  EXPECT_EQ(0u, c.child());
+  EXPECT_EQ(0u, c.childDev());
+}
+
+// The int -> uint32_t cast is a value-preserving bit reinterpretation, not a truthiness collapse.
+TEST_F(InitMicrotest, SetCommAbortFlags_NegativeValue_StoredAsTwosComplementBits) {
+  AbortFlagsComm c;
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), -1));
+  EXPECT_EQ(0xFFFFFFFFu, c.parent());
+  EXPECT_EQ(0xFFFFFFFFu, c.parentDev());
+  EXPECT_EQ(0xFFFFFFFFu, c.child());
+  EXPECT_EQ(0xFFFFFFFFu, c.childDev());
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), INT32_MIN));
+  EXPECT_EQ(0x80000000u, c.parent());
+  EXPECT_EQ(0x80000000u, c.parentDev());
+  EXPECT_EQ(0x80000000u, c.child());
+  EXPECT_EQ(0x80000000u, c.childDev());
+}
+
+// A large positive value keeps all 31 payload bits: pins that no truncation or masking is applied.
+TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
+  AbortFlagsComm c;
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 0x7F00FF01));
+  EXPECT_EQ(0x7F00FF01u, c.parent());
+  EXPECT_EQ(0x7F00FF01u, c.parentDev());
+  EXPECT_EQ(0x7F00FF01u, c.child());
+  EXPECT_EQ(0x7F00FF01u, c.childDev());
+}
+
+// LATENT COUPLING (init.cc:3889): childAbortFlagDev is stored under childAbortFlag's null check, so a
+// non-null childAbortFlag paired with a null childAbortFlagDev writes through NULL. Differential with
+// SetCommAbortFlags_ChildAttached_WritesAllFourFlags: identical state but that pointer, which survives.
+TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOnNullDeref) {
+  EXPECT_EXIT(
+      {
+        AbortFlagsComm c;
+        c.get()->childAbortFlagDev = nullptr;
+        fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
+        fflush(stderr);
+        (void)setCommAbortFlags(c.get(), 1);
+        fprintf(stderr, "setCommAbortFlags-returned-without-dereferencing-null\n");
+        _exit(0);  // a non-crashing build exits 0, matching neither DEATH_BY_SEGV alternative
+      },
+      DEATH_BY_SEGV, "setCommAbortFlags-reached-with-null-childAbortFlagDev");
+}
+// ---------------------------------------------------------------------------
+// ncclGetUniqueId_impl (init.cc:358) -- the standalone public-API id minter.
+// ---------------------------------------------------------------------------
+namespace {
+// 0xAB, not 0x00: the memset's job is erasing pre-existing bytes, which a zero-filled buffer cannot show.
+constexpr char kIdPoison = static_cast<char>(0xAB);
+
+// Distinctive, byte-wise distinct from kIdPoison and from 0, so a short or long memcpy is visible in every byte.
+ncclBootstrapHandle DistinctiveHandle() {
+  ncclBootstrapHandle h{};
+  h.magic = 0x0123456789ABCDEFULL;
+  h.addr.sa.sa_family = AF_INET;
+  std::memset(h.addr.sa.sa_data, 0x5C, sizeof(h.addr.sa.sa_data));
+  h.nRanks = 0x11223344;
+  return h;
+}
+}  // namespace
+
+// Whole-buffer oracle: the first sizeof(handle) bytes must be the handle verbatim, every later byte must be zero.
+TEST_F(InitMicrotest, GetUniqueId_HappyPath_CopiesHandleAndZeroesTheTail) {
+  g_bootstrapHandleTemplate = DistinctiveHandle();
+  g_bootstrapHandleMagic = g_bootstrapHandleTemplate.magic;
+
+  ncclUniqueId id;
+  std::memset(&id, kIdPoison, sizeof(id));
+  ASSERT_EQ(ncclSuccess, ncclGetUniqueId_impl(&id));
+
+  EXPECT_EQ(1, g_bootstrapGetUniqueIdCalls);
+  const ncclBootstrapHandle expect = DistinctiveHandle();
+  EXPECT_EQ(0, std::memcmp(id.internal, &expect, sizeof(expect))) << "handle bytes were not copied verbatim";
+  for (size_t i = sizeof(ncclBootstrapHandle); i < sizeof(ncclUniqueId); ++i) {
+    ASSERT_EQ('\0', id.internal[i]) << "byte " << i << " past the handle was not zeroed";
+  }
+}
+
+// The memset covers the WHOLE id, so a byte the handle does write must still come from the handle, not the poison.
+TEST_F(InitMicrotest, GetUniqueId_HappyPath_ZeroValuedHandleFieldsOverwriteThePoison) {
+  ncclBootstrapHandle h = DistinctiveHandle();
+  h.nRanks = 0;  // a zero field inside the copied prefix: only memset-then-memcpy can make this read back as 0
+  g_bootstrapHandleTemplate = h;
+  g_bootstrapHandleMagic = h.magic;
+
+  ncclUniqueId id;
+  std::memset(&id, kIdPoison, sizeof(id));
+  ASSERT_EQ(ncclSuccess, ncclGetUniqueId_impl(&id));
+
+  int nRanksOut = -1;
+  std::memcpy(&nRanksOut, id.internal + offsetof(ncclBootstrapHandle, nRanks), sizeof(nRanksOut));
+  EXPECT_EQ(0, nRanksOut);
+  uint64_t magicOut = 0;
+  std::memcpy(&magicOut, id.internal, sizeof(magicOut));
+  EXPECT_EQ(h.magic, magicOut);  // positive anchor: the copy really ran
+}
+
+// The Recorder call is a line of the unit: it must see rrGetUniqueId, the sentinel ranks, and the caller's buffer.
+TEST_F(InitMicrotest, GetUniqueId_HappyPath_RecordsGetUniqueIdWithSentinelRanks) {
+  g_bootstrapHandleTemplate = DistinctiveHandle();
+  ncclUniqueId id{};
+  ASSERT_EQ(ncclSuccess, ncclGetUniqueId_impl(&id));
+  EXPECT_EQ(1, g_recorderIdCalls);
+  EXPECT_EQ(static_cast<int>(rccl::rrGetUniqueId), g_recorderLastIdCall);
+  EXPECT_EQ(&id, g_recorderLastId);
+  EXPECT_EQ(-1, g_recorderLastRank);
+  EXPECT_EQ(-1, g_recorderLastNranks);
+}
+
+// PtrCheck's null arm. Full message, not "argument is NULL": every PtrCheck site shares that suffix.
+TEST_F(InitMicrotest, GetUniqueId_NullOut_ReturnsInvalidArgumentBeforeMintingAHandle) {
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = ncclGetUniqueId_impl(nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "GetUniqueId : out argument is NULL")) << log;
+  EXPECT_EQ(0, g_bootstrapGetUniqueIdCalls) << "must not mint an id it has nowhere to put";
+  EXPECT_EQ(0, g_recorderIdCalls);
+}
+
+// bootstrapGetUniqueId's failure arm: the error propagates and the caller's buffer is left completely alone.
+TEST_F(InitMicrotest, GetUniqueId_BootstrapFails_PropagatesAndLeavesOutUntouched) {
+  g_bootstrapGetUniqueIdResult = ncclSystemError;
+  ncclUniqueId id;
+  std::memset(&id, kIdPoison, sizeof(id));
+  EXPECT_EQ(ncclSystemError, ncclGetUniqueId_impl(&id));
+  EXPECT_EQ(1, g_bootstrapGetUniqueIdCalls);
+  for (size_t i = 0; i < sizeof(ncclUniqueId); ++i) {
+    ASSERT_EQ(kIdPoison, id.internal[i]) << "byte " << i << " was written on a failed mint";
+  }
+  EXPECT_EQ(0, g_recorderIdCalls);
+}
+
+// ncclInit()'s per-call NCCLCHECK (init.cc:292) runs before its call_once, so this arm is reachable in-process.
+TEST_F(InitMicrotest, GetUniqueId_NcclInitFails_PropagatesBeforePtrCheck) {
+  g_ncclOsTopoGetStrFromSysResult = ncclRemoteError;
+  ncclUniqueId id;
+  std::memset(&id, kIdPoison, sizeof(id));
+  EXPECT_EQ(ncclRemoteError, ncclGetUniqueId_impl(&id));
+  EXPECT_EQ(1, g_ncclOsTopoGetStrFromSysCalls);
+  EXPECT_EQ(0, g_bootstrapGetUniqueIdCalls);
+  EXPECT_EQ(kIdPoison, id.internal[0]);
+}
+
+// Same failure with a null out: proves ncclInit() is checked BEFORE PtrCheck, which would otherwise report first.
+TEST_F(InitMicrotest, GetUniqueId_NcclInitFails_OutrunsTheNullOutCheck) {
+  g_ncclOsTopoGetStrFromSysResult = ncclRemoteError;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = ncclGetUniqueId_impl(nullptr); });
+  EXPECT_EQ(ncclRemoteError, res);
+  EXPECT_FALSE(RcclUnitTesting::LogHas(log, "GetUniqueId : out argument is NULL")) << log;
+  EXPECT_EQ(1, g_ncclOsTopoGetStrFromSysCalls);  // positive anchor: an empty log cannot pass the check above
+}
+
+// envInitOnceFlag latches for the process, so the failure arm is only reachable in a child that has never called it.
+TEST_F(InitMicrotestIsolated, GetUniqueId_NcclInitEnvFails_PropagatesBeforeNcclInit) {
+  RUN_ISOLATED_TEST(
+      "Init_GetUniqueId_NcclInitEnvFails",
+      []() {
+        g_ncclEnvPluginInitResult = ncclInvalidUsage;
+        ncclUniqueId id;
+        std::memset(&id, kIdPoison, sizeof(id));
+        ASSERT_EQ(ncclInvalidUsage, ncclGetUniqueId_impl(&id));
+        ASSERT_EQ(0, g_ncclOsTopoGetStrFromSysCalls);  // ncclInit() never ran
+        ASSERT_EQ(0, g_bootstrapGetUniqueIdCalls);
+        ASSERT_EQ(kIdPoison, id.internal[0]);
+      });
+}
+
+// LATENT BUG (init.cc:369): this is the only record(rcclCall_t,int,int,ncclUniqueId*,...) site that drops the
+// result; :3467/:3483/:3709 all NCCLCHECK it. A recorder failure here is swallowed and the API reports success.
+TEST_F(InitMicrotest, GetUniqueId_RecorderFails_StillReturnsSuccess) {
+  g_bootstrapHandleTemplate = DistinctiveHandle();
+  g_recorderResult = ncclInternalError;
+  ncclUniqueId id{};
+  EXPECT_EQ(ncclSuccess, ncclGetUniqueId_impl(&id));
+  EXPECT_EQ(1, g_recorderIdCalls);  // positive anchor: the ignored call really happened
 }

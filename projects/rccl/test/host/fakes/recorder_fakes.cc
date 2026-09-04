@@ -16,7 +16,20 @@
 
 ncclResult_t g_recorderResult = ncclSuccess;
 
-void ResetRecorderFakes() { g_recorderResult = ncclSuccess; }
+int g_recorderIdCalls = 0;
+int g_recorderLastIdCall = -1;
+ncclUniqueId* g_recorderLastId = nullptr;
+int g_recorderLastRank = -12345;
+int g_recorderLastNranks = -12345;
+
+void ResetRecorderFakes() {
+  g_recorderResult = ncclSuccess;
+  g_recorderIdCalls = 0;
+  g_recorderLastIdCall = -1;
+  g_recorderLastId = nullptr;
+  g_recorderLastRank = -12345;
+  g_recorderLastNranks = -12345;
+}
 
 // The overloads the microtest units reach today, not all 12 declared in
 // recorder.h. Add one here when a unit needs it; do not re-add it locally.
@@ -35,7 +48,13 @@ void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclCo
 
 ncclResult_t Recorder::record(rcclCall_t, int) { return g_recorderResult; }            // group op
 ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return g_recorderResult; }     // comm destroy
-ncclResult_t Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclComm_t, int) {  // init
+ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueId* id, ncclComm_t,
+                              int) {  // init
+  ++g_recorderIdCalls;
+  g_recorderLastIdCall = static_cast<int>(call);
+  g_recorderLastId = id;
+  g_recorderLastRank = rank;
+  g_recorderLastNranks = nranks;
   return g_recorderResult;
 }
 // recorder.h:128 declares ONE overload with defaulted trailing args, which both

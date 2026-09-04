@@ -19,6 +19,14 @@
 // observable arm. Every ncclResult_t-returning overload returns this.
 extern ncclResult_t g_recorderResult;
 
+// The init overload's arguments, recorded: ncclGetUniqueId_impl's record() call is a line of the
+// unit under test, and a fake that drops what it was handed cannot see a swapped rank/nranks/id.
+extern int g_recorderIdCalls;
+extern int g_recorderLastIdCall;  // rcclCall_t as int, so an includer needs no recorder.h
+extern ncclUniqueId* g_recorderLastId;
+extern int g_recorderLastRank;
+extern int g_recorderLastNranks;
+
 void ResetRecorderFakes();
 
 #endif  // RCCL_TEST_HOST_RECORDER_FAKES_H_

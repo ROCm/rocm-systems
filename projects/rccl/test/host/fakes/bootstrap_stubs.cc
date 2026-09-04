@@ -26,9 +26,17 @@ extern ncclResult_t g_bcastGrowHandleResult;
 extern uint64_t g_bootstrapHandleMagic;
 extern int g_bcastGrowHandleCalls;
 extern bool g_bcastGrowHandleIsRoot;
+struct ncclBootstrapHandle g_bootstrapHandleTemplate{};
+extern int g_bootstrapGetUniqueIdCalls;
+void ResetBootstrapHandleTemplate() { g_bootstrapHandleTemplate = ncclBootstrapHandle{}; }
 
+// Writes the WHOLE handle, not just magic: a caller that memcpy's too few bytes is invisible if addr/nRanks stay 0.
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) {
-  if (handle && g_bootstrapGetUniqueIdResult == ncclSuccess) handle->magic = g_bootstrapHandleMagic;
+  ++g_bootstrapGetUniqueIdCalls;
+  if (handle && g_bootstrapGetUniqueIdResult == ncclSuccess) {
+    *handle = g_bootstrapHandleTemplate;
+    handle->magic = g_bootstrapHandleMagic;
+  }
   return g_bootstrapGetUniqueIdResult;
 }
 

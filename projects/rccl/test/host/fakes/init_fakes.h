@@ -23,6 +23,9 @@
 #include "tuning_fakes.h"  // g_tuningIndexValue / g_tuningIndexLastArch (shared)
 
 struct ncclTopoSystem;
+// Forward-declared, not #include "bootstrap.h": including it here would pull src/include/recorder.h in alongside the
+// hipified copy init.cc includes, and the two enum definitions collide.
+struct ncclBootstrapHandle;
 
 void SetGethostnameFail(bool fail);
 void SetDladdrFail(bool fail);
@@ -77,6 +80,19 @@ extern ncclResult_t g_bcastGrowHandleResult;
 extern uint64_t g_bootstrapHandleMagic;
 extern int g_bcastGrowHandleCalls;
 extern bool g_bcastGrowHandleIsRoot;
+// Whole-handle payload the bootstrapGetUniqueId fake writes on success; magic is then overwritten from the global.
+extern struct ncclBootstrapHandle g_bootstrapHandleTemplate;
+extern int g_bootstrapGetUniqueIdCalls;
+// Defined next to the fake: bootstrap.h cannot be included here, and the template needs its complete type to reset.
+void ResetBootstrapHandleTemplate();
+
+// ncclInitEnv() latches this behind std::call_once, so only the FIRST call in a process can observe a failure.
+extern ncclResult_t g_ncclEnvPluginInitResult;
+// ncclInit() NCCLCHECKs this before its own call_once, so it is the one per-call way to fail ncclInit().
+extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
+extern int g_ncclOsTopoGetStrFromSysCalls;
+
+// g_recorderResult and the ncclGetUniqueId_impl argument recorder come from recorder_fakes.h.
 
 // The fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one; callers must supply storage.
 extern ncclResult_t g_initChannelResult;
@@ -148,6 +164,21 @@ extern int g_ncclTopoDumpGraphsCalls;
 extern int g_ncclTopoDumpGraphsNgraphs;
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
+
+// -------------------------------------------------------------------------
+// commCleanup() seams (init.cc:3696). The block is pure ordering + error
+// propagation, so the oracle is the call-order log, not any return code.
+// Every teardown step appends its own name to g_cleanupCallOrder in call order:
+// "tunerFinalize" (pushed by the test's own ncclTuner_t::finalize),
+// "tunerUnload", and "commFree" -- the last pushed by the ncclCeFinalize fake,
+// which is commFree's FIRST NCCLCHECK and therefore marks commFree entry.
+// g_ncclCeFinalizeResult is also the only knob that makes commFree fail; note a
+// failing commFree bails before free(comm), so such a test must free it itself.
+// -------------------------------------------------------------------------
+extern std::vector<std::string> g_cleanupCallOrder;
+extern ncclResult_t g_ncclCeFinalizeResult;
+extern ncclResult_t g_ncclTunerPluginUnloadResult;
+extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 
 void InstallCommAllocSuccess();
 

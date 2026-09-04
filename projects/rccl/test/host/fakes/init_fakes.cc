@@ -23,8 +23,6 @@
 #include <string>
 #include <unordered_map>
 
-#include "recorder.h"
-
 // micro_getenv / SetMicroEnv / ClearMicroEnv / the getenv interposer / ncclGetEnv
 // moved to env_fakes.cc so every microtest binary shares ONE env implementation:
 // a second, map-only copy cannot intercept production's raw getenv() call sites.
@@ -68,7 +66,8 @@ int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_
 
 // rccl::Recorder moved to recorder_fakes.cc: the ctor/dtor/instance() triple was
 // copied verbatim into three fakes files, differing only in which record()
-// overloads each target referenced.
+// overloads each target referenced. The init overload's argument recorder moved
+// with it.
 
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
@@ -175,7 +174,8 @@ ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemErro
 void initEnv() {}
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 void initNvtxRegisteredEnums() {}
-ncclResult_t ncclEnvPluginInit(void) { return ncclSuccess; }
+ncclResult_t g_ncclEnvPluginInitResult = ncclSuccess;
+ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInitResult; }
 bool ncclIommuPassthroughOk(const char*) { return true; }
 // ncclInit() strtok_r()s the /proc version read, so it must have >= 3 whitespace tokens.
 ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
@@ -204,6 +204,7 @@ ncclResult_t g_bcastGrowHandleResult      = ncclSuccess;
 uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
 int g_bcastGrowHandleCalls                = 0;
 bool g_bcastGrowHandleIsRoot              = false;
+int g_bootstrapGetUniqueIdCalls           = 0;
 
 ncclResult_t g_initChannelResult        = ncclSuccess;
 int g_initChannelLastId                 = -1;
@@ -220,6 +221,8 @@ int g_ncclOsCpuCountCalls                = 0;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 ncclResult_t g_ncclOsSetAffinityResult   = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
+ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+int g_ncclOsTopoGetStrFromSysCalls       = 0;
 ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
 int g_ncclMnnvlCheckCalls                = 0;
 // Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
@@ -278,6 +281,12 @@ extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemM
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 
+// commCleanup ordering oracle; the fakes that append to it live in nccl_stubs.cc. See init_fakes.h.
+std::vector<std::string> g_cleanupCallOrder;
+ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
+ncclResult_t g_ncclTunerPluginUnloadResult = ncclSuccess;
+struct ncclComm* g_ncclTunerPluginUnloadLastComm = nullptr;
+
 void InstallCommAllocSuccess() {
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;
@@ -330,6 +339,11 @@ void ResetInitFakes() {
   g_bootstrapHandleMagic = 0xB007ULL;
   g_bcastGrowHandleCalls = 0;
   g_bcastGrowHandleIsRoot = false;
+  ResetBootstrapHandleTemplate();
+  g_bootstrapGetUniqueIdCalls = 0;
+  g_ncclEnvPluginInitResult = ncclSuccess;
+  g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+  g_ncclOsTopoGetStrFromSysCalls = 0;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
@@ -368,4 +382,8 @@ void ResetInitFakes() {
   g_ncclTopoDumpGraphsNgraphs = -1;
   g_ncclTopoDumpGraphsArray.clear();
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
+  g_cleanupCallOrder.clear();
+  g_ncclCeFinalizeResult = ncclSuccess;
+  g_ncclTunerPluginUnloadResult = ncclSuccess;
+  g_ncclTunerPluginUnloadLastComm = nullptr;
 }
