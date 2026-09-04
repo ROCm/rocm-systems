@@ -77,14 +77,14 @@ struct ResolvedMoiScratchPlan {
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
 };
 
-/// Read-only scalar-routing state projected from one accepted operating point.
-/// Mode owners may select their scalar ABI and dense-router mechanics from this
+/// Read-only scalar-preservation state projected from one accepted operating
+/// point. Mode owners select their scalar ABI and spill behavior from this
 /// value without inspecting unrelated vector, dispatch, or private-state
 /// placement decisions.
-struct MoiScalarRoutingState {
+struct MoiScalarPreservationState {
   std::optional<uint16_t> exec_save_sgpr;
   ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
-  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
+  std::optional<ConSanMoiScalarSpillSetup> scalar_spill_setup;
   bool has_branch_only_spill = false;
 
   [[nodiscard]] bool has_scalar_spill() const {
@@ -97,21 +97,21 @@ struct MoiScalarRoutingState {
     return spill_layout == ConSanMoiScalarSpillLayout::Compact;
   }
 
-  bool operator==(const MoiScalarRoutingState &) const = default;
+  bool operator==(const MoiScalarPreservationState &) const = default;
 };
 
-[[nodiscard]] inline MoiScalarRoutingState
-moi_scalar_routing_state(const ConSanMoiOperatingPoint &point) {
+[[nodiscard]] inline MoiScalarPreservationState
+moi_scalar_preservation_state(const ConSanMoiOperatingPoint &point) {
   return {
       .exec_save_sgpr = point.moi_exec_save_sgpr,
       .spill_layout = point.automatic_moi_scalar_spill_layout,
-      .scalar_router = point.moi_scalar_router,
+      .scalar_spill_setup = point.moi_scalar_spill_setup,
       .has_branch_only_spill = point.moi_branch_only_spill.has_value(),
   };
 }
 
 /// A scalar register interval that a relocated host must preserve while it
-/// bootstraps a generated router. This is a placement constraint, not an
+/// establishes generated probe state. This is a placement constraint, not an
 /// engine emission policy.
 using MoiSgprRange = consan_detail::ScalarOwnerSgprRange;
 

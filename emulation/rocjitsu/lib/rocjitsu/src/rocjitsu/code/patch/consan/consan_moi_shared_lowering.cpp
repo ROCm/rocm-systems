@@ -351,13 +351,14 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
     }
     const bool spill_backed_scalar_window = point.has_moi_scalar_spill();
     const MoiScalarAbiPlan scalar_abi =
-        plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
-    if (!scalar_abi.special_state || (spill_backed_scalar_window && !scalar_abi.indirect_jump)) {
+        plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
+    if (!scalar_abi.special_state ||
+        (spill_backed_scalar_window && !point.moi_scalar_spill_setup)) {
       warnings.emplace_back("ConSan MOI dynamic-stack spill has no SCC-save register");
       return std::nullopt;
     }
     const uint16_t saved_scc_sgpr = spill_backed_scalar_window
-                                        ? scalar_abi.indirect_jump->scc_save_sgpr
+                                        ? point.moi_scalar_spill_setup->temporaries.scc_save_sgpr
                                         : scalar_abi.special_state->scc_save_sgpr;
     const auto saved_frame_offset = moi_dynamic_stack_frame_save_sgpr_offset(request.moi_engine);
     if (!spill_backed_scalar_window &&
@@ -371,7 +372,7 @@ std::optional<ConSanMoiPrivateStateLayout> MoiPrivateStateLayoutCache::resolve(
     }
     const uint16_t saved_frame_base_sgpr =
         spill_backed_scalar_window
-            ? scalar_abi.indirect_jump->pc_sgpr
+            ? point.moi_scalar_spill_setup->temporaries.frame_base_sgpr
             : static_cast<uint16_t>(*point.moi_exec_save_sgpr + *saved_frame_offset);
     const uint32_t additional_frame_bytes =
         spill_backed_scalar_window ? static_cast<uint32_t>(moi_exec_save_sgpr_count(

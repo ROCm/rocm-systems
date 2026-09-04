@@ -16,7 +16,7 @@ namespace rocjitsu::consan_moi_impl {
 /// without inspecting the complete mutable operating point.
 struct MoiInlineShadowScalarState {
   std::optional<uint16_t> exec_save_sgpr;
-  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
+  std::optional<ConSanMoiScalarSpillSetup> scalar_spill_setup;
   bool inline_scalar_spill = false;
   bool branch_only_spill = false;
   bool exec_save_persistent = false;

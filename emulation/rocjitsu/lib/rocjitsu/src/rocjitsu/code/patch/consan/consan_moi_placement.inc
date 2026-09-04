@@ -461,7 +461,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
   if (!selected) {
     return point.moi_exec_save_sgpr.has_value() ||
            (point.has_inline_moi_scalar_spill() &&
-            (point.moi_scalar_router || point.moi_branch_only_spill));
+            (point.moi_scalar_spill_setup || point.moi_branch_only_spill));
   }
   if (saw_unassigned_owner)
     return false;
@@ -475,7 +475,7 @@ apply_moi_transient_sgpr_assignment(const ConSanRequest &request, ConSanMoiOpera
     point.moi_exec_save_sgprs_persistent = false;
   point.moi_dispatch_identity.set_sgpr(selected->dispatch_id_sgpr,
                                        point.moi_dispatch_identity.automatic_sgpr());
-  point.moi_scalar_router = selected->scalar_router;
+  point.moi_scalar_spill_setup = selected->scalar_spill_setup;
   if (spill_layout == ConSanMoiScalarSpillLayout::Inline) {
     point.automatic_moi_scalar_spill_layout = selected->spill_backed
                                                   ? ConSanMoiScalarSpillLayout::Inline
@@ -1458,8 +1458,8 @@ void occupy_moi_transient_scalar_state(MoiScalarPlacementDomain &domain,
     domain.occupy(assignment.exec_save_sgpr, exec_width);
     domain.occupy(assignment.owner_sgpr, 1u);
     domain.occupy(assignment.dispatch_id_sgpr, kMoiDispatchStateSgprCount);
-    if (assignment.scalar_router) {
-      assignment.scalar_router->for_each_sgpr_range(
+    if (assignment.scalar_spill_setup) {
+      assignment.scalar_spill_setup->for_each_sgpr_range(
           true, [&](uint16_t base, uint16_t width) { domain.occupy(base, width); });
     }
     if (assignment.branch_only_spill)
@@ -2165,7 +2165,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         options.moi_exec_save_sgpr) {
       selected = options.moi_exec_save_sgpr;
     }
-    std::optional<uint16_t> spill_pc;
+    std::optional<uint16_t> spill_frame_base;
     std::optional<uint16_t> spill_scc;
     std::optional<uint16_t> spill_visible;
     std::optional<uint16_t> inline_dead_fallback;
@@ -2215,13 +2215,13 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         if (!attempt.select(spill_base, count, /*require_dead=*/false))
           continue;
         spill_visible = attempt.select_first(fresh_begin, 1u);
-        spill_pc = attempt.select_first(liveness_search_floor, 2u, 2u);
-        if (spill_pc)
+        spill_frame_base = attempt.select_first(liveness_search_floor, 2u, 2u);
+        if (spill_frame_base)
           spill_scc = attempt.select_first(liveness_search_floor, 1u);
         if (spill_scc)
           selected = spill_base;
         else
-          spill_visible = spill_pc = std::nullopt;
+          spill_visible = spill_frame_base = std::nullopt;
       }
       // A full-pressure owner may have no scalar register that remains dead
       // from an access anchor through the complete probe. Preserve the
@@ -2239,7 +2239,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       // empty and partially active waves.
       if (consan_arch_is_rdna4_or_cdna5(arch) && all_owners_use_fixed_stack) {
         selected.reset();
-        spill_pc.reset();
+        spill_frame_base.reset();
         spill_scc.reset();
         spill_visible.reset();
       }
@@ -2266,8 +2266,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       // This path preserves every borrowed guest SGPR in address-free private
       // storage before using it. Unlike a merely liveness-dead window, it is
       // safe below a scalar-relative owner's allocation tail.
-      spill_pc = domain.select_first(0u, 2u, 2u);
-      if (spill_pc)
+      spill_frame_base = domain.select_first(0u, 2u, 2u);
+      if (spill_frame_base)
         spill_scc = domain.select_first(0u, 1u);
       const uint16_t spilled_scalar_count =
           placement.compact_spill_scalar_count ? placement.compact_spill_scalar_count : count;
@@ -2291,8 +2291,8 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       MoiScalarPlacementDomain branch_domain(arch, allocated_limit, component_contexts->summaries);
       if (rdna_branch_only) {
         branch_domain.occupy(options.moi_owner_sgpr.base(), 1u);
-        branch_domain.occupy(options.moi_scalar_router
-                                 ? options.moi_scalar_router->visible_evidence_sgpr
+        branch_domain.occupy(options.moi_scalar_spill_setup
+                                 ? options.moi_scalar_spill_setup->visible_evidence_sgpr
                                  : std::nullopt,
                              1u);
       }
@@ -2312,12 +2312,12 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
         selected = static_cast<uint16_t>(base);
       }
       branch_only_scalar_spill = selected.has_value();
-      if (cdna_branch_only && selected && placement.branch_only_spill_preserves_indirect_state &&
+      if (cdna_branch_only && selected && placement.branch_only_spill_preserves_setup_state &&
           count >= 4u) {
-        spill_pc = static_cast<uint16_t>(*selected + 2u);
+        spill_frame_base = static_cast<uint16_t>(*selected + 2u);
         spill_scc = selected;
       } else {
-        spill_pc.reset();
+        spill_frame_base.reset();
         spill_scc.reset();
       }
       spill_visible.reset();
@@ -2329,7 +2329,7 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
       continue;
     }
     const uint16_t selected_sgpr = *selected;
-    const bool spill_backed = (spill_pc && spill_scc) || branch_only_scalar_spill ||
+    const bool spill_backed = (spill_frame_base && spill_scc) || branch_only_scalar_spill ||
                               dynamic_stack_borrowed_sgpr.has_value();
     const std::optional<uint16_t> dispatch_id_sgpr =
         options.moi_dispatch_identity.sgpr() &&
@@ -2351,11 +2351,13 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
                    : options.moi_owner_sgpr.base(),
            .dispatch_id_sgpr = dispatch_id_sgpr,
            .spill_backed = spill_backed,
-           .scalar_router = spill_pc && spill_scc
-                                ? std::optional{ConSanMoiScalarRouterAllocation{
-                                      .jump = ConSanIndirectJumpSgprs{*spill_pc, *spill_scc},
-                                      .visible_evidence_sgpr = spill_visible}}
-                                : std::nullopt,
+           .scalar_spill_setup =
+               spill_frame_base && spill_scc
+                   ? std::optional{ConSanMoiScalarSpillSetup{
+                         .temporaries =
+                             ConSanMoiScalarSpillTemporaries{*spill_frame_base, *spill_scc},
+                         .visible_evidence_sgpr = spill_visible}}
+                   : std::nullopt,
            .branch_only_spill =
                branch_only_scalar_spill
                    ? std::optional{ConSanMoiBranchOnlyScalarSpill{dynamic_stack_borrowed_sgpr}}
@@ -2592,13 +2594,14 @@ resolve_moi_scratch(std::span<const ConSanCandidateResourcePlan> plans,
     const auto spill = domain.select_first(scalar_contexts.initialized_sgpr_count, count, 2u,
                                            /*require_dead=*/false);
     const auto visible = spill ? domain.select_first(first, 1u) : std::nullopt;
-    const auto pc = spill ? domain.select_first(0u, 2u, 2u) : std::nullopt;
+    const auto frame_base = spill ? domain.select_first(0u, 2u, 2u) : std::nullopt;
     const auto scc = spill ? domain.select_first(0u, 1u) : std::nullopt;
-    if (spill && pc && scc) {
+    if (spill && frame_base && scc) {
       options.moi_exec_save_sgpr = spill;
       options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-      options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-          .jump = ConSanIndirectJumpSgprs{*pc, *scc}, .visible_evidence_sgpr = visible};
+      options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+          .temporaries = ConSanMoiScalarSpillTemporaries{*frame_base, *scc},
+          .visible_evidence_sgpr = visible};
       warnings.emplace_back("ConSan MOI automatically assigned spill-backed Inline SGPRs");
       return true;
     }
@@ -3132,7 +3135,7 @@ validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResour
   const bool branch_only_scalar_invalid =
       point.moi_branch_only_spill && (!inline_layout || !point.has_inline_moi_scalar_spill() ||
                                       !consan_arch_is_rdna4_or_cdna5(arch) ||
-                                      !point.moi_exec_save_sgpr || point.moi_scalar_router);
+                                      !point.moi_exec_save_sgpr || point.moi_scalar_spill_setup);
   const bool dynamic_bootstrap_invalid = [&] {
     if (!point.moi_branch_only_spill || !point.moi_branch_only_spill->dynamic_stack_borrowed_sgpr)
       return false;
@@ -3144,7 +3147,7 @@ validate_moi_scalar_state(const ConSanRequest &request, const BoundRuntimeResour
         [&](std::optional<uint16_t> reg, uint16_t width) { bootstrap_domain.occupy(reg, width); });
     return !inline_layout || !point.has_inline_moi_scalar_spill() ||
            !point.moi_dynamic_stack_spill || !consan_arch_is_rdna4_or_cdna5(arch) ||
-           base % 2u != 0u || point.moi_scalar_router ||
+           base % 2u != 0u || point.moi_scalar_spill_setup ||
            !bootstrap_domain.can_select(base, 2u, /*require_dead=*/false);
   }();
   if (!exec_invalid && !owner_invalid && !persistent_invalid && !auxiliary_invalid &&

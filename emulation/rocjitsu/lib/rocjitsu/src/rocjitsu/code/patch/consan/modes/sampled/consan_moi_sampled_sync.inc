@@ -59,7 +59,7 @@ struct SampledBarrierCandidate {
       .automatic_private_epoch = point.automatic_moi_private_epoch,
       .workitem_owner = request.moi_owner_source == ConSanMoiOwnerSource::WorkitemId,
       .persistent_sgprs = point.moi_persistent_sgprs,
-      .scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point)),
+      .scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point)),
       .dispatch_id = consan_moi_detail::moi_bound_dispatch_id_sources({point, bound_resources}),
       .workgroup_sources = *workgroup_sources,
       .owner_epoch_vgprs = owner_epoch_vgprs,

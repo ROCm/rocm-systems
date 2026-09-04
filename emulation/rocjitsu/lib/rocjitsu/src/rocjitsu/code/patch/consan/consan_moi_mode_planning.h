@@ -152,12 +152,9 @@ struct MoiDispatchIdentityPlan {
   std::string_view fallback_diagnostic;
 };
 
-/// Complete scalar preservation ABI selected by one mode. The common builder
-/// handles spill-backed indirect state; modes supply their fixed layout or
-/// publication-derived special-state registers.
+/// Complete scalar preservation ABI selected by one mode.
 struct MoiScalarAbiPlan {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  std::optional<ConSanIndirectJumpSgprs> indirect_jump;
 };
 
 /// Mode-neutral inputs from the transform pipeline to evidence planning.
@@ -178,7 +175,7 @@ struct MoiEvidencePlanningContext {
 struct MoiTransientScalarPlacementTraits {
   ConSanMoiScalarSpillLayout spill_layout = ConSanMoiScalarSpillLayout::None;
   bool requires_capability_target = false;
-  bool branch_only_spill_preserves_indirect_state = false;
+  bool branch_only_spill_preserves_setup_state = false;
   /// Zero retains the ordinary transient ABI width. Sampled's compact private
   /// frame has a fixed eight-scalar representation.
   uint16_t compact_spill_scalar_count = 0u;
@@ -254,12 +251,7 @@ plan_moi_operand_overlap_spill(const MoiOperandOverlapSpillContext &context);
 plan_moi_dispatch_identity(const ConSanRequest &request, const MoiDispatchIdentityFacts &facts);
 
 [[nodiscard]] MoiScalarAbiPlan
-make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
-                         std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
-                         uint16_t fixed_indirect_pc_offset);
-
-[[nodiscard]] MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
-                                                   const MoiScalarRoutingState &routing_state);
+plan_moi_scalar_abi(ConSanMoiEngine engine, const MoiScalarPreservationState &preservation_state);
 
 [[nodiscard]] ConSanEvidenceRequirements
 plan_moi_evidence_requirements(ConSanMoiEngine engine, const MoiEvidencePlanningContext &context);
@@ -296,7 +288,7 @@ struct MoiModeOperations {
   std::optional<uint16_t> (*access_spill_fallback)(const MoiAccessSpillFallbackContext &);
   MoiDispatchIdentityPlan (*dispatch_identity)(const ConSanRequest &,
                                                const MoiDispatchIdentityFacts &);
-  MoiScalarAbiPlan (*scalar_abi)(const MoiScalarRoutingState &);
+  MoiScalarAbiPlan (*scalar_abi)(const MoiScalarPreservationState &);
   ConSanEvidenceRequirements (*plan_evidence)(const MoiEvidencePlanningContext &);
   ConSanMoiModePolicy policy;
   bool (*plan_report_layout)(const ConSanMoiAutoReportInventory &, ConSanMoiAutoReportPlan &,

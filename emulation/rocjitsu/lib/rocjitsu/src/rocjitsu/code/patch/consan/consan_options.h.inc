@@ -370,19 +370,19 @@ struct ConSanMoiPrologueScratchVgprAssignment {
 
 /// Scalar temporaries needed while a spill-backed probe establishes its
 /// private frame and reloads owner-local state.
-struct ConSanMoiScalarRouterAllocation {
-  ConSanIndirectJumpSgprs jump;
+struct ConSanMoiScalarSpillSetup {
+  ConSanMoiScalarSpillTemporaries temporaries;
   std::optional<uint16_t> visible_evidence_sgpr = std::nullopt;
 
   template <typename Visitor>
   void for_each_sgpr_range(bool include_visible, Visitor &&visit) const {
-    visit(jump.pc_sgpr, 2u);
-    visit(jump.scc_save_sgpr, 1u);
+    visit(temporaries.frame_base_sgpr, 2u);
+    visit(temporaries.scc_save_sgpr, 1u);
     if (include_visible && visible_evidence_sgpr)
       visit(*visible_evidence_sgpr, 1u);
   }
 
-  auto operator<=>(const ConSanMoiScalarRouterAllocation &) const = default;
+  auto operator<=>(const ConSanMoiScalarSpillSetup &) const = default;
 };
 
 /// Inline spill state reached through branch-only relays. A dynamic-stack
@@ -464,11 +464,11 @@ struct ConSanMoiTransientSgprAssignment {
   /// and records zero generation rather than clobbering guest scalar state.
   std::optional<uint16_t> dispatch_id_sgpr;
   bool spill_backed = false;
-  std::optional<ConSanMoiScalarRouterAllocation> scalar_router;
+  std::optional<ConSanMoiScalarSpillSetup> scalar_spill_setup;
   /// The complete scalar window is preserved in private memory and control
   /// reaches the appended body through branch-only relays. This avoids any
   /// scalar value that would otherwise have to remain live from the guest
-  /// anchor through the router.
+  /// anchor through probe setup.
   std::optional<ConSanMoiBranchOnlyScalarSpill> branch_only_spill;
 
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
@@ -949,7 +949,7 @@ struct ConSanMoiOperatingPoint {
   /// cannot use the mode's fixed register layout. Inline, Record/Replay, and
   /// Sampled share the frame pair and SCC-save temporary; Inline's optional
   /// visible-evidence temporary remains a facet of that exact allocation.
-  std::optional<ConSanMoiScalarRouterAllocation> moi_scalar_router;
+  std::optional<ConSanMoiScalarSpillSetup> moi_scalar_spill_setup;
   /// Inline component whose saved scalar window is reached through branch-only
   /// relays instead of live-through SGPR state, including its optional
   /// dynamic-stack bootstrap pair.
@@ -992,8 +992,8 @@ struct ConSanMoiOperatingPoint {
   /// operating point. EXEC, owner, dispatch, and persistent state have
   /// separate lifetime rules and are intentionally not part of this view.
   template <typename Visitor> void for_each_auxiliary_sgpr_range(Visitor &&visit) const {
-    if (moi_scalar_router)
-      moi_scalar_router->for_each_sgpr_range(true, visit);
+    if (moi_scalar_spill_setup)
+      moi_scalar_spill_setup->for_each_sgpr_range(true, visit);
     visit(moi_branch_only_spill ? moi_branch_only_spill->dynamic_stack_borrowed_sgpr : std::nullopt,
           2u);
   }

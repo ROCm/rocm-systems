@@ -2847,7 +2847,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = 96u,
       .spill_backed = false,
-      .scalar_router = std::nullopt,
+      .scalar_spill_setup = std::nullopt,
       .branch_only_spill = std::nullopt,
   };
 
@@ -2929,14 +2929,14 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     const ConSanMoiTransientSgprAssignment assignment =
         test_moi_transient_sgpr_assignments(result).front();
     EXPECT_TRUE(assignment.spill_backed);
-    ASSERT_TRUE(assignment.scalar_router);
-    EXPECT_EQ(assignment.scalar_router->jump.pc_sgpr, 0u);
-    EXPECT_EQ(assignment.scalar_router->jump.scc_save_sgpr, 4u);
+    ASSERT_TRUE(assignment.scalar_spill_setup);
+    EXPECT_EQ(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 0u);
+    EXPECT_EQ(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, 4u);
     EXPECT_EQ(std::ranges::count(result.patches,
                                  ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                  &ConSanPatchInfo::kind),
               9u);
-    ASSERT_TRUE(assignment.scalar_router);
+    ASSERT_TRUE(assignment.scalar_spill_setup);
     AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     for (const ConSanPatchInfo &patch : result.patches) {
@@ -3021,7 +3021,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
     words.push_back(0xBF94FFFFu); // s_barrier_wait -1
   }
   // Keep the ordinary scalar file live across every synchronization site
-  // except for the separately proven router pair/key/SCC tuple.
+  // except for the separately proven frame pair and SCC snapshot.
   for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
     if (std::ranges::find(dead, sgpr) == dead.end())
       words.push_back(build_s_mov_b32(/*sdst=*/0u, sgpr, arch));
@@ -3177,7 +3177,7 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
       /*uses_dynamic_stack=*/true);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
     // Allocate the full ordinary scalar file. The synthetic uses below keep
-    // every register live except the minimal dead indirect-router state, so
+    // every register live except the minimal dead spill-setup state, so
     // no eight-register transient window can be justified by liveness.
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
@@ -3200,13 +3200,15 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
   const auto overlaps_dynamic_stack = [](uint16_t base, uint16_t width) {
     return base < 34u && 32u < static_cast<uint32_t>(base) + width;
   };
   EXPECT_FALSE(overlaps_dynamic_stack(assignment.exec_save_sgpr, 8u));
-  EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->jump.pc_sgpr, 2u));
-  EXPECT_FALSE(overlaps_dynamic_stack(assignment.scalar_router->jump.scc_save_sgpr, 1u));
+  EXPECT_FALSE(
+      overlaps_dynamic_stack(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 2u));
+  EXPECT_FALSE(
+      overlaps_dynamic_stack(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, 1u));
 
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
@@ -3223,10 +3225,10 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
     EXPECT_GT(patch->required_private_segment_size, patch->spilled_vgpr_count * sizeof(uint32_t));
     const std::vector<uint32_t> cave =
         text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-    EXPECT_NE(
-        std::ranges::find(cave, build_s_mov_b32(assignment.scalar_router->jump.pc_sgpr,
-                                                /*frame base=*/33u, ROCJITSU_CODE_ARCH_CDNA4)),
-        cave.end());
+    EXPECT_NE(std::ranges::find(
+                  cave, build_s_mov_b32(assignment.scalar_spill_setup->temporaries.frame_base_sgpr,
+                                        /*frame base=*/33u, ROCJITSU_CODE_ARCH_CDNA4)),
+              cave.end());
     const uint32_t scalar_slot = patch->spilled_vgpr_count * sizeof(uint32_t);
     const auto scalar_store = build_cdna4_scratch_store_b32_saddr(
         *patch->scratch_vgpr, /*frame base=*/33u, scalar_slot, ROCJITSU_CODE_ARCH_CDNA4);
@@ -6567,8 +6569,8 @@ TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicNeedsNoSpillBootstrapRoute) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
-  EXPECT_NE(assignment.scalar_router->jump.pc_sgpr, 0u);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
+  EXPECT_NE(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 0u);
 
   const auto atomic_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
@@ -7006,7 +7008,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_FALSE(assignment.scalar_router);
+  EXPECT_FALSE(assignment.scalar_spill_setup);
 
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
@@ -7032,7 +7034,7 @@ TEST(ConSanMoi, Cdna4SampledSpillSafeRuntimeSelectionUsesBodyGate) {
       build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u, /*byte_offset=*/0u, kArch);
   ASSERT_TRUE(guest);
 
-  // Exhaust ordinary scalar routing state while leaving enough VGPR capacity
+  // Exhaust ordinary scalar preservation state while leaving enough VGPR capacity
   // for persistent workgroup coordinates. Runtime selection must remain in
   // the spill-safe access body.
   std::vector<uint32_t> text_words(1200u, build_s_nop(0u, kArch));
@@ -7066,7 +7068,7 @@ TEST(ConSanMoi, Cdna4SampledSpillSafeRuntimeSelectionUsesBodyGate) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_FALSE(assignment.scalar_router);
+  EXPECT_FALSE(assignment.scalar_spill_setup);
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.patches);
@@ -7300,9 +7302,10 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .scalar_router =
-          ConSanMoiScalarRouterAllocation{
-              .jump = ConSanIndirectJumpSgprs{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
+      .scalar_spill_setup =
+          ConSanMoiScalarSpillSetup{
+              .temporaries =
+                  ConSanMoiScalarSpillTemporaries{kLocalIndirectPcSgpr, kLocalIndirectSccSgpr},
           },
       .branch_only_spill = std::nullopt,
   };

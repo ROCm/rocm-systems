@@ -81,7 +81,7 @@ namespace consan_moi_impl {
   if (target == nullptr)
     return fail("ConSan MOI first-light probe has no target profile");
   const MoiScalarAbiPlan scalar_abi =
-      plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+      plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       request, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;

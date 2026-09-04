@@ -897,7 +897,7 @@ if(NOT _moi_mode_planning_contract MATCHES
 endif()
 foreach(_planner IN ITEMS plan_moi_scalar_abi)
     if(NOT _moi_mode_planning_contract MATCHES
-           "${_planner}[(][^;]*ConSanMoiEngine[^;]*MoiScalarRoutingState" OR
+           "${_planner}[(][^;]*ConSanMoiEngine[^;]*MoiScalarPreservationState" OR
        _moi_mode_planning_contract MATCHES
            "${_planner}[(][^;]*(ConSanRequest|ConSanMoiOperatingPoint)")
         message(FATAL_ERROR
@@ -1009,10 +1009,10 @@ if(_dispatch_placement MATCHES
     )
 endif()
 
-# Every scalar router owns one indirect jump. Its optional dense-call and
-# Inline visible-evidence facets travel with that jump through owner-local
-# assignment, the broad operating point, and narrow mode projections. Do not
-# restore independently optional router fragments.
+# Spill-backed scalar setup owns one frame pair, SCC snapshot, and optional
+# Inline visible-evidence register. These facets travel together through
+# owner-local assignment, the broad operating point, and narrow mode
+# projections.
 file(GLOB_RECURSE _consan_production_files "${_consan_dir}/*.cpp" "${_consan_dir}/*.h" "${_consan_dir}/*.inc")
 foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
@@ -1048,12 +1048,12 @@ foreach(_file IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_file}"
         "moi_(inline|record_replay)_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_router_(indirect_(pc|scc)|dispatch_key|call_return)_sgpr|moi_inline_(branch_only_scalar_spill|dynamic_stack_borrowed_sgpr)"
-        "scalar-router and branch-only preservation state must remain shared typed allocations"
+        "scalar setup and branch-only preservation must remain shared typed allocations"
     )
     _consan_assert_no_match(
         "${_file}"
         "moi_router_(jump|call)|moi_inline_visible_evidence_sgpr|(^|[^A-Za-z0-9_])(router_jump|router_call)[^A-Za-z0-9_]"
-        "scalar-router facets must retain one aggregate authority"
+        "retired scalar-router facets must not return"
     )
     _consan_assert_no_match(
         "${_file}"
@@ -1073,20 +1073,20 @@ foreach(_file IN LISTS _consan_production_files)
 endforeach()
 file(READ "${_consan_dir}/consan_options.h.inc" _consan_options_contract)
 if(NOT _consan_options_contract MATCHES
-       "struct ConSanMoiScalarRouterAllocation" OR
+       "struct ConSanMoiScalarSpillSetup" OR
    NOT _consan_options_contract MATCHES
-       "std::optional<ConSanMoiScalarRouterAllocation>[ 	]+scalar_router" OR
+       "std::optional<ConSanMoiScalarSpillSetup>[ 	]+scalar_spill_setup" OR
    NOT _consan_options_contract MATCHES
-       "std::optional<ConSanMoiScalarRouterAllocation>[ 	]+moi_scalar_router")
+       "std::optional<ConSanMoiScalarSpillSetup>[ 	]+moi_scalar_spill_setup")
     message(FATAL_ERROR
-        "owner-local and global scalar routing must retain one shared aggregate"
+        "owner-local and global scalar spill setup must retain one shared aggregate"
     )
 endif()
 file(READ "${_consan_dir}/consan_moi_record_event_emission.h" _record_event_contract)
 if(_record_event_contract MATCHES
-       "ConSanIndirectJumpSgprs|cave_text_offset|return_text_offset|fallthrough|call_return_sgpr|build_moi_runtime_workgroup_gate_call_words" OR
+       "ConSanMoiScalarSpillTemporaries|cave_text_offset|return_text_offset|fallthrough|call_return_sgpr|build_moi_runtime_workgroup_gate_call_words" OR
    _record_event_contract MATCHES
-       "ConSanMoiScalarRouterAllocation|automatic_moi_record_replay_sgpr_spill|router_(dispatch_key|call_return)_sgpr")
+       "ConSanMoiScalarSpillSetup|automatic_moi_record_replay_sgpr_spill|router_(dispatch_key|call_return)_sgpr")
     message(FATAL_ERROR
         "Record/Replay fragment emission must not recover the retired cave-return routing API"
     )
@@ -1104,17 +1104,17 @@ if(NOT _record_event_contract MATCHES
 endif()
 _consan_assert_no_match(
     "${_consan_dir}/modes/record_replay/consan_moi_record_fence.inc"
-    "moi_scalar_router_call|automatic_moi_record_replay_sgpr_spill|moi_exec_save_sgpr[ \t]*[+]"
+    "moi_scalar_spill_setup_call|automatic_moi_record_replay_sgpr_spill|moi_exec_save_sgpr[ \t]*[+]"
     "Record/Replay fence lowering must not reconstruct dense-router registers"
 )
 _consan_assert_no_match(
     "${_consan_dir}/modes/sampled/consan_moi_sampled_sync.inc"
-    "moi_scalar_router_call|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
+    "moi_scalar_spill_setup_call|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
     "Sampled dense synchronization must consume the mode-owned router plan"
 )
 _consan_assert_no_match(
     "${_consan_dir}/consan_moi_barrier.inc"
-    "moi_scalar_router_call|spill_backed_(inline|record_replay)_router|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
+    "moi_scalar_spill_setup_call|spill_backed_(inline|record_replay)_router|group_point[.]moi_exec_save_sgpr[^\n]*[+][ \t]*(5u|6u)"
     "shared dense-barrier lowering must consume the mode-owned barrier router plan"
 )
 file(READ "${_consan_dir}/consan_moi_barrier.inc" _moi_barrier_planning)
@@ -1414,7 +1414,7 @@ if(NOT _moi_placement MATCHES "class MoiScalarPlacementDomain" OR
    NOT _moi_placement MATCHES
        "scalar_owner_contexts_conflict_with_physical_vcc" OR
    _moi_placement_contract MATCHES
-       "moi_resource_owner_(anchors_admit_scalar_router_ranges|anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
+       "moi_resource_owner_(anchors_admit_scalar_spill_setup_ranges|anchors_admit_call_clobber_ranges|ranges_conflict_with_physical_vcc)")
     message(FATAL_ERROR
         "scalar placement and physical-VCC safety must retain one placement-domain proof"
     )
@@ -1597,10 +1597,10 @@ endforeach()
 file(READ "${_consan_dir}/consan_moi_placement_contracts.h" _moi_placement_contract)
 file(READ "${_consan_dir}/consan_moi_mode_planning.cpp" _moi_mode_planning_implementation)
 file(READ "${_consan_dir}/modes/sampled/consan_moi_sampled_contracts.h" _moi_sampled_contract)
-if(NOT _moi_placement_contract MATCHES "struct MoiScalarRoutingState" OR
-   NOT _moi_placement_contract MATCHES "moi_scalar_routing_state")
+if(NOT _moi_placement_contract MATCHES "struct MoiScalarPreservationState" OR
+   NOT _moi_placement_contract MATCHES "moi_scalar_preservation_state")
     message(FATAL_ERROR
-        "ConSan scalar routing lost its narrow operating-point projection"
+        "ConSan scalar preservation lost its narrow operating-point projection"
     )
 endif()
 foreach(_callback IN ITEMS scalar_abi)
@@ -2036,8 +2036,8 @@ foreach(_sc_retired_route_owner IN LISTS _consan_production_files)
     )
 endforeach()
 
-# SCC-preserving indirect jumps have one mode/target-neutral scalar contract.
-# Whole-text relocation must not retain the obsolete branch-only route schema.
+# Spill-frame setup has one mode/target-neutral scalar contract. Whole-text
+# relocation must not restore an indirect-control-flow interpretation.
 file(READ
     "${_consan_dir}/consan_indirect_jump_sgprs.h.inc"
     _indirect_jump_contract
@@ -2045,9 +2045,9 @@ file(READ
 if(NOT _shared_aggregate_contract MATCHES
        "consan_indirect_jump_sgprs[.]h[.]inc" OR
    NOT _indirect_jump_contract MATCHES
-       "struct ConSanIndirectJumpSgprs")
+       "struct ConSanMoiScalarSpillTemporaries")
     message(FATAL_ERROR
-        "indirect control flow lost its shared scalar primitive"
+        "spill-frame setup lost its shared scalar primitive"
     )
 endif()
 foreach(_file IN LISTS _consan_production_files)
@@ -2059,7 +2059,7 @@ foreach(_file IN LISTS _consan_production_files)
 endforeach()
 _consan_assert_no_match(
     "${_consan_dir}/consan_code_object_types.h.inc"
-    "indirect_(pc_sgpr|saved_scc_sgpr|saved_vcc_sgpr|return_offset|return_pc_sgpr|return_saved_scc_sgpr|return_saved_vcc_sgpr)"
+    "indirect_(frame_base_sgpr|saved_scc_sgpr|saved_vcc_sgpr|return_offset|return_pc_sgpr|return_saved_scc_sgpr|return_saved_vcc_sgpr)"
     "patch effects must not regain the flattened generic indirect schema"
 )
 foreach(_indirect_contract IN ITEMS
@@ -2075,8 +2075,8 @@ endforeach()
 foreach(_indirect_owner IN LISTS _consan_production_files)
     _consan_assert_no_match(
         "${_indirect_owner}"
-        "ConSanMoiIndirectJumpSgprs"
-        "indirect jump scratch must retain one mechanism-shared type"
+        "ConSan(Moi)?IndirectJumpSgprs"
+        "spill-frame setup must not return to indirect-jump vocabulary"
     )
 endforeach()
 

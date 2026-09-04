@@ -86,7 +86,7 @@ MoiInlineShadowScalarState
 project_inline_shadow_scalar_state(const ConSanMoiOperatingPoint &point) {
   return {
       .exec_save_sgpr = point.moi_exec_save_sgpr,
-      .scalar_router = point.moi_scalar_router,
+      .scalar_spill_setup = point.moi_scalar_spill_setup,
       .inline_scalar_spill = point.has_inline_moi_scalar_spill(),
       .branch_only_spill = point.moi_branch_only_spill.has_value(),
       .exec_save_persistent = point.moi_exec_save_sgprs_persistent,
@@ -99,7 +99,8 @@ inline_shadow_visible_evidence_sgpr(const MoiInlineShadowScalarState &state) {
   if (!state.exec_save_sgpr)
     return std::nullopt;
   if (state.inline_scalar_spill)
-    return state.scalar_router ? state.scalar_router->visible_evidence_sgpr : std::nullopt;
+    return state.scalar_spill_setup ? state.scalar_spill_setup->visible_evidence_sgpr
+                                    : std::nullopt;
   if (!state.exec_save_persistent)
     return std::nullopt;
   return static_cast<uint16_t>(*state.exec_save_sgpr + (state.dynamic_stack_spill ? 25u : 24u));
@@ -134,7 +135,7 @@ bool validate_inline_shadow_exec_save_sgpr(const MoiInlineShadowScalarState &sta
   if (!state.exec_save_sgpr)
     return true;
   if (state.inline_scalar_spill && inline_access_present &&
-      (!state.scalar_router && !state.branch_only_spill)) {
+      (!state.scalar_spill_setup && !state.branch_only_spill)) {
     errors.emplace_back(
         "ConSan MOI spill-backed inline-shadow probes require planned scalar temporaries or "
         "private preservation");
@@ -304,16 +305,17 @@ plan_inline_shadow_dispatch_identity(const ConSanRequest &request,
   return plan;
 }
 
-MoiScalarAbiPlan plan_inline_shadow_scalar_abi(const MoiScalarRoutingState &routing_state) {
+MoiScalarAbiPlan
+plan_inline_shadow_scalar_abi(const MoiScalarPreservationState &preservation_state) {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  if (routing_state.exec_save_sgpr) {
-    const uint16_t base = *routing_state.exec_save_sgpr;
+  if (preservation_state.exec_save_sgpr) {
+    const uint16_t base = *preservation_state.exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 8u),
         .scc_save_sgpr = static_cast<uint16_t>(base + 10u),
     };
   }
-  return make_moi_scalar_abi_plan(routing_state, special_state, 12u);
+  return {.special_state = special_state};
 }
 
 uint16_t inline_shadow_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,

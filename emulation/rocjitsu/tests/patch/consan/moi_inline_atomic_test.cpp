@@ -1006,8 +1006,8 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
   options.scratch_vgpr = 8u;
   options.set_moi_owner_epoch_vgprs(40u, 41u);
   options.moi_exec_save_sgpr = 4u;
-  options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
+  options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{kIndirectPcSgpr, kKeyAndSccSgpr},
   };
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
@@ -1017,9 +1017,9 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesWholeTextTransactionWithoutRelay) {
       .owner_sgpr = std::nullopt,
       .dispatch_id_sgpr = std::nullopt,
       .spill_backed = true,
-      .scalar_router =
-          ConSanMoiScalarRouterAllocation{
-              .jump = ConSanIndirectJumpSgprs{kIndirectPcSgpr, kKeyAndSccSgpr},
+      .scalar_spill_setup =
+          ConSanMoiScalarSpillSetup{
+              .temporaries = ConSanMoiScalarSpillTemporaries{kIndirectPcSgpr, kKeyAndSccSgpr},
           },
       .branch_only_spill = std::nullopt,
   };
@@ -4898,8 +4898,8 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_options.set_moi_owner_epoch_vgprs(80u, 81u);
   atomic_only_options.moi_exec_save_sgpr = 4u;
   atomic_only_options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-  atomic_only_options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{42u, 46u},
+  atomic_only_options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{42u, 46u},
       .visible_evidence_sgpr = 40u,
   };
   const ConSanTransformArtifacts atomic_only = test_lower_consan(
@@ -4939,8 +4939,8 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   // surround a vector-only FLAT atomic, but it must not clobber this pair.
   options.moi_exec_save_sgpr = 4u;
   options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-  options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{42u, 46u},
+  options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{42u, 46u},
       .visible_evidence_sgpr = 40u,
   };
   options.moi_report_buffer_address = 0x123456780000ull;

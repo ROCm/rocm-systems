@@ -203,18 +203,20 @@ MoiDispatchIdentityPlan plan_record_replay_dispatch_identity(const ConSanRequest
   };
 }
 
-MoiScalarAbiPlan plan_record_replay_scalar_abi(const MoiScalarRoutingState &routing_state) {
+MoiScalarAbiPlan
+plan_record_replay_scalar_abi(const MoiScalarPreservationState &preservation_state) {
   std::optional<consan_detail::MoiSpecialStateSgprs> special_state;
-  if (routing_state.exec_save_sgpr) {
-    const uint16_t base = *routing_state.exec_save_sgpr;
+  if (preservation_state.exec_save_sgpr) {
+    const uint16_t base = *preservation_state.exec_save_sgpr;
     special_state = consan_detail::MoiSpecialStateSgprs{
         .vcc_save_sgpr = static_cast<uint16_t>(base + 2u),
-        .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.scalar_router
-                             ? routing_state.scalar_router->jump.scc_save_sgpr
-                             : static_cast<uint16_t>(base + 4u),
+        .scc_save_sgpr =
+            preservation_state.has_compact_spill() && preservation_state.scalar_spill_setup
+                ? preservation_state.scalar_spill_setup->temporaries.scc_save_sgpr
+                : static_cast<uint16_t>(base + 4u),
     };
   }
-  return make_moi_scalar_abi_plan(routing_state, special_state, 0u);
+  return {.special_state = special_state};
 }
 
 uint16_t record_replay_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,

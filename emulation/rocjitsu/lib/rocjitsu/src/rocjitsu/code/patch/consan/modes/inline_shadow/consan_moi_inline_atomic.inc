@@ -9,7 +9,7 @@
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
   const MoiScalarAbiPlan scalar_abi =
-      plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(point));
+      plan_moi_scalar_abi(options.moi_engine, moi_scalar_preservation_state(point));
   const auto workgroup_sources = moi_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
   if (!scalar_abi.special_state || !workgroup_sources)
@@ -312,13 +312,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!private_layout)
         continue;
       if (private_layout->dispatch_id_offset) {
-        if (!candidate_point.moi_scalar_router) {
+        if (!candidate_point.moi_scalar_spill_setup) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic private dispatch identity has no owner-local reload pair");
           continue;
         }
         candidate_point.moi_dispatch_identity.set_sgpr(
-            candidate_point.moi_scalar_router->jump.pc_sgpr);
+            candidate_point.moi_scalar_spill_setup->temporaries.frame_base_sgpr);
       }
     }
     if (candidate_point.has_inline_moi_scalar_spill()) {

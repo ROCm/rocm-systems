@@ -2089,13 +2089,13 @@ void try_apply_owner_epoch_prologue_patch(
       // restoring them later can overwrite guest values written after entry
       // if the prologue's VALU lane transfers are still retiring. Preserve
       // only the initialized intersection of the borrowed scalar window.
-      if (sgpr_count != 0u &&
-          !moi_entry_scalar_backup_preserves_persistent_outputs(
-              emission, kernel_point.moi_exec_save_sgprs_persistent,
-              kernel_point.moi_owner_sgpr.automatic(),
-              kernel_point.moi_scalar_router ? kernel_point.moi_scalar_router->visible_evidence_sgpr
-                                             : std::nullopt,
-              sgpr_base, sgpr_count)) {
+      if (sgpr_count != 0u && !moi_entry_scalar_backup_preserves_persistent_outputs(
+                                  emission, kernel_point.moi_exec_save_sgprs_persistent,
+                                  kernel_point.moi_owner_sgpr.automatic(),
+                                  kernel_point.moi_scalar_spill_setup
+                                      ? kernel_point.moi_scalar_spill_setup->visible_evidence_sgpr
+                                      : std::nullopt,
+                                  sgpr_base, sgpr_count)) {
         result.errors.emplace_back(
             "ConSan MOI entry scalar backup overlaps persistent output state");
         return;

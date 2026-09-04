@@ -10,7 +10,7 @@ namespace {
 
 using consan_moi_impl::find_moi_mode_operations;
 using consan_moi_impl::moi_mode_operations;
-using consan_moi_impl::moi_scalar_routing_state;
+using consan_moi_impl::moi_scalar_preservation_state;
 using consan_moi_impl::MoiCdnaPersistentOverflowStrategy;
 using consan_moi_impl::MoiObjectFacts;
 using consan_moi_impl::MoiPersistentStateFacts;
@@ -324,78 +324,63 @@ TEST(ConSanMoiModePlanning, EachEngineOwnsItsScalarAbiLayout) {
   const auto &record_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
   EXPECT_EQ(record_traits.spill_layout, ConSanMoiScalarSpillLayout::Compact);
   EXPECT_FALSE(record_traits.requires_capability_target);
-  EXPECT_TRUE(record_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_TRUE(record_traits.branch_only_spill_preserves_setup_state);
   EXPECT_EQ(record_traits.compact_spill_scalar_count, 0u);
-  auto plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  auto plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{22u, 24u}));
-  ASSERT_TRUE(plan.indirect_jump);
-  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 20u);
-  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 24u);
+
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
+  point.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{40u, 42u},
+  };
+  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
+  EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{22u, 42u}));
 
   request.moi_engine = ConSanMoiEngine::Sampled;
   const auto &sampled_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
   EXPECT_EQ(sampled_traits.spill_layout, ConSanMoiScalarSpillLayout::Compact);
   EXPECT_TRUE(sampled_traits.requires_capability_target);
-  EXPECT_FALSE(sampled_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_FALSE(sampled_traits.branch_only_spill_preserves_setup_state);
   EXPECT_EQ(sampled_traits.compact_spill_scalar_count, 8u);
-  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   ASSERT_TRUE(plan.special_state);
   EXPECT_EQ(plan.special_state->vcc_save_sgpr, 22u);
-  ASSERT_TRUE(plan.indirect_jump);
-  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 20u);
-  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 24u);
+  EXPECT_EQ(plan.special_state->scc_save_sgpr, 42u);
 
+  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::None;
+  point.moi_scalar_spill_setup.reset();
   request.moi_engine = ConSanMoiEngine::InlineShadow;
   const auto &inline_traits = moi_mode_operations(request.moi_engine).transient_scalar_placement;
   EXPECT_EQ(inline_traits.spill_layout, ConSanMoiScalarSpillLayout::Inline);
   EXPECT_FALSE(inline_traits.requires_capability_target);
-  EXPECT_FALSE(inline_traits.branch_only_spill_preserves_indirect_state);
+  EXPECT_FALSE(inline_traits.branch_only_spill_preserves_setup_state);
   EXPECT_EQ(inline_traits.compact_spill_scalar_count, 0u);
-  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   EXPECT_EQ(plan.special_state, (consan_detail::MoiSpecialStateSgprs{28u, 30u}));
-  ASSERT_TRUE(plan.indirect_jump);
-  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 32u);
-  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 30u);
-
-  point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Inline;
-  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{40u, 42u},
-  };
-  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
-  ASSERT_TRUE(plan.indirect_jump);
-  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
-  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
-
-  point.moi_exec_save_sgpr.reset();
-  plan = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
-  EXPECT_FALSE(plan.special_state);
-  ASSERT_TRUE(plan.indirect_jump);
-  EXPECT_EQ(plan.indirect_jump->pc_sgpr, 40u);
-  EXPECT_EQ(plan.indirect_jump->scc_save_sgpr, 42u);
 }
 
-TEST(ConSanMoiModePlanning, ScalarRoutingStateExcludesUnrelatedPlacement) {
+TEST(ConSanMoiModePlanning, ScalarPreservationStateExcludesUnrelatedPlacement) {
   ConSanMoiOperatingPoint point;
   point.moi_exec_save_sgpr = 20u;
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+  point.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{40u, 42u},
   };
   point.moi_branch_only_spill = ConSanMoiBranchOnlyScalarSpill{};
 
-  const auto routing_state = moi_scalar_routing_state(point);
-  EXPECT_EQ(routing_state.exec_save_sgpr, 20u);
-  EXPECT_TRUE(routing_state.has_scalar_spill());
-  EXPECT_TRUE(routing_state.has_compact_spill());
-  EXPECT_FALSE(routing_state.has_inline_spill());
-  EXPECT_EQ(routing_state.scalar_router, point.moi_scalar_router);
-  EXPECT_TRUE(routing_state.has_branch_only_spill);
+  const auto preservation_state = moi_scalar_preservation_state(point);
+  EXPECT_EQ(preservation_state.exec_save_sgpr, 20u);
+  EXPECT_TRUE(preservation_state.has_scalar_spill());
+  EXPECT_TRUE(preservation_state.has_compact_spill());
+  EXPECT_FALSE(preservation_state.has_inline_spill());
+  EXPECT_EQ(preservation_state.scalar_spill_setup, point.moi_scalar_spill_setup);
+  EXPECT_TRUE(preservation_state.has_branch_only_spill);
 
   point.moi_initialize_owner_epoch = true;
   point.set_moi_owner_epoch_vgprs(60u, 61u);
   point.automatic_moi_private_epoch = true;
   point.moi_persistent_sgprs.set_owner_epoch(62u, 63u);
-  EXPECT_EQ(moi_scalar_routing_state(point), routing_state);
+  EXPECT_EQ(moi_scalar_preservation_state(point), preservation_state);
 }
 
 TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
@@ -407,7 +392,7 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
   point.moi_exec_save_sgpr = 20u;
   point.moi_persistent_sgprs.exact_workgroup = ConSanMoiPersistentWorkgroupRegisters{6u, 7u, 8u};
 
-  auto scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  auto scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   auto emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
                                                          ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(emission);
@@ -415,10 +400,10 @@ TEST(ConSanMoiModePlanning, RecordEventRetainsResolvedScalarAbi) {
   EXPECT_EQ(emission->special_state, *scalar_abi.special_state);
 
   point.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-  point.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-      .jump = ConSanIndirectJumpSgprs{40u, 42u},
+  point.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+      .temporaries = ConSanMoiScalarSpillTemporaries{40u, 42u},
   };
-  scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(point));
+  scalar_abi = plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(point));
   emission = resolve_moi_record_event_emission_plan(request, resources, point, scalar_abi, 10u,
                                                     ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(emission);

@@ -210,15 +210,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
 
     if (private_layout && private_layout->dispatch_id_offset) {
-      const auto reload =
-          plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point))
-              .indirect_jump;
-      if (!reload) {
+      const std::optional<uint16_t> reload_sgpr =
+          candidate_point.moi_scalar_spill_setup
+              ? std::optional{candidate_point.moi_scalar_spill_setup->temporaries.frame_base_sgpr}
+          : candidate_point.moi_exec_save_sgpr
+              ? std::optional{static_cast<uint16_t>(*candidate_point.moi_exec_save_sgpr + 12u)}
+              : std::nullopt;
+      if (!reload_sgpr) {
         result.warnings.emplace_back(
             "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
         continue;
       }
-      candidate_point.moi_dispatch_identity.set_sgpr(reload->pc_sgpr);
+      candidate_point.moi_dispatch_identity.set_sgpr(reload_sgpr);
     }
 
     std::vector<std::string> workgroup_errors;
@@ -320,7 +323,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         .scratch_count = resources->count,
         .scalar_state = project_inline_shadow_scalar_state(candidate_point),
         .scalar_abi =
-            plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point)),
+            plan_moi_scalar_abi(options.moi_engine, moi_scalar_preservation_state(candidate_point)),
         .dispatch_id =
             consan_moi_detail::moi_target_dispatch_id_sources({candidate_point, options}, arch),
         .owner_field =

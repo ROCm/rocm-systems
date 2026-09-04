@@ -98,28 +98,9 @@ MoiDispatchIdentityPlan plan_moi_dispatch_identity(const ConSanRequest &request,
   return moi_mode_operations(request.moi_engine).dispatch_identity(request, facts);
 }
 
-MoiScalarAbiPlan
-make_moi_scalar_abi_plan(const MoiScalarRoutingState &routing_state,
-                         std::optional<consan_detail::MoiSpecialStateSgprs> special_state,
-                         uint16_t fixed_indirect_pc_offset) {
-  MoiScalarAbiPlan plan{.special_state = special_state, .indirect_jump = std::nullopt};
-  if (routing_state.has_scalar_spill()) {
-    if (routing_state.scalar_router)
-      plan.indirect_jump = routing_state.scalar_router->jump;
-    return plan;
-  }
-  if (!routing_state.exec_save_sgpr || !special_state)
-    return plan;
-  plan.indirect_jump = ConSanIndirectJumpSgprs{
-      .pc_sgpr = static_cast<uint16_t>(*routing_state.exec_save_sgpr + fixed_indirect_pc_offset),
-      .scc_save_sgpr = special_state->scc_save_sgpr,
-  };
-  return plan;
-}
-
 MoiScalarAbiPlan plan_moi_scalar_abi(ConSanMoiEngine engine,
-                                     const MoiScalarRoutingState &routing_state) {
-  return moi_mode_operations(engine).scalar_abi(routing_state);
+                                     const MoiScalarPreservationState &preservation_state) {
+  return moi_mode_operations(engine).scalar_abi(preservation_state);
 }
 
 ConSanEvidenceRequirements

@@ -170,20 +170,20 @@ sampled_runtime_mapping_including_staged(const ConSanTransformArtifacts &result)
 
 /// Returns the SCC snapshot that remains valid after a sampled access body.
 ///
-/// Fixed layouts return after the sampled body has overwritten the runtime
-/// gate's residue field with the guest SCC snapshot. Spill-backed layouts
-/// restore the complete transient window before returning, so their separately
-/// allocated indirect-jump SCC register remains the stable snapshot.
+/// Fixed layouts leave the guest SCC snapshot in the runtime gate's residue
+/// field. Spill-backed layouts restore the complete transient window, so their
+/// separately allocated setup SCC register remains the stable snapshot.
 std::optional<uint16_t>
-moi_sampled_access_return_scc_sgpr(const MoiScalarRoutingState &routing_state) {
-  if (!routing_state.exec_save_sgpr)
+moi_sampled_access_return_scc_sgpr(const MoiScalarPreservationState &preservation_state) {
+  if (!preservation_state.exec_save_sgpr)
     return std::nullopt;
-  if (routing_state.has_compact_spill()) {
-    return routing_state.scalar_router
-               ? std::optional<uint16_t>(routing_state.scalar_router->jump.scc_save_sgpr)
+  if (preservation_state.has_compact_spill()) {
+    return preservation_state.scalar_spill_setup
+               ? std::optional<uint16_t>(
+                     preservation_state.scalar_spill_setup->temporaries.scc_save_sgpr)
                : std::nullopt;
   }
-  const auto publication = moi_sampled_publication_state_sgprs(routing_state.exec_save_sgpr);
+  const auto publication = moi_sampled_publication_state_sgprs(preservation_state.exec_save_sgpr);
   return publication ? std::optional<uint16_t>(publication->guest_scc_snapshot_sgpr) : std::nullopt;
 }
 
@@ -322,18 +322,19 @@ MoiDispatchIdentityPlan plan_sampled_dispatch_identity(const ConSanRequest &requ
   };
 }
 
-MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarRoutingState &routing_state) {
-  const auto publication = moi_sampled_publication_state_sgprs(routing_state.exec_save_sgpr);
+MoiScalarAbiPlan plan_sampled_scalar_abi(const MoiScalarPreservationState &preservation_state) {
+  const auto publication = moi_sampled_publication_state_sgprs(preservation_state.exec_save_sgpr);
   const std::optional<consan_detail::MoiSpecialStateSgprs> special_state =
       publication
           ? std::optional{consan_detail::MoiSpecialStateSgprs{
                 .vcc_save_sgpr = publication->selection_vcc_save_sgpr,
-                .scc_save_sgpr = routing_state.has_compact_spill() && routing_state.scalar_router
-                                     ? routing_state.scalar_router->jump.scc_save_sgpr
-                                     : publication->publication_exec_save_sgpr,
+                .scc_save_sgpr =
+                    preservation_state.has_compact_spill() && preservation_state.scalar_spill_setup
+                        ? preservation_state.scalar_spill_setup->temporaries.scc_save_sgpr
+                        : publication->publication_exec_save_sgpr,
             }}
           : std::nullopt;
-  return make_moi_scalar_abi_plan(routing_state, special_state, 0u);
+  return {.special_state = special_state};
 }
 
 uint16_t sampled_exec_save_sgpr_count(const MoiExecSaveRequirement &requirement,

@@ -1400,7 +1400,7 @@ TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
   ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
 
   const uint16_t persistent_begin = *test_moi_persistent_sgpr_state(result).owner();
   const uint16_t persistent_end =
@@ -1411,9 +1411,9 @@ TEST(ConSanMoi, Gfx1100RecordReplayRouteKeyDoesNotAliasPersistentEpoch) {
   EXPECT_FALSE(persistent_overlaps(assignment.exec_save_sgpr, 4u));
   EXPECT_FALSE(persistent_overlaps(assignment.owner_sgpr));
   EXPECT_FALSE(persistent_overlaps(assignment.dispatch_id_sgpr, 2u));
-  EXPECT_FALSE(persistent_overlaps(assignment.scalar_router->jump.pc_sgpr, 2u));
-  EXPECT_FALSE(persistent_overlaps(assignment.scalar_router->jump.scc_save_sgpr));
-  EXPECT_FALSE(persistent_overlaps(assignment.scalar_router->visible_evidence_sgpr));
+  EXPECT_FALSE(persistent_overlaps(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 2u));
+  EXPECT_FALSE(persistent_overlaps(assignment.scalar_spill_setup->temporaries.scc_save_sgpr));
+  EXPECT_FALSE(persistent_overlaps(assignment.scalar_spill_setup->visible_evidence_sgpr));
   EXPECT_FALSE(persistent_overlaps(assignment.branch_only_spill
                                        ? assignment.branch_only_spill->dynamic_stack_borrowed_sgpr
                                        : std::nullopt,
@@ -5626,7 +5626,7 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillSkipsUninitializedScalarWindow) {
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_FALSE(assignment.branch_only_spill);
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
 
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -5684,8 +5684,8 @@ TEST(ConSanMoi, SparseRecordReplaySpillSkipsUninitializedEntryHashWindowAcrossTa
     options.moi_init_owner_epoch = true;
     options.moi_exec_save_sgpr = kExecSaveSgpr;
     options.automatic_moi_scalar_spill_layout = ConSanMoiScalarSpillLayout::Compact;
-    options.moi_scalar_router = ConSanMoiScalarRouterAllocation{
-        .jump = ConSanIndirectJumpSgprs{70u, 72u},
+    options.moi_scalar_spill_setup = ConSanMoiScalarSpillSetup{
+        .temporaries = ConSanMoiScalarSpillTemporaries{70u, 72u},
     };
     options.moi_dispatch_identity.set_sgpr(60u);
     options.moi_persistent_sgprs.exact_workgroup =
@@ -5836,7 +5836,7 @@ TEST(ConSanMoi, RecordReplaySharedHelperUsesOneSpillBackedWindowAcrossOwners) {
     ASSERT_TRUE(assignment);
     EXPECT_TRUE(assignment->spill_backed);
     EXPECT_TRUE(assignment->branch_only_spill);
-    EXPECT_TRUE(assignment->scalar_router);
+    EXPECT_TRUE(assignment->scalar_spill_setup);
     if (common_exec_save_sgpr)
       EXPECT_EQ(assignment->exec_save_sgpr, *common_exec_save_sgpr);
     else
@@ -5910,9 +5910,9 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
       const ConSanMoiTransientSgprAssignment assignment =
           test_moi_transient_sgpr_assignments(result).front();
       EXPECT_TRUE(assignment.spill_backed);
-      ASSERT_TRUE(assignment.scalar_router);
-      EXPECT_EQ(assignment.scalar_router->jump.pc_sgpr, 0u);
-      EXPECT_EQ(assignment.scalar_router->jump.scc_save_sgpr, 4u);
+      ASSERT_TRUE(assignment.scalar_spill_setup);
+      EXPECT_EQ(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 0u);
+      EXPECT_EQ(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, 4u);
       EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                    &ConSanPatchInfo::kind),
                 access_count);
@@ -6178,7 +6178,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
 
   std::vector<uint32_t> words(access->begin(), access->end());
   words.push_back(*barrier);
-  // Leave only the router state, one dispatch-ID pair, and physical VCC
+  // Leave only the spill-setup state, one dispatch-ID pair, and physical VCC
   // unused. The test gives the kernel a 104-register allocation so s98:s99
   // are physical VCC and must remain unavailable even without guest uses.
   constexpr std::array<uint16_t, 8> kUnreferenced = {
@@ -6215,12 +6215,12 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
   const auto avoids_physical_vcc = [](uint16_t base, uint16_t width) {
     return static_cast<uint32_t>(base) + width <= 98u || base >= 100u;
   };
-  EXPECT_TRUE(avoids_physical_vcc(assignment.scalar_router->jump.pc_sgpr, 2u));
-  EXPECT_TRUE(avoids_physical_vcc(assignment.scalar_router->jump.scc_save_sgpr, 1u));
+  EXPECT_TRUE(avoids_physical_vcc(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, 2u));
+  EXPECT_TRUE(avoids_physical_vcc(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, 1u));
 
   for (ConSanPatchKind kind : {ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                ConSanPatchKind::TrampolineMoiBarrierRecord}) {
@@ -6314,7 +6314,7 @@ TEST(ConSanMoi, RecordReplayRelocatesSpillBackedSitesWithMinimalSetupScalars) {
         test_moi_transient_sgpr_assignments(result).front();
     EXPECT_TRUE(assignment.spill_backed);
     EXPECT_EQ(assignment.branch_only_spill.has_value(), expect_branch_only);
-    EXPECT_TRUE(assignment.scalar_router);
+    EXPECT_TRUE(assignment.scalar_spill_setup);
     EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                  &ConSanPatchInfo::kind),
               9u);
@@ -6503,7 +6503,7 @@ TEST(ConSanMoi, RecordReplayRelocationComposesSpillBackedAccessesAndBarrier) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6554,7 +6554,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayRelocatesDenseSpillBackedBarriers) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             2u * kSiteCount);
@@ -6626,7 +6626,7 @@ TEST(ConSanMoi, RecordReplayRelocationAvoidsTransientSgprHostLivenessConstraint)
     words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
   }
 
-  // The automatic spill router selects these four registers because the
+  // The automatic spill allocation selects these four registers because the
   // definitions keep them dead at every access anchor. They are nevertheless
   // live across the following NOP run, which is an attractive relocatable
   // host unless the post-planning liveness state includes arbitrary hosts.
@@ -6661,9 +6661,9 @@ TEST(ConSanMoi, RecordReplayRelocationAvoidsTransientSgprHostLivenessConstraint)
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(assignment.scalar_router);
-  EXPECT_EQ(assignment.scalar_router->jump.pc_sgpr, kTransientWindow[0]);
-  EXPECT_EQ(assignment.scalar_router->jump.scc_save_sgpr, kTransientWindow[2]);
+  ASSERT_TRUE(assignment.scalar_spill_setup);
+  EXPECT_EQ(assignment.scalar_spill_setup->temporaries.frame_base_sgpr, kTransientWindow[0]);
+  EXPECT_EQ(assignment.scalar_spill_setup->temporaries.scc_save_sgpr, kTransientWindow[2]);
   expect_record_replay_text_transaction(result);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
@@ -8840,7 +8840,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_TRUE(assignment.scalar_router);
+  EXPECT_TRUE(assignment.scalar_spill_setup);
   EXPECT_FALSE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
@@ -8888,7 +8888,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_TRUE(assignment.scalar_router);
+  EXPECT_TRUE(assignment.scalar_spill_setup);
   EXPECT_FALSE(assignment.dispatch_id_sgpr);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
@@ -9437,7 +9437,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRelocatesFarSiteWithoutEntryTuple) {
   const ConSanMoiTransientSgprAssignment assignment =
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_TRUE(assignment.scalar_router);
+  EXPECT_TRUE(assignment.scalar_spill_setup);
   ASSERT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             1u)
@@ -9697,7 +9697,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRelocatesBarrierWithoutDeadTransientScalarRegis
       test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_spill);
-  EXPECT_TRUE(assignment.scalar_router);
+  EXPECT_TRUE(assignment.scalar_spill_setup);
 
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);

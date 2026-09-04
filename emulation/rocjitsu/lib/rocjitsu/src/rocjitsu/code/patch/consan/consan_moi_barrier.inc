@@ -487,7 +487,7 @@ void try_apply_shared_barrier_patch(std::span<const uint8_t> bytes, const ConSan
                                  candidate_point, semantics, arch);
     }
     const MoiScalarAbiPlan scalar_abi =
-        plan_moi_scalar_abi(options.moi_engine, moi_scalar_routing_state(candidate_point));
+        plan_moi_scalar_abi(options.moi_engine, moi_scalar_preservation_state(candidate_point));
     body = plan_body(options, candidate_point, scalar_abi, scratch_vgpr, owners, arch,
                      result.moi_operating_point, result.warnings, result.errors);
     if (!body) {

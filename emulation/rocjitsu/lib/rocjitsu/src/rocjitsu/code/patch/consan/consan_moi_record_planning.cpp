@@ -139,7 +139,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
   }
 
   const MoiScalarAbiPlan scalar_abi =
-      plan_moi_scalar_abi(request.moi_engine, moi_scalar_routing_state(event_point));
+      plan_moi_scalar_abi(request.moi_engine, moi_scalar_preservation_state(event_point));
   auto emission = resolve_moi_record_event_emission_plan(
       request, bound_resources, event_point, scalar_abi, resources.base, arch,
       private_layout ? &*private_layout : nullptr);
