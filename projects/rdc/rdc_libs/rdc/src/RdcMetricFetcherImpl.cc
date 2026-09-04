@@ -1802,7 +1802,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     return RDC_ST_NOT_SUPPORTED;
   }
 
-  if (status != RDC_ST_OK) {
+  // The platform cannot serve this health field. rdc_health_set reports it
+  // when the watch is set, so the per-fetch lines are informational only.
+  const bool health_miss =
+      is_health_field(field_id) && is_capability_miss(static_cast<rdc_status_t>(value->status));
+  if (status != RDC_ST_OK && !health_miss) {
     RDC_LOG(RDC_ERROR, "Fetch status is not ok error: " << status);
   }
 
@@ -1810,6 +1814,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   if (value->status != AMDSMI_STATUS_SUCCESS) {
     if (async_fetching) {  //!< Async fetching is not an error
       RDC_LOG(RDC_DEBUG, "Async fetch " << field_id_string(field_id));
+    } else if (health_miss) {
+      RDC_LOG(RDC_INFO, "Health field " << gpu_index << ":" << field_id_string(field_id)
+                                        << " not supported, status " << value->status
+                                        << ", latency " << latency);
     } else {
       RDC_LOG(RDC_ERROR, "Fail to fetch " << gpu_index << ":" << field_id_string(field_id)
                                           << " with rsmi error code " << value->status

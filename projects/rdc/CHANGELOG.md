@@ -28,6 +28,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - XGMI health falls back to `RDC_FI_ECC_XGMI_WAFL_UE` where the legacy `xgmi_error` sysfs node is unreadable.
   - Health fields the platform cannot serve are probed at `rdci health -s`, reported per GPU at default verbosity (naming the fallback source where one exists), and left out of the 1 s watch.
   - The EEPROM health component watches the field `eeprom_check` actually reads (`RDC_FI_ECC_UNCORRECT_TOTAL`) instead of polling `RDC_HEALTH_EEPROM_CONFIG_VALID`, which no check consumes.
+  - Per-fetch capability misses on `RDC_HEALTH_*` fields log at INFO instead of ERROR; the watch-set report above is the user-visible line.
 
 ## RDC for ROCm 7.13.0
 

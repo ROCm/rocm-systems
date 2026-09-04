@@ -89,6 +89,10 @@ bool is_capability_miss(rdc_status_t status) {
   }
 }
 
+bool is_health_field(rdc_field_t field_id) {
+  return field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST;
+}
+
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
   uint32_t socket_count = 0;
