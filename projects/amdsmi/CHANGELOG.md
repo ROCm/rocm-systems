@@ -23,9 +23,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   ...
   ```
 
-- **Added `physical_acc_id` to `amdsmi_enumeration_info_t`**.  
-  - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
-  - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
+- **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.  
+  - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
+  - Reads GPU telemetry through `librocdxg`; queries with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
+
+- **Added UALoE-backed physical accelerator ID and tray info**.  
+  - `physical_acc_id` added to `amdsmi_asic_info_t` and `amdsmi_enumeration_info_t`, populated by `amdsmi_get_gpu_asic_info()` and `amdsmi_get_gpu_enumeration_info()`.
+  - New node-scoped `amdsmi_get_tray_info()` reports compute tray type and accelerator count via `amdsmi_tray_info_t` and `amdsmi_compute_tray_type_t`.
+  - Without an active UALoE session these report `AMDSMI_STATUS_NOT_SUPPORTED`, or `UINT32_MAX` for `physical_acc_id`.
+  - CLI: `amd-smi static --asic` and `amd-smi list --enumeration` show `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` prints tray type and accelerator count.
+
+- **Added `CACHE_ACRONYM` and `TOTAL_CACHE_SIZE` to `amd-smi metric --cache`**.  
+  - Each `CACHE_<N>` entry now reports a short type label (`L1D`, `L1I`, `L2`, `L3`) and the total size across all instances at that level.
 
 - **Added `chip_rev_id` and `external_rev_id` to `amdsmi_get_gpu_asic_info()`**.  
   - Reports the amdgpu `chip_rev` and `external_rev` values from the `AMDGPU_INFO_DEV_INFO` DRM query. Both are distinct from `rev_id`, which is the PCI config-space revision.
@@ -37,14 +46,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.
+
 - **Expanded `amdsmi_gpu_block_t` enum with 20 new RAS IP blocks**.  
   - Added blocks: from `AMDSMI_GPU_BLOCK_MMSCH` to `AMDSMI_GPU_BLOCK_UCIE_PCS` at bit positions 19-38.
   - Updated `AMDSMI_GPU_BLOCK_LAST` to `AMDSMI_GPU_BLOCK_UCIE_PCS`.
 
-- **An empty nested section now renders as `N/A` in human-readable CLI output**.  
-  - Any `amd-smi` command whose output contains an empty sub-section printed a bare `SECTION:` header with nothing under it. It now prints `SECTION: N/A`, matching how empty lists are already rendered.
-  - This covers every subcommand that uses the standard human-readable renderer, not only the AI-NIC `RDMA_DEVICES` case that prompted it.
-  - `monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output print tables and are unchanged.
+- **A section with no entries now renders as `SECTION: N/A` in human-readable CLI output**.  
+  - It previously printed a bare `SECTION:` header with nothing beneath it, which read as truncated output. For `SWITCH_ERRORS` this also hid data: a block the driver reported as `N/A` became an empty header.
+  - Affects sections that list a variable number of entries: `PORTS` and `RDMA_DEVICES` for an AI-NIC, the per-block counters under `NIC_ERRORS` and `SWITCH_ERRORS`, and `FREQUENCY_LEVELS` in `amd-smi static --clock`. Sections with a fixed set of fields already print `N/A` per field and are unaffected.
+  - `--json`, `--csv`, and the table-based subcommands (`monitor`, `partition`, `topology`, `xgmi`, and the default no-argument output) are unchanged.
 
 - **`cper_decode()` in the internal header `amd_smi/impl/amd_smi_cper.h` takes a new `buf_size` argument**.  
   - The function needs the caller's buffer length to bound the record it walks. It also now rejects a buffer that does not start with the `CPER` signature, so the record walk is safe for any pointer and size rather than depending on `amdsmi_get_afids_from_cper()` having validated first.
@@ -66,6 +76,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `vram_bit_width` never being reported as `N/A`**.  
   - The unavailable-value check compared a `uint32_t` field against `UINT64_MAX`, which can never match, so an unknown bit width was logged as `4294967295`.
+
 - **Fixed an out-of-bounds read in the DRM example's RAS block listing**.  
   - `amd_smi_drm_example.cc` iterated every `amdsmi_gpu_block_t` value but indexed a 14-entry name array, so every block from `AMDSMI_GPU_BLOCK_MCA` onward read past the end of the array and printed a garbage label. The list now covers all 39 blocks and the lookup is bounds-checked.
 
@@ -88,6 +99,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static --vram` reporting `GDDR7` for LPDDR5 unified memory on APUs (e.g. gfx117x)**.  
   - `AMDSMI_VRAM_TYPE__MAX` aliases the highest real memory type (`LPDDR5`), so a genuine LPDDR5 reading was matched by the `__MAX` special case and mislabeled `GDDR7`. It is now correctly reported as `LPDDR5`.
+
+- **Fixed `amd-smi metric --clock` reporting FCLK `MAX_CLK` as 0 MHz**.  
+  - The FCLK range came from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) has no FCLK section, leaving the parsed maximum at 0. It now falls back to `pp_dpm_fclk` (and likewise `pp_dpm_sclk`/`pp_dpm_mclk`) when the overdrive file omits a domain.
 
 - **Fixed out-of-bounds reads and writes when parsing malformed CPER records**.  
   - A record whose `record_length` is smaller than a CPER header is now dropped by the ring reader. Such a record was previously copied and then had a product serial number written past the end of the caller's buffer.
@@ -123,54 +137,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `cache_acronym` and `total_cache_size` to `amd-smi metric --cache` command**.  
-
-```console
-GPU: 0
-    CACHE_INFO:
-        CACHE_0:
-            CACHE_ACRONYM: L1D
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 32 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 1
-            NUM_CACHE_INSTANCE: 80
-            TOTAL_CACHE_SIZE: 2560 KB
-        CACHE_1:
-            CACHE_ACRONYM: L1I
-            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-            CACHE_SIZE: 64 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 32
-            TOTAL_CACHE_SIZE: 2048 KB
-        CACHE_2:
-            CACHE_ACRONYM: L2
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 4096 KB
-            CACHE_LEVEL: 2
-            MAX_NUM_CU_SHARED: 80
-            NUM_CACHE_INSTANCE: 1
-            TOTAL_CACHE_SIZE: 4096 KB
-        CACHE_3:
-            CACHE_ACRONYM: L3
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 262144 KB
-            CACHE_LEVEL: 3
-            MAX_NUM_CU_SHARED: 80
-            NUM_CACHE_INSTANCE: 1
-            TOTAL_CACHE_SIZE: 262144 KB
-```
 - **Added accelerator partition memory allocation mode API**.  
   - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
   - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
 
-- **Added physical accelerator ID and tray info via UALoE**.
-  - `amdsmi_asic_info_t` gained a `physical_acc_id` field, populated by `amdsmi_get_gpu_asic_info()`.
-  - New node-scoped API `amdsmi_get_tray_info()` reports compute tray type and accelerator count via the new `amdsmi_tray_info_t` struct and `amdsmi_compute_tray_type_t` enum.
-  - Both are UALoE-backed and report `AMDSMI_STATUS_NOT_SUPPORTED` (or the `UINT32_MAX` sentinel for `physical_acc_id`) on systems without an active UALoE session.
-  - CLI: `amd-smi static --asic` now includes `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` flag prints tray type and accelerator count.
+- **Added `amdsmi_get_vcn_busy_percent()` API**.  
+  - Reports VCN activity on devices without XCP partitions (e.g. Navi), which report `N/A` through the partition-based metrics path.
 
 - **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
   - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
@@ -222,39 +195,32 @@ GPU: 0
 - **Prefixed public preprocessor macros with `AMDSMI_` in `amdsmi.h`** (breaking).  
   - `MAX_SVI3_RAIL_INDEX`, `MAX_SVI3_RAIL_SELECTION`, `POWER_EFFICIENCY_MODE_4`, `POWER_EFFICIENCY_MODE_5`, and `MAX_NUMBER_OF_AFIDS_PER_RECORD` are now `AMDSMI_MAX_SVI3_RAIL_INDEX`, `AMDSMI_MAX_SVI3_RAIL_SELECTION`, `AMDSMI_POWER_EFFICIENCY_MODE_4`, `AMDSMI_POWER_EFFICIENCY_MODE_5`, and `AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD`. The unused `CENTRIGRADE_TO_MILLI_CENTIGRADE` macro was removed. Update references to the new names.
 
-- **Deprecated the `compute_partition` APIs in favor of `accelerator_partition` equivalents**.  
-  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_set_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, and `amdsmi_set_gpu_compute_partition_mem_alloc_mode()` are slated for removal in a future ROCm release. They now emit a `DeprecationWarning` from the Python interface and delegate to their `accelerator_partition` counterparts.
-  - The `amdsmi_compute_partition_type_t` and `amdsmi_compute_partition_mem_alloc_mode_t` enums are deprecated in favor of `amdsmi_accelerator_partition_type_t` and `amdsmi_accelerator_partition_mem_alloc_mode_t`.
-
-- **Deprecated `amdsmi_set_gpu_memory_partition()` in favor of `amdsmi_set_gpu_memory_partition_mode()`**.  
-  - `amdsmi_set_gpu_memory_partition` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_set_gpu_memory_partition_mode()`.
-
 - **Namespaced `amdsmi_clk_limit_type_t` and `amdsmi_io_bw_encoding_t` enumerators with an `AMDSMI_` prefix**.  
   - Added `AMDSMI_CLK_LIMIT_MIN`/`AMDSMI_CLK_LIMIT_MAX` and `AMDSMI_AGG_BW0`/`AMDSMI_RD_BW0`/`AMDSMI_WR_BW0`.
   - The unprefixed names (`CLK_LIMIT_MIN`, `CLK_LIMIT_MAX`, `AGG_BW0`, `RD_BW0`, `WR_BW0`) are retained as deprecated aliases with unchanged values and are slated for removal in a future ROCm release.
 
-- **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
-  - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
-
-- **Removed unused public macros to match the unified ABI** (breaking).  
-  - Dropped the `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, `AMDSMI_MAX_PROFILE_COUNT`, and `AMDSMI_PF_INDEX` defines, which were unreferenced by any API or struct.
-
 - **Deduplicated the `amdsmi_fabric_telemetry_category_t` enumerators**.  
   - `AMDSMI_FABRIC_TELEMETRY_CATEGORY_INVALID` is now the canonical `0xFFFFFFFF` value; the previous `AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN` name (same value) is retained as a deprecated alias and is slated for removal in a future ROCm release.
-
-- **Deprecated `amdsmi_get_gpu_vram_vendor()`**. Use `amdsmi_get_gpu_vram_info()` and read the `vram_vendor` field instead. The function is retained (it now delegates to `amdsmi_get_gpu_vram_info()`, and the Python binding emits a `DeprecationWarning`) and is slated for removal in a future ROCm release.
-
-- **Removed `amdsmi_get_cpusocket_handles()` from the Python interface** (breaking). Use `amdsmi_get_cpu_handles()` instead.
-
-- **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
-
-- **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
 
 - **Restructured AMD SMI C++ tests into unit and functional suites**.  
   - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
   - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
+
+### Removed
+
+- **Removed the `amdsmi_gpu_driver_reload()` API and its Python binding** (breaking).  
+  - Reload the amdgpu driver out of band with `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to apply memory partition changes instead.
+
+- **Removed unused public macros to match the unified ABI** (breaking).  
+  - Dropped `AMDSMI_MAX_VF_COUNT`, `AMDSMI_MAX_DRIVER_NUM`, `AMDSMI_DFC_FW_NUMBER_OF_ENTRIES`, `AMDSMI_MAX_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_BLACK_LIST_ELEMENTS`, `AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS`, `AMDSMI_MAX_ERR_RECORDS`, `AMDSMI_MAX_PROFILE_COUNT`, and `AMDSMI_PF_INDEX`, which no API or struct referenced.
+
+- **Removed `amdsmi_get_cpusocket_handles()` from the Python interface** (breaking). Use `amdsmi_get_cpu_handles()` instead.
+
+- **Removed the `plpds` key from `amdsmi_get_xgmi_plpd()` Python output** (breaking). Use the `policies` key instead.
+
+- **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
 
 ### Optimized
 
@@ -264,8 +230,8 @@ GPU: 0
 
 ### Resolved Issues
 
-- **Fixed `amd-smi metric --clock` reporting FCLK `max_clk` as 0 MHz**.
-  - `amdsmi_get_clock_info()` derived the FCLK (data-fabric) range from `pp_od_clk_voltage`, which on some GPUs (e.g. MI45x) lists only `OD_SCLK`/`OD_MCLK` and no FCLK section. The parsed maximum stayed at 0 and the code never fell back to `pp_dpm_fclk`, so `amd-smi metric --clock` showed `FCLK_0 MAX_CLK: 0 MHz`. The range now falls back to `pp_dpm_fclk` (and the analogous `pp_dpm_sclk`/`pp_dpm_mclk`) whenever the overdrive file omits that domain.
+- **Fixed `amd-smi metric --usage` reporting `VCN_BUSY` as N/A on Navi**.  
+  - On devices without XCP partitions the CLI now reads `vcn_busy_percent` through the new `amdsmi_get_vcn_busy_percent()` API.
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.  
   - The common no-entries case printed empty output, so consumers feeding stdout to `json.loads` failed with `Expecting value: line 1 column 1 (char 0)`. The command now always emits exactly one valid JSON document: `[]` when there are no entries, or a single aggregated array across all GPUs when there are. `--follow` mode stays silent until entries appear. The human-readable primary-partition warning is also suppressed in JSON mode so it no longer corrupts the output.
@@ -289,13 +255,18 @@ GPU: 0
 - **Fixed ctypes `DeprecationWarning` from `amdsmi_wrapper.py` on Python 3.14**.  
   - Python 3.14 deprecates the implicit ctypes structure layout when `_pack_` is set (slated to become an error in 3.19). Each packed structure/union in the generated wrapper now sets `_layout_ = 'ms'`, preserving the existing MSVC-compatible layout (no ABI change) while silencing the warning.
 
+### Upcoming Changes
+
+- **The `compute_partition` APIs will be removed in the next major release**.  
+  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_set_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, and `amdsmi_set_gpu_compute_partition_mem_alloc_mode()` emit a `DeprecationWarning` from the Python interface and delegate to their `accelerator_partition` counterparts.
+  - `amdsmi_compute_partition_type_t` and `amdsmi_compute_partition_mem_alloc_mode_t` are superseded by `amdsmi_accelerator_partition_type_t` and `amdsmi_accelerator_partition_mem_alloc_mode_t`.
+
+- **`amdsmi_set_gpu_memory_partition()` will be removed in the next major release**.  
+  - It emits a `DeprecationWarning` from the Python interface and wraps `amdsmi_set_gpu_memory_partition_mode()`.
+
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
-
-- **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.
-  - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
-  - Reads real GPU telemetry through `librocdxg` (`rocdxg_smi_*` APIs); queries with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
 
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
@@ -361,12 +332,9 @@ GPU: 0
   - `amd-smi process --sort-by-pid` and `amd-smi monitor --sort-by-pid` group output by PID, merging each PID's per-GPU usage into one row.
   - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
 
-- **Added `amdsmi_get_vcn_busy_percent` API**.  
-  - Navi devices were incorrectly displaying N/A for vcn_busy in their metrics output due to a difference in design. This API was added to allow users to properly obtain the vcn_busy metric from Navi and other similar devices.
-
 ### Changed
 
-- **Reworked Python package install layout for system packages and pip wheels**.
+- **Reworked Python package install layout for system packages and pip wheels**.  
   - System `.deb` / `.rpm` packages no longer run `pip install` during postinst; the `amdsmi` Python package is installed directly into the default system Python's `site-packages`/`dist-packages` (detected from the distro-default interpreter) as part of the package payload, so plain `import amdsmi` works after `apt install` / `dnf install`. Removing the package removes those files. `pip list` will no longer show `amdsmi` for the system package.
   - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
@@ -380,11 +348,6 @@ GPU: 0
   - The per-GPU columns are now lowercase (`gpu_<N>` for the BDF header row, `gpu_<N>_topo` for each NIC's status row) in JSON and CSV output, matching the existing `gpu_<N>` keys in the GPU-to-GPU access matrix; they were previously uppercase (`GPU<N>`, `GPU<N>_Topo`).
   - Human-readable output is unchanged, since it uppercases all keys.
 
-- **Fixed `amd-smi static --clock` CSV and human-readable formatting to output frequency levels as strings instead of dictionary objects**.  
-
-- **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
-  - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
-
 - **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
   - The label now correctly reflects that it shows the ionic kernel driver version.
 
@@ -395,6 +358,9 @@ GPU: 0
 - **Removed the unused `amdsmi_nic_link_type_t` enum from the public header**. No API or struct referenced it; NIC link types are reported through `amdsmi_link_type_t`, which gains `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` in this release.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi static --clock` emitting frequency levels as dictionary objects**.  
+  - CSV and human-readable output now format each level as a string.
 
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
@@ -443,8 +409,10 @@ GPU: 0
 - **Fixed fabric telemetry APIs returning the wrong status on non-IFoE systems**.  
   - `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, and `amdsmi_free_fabric_telemetry()` now return `AMDSMI_STATUS_NOT_SUPPORTED` on systems without fabric hardware, consistent with `amdsmi_get_gpu_fabric_info()`.
 
-- **Fixed incorrect N/A output for vcn_busy field in `amd-smi metric --usage`**.  
-  - On devices without XCP partitions (e.g. Navi), the CLI now reads `vcn_busy_percent` via the new `amdsmi_get_vcn_busy_percent()` sysfs API.
+### Upcoming Changes
+
+- **`amdsmi_get_gpu_vram_vendor()` will be removed in the next major release**.  
+  - It emits a `DeprecationWarning` from the Python interface and delegates to `amdsmi_get_gpu_vram_info()`. Read the `vram_vendor` field from that call instead.
 
 ## amd_smi_lib for ROCm 7.13.0
 
@@ -476,7 +444,7 @@ GPU: 0
   - Fields not applicable to the current version are set to sentinel values: `0xFFFF` for `uint16_t`, `0xFFFFFFFF` for `uint32_t`, and `UINT64_MAX` for `uint64_t` fields.
   - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
 
-- **Added `oam_id` to `amdsmi_enumeration_info_t`**.
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.  
   - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
   - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
 
