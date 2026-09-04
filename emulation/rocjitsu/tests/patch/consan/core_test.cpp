@@ -8,8 +8,38 @@
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/consan/targets/consan_target_lds_ops.h"
 
+#if defined(__linux__)
+#include <sys/resource.h>
+#endif
+
 namespace rocjitsu {
 namespace {
+
+#if defined(__linux__)
+class ScopedAddressSpaceLimit {
+public:
+  explicit ScopedAddressSpaceLimit(rlim_t limit) {
+    if (getrlimit(RLIMIT_AS, &saved_limit_) != 0) {
+      return;
+    }
+    rlimit limited = saved_limit_;
+    limited.rlim_cur = std::min(limited.rlim_cur, limit);
+    active_ = setrlimit(RLIMIT_AS, &limited) == 0;
+  }
+
+  ~ScopedAddressSpaceLimit() {
+    if (active_) {
+      (void)setrlimit(RLIMIT_AS, &saved_limit_);
+    }
+  }
+
+  bool active() const { return active_; }
+
+private:
+  rlimit saved_limit_{};
+  bool active_ = false;
+};
+#endif
 
 struct PhysicalAliasTestCandidate {
   uint64_t file_offset = 0;
@@ -1413,6 +1443,15 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
 }
 
 TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
+#if defined(__linux__)
+  // A mutation of ELF size metadata can provoke a speculative allocation
+  // before ConSan's post-materialization growth policy rejects the object. Keep
+  // exercising every mutation while requiring allocation failure to remain
+  // transactional and keeping this test's working set comparable to its peers.
+  ScopedAddressSpaceLimit address_space_limit(512ull * 1024ull * 1024ull);
+  ASSERT_TRUE(address_space_limit.active());
+#endif
+
   const std::array<uint32_t, 13> text_words = {
       0xD8340000u,
       0x00000102u, // ds_store_b32 v2, v1
