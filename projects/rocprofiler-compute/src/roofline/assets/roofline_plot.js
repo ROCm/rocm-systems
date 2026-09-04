@@ -51,6 +51,7 @@
 
   // ---- DOM handles --------------------------------------------------------
   var gd = document.getElementById(model.divId);
+  var precisionSelect = document.getElementById("roofline-precision-select");
   var peakSelect = document.getElementById("roofline-peak-select");
   var peakControl = document.getElementById("roofline-peak-control");
   var peakControlTitle = peakControl ? peakControl.title : "";
@@ -84,6 +85,7 @@
   var rooflineTraces = model.rooflineTraces;
   var computeTraces = model.computeTraces;
   var computeOverlayTraces = model.computeOverlayTraces;
+  var precisions = model.precisions || [];
   var peakColors = model.peakColors;
   var initialRange = null;
 
@@ -104,6 +106,7 @@
   });
 
   var state = {
+    precision: precisions[0] || "",
     peak: model.defaultPeak || ALL_PEAKS_VALUE,
     selected: new Set(),
     isolatedRoofs: new Set(),
@@ -271,7 +274,10 @@
     var visibility = [];
     computeOverlayTraces.forEach(function (overlay) {
       indices.push(overlay.traceIndex);
-      if (isolating && refBw) {
+      var source = computeTraces.find(function (trace) {
+        return trace.traceIndex === overlay.sourceTraceIndex;
+      });
+      if (isolating && refBw && source && source.dtype === state.precision) {
         var left = overlay.peakPerf / refBw;
         xs.push([left, ROOF_EXTREME_MAX_AI]);
         ys.push([overlay.peakPerf, overlay.peakPerf]);
@@ -307,6 +313,23 @@
     }
     applyRoofEmphasis();
     updateCeilings();
+  }
+
+  function applyPrecision() {
+    if (!plotlyReady()) {
+      return;
+    }
+    Plotly.restyle(
+      gd,
+      {
+        visible: computeTraces.map(function (trace) {
+          return trace.dtype === state.precision;
+        }),
+      },
+      computeCeilingIndices
+    );
+    updateCeilings();
+    resetView();
   }
 
   var lastEmphasizedLevel;
@@ -1202,6 +1225,19 @@
     peakSelect.value = state.peak;
   }
 
+  function buildPrecisionOptions() {
+    if (!precisionSelect) {
+      return;
+    }
+    precisions.forEach(function (precision) {
+      var option = document.createElement("option");
+      option.value = precision;
+      option.textContent = precision;
+      precisionSelect.appendChild(option);
+    });
+    precisionSelect.value = state.precision;
+  }
+
   function buildKernelPanel() {
     if (!kernelList) {
       return;
@@ -1317,6 +1353,12 @@
   }
 
   function wireEvents() {
+    if (precisionSelect) {
+      precisionSelect.addEventListener("change", function () {
+        state.precision = precisionSelect.value;
+        applyPrecision();
+      });
+    }
     if (peakSelect) {
       peakSelect.addEventListener("change", function () {
         state.peak = peakSelect.value;
@@ -1461,6 +1503,7 @@
       KERNEL_NAME_FONT_FAMILY
     );
     buildPeakOptions();
+    buildPrecisionOptions();
     buildKernelPanel();
     buildRoofPanel();
     computeRuntimeBreakpoints();
@@ -1477,6 +1520,7 @@
       resizePlot();
       applyPlotTheme();
       render();
+      applyPrecision();
       resetView();
     }, PLOT_READY_MAX_ATTEMPTS);
   }

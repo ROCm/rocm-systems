@@ -58,6 +58,7 @@ class RooflineViewModel:
     roofline_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: List[Dict[str, Any]] = field(default_factory=list)
+    precisions: List[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         """Serialize the model for embedding in a <script> tag."""
@@ -71,6 +72,7 @@ class RooflineViewModel:
             "rooflineTraces": self.roofline_traces,
             "computeTraces": self.compute_traces,
             "computeOverlayTraces": self.compute_overlay_traces,
+            "precisions": self.precisions,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
             "framePad": FRAME_PAD,

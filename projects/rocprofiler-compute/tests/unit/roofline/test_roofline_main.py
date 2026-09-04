@@ -371,6 +371,24 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
         assert roof["kneePerf"] == pytest.approx(drawn_perf)
 
 
+def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
+    benchmarked_roofline,
+) -> None:
+    """GUI-style generation attempts all supported architecture datatypes even
+    when the shared analyze arguments selected only one terminal datatype."""
+    roofline = benchmarked_roofline(["FP64"])
+
+    ops_figure, flops_figure, _, _ = roofline.construct_plotly_figures(
+        {"kernelNames": []}, datatypes=None
+    )
+
+    assert ops_figure is None
+    assert flops_figure is not None
+    trace_names = {trace.name for trace in flops_figure.data}
+    assert "Peak MFMA-BF16" in trace_names
+    assert "Peak VALU-FP64" in trace_names
+
+
 def test_view_model_to_json_escapes_script_close() -> None:
     model = RooflineViewModel(kernels=[{"name": "evil</script>", "points": []}])
 

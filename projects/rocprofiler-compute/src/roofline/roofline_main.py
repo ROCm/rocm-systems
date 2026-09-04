@@ -280,6 +280,7 @@ class Roofline:
             "traceIndex": len(fig.data) - 1,
             "label": ceiling_name,
             "peakPerf": peak_perf,
+            "dtype": dtype,
         })
         fig.add_trace(
             go.Scatter(
@@ -296,6 +297,7 @@ class Roofline:
         view_model.compute_overlay_traces.append({
             "traceIndex": len(fig.data) - 1,
             "peakPerf": peak_perf,
+            "sourceTraceIndex": view_model.compute_traces[-1]["traceIndex"],
         })
 
     def _figure_compute_peaks(self, ops_flops: str) -> list[tuple[str, float]]:
@@ -482,13 +484,14 @@ class Roofline:
 
     @demarcate
     def construct_plotly_figures(
-        self, ai_data: dict[str, Any]
+        self, ai_data: dict[str, Any], datatypes: Optional[list[str]] = None
     ) -> tuple[Optional[go.Figure], Optional[go.Figure], str, str]:
         """
         Build raw Plotly figure objects from pre-computed AI data.
 
         Returns (ops_figure, flops_figure, ops_dt_list, flops_dt_list).
-        No I/O or HTML wrapping.
+        No I/O or HTML wrapping. When datatypes is None, use every datatype
+        supported by the profiled GPU architecture.
         """
         self.roof_setup()
         self.__view_models = {}
@@ -508,8 +511,13 @@ class Roofline:
 
         figures: dict[str, Optional[go.Figure]] = {"OP": None, "FLOP": None}
         datatype_lists: dict[str, str] = {"OP": "", "FLOP": ""}
+        selected_datatypes = (
+            datatypes
+            if datatypes is not None
+            else list(SUPPORTED_DATATYPES.get(self.__mspec.gpu_arch, {}))
+        )
 
-        for dt in self.__run_parameters.get("roofline_data_type", []):
+        for dt in selected_datatypes:
             if not self._datatype_supported(dt):
                 console_error(
                     f"{dt} is not a supported datatype for roofline profiling on "
@@ -545,7 +553,7 @@ class Roofline:
         ops_dt_list: str,
         flops_dt_list: str,
     ) -> None:
-        """Write Plotly figures to standalone HTML files on disk."""
+        """Write one precision-selectable Plotly HTML document to disk."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
         if self.__run_parameters.get("kernel_filter", False):
@@ -560,29 +568,72 @@ class Roofline:
                     kernel_list += "_" + name
 
         workload_dir = self.__run_parameters["workload_dir"]
-        prefix = f"{workload_dir}/empirRoof_gpu-{dev_id}"
-
-        wrote = False
-        for ops_flops, figure, dt_list in (
-            ("OP", ops_figure, ops_dt_list),
-            ("FLOP", flops_figure, flops_dt_list),
-        ):
-            if not figure:
-                continue
+        figure, view_model = self._combined_html_figure(ops_figure, flops_figure)
+        if figure is not None:
             document = build_interactive_document(
                 figure,
-                self.__view_models.get(ops_flops, RooflineViewModel()),
-                title=(
-                    f"Empirical Roofline Analysis "
-                    f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
-                ),
+                view_model,
+                title="Empirical Roofline Analysis",
             )
-            path = f"{prefix}{dt_list}{kernel_list}.html"
+            path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
-            wrote = True
-
-        if wrote:
             console_log("roofline", "Roofline HTML files saved.")
+
+    def _combined_html_figure(
+        self,
+        ops_figure: Optional[go.Figure],
+        flops_figure: Optional[go.Figure],
+    ) -> tuple[Optional[go.Figure], RooflineViewModel]:
+        """Combine selected floating-point and integer compute ceilings into one
+        standalone figure. Bandwidth roofs and kernel points are shared, so the
+        floating-point figure provides those traces whenever it is available.
+        """
+        source_key = "FLOP" if flops_figure is not None else "OP"
+        source_figure = flops_figure or ops_figure
+        if source_figure is None:
+            return None, RooflineViewModel()
+
+        figure = go.Figure(source_figure)
+        source_model = self.__view_models.get(source_key, RooflineViewModel())
+        view_model = RooflineViewModel(
+            peaks=list(source_model.peaks),
+            peak_colors=dict(source_model.peak_colors),
+            default_peak=source_model.default_peak,
+            kernels=list(source_model.kernels),
+            kernel_trace_indices=list(source_model.kernel_trace_indices),
+            roofline_traces=list(source_model.roofline_traces),
+            compute_traces=list(source_model.compute_traces),
+            compute_overlay_traces=list(source_model.compute_overlay_traces),
+        )
+
+        if source_key == "FLOP" and ops_figure is not None:
+            ops_model = self.__view_models.get("OP", RooflineViewModel())
+            overlay_by_source = {
+                overlay["sourceTraceIndex"]: overlay
+                for overlay in ops_model.compute_overlay_traces
+            }
+            for trace in ops_model.compute_traces:
+                original_index = trace["traceIndex"]
+                new_index = len(figure.data)
+                figure.add_trace(ops_figure.data[original_index])
+                merged_trace = dict(trace)
+                merged_trace["traceIndex"] = new_index
+                view_model.compute_traces.append(merged_trace)
+
+                overlay = overlay_by_source.get(original_index)
+                if overlay:
+                    overlay_index = len(figure.data)
+                    figure.add_trace(ops_figure.data[overlay["traceIndex"]])
+                    view_model.compute_overlay_traces.append({
+                        "traceIndex": overlay_index,
+                        "peakPerf": overlay["peakPerf"],
+                        "sourceTraceIndex": new_index,
+                    })
+
+        view_model.precisions = list(
+            dict.fromkeys(trace["dtype"] for trace in view_model.compute_traces)
+        )
+        return figure, view_model
 
     @staticmethod
     def generate_html_section(
