@@ -199,7 +199,7 @@ jobs:
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ctest -V -L "system" --parallel
+              ctest -V -L "system"
             '
       - name: Stress tests for hipFile targeting the AMD platform
         run: |
@@ -208,7 +208,7 @@ jobs:
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ctest -V -L "stress" --parallel
+              ctest -V -L "stress"
             '
       - name: hipFile fallback/POSIX IO test using aiscp
         run: |
