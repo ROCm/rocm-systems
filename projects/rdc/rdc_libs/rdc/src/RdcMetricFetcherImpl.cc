@@ -176,15 +176,16 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
     return;
   }
 
+  // value->status carries an rdc_status_t, as in every other fetch path.
   auto gpu_block = field_to_block_(field_id);
   if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
-    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    value->status = Smi2RdcError(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
   }
 
   err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
   if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_INFO, "Error in ecc status [" << gpu_block << "]:" << err);
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
@@ -192,11 +193,11 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Error in ecc count [" << gpu_block << "]:" << err);
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  value->status = RDC_ST_OK;
   value->type = INTEGER;
   if (is_correctable) {
     value->value.l_int = ec.correctable_count;
