@@ -68,8 +68,7 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
 
   // Inputs: every value below is exactly representable in FP4 E2M1, so no
   // rounding occurs in either direction.
-  std::vector<float> in = {0.0f,  0.5f, -0.5f, 1.0f, -1.0f,
-                           1.5f, -1.5f,  2.0f, 3.0f,  4.0f};
+  std::vector<float> in = {0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, 3.0f, 4.0f};
   const size_t size = in.size();
 
   float *d_in, *d_out;
@@ -111,3 +110,56 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
 
   HIP_CHECK(hipModuleUnload(module));
 }
+
+#if HT_AMD
+TEST_CASE("Unit_hiprtc_check_hide_op_flag") {
+  constexpr const char* source = R"(
+extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t size) {
+  size_t i = threadIdx.x;
+  // do nothing
+}
+)";
+
+  // We basically check for static archs.
+  // Just want to make sure operators are correctly visible for different archs
+  std::vector<std::string> archs{"gfx950", "gfx1250"};
+
+  for (const auto& arch : archs) {
+    std::string sarg = std::string("--offload-arch=") + arch;
+    CAPTURE(sarg);
+
+    // Not constexpr since we need pointers
+    std::array all_options{
+        "-D__HIP_NO_HALF_CONVERSIONS__=1",         "-D__HIP_NO_HALF_OPERATORS__=1",
+        "-D__HIP_NO_FP4_CONVERSION_OPERATORS__=1", "-D__HIP_NO_FP4_CONVERSIONS__=1",
+        "-D__HIP_NO_FP6_CONVERSIONS__=1",          "-D__HIP_NO_FP6_CONVERSION_OPERATORS__=1"};
+
+    constexpr unsigned N = all_options.size();
+
+    for (unsigned mask = 0; mask < (1u << N); ++mask) {
+      std::vector<const char*> opts{sarg.c_str()};
+      // Basically generate combinations of the options to mix and match it
+      for (unsigned i = 0; i < N; ++i) {
+        if (mask & (1u << i)) {
+          opts.push_back(all_options[i]);
+        }
+      }
+
+      CAPTURE(opts);
+
+      hiprtcProgram prog{};
+      HIPRTC_CHECK(hiprtcCreateProgram(&prog, source, "kernel.cu", 0, nullptr, nullptr));
+      hiprtcResult compileResult{hiprtcCompileProgram(prog, opts.size(), opts.data())};
+      size_t logSize{};
+      HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
+      if (logSize) {
+        std::string log(logSize, '\0');
+        HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+        std::cout << log << '\n';
+      }
+      REQUIRE(compileResult == HIPRTC_SUCCESS);
+      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+    }
+  }
+}
+#endif
