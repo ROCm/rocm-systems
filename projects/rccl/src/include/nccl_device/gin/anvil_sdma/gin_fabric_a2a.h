@@ -17,7 +17,7 @@ namespace gin::fabric {
 using dda::common::kDdaLLMaxBytes;
 using dda::common::kDdaLLA2ASlotStridePkts;
 using dda::common::LLPacket16;
-using dda::common::bf16;
+using ::bf16;
 
 constexpr int kDdaMaxNranks = 72;
 constexpr size_t kDdaLLA2APktsPerBlock = 256;
