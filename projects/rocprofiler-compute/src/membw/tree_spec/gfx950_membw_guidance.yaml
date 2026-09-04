@@ -2,6 +2,11 @@
 #
 # Guidance text rendered for active bottleneck leaf nodes.
 # Placeholders {threshold:KEY} and {metric:KEY} are replaced at render time.
+#
+# Impact lines are sourced from metric descriptions and counter names in
+# gfx950/3000_mem_bw.yaml. Catch-all nodes describe the pipeline outcome:
+# parent metric exceeds threshold but no specific child does.
+# Lines marked [inferred] go beyond what the metric description states.
 
 guidance_templates:
 
@@ -31,6 +36,8 @@ guidance_templates:
       Measured  : {metric:L1 Cache - TCP stalled by L2}% (threshold: {threshold:stall_pct_high}%)
       Impact    : L2 backpressure -- may cascade from EA/HBM bandwidth saturation
 
+  # Catch-all: aggregated TCP stall >= threshold but no child (UTCL1/UTCL2/TD/L2)
+  # individually exceeds it. Impact given is generic advice.
   gl1_tcp_other_stall: |
     [GL1] TCP stall detected (not attributed to a specific sub-component)
       Condition : TA stalled by TCP >= {threshold:stall_pct_high}% with no specific child active
@@ -63,6 +70,8 @@ guidance_templates:
       Measured  : {metric:L2 Memory BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
       Impact    : L2 stalled waiting for HBM write credits -- memory write bandwidth saturated
 
+  # Catch-all: combined credit stall >= threshold but neither read nor write
+  # individually exceeds it.
   gl2_mem_bw_other: |
     [GL2] HBM bandwidth bound (balanced read/write)
       Condition : Combined HBM credit stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant
@@ -107,6 +116,8 @@ guidance_templates:
       Measured  : {metric:EA HBM BW Bound - Write Credit Pressure}% (threshold: {threshold:stall_pct_high}%)
       Impact    : EA write path saturated by HBM bandwidth
 
+  # Catch-all: combined EA HBM stall >= threshold but neither read nor write
+  # individually exceeds it.
   ea_hbm_other: |
     [EA] HBM bandwidth bound (balanced read/write)
       Condition : Combined EA HBM stall >= {threshold:stall_pct_high}% with neither read nor write individually dominant

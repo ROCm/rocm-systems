@@ -6,7 +6,7 @@
 import re
 from typing import Optional
 
-_PLACEHOLDER_RE = re.compile(r"\{(threshold|metric):([^}]+)\}")
+_METRIC_THRESHOLD_RE = re.compile(r"\{(threshold|metric):([^}]+)\}")
 
 
 def render_guidance_blocks(
@@ -22,8 +22,12 @@ def render_guidance_blocks(
         template = guidance_templates.get(guidance_id)
         if template is None:
             continue
-        rendered = _render_template(template, thresholds, metric_values)
-        blocks.append(rendered.rstrip())
+        try:
+            rendered = _render_template(template, thresholds, metric_values)
+            blocks.append(rendered.rstrip())
+        except Exception as exc:  # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
+            blocks.append(f"[{guidance_id}] template error: {err}")
 
     overflow = sum(1 for gid in guidance_ids[max_blocks:] if gid in guidance_templates)
     if overflow > 0:
@@ -49,15 +53,13 @@ def _render_template(
             return _format_threshold_value(value)
         return _format_metric_value(metric_values.get(key))
 
-    return _PLACEHOLDER_RE.sub(_replace_match, template)
+    return _METRIC_THRESHOLD_RE.sub(_replace_match, template)
 
 
 def _format_threshold_value(value: float) -> str:
     """Format a threshold value, stripping trailing zeros."""
     formatted = f"{value:.1f}"
-    if "." in formatted:
-        formatted = formatted.rstrip("0").rstrip(".")
-    return formatted
+    return formatted.rstrip("0").rstrip(".")
 
 
 def _format_metric_value(value: Optional[float]) -> str:

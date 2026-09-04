@@ -11,6 +11,7 @@ import common
 import pytest
 import yaml
 
+from membw.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from utils import mem_chart_gfx9
 from utils.mem_chart_common import strip_ansi
 
@@ -280,3 +281,155 @@ class TestPanelYamlGfx9:
             f"{architecture}: expected {expected_na_count} N/A, "
             f"got {output.count('N/A')}"
         )
+
+
+def make_node(
+    node_id: str,
+    label: str,
+    level: str,
+    state: str,
+    value: float = 18.7,
+    children: tuple = (),
+) -> BottleneckNode:
+    supporting = ()
+    if value is not None:
+        supporting = (
+            SupportingMetric(
+                key=f"test_{node_id}",
+                value=value,
+                unit="Percent",
+                display=f"{value:.1f}%",
+            ),
+        )
+    return BottleneckNode(
+        id=node_id,
+        label=label,
+        level=level,
+        state=state,
+        supporting=supporting,
+        children=children,
+    )
+
+
+def make_result(
+    nodes: tuple,
+    guidance_blocks: tuple = (),
+) -> MemBwAnalysisResult:
+    return MemBwAnalysisResult(
+        arch="gfx950",
+        availability="full",
+        availability_reason=None,
+        nodes=nodes,
+        guidance_blocks=guidance_blocks,
+    )
+
+
+def render_gfx950_with_membw(membw):
+    return strip_ansi(
+        mem_chart_gfx9.plot_mem_chart(
+            dict(GFX9_SAMPLE_METRICS),
+            chart_title=DEFAULT_TITLE,
+            gpu_arch="gfx950",
+            membw=membw,
+        )
+    )
+
+
+class TestMembwAnnotations:
+    def test_utcl1_stall_shows_annotation(self):
+        child = make_node(
+            "gl1_tcp_utcl1_stall",
+            "TCP<-UTCL1",
+            "GL1",
+            "active",
+            value=18.7,
+        )
+        parent = make_node(
+            "gl1_tcp_stall",
+            "TCP stall",
+            "GL1",
+            "active",
+            value=25.0,
+            children=(child,),
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(parent,)))
+        assert "[!] TCP<-UTCL1" in output
+        assert "18.7%" in output
+
+    def test_gl2_stall_shows_annotation(self):
+        gl2 = make_node(
+            "gl2_cache_efficiency",
+            "L2 low hit rate",
+            "GL2",
+            "active",
+            value=33.6,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(gl2,)))
+        assert "[!] L2 low hit" in output
+
+    def test_ea_stall_shows_annotation_in_data_fabric(self):
+        ea = make_node(
+            "ea_write_backpressure",
+            "EA write stall",
+            "EA",
+            "active",
+            value=10.7,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(ea,)))
+        assert "[!] EA write stall" in output
+
+    def test_no_bottlenecks_no_stall_rows(self):
+        inactive = make_node(
+            "gl1_tcp_stall",
+            "TCP stall",
+            "GL1",
+            "inactive",
+            value=5.0,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
+        assert "[!]" not in output
+        assert "Stall" not in output
+
+    def test_without_membw_matches_baseline(self):
+        baseline = strip_ansi(
+            mem_chart_gfx9.plot_mem_chart(
+                dict(GFX9_SAMPLE_METRICS),
+                chart_title=DEFAULT_TITLE,
+                gpu_arch="gfx950",
+            )
+        )
+        with_none = render_gfx950_with_membw(None)
+        assert baseline == with_none
+
+    def test_stall_prefix_present_without_color(self):
+        ea = make_node(
+            "ea_hbm_read",
+            "EA HBM read",
+            "EA",
+            "active",
+            value=15.0,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(ea,)))
+        assert "[!] EA HBM read" in output
+
+    def test_legend_includes_stall_when_active(self):
+        gl2 = make_node(
+            "gl2_back_pressure",
+            "L2 back pressure",
+            "GL2",
+            "active",
+            value=12.0,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(gl2,)))
+        assert "Stall" in output
+
+    def test_legend_excludes_stall_when_no_bottlenecks(self):
+        inactive = make_node(
+            "gl2_back_pressure",
+            "L2 back pressure",
+            "GL2",
+            "inactive",
+            value=5.0,
+        )
+        output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
+        assert "Stall" not in output
