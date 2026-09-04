@@ -870,6 +870,7 @@ Before adding or modifying tests, read the existing test modules to understand t
 - Integration test modules are named after the user-facing feature or workflow they exercise end-to-end (e.g. `test_roofline_workflow.py`, `test_profile_export.py`), not after a single source file. The name should tell a reader what scenario is being validated without opening the file.
 - Prefer `monkeypatch` (pytest fixture) over `unittest.mock.Mock` / `MagicMock` — `monkeypatch` integrates with pytest's fixture lifecycle and is the dominant pattern in this project. Reserve `Mock` / `MagicMock` for cases that genuinely need call tracking or attribute auto-creation.
 - Use `types.SimpleNamespace` or `argparse.Namespace` for plain attribute bags instead of mock objects.
+- Define module-level helpers, constants, and fixtures at the top of a test module, above the first test. Do not interleave them between test functions, even when a helper serves only one section.
 
 ## Key Principles Summary
 

@@ -16,9 +16,99 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils import schema
+from utils.specs import MachineSpecsCDNA
 from utils.tty import show_all
 
 MODULE = "rocprof_compute_analyze.analysis_base"
+
+# The args every analyzer needs; make_analyzer() overrides per test.
+ANALYZER_ARG_DEFAULTS = {
+    "output_format": "stdout",
+    "output_name": None,
+    "path": [],
+    "gpu_kernel": None,
+    "gpu_id": None,
+    "gpu_dispatch_id": None,
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def make_analyzer(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stub_initalize_runs: bool = True,
+    **arg_overrides,
+) -> OmniAnalyze_Base:
+    """Return an analyzer built from ANALYZER_ARG_DEFAULTS plus arg_overrides.
+
+    pre_processing() normally walks args.path to load sysinfo.csv and join
+    counter files. The default empty path list plus a stubbed initalize_runs()
+    reduces it to the --output-format dispatch. Pass stub_initalize_runs=False
+    with a path to exercise the real run loop.
+    """
+    if stub_initalize_runs:
+        monkeypatch.setattr(
+            OmniAnalyze_Base, "initalize_runs", lambda self: OrderedDict()
+        )
+
+    args = argparse.Namespace(**{**ANALYZER_ARG_DEFAULTS, **arg_overrides})
+    analyzer = OmniAnalyze_Base(args, {})
+    analyzer._profiling_config = {}
+    return analyzer
+
+
+def render_report(analyzer: OmniAnalyze_Base, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Write one rendered panel to analyzer._output via the real tty renderer."""
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_args, **_kwargs: metric_dataframe
+    )
+
+    show_all(
+        argparse.Namespace(
+            decimal=2,
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=True,
+            normal_unit="per_wave",
+            path=[["fixture"]],
+            time_unit="ns",
+            view=None,
+        ),
+        runs,
+        arch_configs,
+        analyzer._output,
+        profiling_config={"filter_blocks": []},
+    )
 
 
 def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) -> None:
@@ -201,87 +291,14 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 # ---------------------------------------------------------------------------
 
 
-def make_analyzer(
-    monkeypatch: pytest.MonkeyPatch,
-    output_format: str,
-    output_name: str = None,
-) -> OmniAnalyze_Base:
-    """Return an analyzer wired for pre_processing() with no workload on disk.
-
-    pre_processing() normally walks args.path to load sysinfo.csv and join
-    counter files. An empty path list plus a stubbed initalize_runs() reduces
-    it to the --output-format dispatch these tests are about.
-    """
-    monkeypatch.setattr(OmniAnalyze_Base, "initalize_runs", lambda self: OrderedDict())
-
-    args = argparse.Namespace(
-        output_format=output_format,
-        output_name=output_name,
-        path=[],
-        gpu_kernel=None,
-        gpu_id=None,
-        gpu_dispatch_id=None,
-    )
-    analyzer = OmniAnalyze_Base(args, {})
-    analyzer._profiling_config = {}
-    return analyzer
-
-
-def render_report(analyzer: OmniAnalyze_Base, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Write one rendered panel to analyzer._output via the real tty renderer."""
-    metric_dataframe = pd.DataFrame({
-        "Metric": ["EA read request fraction - HBM"],
-        "Avg": [50.0],
-        "Unit": ["Percent"],
-    })
-    table_config = {
-        "id": 3013,
-        "title": "EA Interface",
-        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
-    }
-    arch_configs = SimpleNamespace(
-        panel_configs={
-            3000: {
-                "id": 3000,
-                "title": "Memory Bandwidth Analysis",
-                "data source": [{"metric_table": table_config}],
-            }
-        }
-    )
-    runs = {
-        "fixture": SimpleNamespace(
-            dfs={3013: metric_dataframe},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-        )
-    }
-    monkeypatch.setattr(
-        "utils.tty.process_table_data", lambda *_args, **_kwargs: metric_dataframe
-    )
-
-    show_all(
-        argparse.Namespace(
-            decimal=2,
-            filter_metrics=None,
-            include_cols=None,
-            membw_analysis=True,
-            normal_unit="per_wave",
-            path=[["fixture"]],
-            time_unit="ns",
-            view=None,
-        ),
-        runs,
-        arch_configs,
-        analyzer._output,
-        profiling_config={"filter_blocks": []},
-    )
-
-
 def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
     """--output-format txt with --output-name writes <name>.txt in the cwd."""
     mocks = common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    analyzer = make_analyzer(
+        monkeypatch, output_format="txt", output_name="analysis_report"
+    )
     analyzer.pre_processing()
 
     try:
@@ -300,7 +317,7 @@ def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = make_analyzer(monkeypatch, "txt")
+    analyzer = make_analyzer(monkeypatch, output_format="txt")
     analyzer.pre_processing()
 
     try:
@@ -316,7 +333,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = make_analyzer(monkeypatch, "stdout")
+    analyzer = make_analyzer(monkeypatch, output_format="stdout")
     analyzer.pre_processing()
 
     assert analyzer._output is sys.stdout
@@ -328,7 +345,9 @@ def test_txt_output_matches_stdout_output(tmp_path, monkeypatch, capsys) -> None
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    txt_analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    txt_analyzer = make_analyzer(
+        monkeypatch, output_format="txt", output_name="analysis_report"
+    )
     txt_analyzer.pre_processing()
     try:
         render_report(txt_analyzer, monkeypatch)
@@ -338,7 +357,7 @@ def test_txt_output_matches_stdout_output(tmp_path, monkeypatch, capsys) -> None
     finally:
         txt_analyzer._output.close()
 
-    stdout_analyzer = make_analyzer(monkeypatch, "stdout")
+    stdout_analyzer = make_analyzer(monkeypatch, output_format="stdout")
     stdout_analyzer.pre_processing()
     capsys.readouterr()
     render_report(stdout_analyzer, monkeypatch)
@@ -360,9 +379,75 @@ def test_pre_processing_txt_unwritable_directory_raises(tmp_path, monkeypatch) -
     read_only.chmod(0o555)
     monkeypatch.chdir(read_only)
 
-    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    analyzer = make_analyzer(
+        monkeypatch, output_format="txt", output_name="analysis_report"
+    )
     try:
         with pytest.raises(PermissionError):
             analyzer.pre_processing()
     finally:
         read_only.chmod(0o755)
+
+
+# ---------------------------------------------------------------------------
+# initalize_runs --specs-correction handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "specs_correction, expected",
+    [
+        (None, {"num_xcd": 8, "cu_per_gpu": 256}),
+        ("num_xcd:4,cu_per_gpu:64", {"num_xcd": "4", "cu_per_gpu": "64"}),
+    ],
+    ids=["recorded_sysinfo", "corrected_specs"],
+)
+def test_initalize_runs_specs_correction(
+    tmp_path, monkeypatch, specs_correction, expected
+) -> None:
+    """--specs-correction replaces the specs analysis runs on.
+
+    Corrected values stay strings because the correction assigns them onto the
+    spec object, while uncorrected ones keep the dtype read_csv inferred.
+    """
+    sysinfo = {
+        "ip_blocks": "SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF|roofline",
+        "version": "3",
+        "gpu_model": "MI350",
+        "gpu_arch": "gfx950",
+        "cu_per_gpu": "256",
+        "num_xcd": "8",
+    }
+    # The spec is trimmed, so silence the "missing specs" warnings the
+    # spec-to-frame conversion emits for the fields it leaves unset.
+    common.patch_console(monkeypatch, "utils.specs", "warning")
+    pd.DataFrame([sysinfo]).to_csv(tmp_path / "sysinfo.csv", index=False)
+
+    analyzer = make_analyzer(
+        monkeypatch,
+        stub_initalize_runs=False,
+        path=[[str(tmp_path)]],
+        specs_correction=specs_correction,
+        no_roof=True,
+        normal_unit="per_kernel",
+        list_stats=False,
+        filter_metrics=None,
+        tui=False,
+        config_dir=str(tmp_path),
+    )
+    # Panel config generation would load the real arch YAML, which these tests
+    # are not about.
+    monkeypatch.setattr(analyzer, "generate_configs", lambda *a, **kw: {})
+    analyzer._arch_configs = {sysinfo["gpu_arch"]: schema.ArchConfig()}
+    analyzer.set_soc({
+        sysinfo["gpu_arch"]: SimpleNamespace(_mspec=MachineSpecsCDNA(**sysinfo))
+    })
+
+    workload = analyzer.initalize_runs()[str(tmp_path)]
+
+    assert workload.sys_info["num_xcd"].item() == expected["num_xcd"]
+    assert workload.sys_info["cu_per_gpu"].item() == expected["cu_per_gpu"]
+    # Uncorrected specs come through untouched, including the ip_blocks entry
+    # initalize_runs() reads right after applying the correction.
+    assert workload.sys_info["gpu_arch"].item() == "gfx950"
+    assert workload.avail_ips == sysinfo["ip_blocks"].split("|")

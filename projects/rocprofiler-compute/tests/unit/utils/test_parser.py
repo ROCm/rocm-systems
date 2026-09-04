@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """Unit tests for utils.parser.build_dfs, apply_filters, apply_kernel_filter,
-load_pc_sampling_data, utils_analysis filter resolution, and
+load_pc_sampling_data, correct_sys_info, utils_analysis filter resolution, and
 utils_common.expand_placeholder_ranges."""
 
 from collections import OrderedDict
@@ -19,8 +19,10 @@ from utils.parser import (
     apply_filters,
     apply_kernel_filter,
     build_dfs,
+    correct_sys_info,
     load_pc_sampling_data,
 )
+from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
@@ -70,6 +72,24 @@ def _make_arch_config(panels: list[tuple[int, dict[str, Any]]]) -> schema.ArchCo
 
 def _sys_info() -> dict[str, Any]:
     return {"total_l2_chan": 4}
+
+
+def make_mi350_machine_specs(monkeypatch: pytest.MonkeyPatch) -> MachineSpecsCDNA:
+    """MI350 (gfx950) specs, trimmed to the fields the correction tests assert.
+
+    get_class_members() warns once per spec left unset, so the warning is
+    silenced here instead of populating every field to keep the output quiet.
+    """
+    common.patch_console(monkeypatch, "utils.specs", "warning")
+    return MachineSpecsCDNA(
+        command="./tests/vcopy -n 1048576 -b 256 -i 3",
+        ip_blocks="SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF|roofline",
+        gpu_model="MI350",
+        gpu_arch="gfx950",
+        cu_per_gpu="256",
+        total_l2_chan="128",
+        num_xcd="8",
+    )
 
 
 # =============================================================================
@@ -941,3 +961,86 @@ def test_display_dedup_across_dataframes():
     matched = get_matched_torch_operators_for_display(torch_operators, ["all"])
     op_names = [name for name, _ in matched]
     assert op_names.count(H3) == 1
+
+
+# =============================================================================
+# Tests for correct_sys_info (analyze --specs-correction)
+# =============================================================================
+
+
+class TestCorrectSysInfo:
+    """--specs-correction parsing, spec overrides, and error handling."""
+
+    def test_single_pair_overrides_spec(self, monkeypatch) -> None:
+        """One name:value pair updates the spec object and the returned frame."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4")
+
+        assert mspec.num_xcd == "4"
+        assert len(sys_info) == 1
+        assert sys_info["num_xcd"].item() == "4"
+
+    def test_multiple_pairs_override_every_spec(self, monkeypatch) -> None:
+        """Comma-separated pairs are all applied."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_surrounding_whitespace_is_stripped(self, monkeypatch) -> None:
+        """Spaces around names and values do not break the override."""
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(monkeypatch), " num_xcd : 4 , cu_per_gpu:64 "
+        )
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "64"
+
+    def test_untouched_specs_are_preserved(self, monkeypatch) -> None:
+        """
+        Specs that were not corrected survive the rebuild of sys_info.
+
+        analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
+        after the correction, so dropping columns here would break analysis.
+        """
+        sys_info = correct_sys_info(make_mi350_machine_specs(monkeypatch), "num_xcd:4")
+
+        assert sys_info["ip_blocks"].item().startswith("SQ|LDS|")
+        assert sys_info["gpu_arch"].item() == "gfx950"
+        assert sys_info["gpu_model"].item() == "MI350"
+        assert sys_info["total_l2_chan"].item() == "128"
+
+    def test_fragment_without_separator_is_ignored(self, monkeypatch) -> None:
+        """A fragment with no ':' is skipped; valid pairs still apply."""
+        mspec = make_mi350_machine_specs(monkeypatch)
+        sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
+
+        assert sys_info["num_xcd"].item() == "4"
+        assert sys_info["cu_per_gpu"].item() == "256"
+
+    def test_value_keeps_everything_after_the_first_colon(self, monkeypatch) -> None:
+        """Only the first ':' separates name from value."""
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(monkeypatch), "command:./vcopy -n 1:2"
+        )
+
+        assert sys_info["command"].item() == "./vcopy -n 1:2"
+
+    def test_unknown_spec_name_errors_and_exits(self, monkeypatch) -> None:
+        """An unknown spec name reports the name and aborts."""
+        error_calls = []
+
+        def record_and_exit(*args, **_kwargs):
+            error_calls.append(args)
+            raise SystemExit(1)
+
+        common.patch_console(
+            monkeypatch, "utils.parser", "error", error=record_and_exit
+        )
+
+        with pytest.raises(SystemExit):
+            correct_sys_info(make_mi350_machine_specs(monkeypatch), "not_a_spec:1")
+
+        assert "not_a_spec" in str(error_calls[0])
+        assert "--specs" in str(error_calls[0])
