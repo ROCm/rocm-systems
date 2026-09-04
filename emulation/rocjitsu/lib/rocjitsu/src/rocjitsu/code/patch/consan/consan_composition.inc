@@ -597,7 +597,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                 return false;
               }
             })) +
-                                        static_cast<uint32_t>(result.staged_text_rewrites.size());
+                                        static_cast<uint32_t>(result.staged_text_fragments.size());
         if (access_patches >= max_patches && redundant_options.max_patches_is_expert_limit) {
           ConSanOptions flat_options = redundant_options;
           flat_options.max_patches = 0u;
@@ -629,7 +629,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   else if (!has_perturbation && (options.probe_nop || options.probe_trampoline_nop))
     try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
 
-  if (!result.staged_text_rewrites.empty() && result.errors.empty()) {
+  if (!result.staged_text_fragments.empty() && result.errors.empty()) {
     const std::string_view subject = options.probe_lds_check_trap && options.probe_flat_check_trap
                                          ? "SuperCollider access proof"
                                      : options.probe_lds_check_trap ? "LDS check/trap proof"

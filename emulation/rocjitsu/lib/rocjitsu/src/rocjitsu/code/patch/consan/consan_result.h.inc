@@ -221,13 +221,29 @@ struct ConSanMutationOutcome {
   bool operator==(const ConSanMutationOutcome &) const = default;
 };
 
-/// One access lowering awaiting the object-wide text relocation transaction.
-/// Semantic intent and ABI planning remain site-local; only placement is
-/// deliberately deferred so heterogeneous SuperCollider probes share one
-/// relocated executable image.
-struct ConSanStagedTextRewrite {
+/// How one position-independent fragment composes at its source instruction.
+enum class ConSanTextFragmentKind : uint8_t {
+  /// Execute client words before the translator-owned source instruction.
+  Prefix,
+  /// Wrap the source instruction or exclusive replacement with before/after words.
+  Around,
+  /// Supply the complete semantics of the owned source span.
+  Replacement,
+};
+
+/// One lowering fragment awaiting the object-wide text relocation transaction.
+///
+/// Fragments retain semantic source coordinates and owner scope but no destination geometry.
+/// Staging order defines nesting: earlier Around fragments are outermost, so access followed by
+/// atomic staging produces access-before, atomic-before, guest, atomic-after, access-after.
+struct ConSanTextFragment {
+  /// Transaction-local stable identity assigned when the fragment is staged.
+  uint64_t id = 0;
+  ConSanTextFragmentKind kind = ConSanTextFragmentKind::Replacement;
   std::vector<ConSanProbeIntentId> intent_ids;
-  std::vector<uint32_t> words;
+  std::vector<uint32_t> before_words;
+  std::vector<uint32_t> replacement_words;
+  std::vector<uint32_t> after_words;
   ConSanPatchInfo patch;
 };
 
@@ -266,7 +282,7 @@ struct ConSanTransformArtifacts {
   /// Optional image-level executable relocation enclosing active bodies.
   std::optional<ConSanTextRelocationProof> text_relocation;
   /// Site-local programs awaiting one shared executable relocation.
-  std::vector<ConSanStagedTextRewrite> staged_text_rewrites;
+  std::vector<ConSanTextFragment> staged_text_fragments;
   /// Complete validated code-object replacement, or empty when none is installable.
   std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
@@ -301,7 +317,7 @@ struct ConSanTransformArtifacts {
     replacement.clear();
     patches.clear();
     text_relocation.reset();
-    staged_text_rewrites.clear();
+    staged_text_fragments.clear();
     coverage_ledger.discard_instrumented_lowerings();
   }
   /// Publish the bytes, semantic commits, and patch proof of one completed

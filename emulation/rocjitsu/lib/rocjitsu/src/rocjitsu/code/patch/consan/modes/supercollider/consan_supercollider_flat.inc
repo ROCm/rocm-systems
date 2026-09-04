@@ -603,12 +603,16 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
       }
     }
   }
-  std::vector<ConSanStagedTextRewrite> rewrites;
-  rewrites.reserve(planned_patches.size());
+  std::vector<ConSanTextFragment> fragments;
+  fragments.reserve(planned_patches.size());
   for (PlannedFlatCheckTrapPatch &planned : planned_patches) {
-    rewrites.push_back({
+    fragments.push_back({
+        .id = 0,
+        .kind = ConSanTextFragmentKind::Replacement,
         .intent_ids = std::move(planned.intent_ids),
-        .words = std::move(planned.words),
+        .before_words = {},
+        .replacement_words = std::move(planned.words),
+        .after_words = {},
         .patch = std::move(planned.info),
     });
   }
@@ -618,7 +622,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object,
                                    {.maximum_ordinary_vgpr_count = REGISTER_SET_MAX_VGPRS,
                                     .inventory_proves_empty_accumulator_bank = false,
                                     .maximum_group_segment_bytes = std::nullopt},
-                                   "ConSan flat check/trap proof", std::move(rewrites), result);
+                                   "ConSan flat check/trap proof", std::move(fragments), result);
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object,

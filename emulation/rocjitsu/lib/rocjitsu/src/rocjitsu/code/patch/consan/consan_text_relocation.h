@@ -21,7 +21,7 @@ namespace rocjitsu {
 stage_consan_text_rewrites(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                            const ConSanDescriptorMutationBatch &descriptor_mutations,
                            const ConSanDescriptorMutationPolicy &descriptor_policy,
-                           std::string_view subject, std::vector<ConSanStagedTextRewrite> rewrites,
+                           std::string_view subject, std::vector<ConSanTextFragment> fragments,
                            ConSanTransformArtifacts &result);
 
 /// Commit all staged access programs through one object-wide relocation.
