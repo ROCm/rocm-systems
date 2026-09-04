@@ -297,16 +297,24 @@ ncclResult_t ncclStreamWaitStream(hipStream_t /*a*/,
     return ncclSuccess;
 }
 
+ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI)
+{
+    if (isXGMI) *isXGMI = false;
+    return ncclSuccess;
+}
+std::function<ncclResult_t(int, int, bool*)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
+int g_ncclTopoGetLinkTypeCalls = 0;
+
 ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    /*cudaDev1*/,
-                                 int                    /*cudaDev2*/,
+                                 int                    cudaDev1,
+                                 int                    cudaDev2,
                                  bool*                  isXGMI,
                                  int                    /*maxInter*/,
                                  int                    /*nInter*/,
                                  int*                   /*inter*/)
 {
-    if (isXGMI) *isXGMI = false;
-    return ncclSuccess;
+    g_ncclTopoGetLinkTypeCalls++;
+    return g_ncclTopoGetLinkType(cudaDev1, cudaDev2, isXGMI);
 }
 
 // ---------------------------------------------------------------------------
@@ -385,4 +393,6 @@ void ResetNcclFakes()
     g_loadParam                    = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
+    g_ncclTopoGetLinkTypeCalls     = 0;
 }

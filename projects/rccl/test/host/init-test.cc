@@ -17,6 +17,7 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -67,10 +68,10 @@ static ncclResult_t g_tunerFinalizeResult = ncclSuccess;
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
-std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
+static std::function<void(void*)> g_microFree = [](void* p) { ::free(p); };
 static void MicroFree(void* p) { g_microFree(p); }
 
-std::function<int(unsigned, unsigned*, unsigned*, unsigned*, unsigned*)> g_microCpuid =
+static std::function<int(unsigned, unsigned*, unsigned*, unsigned*, unsigned*)> g_microCpuid =
     [](unsigned leaf, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
       return __get_cpuid(leaf, a, b, c, d);
     };
@@ -78,7 +79,7 @@ static int MicroCpuid(unsigned leaf, unsigned* a, unsigned* b, unsigned* c, unsi
   return g_microCpuid(leaf, a, b, c, d);
 }
 
-std::function<ncclResult_t(const char*, const char*, char*, int)> g_microTopoGetStrFromSys =
+static std::function<ncclResult_t(const char*, const char*, char*, int)> g_microTopoGetStrFromSys =
     [](const char* path, const char* file, char* out, int maxLen) {
       return ncclOsTopoGetStrFromSys(path, file, out, maxLen);
     };
@@ -86,7 +87,7 @@ static ncclResult_t MicroTopoGetStrFromSys(const char* path, const char* file, c
   return g_microTopoGetStrFromSys(path, file, out, maxLen);
 }
 
-std::function<bool(const char*)> g_microIommuPassthroughOk = [](const char* c) {
+static std::function<bool(const char*)> g_microIommuPassthroughOk = [](const char* c) {
   return ncclIommuPassthroughOk(c);
 };
 static bool MicroIommuPassthroughOk(const char* cmdline) { return g_microIommuPassthroughOk(cmdline); }
@@ -156,6 +157,77 @@ class InitMicrotest : public ::testing::Test {
 
 // Derives so SetUp's env mask reaches the re-exec'd child; distinct name keeps the yaml filter InitMicrotestIsolated.*
 class InitMicrotestIsolated : public InitMicrotest {};
+
+namespace {
+// Every NCCL_PARAM body in this TU routes through g_loadParam(env, deft); this maps an env name to a forced value.
+using ParamMap = std::map<std::string, int64_t>;
+
+// The single place this TU raises the log level: WARN needs no lift, so warn-only sites call CaptureLog directly.
+std::string CaptureInfoLog(const std::function<void()>& body) {
+  RcclUnitTesting::ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+  return RcclUnitTesting::CaptureLog(body);
+}
+
+// Heap ncclComm carrying a fresh NCCL_CONFIG_INITIALIZER; owns config.netName, which envConfigOverride re-mallocs.
+class ConfigComm {
+ public:
+  ConfigComm() : comm_(new ncclComm{}) {
+    const ncclConfig_t fresh = NCCL_CONFIG_INITIALIZER;
+    comm_->config = fresh;
+  }
+  ConfigComm(int cgaClusterSize, unsigned magic, const char* commName) : ConfigComm() {
+    comm_->config.cgaClusterSize = cgaClusterSize;
+    comm_->config.magic = magic;
+    comm_->config.commName = commName;
+  }
+  ~ConfigComm() {
+    if (ran_) {
+      ::free(const_cast<char*>(comm_->config.netName));
+    }
+  }
+  ConfigComm(const ConfigComm&) = delete;
+  ConfigComm& operator=(const ConfigComm&) = delete;
+
+  ncclConfig_t& config() { return comm_->config; }
+  ncclComm* comm() { return comm_.get(); }
+  ncclResult_t result() const { return result_; }
+
+  ncclResult_t Run(const ParamMap& params) {
+    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
+      const auto it = params.find(env);
+      return it == params.end() ? deft : it->second;
+    });
+    ran_ = true;
+    result_ = envConfigOverride(comm_.get());
+    return result_;
+  }
+
+  ncclResult_t RunParse(ncclConfig_t* cfg) {
+    ran_ = true;
+    result_ = parseCommConfig(comm_.get(), cfg);
+    return result_;
+  }
+
+  ncclResult_t RunCopyFrom(ConfigComm* parent, const ParamMap& params) {
+    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
+      const auto it = params.find(env);
+      return it == params.end() ? deft : it->second;
+    });
+    ran_ = true;
+    result_ = copyCommConfig(comm_.get(), parent->comm());
+    return result_;
+  }
+
+  std::string RunCapturingLog(const ParamMap& params) {
+    return CaptureInfoLog([&] { Run(params); });
+  }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  ncclResult_t result_ = ncclNumResults;
+  bool ran_ = false;
+};
+}  // namespace
 
 namespace {
 // uniformRanksPerHost reads ONLY peerInfo[i].hostHash; each initializer value is a host id.
@@ -846,11 +918,6 @@ int RunCtaPolicyEnv(const char* value) {
   return ctaPolicyEnv;
 }
 
-// Several inputs are state-indistinguishable ("7" and unset both leave UNDEF), so the diagnostic is the only oracle.
-std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
-  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-  return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
-}
 }  // namespace
 
 TEST_F(InitMicrotest, GetEnvCtaPolicy_Unset_LeavesPolicyUndefined) {
@@ -870,7 +937,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_DigitTwo_SelectsZero) {
 // LATENT BUG (init.cc:160): the `default:` arm logs "Using DEFAULT instead" but never assigns it, leaving UNDEF.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownDigit_LogsDefaultButLeavesUnset) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("7", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("7"); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   // "Unknown CTA policy" is shared with the per-token message at :174; this phrase occurs exactly once in init.cc.
   EXPECT_TRUE(LogHas(log, "Using DEFAULT instead")) << "actual log:\n" << log;
@@ -881,7 +948,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedDefault_SelectsDefault) {
 }
 TEST_F(InitMicrotest, GetEnvCtaPolicy_NamedEfficiency_SelectsEfficiencyAndLogsParse) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("EFFICIENCY", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("EFFICIENCY"); });
   EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, policy);
   // Assert the interpolated payload, not just the sentence: a wrong policy value still satisfies the bare needle.
   EXPECT_TRUE(LogHas(log, "NCCL_CTA_POLICY=EFFICIENCY to 1")) << "actual log:\n" << log;
@@ -909,7 +976,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_UnknownTokenAmongValid_IgnoresOnlyTheUnkno
 }
 TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("BOGUS", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv("BOGUS"); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   EXPECT_TRUE(LogHas(log, "Unknown CTA policy BOGUS")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
@@ -917,7 +984,7 @@ TEST_F(InitMicrotest, GetEnvCtaPolicy_OnlyUnknownToken_LeavesUnsetAndLogsTwice) 
 // isdigit('\0') is false, so an empty value takes the combine arm but strtok yields no token and the loop never runs.
 TEST_F(InitMicrotest, GetEnvCtaPolicy_EmptyString_ParsesNoTokens) {
   int policy = NCCL_CONFIG_UNDEF_INT;
-  const std::string log = RunCtaPolicyEnvCapturingLog("", &policy);
+  const std::string log = CaptureInfoLog([&] { policy = RunCtaPolicyEnv(""); });
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, policy);
   EXPECT_TRUE(LogHas(log, "No valid CTA policies found")) << "actual log:\n" << log;
 }
@@ -1187,38 +1254,20 @@ TEST_F(InitMicrotest, SetAsyncError_NullComm_ReturnsInvalidArgument) {
   EXPECT_EQ(ncclInvalidArgument, ncclCommSetAsyncError(nullptr, ncclSuccess));
 }
 
-namespace {
-std::unique_ptr<ncclComm> UndefConfigComm() {
-  auto comm = std::make_unique<ncclComm>();
-  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
-  comm->config = cfg;
-  return comm;
-}
-}  // namespace
-
 TEST_F(InitMicrotest, EnvConfigOverride_BlockingEnv_OverridesBlocking) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "COMM_BLOCKING") == 0 ? int64_t(1) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(1, comm->config.blocking);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"COMM_BLOCKING", 1}}));
+  EXPECT_EQ(1, c.config().blocking);
 }
 TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeTooBig_ClampedToMax) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(NCCL_MAX_CGA_CLUSTER_SIZE + 1) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, comm->config.cgaClusterSize);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE + 1}}));
+  EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
 }
 TEST_F(InitMicrotest, EnvConfigOverride_CgaClusterSizeInRange_Applied) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(2) : deft;
-  };
-  auto comm = UndefConfigComm();
-  EXPECT_EQ(ncclSuccess, envConfigOverride(comm.get()));
-  EXPECT_EQ(2, comm->config.cgaClusterSize);
+  ConfigComm c;
+  EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", 2}}));
+  EXPECT_EQ(2, c.config().cgaClusterSize);
 }
 // TODO(AICOMRCCL-1685): a MIN_CTAS override does not apply, unlike COMM_BLOCKING on the same g_loadParam path.
 
@@ -3889,6 +3938,24 @@ TEST_F(InitMicrotest, DestructorFnCudaFree_ObjUntrackedByManager_FreesThatExactP
   EXPECT_EQ(&obj, freed);
 }
 
+TEST_F(InitMicrotest, DestructorFnCudaFree_DeviceFreeFails_PropagatesTheErrorAndSkipsTheFree) {
+  Dtor_PushComm c;
+  int other = 0;
+  Dtor_ReleasedManager mgr(&other);
+  c.get()->memManager = mgr.get();
+  int obj = 0;
+  ncclCommPushCudaFree(c.get(), &obj);
+
+  g_hipAsyncOpsResult = hipSuccess;
+  ScopedHook memRange(g_hipMemGetAddressRange, [](hipDeviceptr_t*, std::size_t*, hipDeviceptr_t) {
+    return hipErrorInvalidValue;
+  });
+  ScopedHook hipFree(g_hipFree, [](void*) { return hipSuccess; });
+  EXPECT_EQ(ncclUnhandledCudaError, ncclDestructorFnCudaFree(c.get()->destructorHead));
+  EXPECT_EQ(1, memRange.calls);
+  EXPECT_EQ(0, hipFree.calls);
+}
+
 TEST_F(InitMicrotest, DestructorFnCudaHostFree_PassesTheObjectPointerToTheHostFree) {
   Dtor_PushComm c;
   int obj = 0;
@@ -4066,45 +4133,60 @@ constexpr unsigned Dtor_kParentConfigMagic = 0xA11CEu;
 constexpr unsigned Dtor_kChildConfigMagic = 0xB0B0Bu;
 constexpr const char Dtor_kParentCommName[] = "parent-comm";
 constexpr const char Dtor_kChildCommName[] = "child-comm";
-
-// magic and commName straddle ncclConfig_t's midpoint and envConfigOverride() touches neither.
-std::unique_ptr<ncclComm> Dtor_ConfigComm(int cgaClusterSize, unsigned magic, const char* commName) {
-  std::unique_ptr<ncclComm> comm(new ncclComm{});
-  comm->config = NCCL_CONFIG_INITIALIZER;
-  comm->config.cgaClusterSize = cgaClusterSize;
-  comm->config.magic = magic;
-  comm->config.commName = commName;
-  return comm;
-}
 }  // namespace
 
 TEST_F(InitMicrotest, CopyCommConfig_OverwritesChildFromParent_LeavingTheParentUntouched) {
-  auto parent = Dtor_ConfigComm(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  auto child = Dtor_ConfigComm(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
-  auto expected = Dtor_ConfigComm(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  ASSERT_EQ(ncclSuccess, envConfigOverride(expected.get()));
+  ConfigComm parent(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
+  ConfigComm child(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
+  ConfigComm expected(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
+  ASSERT_EQ(ncclSuccess, expected.Run({}));
 
-  EXPECT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
-  EXPECT_EQ(0, std::memcmp(&child->config, &expected->config, sizeof(ncclConfig_t)));
-  EXPECT_STREQ(Dtor_kParentCommName, child->config.commName);
-  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent->config.cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, parent->config.magic);
-  EXPECT_STREQ(Dtor_kParentCommName, parent->config.commName);
+  EXPECT_EQ(ncclSuccess, child.RunCopyFrom(&parent, {}));
+  EXPECT_EQ(0, std::memcmp(&child.config(), &expected.config(), sizeof(ncclConfig_t)));
+  EXPECT_STREQ(Dtor_kParentCommName, child.config().commName);
+  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent.config().cgaClusterSize);
+  EXPECT_EQ(Dtor_kParentConfigMagic, parent.config().magic);
+  EXPECT_STREQ(Dtor_kParentCommName, parent.config().commName);
 }
 
 TEST_F(InitMicrotest, CopyCommConfig_EnvOverridesTheCopiedValue_NotJustTheRawParentConfig) {
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "CGA_CLUSTER_SIZE") == 0 ? int64_t(Dtor_kEnvCgaClusterSize) : deft;
-  };
-  auto parent = Dtor_ConfigComm(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
-  auto child = Dtor_ConfigComm(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
+  ConfigComm parent(Dtor_kParentCgaClusterSize, Dtor_kParentConfigMagic, Dtor_kParentCommName);
+  ConfigComm child(Dtor_kChildCgaClusterSize, Dtor_kChildConfigMagic, Dtor_kChildCommName);
 
-  EXPECT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.get()));
-  EXPECT_EQ(Dtor_kEnvCgaClusterSize, child->config.cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, child->config.magic);
-  EXPECT_STREQ(Dtor_kParentCommName, child->config.commName);
-  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent->config.cgaClusterSize);
-  EXPECT_EQ(Dtor_kParentConfigMagic, parent->config.magic);
+  EXPECT_EQ(ncclSuccess, child.RunCopyFrom(&parent, {{"CGA_CLUSTER_SIZE", Dtor_kEnvCgaClusterSize}}));
+  EXPECT_EQ(Dtor_kEnvCgaClusterSize, child.config().cgaClusterSize);
+  EXPECT_EQ(Dtor_kParentConfigMagic, child.config().magic);
+  EXPECT_STREQ(Dtor_kParentCommName, child.config().commName);
+  EXPECT_EQ(Dtor_kParentCgaClusterSize, parent.config().cgaClusterSize);
+  EXPECT_EQ(Dtor_kParentConfigMagic, parent.config().magic);
+}
+
+TEST_F(InitMicrotest, CommPoison_ClearsBothMagicsAndTheIdentity_KeepingIntraComm0) {
+  constexpr uint64_t kLiveStartMagic = 0x1111111111111111ull;
+  constexpr uint64_t kLiveEndMagic = 0x2222222222222222ull;
+  constexpr int kLiveRank = 5;
+  constexpr int kLiveCudaDev = 6;
+  constexpr int64_t kLiveBusId = 7;
+  constexpr int kLiveNRanks = 8;
+  auto comm = std::make_unique<ncclComm>();
+  auto neighbour = std::make_unique<ncclComm>();
+  comm->rank = kLiveRank;
+  comm->cudaDev = kLiveCudaDev;
+  comm->busId = kLiveBusId;
+  comm->nRanks = kLiveNRanks;
+  comm->startMagic = kLiveStartMagic;
+  comm->endMagic = kLiveEndMagic;
+  comm->intraComm0 = neighbour.get();
+
+  commPoison(comm.get());
+
+  EXPECT_EQ(-1, comm->rank);
+  EXPECT_EQ(-1, comm->cudaDev);
+  EXPECT_EQ(-1, comm->busId);
+  EXPECT_EQ(-1, comm->nRanks);
+  EXPECT_EQ(0u, comm->startMagic);
+  EXPECT_EQ(0u, comm->endMagic);
+  EXPECT_EQ(neighbour.get(), comm->intraComm0);
 }
 
 TEST_F(InitMicrotest, CommFinalizeAsyncJobFree_ReturnsTheJobToTheHeap) {
@@ -4219,7 +4301,7 @@ constexpr const char Dtor_kNumaBalancingWarning[] = "NUMA auto balancing enabled
 constexpr const char Dtor_kIommuWarning[] = "Missing \"iommu=pt\" from kernel command line";
 
 // ncclInit() reads numa_balancing, /proc/version and bios_version through this one entry point.
-ncclResult_t Dtor_SysFileText(const char* file, const char* numaBalancing, char* out, int maxLen) {
+ncclResult_t SysFileText(const char* file, const char* numaBalancing, char* out, int maxLen) {
   if (!out || maxLen <= 0) return ncclSuccess;
   if (file && std::strcmp(file, "numa_balancing") == 0) {
     std::snprintf(out, maxLen, "%s", numaBalancing);
@@ -4229,7 +4311,7 @@ ncclResult_t Dtor_SysFileText(const char* file, const char* numaBalancing, char*
   return ncclSuccess;
 }
 
-int Dtor_CpuidWithoutHypervisorBit(unsigned, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
+int CpuidWithoutHypervisorBit(unsigned, unsigned* a, unsigned* b, unsigned* c, unsigned* d) {
   if (a) *a = 0;
   if (b) *b = 0;
   if (c) *c = 0;
@@ -4245,9 +4327,9 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOnAndIommuNotPassthrough_War
       []() {
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
-                             return Dtor_SysFileText(file, "1", out, maxLen);
+                             return SysFileText(file, "1", out, maxLen);
                            });
-        ScopedHook cpuid(g_microCpuid, Dtor_CpuidWithoutHypervisorBit);
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
         ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return false; });
         std::string log = RcclUnitTesting::CaptureLog([] { ASSERT_EQ(ncclSuccess, ncclInit()); });
         ASSERT_TRUE(LogHas(log, Dtor_kNumaBalancingWarning)) << "actual log:\n" << log;
@@ -4262,9 +4344,9 @@ TEST_F(InitMicrotestIsolated, NcclInit_NumaBalancingOffAndIommuPassthrough_Warns
       []() {
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
-                             return Dtor_SysFileText(file, "0", out, maxLen);
+                             return SysFileText(file, "0", out, maxLen);
                            });
-        ScopedHook cpuid(g_microCpuid, Dtor_CpuidWithoutHypervisorBit);
+        ScopedHook cpuid(g_microCpuid, CpuidWithoutHypervisorBit);
         ScopedHook iommu(g_microIommuPassthroughOk, [](const char*) { return true; });
         ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
         std::string log = RcclUnitTesting::CaptureLog([] { ASSERT_EQ(ncclSuccess, ncclInit()); });
@@ -4287,32 +4369,23 @@ TEST_F(InitMicrotestIsolated, InitEnv_PluginFails_LatchesThatErrorAndCallsThePlu
       });
 }
 
-#include "ScopedHook.h"
-
 // --- parseCommConfig: version negotiation, per-field validation, defaulting (init.cc:3243-3462) ---
 
 namespace {
 constexpr char ParseCfg_kNetName[] = "microfake-net";
 
+// Large enough that a minCTAs boundary case never also trips the min > max arm of the same condition.
+constexpr int ParseCfg_kAmpleMaxCTAs = 64;
+
 class ParseCfg_Scene {
  public:
-  ParseCfg_Scene() : comm_(new ncclComm{}) {}
-  // envConfigOverride re-mallocs config.netName and never frees it, so the scene owns that buffer.
-  ~ParseCfg_Scene() { free(const_cast<char*>(comm_->config.netName)); }
   ncclConfig_t& config() { return cfg_; }
-  const ncclConfig_t& result_config() const { return comm_->config; }
-  ncclResult_t Run() { return parseCommConfig(comm_.get(), &cfg_); }
-  std::string RunCapturingWarn(ncclResult_t* result) {
-    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
-  }
-  std::string RunCapturingInfo(ncclResult_t* result) {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    return RcclUnitTesting::CaptureLog([&] { *result = Run(); });
-  }
+  const ncclConfig_t& result_config() { return comm_.config(); }
+  ncclResult_t Run() { return comm_.RunParse(&cfg_); }
 
  private:
   ncclConfig_t cfg_ = NCCL_CONFIG_INITIALIZER;
-  std::unique_ptr<ncclComm> comm_;
+  ConfigComm comm_;
 };
 
 // The return code alone cannot tell which field's check fired, so the diagnostic carries the oracle.
@@ -4320,7 +4393,7 @@ void ParseCfg_ExpectRejected(const std::function<void(ncclConfig_t&)>& tweak, co
   ParseCfg_Scene s;
   tweak(s.config());
   ncclResult_t res = ncclSuccess;
-  const std::string log = s.RunCapturingWarn(&res);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclInvalidArgument, res);
   EXPECT_TRUE(LogHas(log, warning)) << "actual log:\n" << log;
 }
@@ -4365,6 +4438,22 @@ TEST_F(InitMicrotest, ParseCommConfig_BadGraphStreamOrdering_RejectsAndNamesTheF
                           "Invalid config graphStreamOrdering attribute value 13");
 }
 
+TEST_F(InitMicrotest, ParseCommConfig_ZeroCgaClusterSize_IsAcceptedAndAssigned) {
+  ParseCfg_Scene s;
+  s.config().cgaClusterSize = 0;
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(0, s.result_config().cgaClusterSize);
+}
+TEST_F(InitMicrotest, ParseCommConfig_ZeroMinCTAsBelowMaxCTAs_IsRejectedAtTheBoundary) {
+  const std::string warning =
+      "Invalid config min/max channels attribute value 0/" + std::to_string(ParseCfg_kAmpleMaxCTAs);
+  ParseCfg_ExpectRejected(
+      [](ncclConfig_t& c) {
+        c.minCTAs = 0;
+        c.maxCTAs = ParseCfg_kAmpleMaxCTAs;
+      },
+      warning.c_str());
+}
 TEST_F(InitMicrotest, ParseCommConfig_ZeroNvlsCTAs_IsRejectedAtTheBoundary) {
   ParseCfg_ExpectRejected([](ncclConfig_t& c) { c.nvlsCTAs = 0; },
                           "Invalid config nvlsCTAs attribute value 0");
@@ -4464,7 +4553,7 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionBelow217_DropsNetNameBeforeDefaulti
   s.config().netName = ParseCfg_kNetName;
   s.config().blocking = 0;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(log, "Comm config Net name set to")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "Comm config Blocking set to 0")) << "actual log:\n" << log;
@@ -4485,7 +4574,7 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionAt217_KeepsNetName) {
   s.config().version = NCCL_VERSION(2, 17, 0);
   s.config().netName = ParseCfg_kNetName;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_TRUE(LogHas(log, "Comm config Net name set to microfake-net")) << "actual log:\n" << log;
 }
@@ -4633,7 +4722,7 @@ TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithGraphMixing_WarnsAnd
   s.config().graphStreamOrdering = 0;
   s.config().graphUsageMode = 2;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingWarn(&res);
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, s.result_config().graphStreamOrdering);
   EXPECT_EQ(2, s.result_config().graphUsageMode);
@@ -4644,7 +4733,7 @@ TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithoutGraphMixing_Stays
   s.config().graphStreamOrdering = 0;
   s.config().graphUsageMode = 1;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(0, s.result_config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
@@ -4655,7 +4744,7 @@ TEST_F(InitMicrotest, ParseCommConfig_GraphMixingWithStreamOrderingOne_StaysOneA
   s.config().graphStreamOrdering = 1;
   s.config().graphUsageMode = 2;
   ncclResult_t res = ncclInternalError;
-  const std::string log = s.RunCapturingInfo(&res);
+  const std::string log = CaptureInfoLog([&] { res = s.Run(); });
   EXPECT_EQ(ncclSuccess, res);
   EXPECT_EQ(1, s.result_config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering=0 with graphUsageMode=2")) << "actual log:\n" << log;
@@ -4835,8 +4924,6 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
 
 // Comm teardown / lifecycle (init.cc:453-4100): commFree, setCommAbortFlags, destroy/finalize/revoke/abort.
 
-#include "ScopedHook.h"
-
 namespace {
 
 // commFree() ends in free(comm), so the comm must be malloc-backed exactly like production.
@@ -4849,30 +4936,30 @@ void Teardown_MakeFreeableComm(ncclComm** comm, uint32_t* abortFlag, int* abortR
   (*comm)->abortFlagRefCount = abortRefCount;
 }
 
-struct Teardown_DtorNode {
+struct DtorNode {
   struct ncclDestructor base;
   int id;
   std::vector<int>* log;
   ncclResult_t result;
 };
 
-ncclResult_t Teardown_LogDtor(struct ncclDestructor* me) {
-  auto* node = reinterpret_cast<Teardown_DtorNode*>(me);
+ncclResult_t RecordingDtor(struct ncclDestructor* me) {
+  auto* node = reinterpret_cast<DtorNode*>(me);
   node->log->push_back(node->id);
   return node->result;
 }
 
 // The destructor chain runs after the task-queue drain, so it is where "were the queues emptied?" is observable.
 ncclResult_t Teardown_LogTaskQueueState(struct ncclDestructor* me) {
-  auto* node = reinterpret_cast<Teardown_DtorNode*>(me);
+  auto* node = reinterpret_cast<DtorNode*>(me);
   node->log->push_back(ncclIntruQueueEmpty(&me->comm->suspendTaskQueue) ? 1 : 0);
   node->log->push_back(ncclIntruQueueEmpty(&me->comm->resumeTaskQueue) ? 1 : 0);
   return ncclSuccess;
 }
 
-void Teardown_ChainDtors(Teardown_DtorNode* nodes, int n, std::vector<int>* log) {
+void ChainDtors(DtorNode* nodes, int n, std::vector<int>* log) {
   for (int i = 0; i < n; ++i) {
-    nodes[i].base.fn = Teardown_LogDtor;
+    nodes[i].base.fn = RecordingDtor;
     nodes[i].base.next = (i + 1 < n) ? &nodes[i + 1].base : nullptr;
     nodes[i].log = log;
     nodes[i].result = ncclSuccess;
@@ -4888,8 +4975,8 @@ TEST_F(InitMicrotest, CommFree_DestructorChain_RunsEveryNodeHeadToTail) {
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
 
   std::vector<int> ran;
-  Teardown_DtorNode nodes[3]{};
-  Teardown_ChainDtors(nodes, 3, &ran);
+  DtorNode nodes[3]{};
+  ChainDtors(nodes, 3, &ran);
   nodes[0].id = 11;
   nodes[1].id = 22;
   nodes[2].id = 33;
@@ -4906,8 +4993,8 @@ TEST_F(InitMicrotest, CommFree_DestructorFails_PropagatesErrorAndStopsWalk) {
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
 
   std::vector<int> ran;
-  Teardown_DtorNode nodes[2]{};
-  Teardown_ChainDtors(nodes, 2, &ran);
+  DtorNode nodes[2]{};
+  ChainDtors(nodes, 2, &ran);
   nodes[0].id = 44;
   nodes[0].result = ncclSystemError;
   nodes[1].id = 55;
@@ -4982,7 +5069,7 @@ TEST_F(InitMicrotest, CommFree_PendingSuspendAndResumeTasks_DrainsBothQueues) {
   }
 
   std::vector<int> emptied;
-  Teardown_DtorNode probe{};
+  DtorNode probe{};
   probe.base.fn = Teardown_LogTaskQueueState;
   probe.base.comm = comm;
   probe.log = &emptied;
@@ -5396,7 +5483,7 @@ struct Teardown_ChainMember {
   Teardown_TunerRecord rec;
 };
 
-void Teardown_BuildChain(Teardown_ChainMember* members, int n) {
+void BuildCommChain(Teardown_ChainMember* members, int n) {
   for (int i = 0; i < n; ++i) {
     ASSERT_NO_FATAL_FAILURE(
         Teardown_MakeFreeableComm(&members[i].comm, &members[i].abortFlag, &members[i].abortRefCount));
@@ -5423,7 +5510,7 @@ TEST_F(InitMicrotest, CommReclaim_NoIntraComm0_ReturnsSuccessWithoutTouchingTheC
 TEST_F(InitMicrotest, CommReclaim_NotLastIntraRank_BumpsLeaderCounterAndDefersCleanup) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
   EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm));
@@ -5442,7 +5529,7 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
   Teardown_AllowStreamCaptureExchange();
   const int kChainLength = 3;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
@@ -5457,7 +5544,7 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
 TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclInternalError; });
 
@@ -5471,7 +5558,7 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
 TEST_F(InitMicrotest, CommReclaim_RevokedComm_DrainsLegacyQueueInsteadOfDestroySync) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   members[0].comm->revokedFlag = 1;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
@@ -5494,7 +5581,7 @@ TEST_F(InitMicrotest, CommReclaim_RevokedComm_DrainsLegacyQueueInsteadOfDestroyS
 TEST_F(InitMicrotest, CommReclaim_FinalizedButNotRevoked_SkipsBothSyncAndDrain) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
 
@@ -5899,7 +5986,7 @@ TEST_F(InitMicrotest, CommRevokeAsync_ProxyThreadsRunning_JoinsBothAfterStopping
 TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyClear) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   ncclComm* comm = members[0].comm;
   comm->finalizeCalled = true;
   comm->revokedFlag = 1;
@@ -5920,7 +6007,7 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyCl
 TEST_F(InitMicrotest, CommReclaim_RevokedCommLegacyCallbackFails_WarnsAndKeepsDraining) {
   const int kChainLength = 1;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeCalled = true;
   members[0].comm->revokedFlag = 1;
 
@@ -5948,7 +6035,7 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
   Teardown_AllowStreamCaptureExchange();
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
-  ASSERT_NO_FATAL_FAILURE(Teardown_BuildChain(members, kChainLength));
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
   members[0].comm->finalizeRankCnt = kChainLength - 1;
   ncclComm* firstComm = members[0].comm;
   ScopedHook unload(g_ncclTunerPluginUnload,
@@ -5988,16 +6075,39 @@ TEST_F(InitMicrotest, CommAbort_LaunchFails_PropagatesTheLaunchError) {
   rec.Release();
 }
 
+// The launch failure is the only fail-path arrival that is guaranteed to have allocated the job.
+TEST_F(InitMicrotest, CommGrow_LaunchFails_DeletesTheJobAndClearsTheOutputComm) {
+  const int kParentRanks = 1;
+  const int kGrownRanks = 2;
+  Teardown_LifecycleComm parent;
+  parent.get()->nRanks = kParentRanks;
+  g_hipAsyncOpsResult = hipSuccess;  // ncclCudaHostCalloc exchanges the stream-capture mode first
+  Teardown_LaunchRecord rec;
+  rec.result = ncclSystemError;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+
+  ncclComm_t grown = parent.get();
+  ncclResult_t ret = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] {
+    ret = ncclCommGrow_impl(parent.get(), kGrownRanks, nullptr, /*rank=*/-1, &grown, nullptr);
+  });
+  EXPECT_EQ(ncclSystemError, ret);
+  EXPECT_EQ(nullptr, grown);
+  ASSERT_EQ(1, rec.calls);
+  ASSERT_NE(nullptr, rec.job);
+
+  auto* reused = new ncclCommInitRankAsyncJob{};
+  const bool recycled = (static_cast<void*>(reused) == static_cast<void*>(rec.job));
+  delete reused;
+  rec.job = nullptr;
+  if (Dtor_kHeapSlotRecycles) {
+    EXPECT_TRUE(recycled) << "the job was not deleted: its heap slot was not reused";
+  }
+}
+
 // envConfigOverride (init.cc:2963): the NCCL_* env and ncclConfig_t validation ladders.
 
-#include <map>
-
-#include "ScopedHook.h"
-
 namespace {
-// Every NCCL_PARAM body in this TU routes through g_loadParam(env, deft); this maps an env name to a forced value.
-using Env_ParamMap = std::map<std::string, int64_t>;
-
 // NCCL_CONFIG_UNDEF_INT is INT_MIN, so an undefined config field always trips the 0/1 clamps at :3189 and :3194.
 constexpr char Env_kUndefSplitShareLog[] = "splitShare -2147483648 is not a valid value 0/1, set it to 0";
 constexpr char Env_kUndefCollnetLog[] = "collnetEnable -2147483648 is not a valid value 0/1, set it to 0";
@@ -6005,48 +6115,10 @@ constexpr char Env_kUndefCollnetLog[] = "collnetEnable -2147483648 is not a vali
 // Large enough that a minCTAs case never trips the min > max clamp at :3183.
 constexpr int Env_kAmpleMaxCTAs = 64;
 
-class Env_ConfigComm {
- public:
-  Env_ConfigComm() : comm_(new ncclComm{}) {
-    const ncclConfig_t fresh = NCCL_CONFIG_INITIALIZER;
-    comm_->config = fresh;
-  }
-  ~Env_ConfigComm() {
-    if (ran_) {
-      ::free(const_cast<char*>(comm_->config.netName));
-    }
-  }
-  Env_ConfigComm(const Env_ConfigComm&) = delete;
-  Env_ConfigComm& operator=(const Env_ConfigComm&) = delete;
-
-  ncclConfig_t& config() { return comm_->config; }
-  ncclComm* comm() { return comm_.get(); }
-  ncclResult_t result() const { return result_; }
-
-  ncclResult_t Run(const Env_ParamMap& params) {
-    ScopedHook loadParam(g_loadParam, [&params](const char* env, int64_t deft) {
-      const auto it = params.find(env);
-      return it == params.end() ? deft : it->second;
-    });
-    ran_ = true;
-    result_ = envConfigOverride(comm_.get());
-    return result_;
-  }
-
-  std::string RunCapturingLog(const Env_ParamMap& params) {
-    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
-    return RcclUnitTesting::CaptureLog([&] { Run(params); });
-  }
-
- private:
-  std::unique_ptr<ncclComm> comm_;
-  ncclResult_t result_ = ncclNumResults;
-  bool ran_ = false;
-};
 }  // namespace
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
   EXPECT_EQ(ncclSuccess, c.result());
   EXPECT_EQ(4, c.config().cgaClusterSize);
@@ -6055,7 +6127,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigUndef_AssignsWithoutRese
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", 4}});
   EXPECT_EQ(4, c.config().cgaClusterSize);
@@ -6064,7 +6136,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaInRangeConfigSet_OverwritesAndLogsRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAtUpperBound_AcceptedNotClamped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE}});
   EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
@@ -6074,14 +6146,14 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaAtUpperBound_AcceptedNotClamped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAtLowerBound_AcceptedAndOverwritesConfig) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   EXPECT_EQ(ncclSuccess, c.Run({{"CGA_CLUSTER_SIZE", 0}}));
   EXPECT_EQ(0, c.config().cgaClusterSize);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaAboveMax_ClampsToMaxAndLogs) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", NCCL_MAX_CGA_CLUSTER_SIZE + 1}});
   EXPECT_EQ(NCCL_MAX_CGA_CLUSTER_SIZE, c.config().cgaClusterSize);
   EXPECT_TRUE(LogHas(log, "NCCL_CGA_CLUSTER_SIZE value 9 is too big. Limiting value to 8."))
@@ -6089,7 +6161,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaAboveMax_ClampsToMaxAndLogs) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CgaNegative_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().cgaClusterSize = 2;
   const std::string log = c.RunCapturingLog({{"CGA_CLUSTER_SIZE", -1}});
   EXPECT_EQ(2, c.config().cgaClusterSize);
@@ -6099,7 +6171,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CgaNegative_LeavesConfigUntouched) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
   EXPECT_EQ(7, c.config().minCTAs);
@@ -6109,7 +6181,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 3;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
@@ -6118,7 +6190,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsPositiveConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 5;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 0}});
@@ -6127,7 +6199,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsZero_KeepsConfigAndLogsTooLow) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 5;
   c.config().maxCTAs = Env_kAmpleMaxCTAs;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", -3}});
@@ -6136,7 +6208,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsNegative_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
   EXPECT_EQ(9, c.config().maxCTAs);
   EXPECT_FALSE(LogHas(log, "maxCTAs reset to")) << "actual log:\n" << log;
@@ -6144,7 +6216,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 3;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 9}});
   EXPECT_EQ(9, c.config().maxCTAs);
@@ -6152,7 +6224,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsPositiveConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 5;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", 0}});
   EXPECT_EQ(5, c.config().maxCTAs);
@@ -6160,7 +6232,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsZero_KeepsConfigAndLogsTooLow) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = 5;
   const std::string log = c.RunCapturingLog({{"MAX_CTAS", -3}});
   EXPECT_EQ(5, c.config().maxCTAs);
@@ -6168,7 +6240,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsNegative_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinAndMaxCTAsBothSet_EachTakesItsOwnValue) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 1;
   c.config().maxCTAs = 2;
   EXPECT_EQ(ncclSuccess, c.Run({{"MIN_CTAS", 6}, {"MAX_CTAS", 11}}));
@@ -6177,7 +6249,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinAndMaxCTAsBothSet_EachTakesItsOwnValu
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
   EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
   EXPECT_FALSE(LogHas(log, "nChannelsPerNetPeer reset to")) << "actual log:\n" << log;
@@ -6185,7 +6257,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigUndef_A
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 1;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 3}});
   EXPECT_EQ(3, c.config().nChannelsPerNetPeer);
@@ -6194,7 +6266,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerPositiveConfigSet_Ove
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 2;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", 0}});
   EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
@@ -6203,7 +6275,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerZero_KeepsConfigAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nChannelsPerNetPeer = 2;
   const std::string log = c.RunCapturingLog({{"NCHANNELS_PER_NET_PEER", -5}});
   EXPECT_EQ(2, c.config().nChannelsPerNetPeer);
@@ -6212,7 +6284,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NChannelsPerNetPeerNegative_KeepsConfigA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
   EXPECT_FALSE(LogHas(log, "nvlinkCentricSched reset to")) << "actual log:\n" << log;
@@ -6220,7 +6292,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigUndef_Assigns
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedZeroConfigOne_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 1;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 0}});
   EXPECT_EQ(0, c.config().nvlinkCentricSched);
@@ -6229,7 +6301,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedZeroConfigOne_Overwrit
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigZero_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 0;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 1}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
@@ -6238,7 +6310,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedOneConfigZero_Overwrit
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedTwo_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 1;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", 2}});
   EXPECT_EQ(1, c.config().nvlinkCentricSched);
@@ -6247,7 +6319,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedTwo_KeepsConfigAndLogs
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedNegative_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlinkCentricSched = 0;
   const std::string log = c.RunCapturingLog({{"NVLINK_UTIL_CENTRIC_SCHED_ENABLE", -1}});
   EXPECT_EQ(0, c.config().nvlinkCentricSched);
@@ -6256,7 +6328,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlinkCentricSchedNegative_KeepsConfigAn
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigUndef_SetsUsageModeTwoSilently) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
   EXPECT_EQ(2, c.config().graphUsageMode);
   EXPECT_FALSE(LogHas(log, "graphUsageMode reset to")) << "actual log:\n" << log;
@@ -6264,7 +6336,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigUndef_SetsUsa
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigSet_SetsUsageModeTwoAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 1}});
   EXPECT_EQ(2, c.config().graphUsageMode);
@@ -6273,7 +6345,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportOneConfigSet_SetsUsage
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportZeroConfigSet_SetsUsageModeZeroAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 0}});
   EXPECT_EQ(0, c.config().graphUsageMode);
@@ -6282,7 +6354,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportZeroConfigSet_SetsUsag
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportInvalid_KeepsUsageModeAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphUsageMode = 7;
   const std::string log = c.RunCapturingLog({{"GRAPH_MIXING_SUPPORT", 5}});
   EXPECT_EQ(7, c.config().graphUsageMode);
@@ -6291,7 +6363,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphMixingSupportInvalid_KeepsUsageMode
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxPositive_AssignsWithoutDisabledLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 4}});
   EXPECT_EQ(4, c.config().numRmaCtx);
@@ -6300,7 +6372,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxPositive_AssignsWithoutDisabled
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxZero_AssignsZeroAndLogsRmaDisabled) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", 0}});
   EXPECT_EQ(0, c.config().numRmaCtx);
@@ -6308,7 +6380,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxZero_AssignsZeroAndLogsRmaDisab
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().numRmaCtx = 9;
   const std::string log = c.RunCapturingLog({{"NUM_RMA_CTX", -1}});
   EXPECT_EQ(9, c.config().numRmaCtx);
@@ -6317,7 +6389,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NumRmaCtxNegative_KeepsConfigAndLogsTooL
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
   EXPECT_FALSE(LogHas(log, "maxP2pPeers reset to")) << "actual log:\n" << log;
@@ -6325,7 +6397,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigUndef_AssignsWi
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
@@ -6333,7 +6405,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
@@ -6341,7 +6413,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
@@ -6349,7 +6421,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6358,7 +6430,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_Leaves
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
   EXPECT_FALSE(LogHas(log, "graphStreamOrdering reset to")) << "actual log:\n" << log;
@@ -6366,7 +6438,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigUndef_Assig
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingOneConfigZero_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 0;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 1}});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6375,7 +6447,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingOneConfigZero_Overwri
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigOne_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 0}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
@@ -6384,7 +6456,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingZeroConfigOne_Overwri
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingTwo_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 1;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", 2}});
   EXPECT_EQ(1, c.config().graphStreamOrdering);
@@ -6393,7 +6465,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingTwo_KeepsConfigAndLog
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingNegative_KeepsConfigAndLogsNotValid) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().graphStreamOrdering = 0;
   const std::string log = c.RunCapturingLog({{"GRAPH_STREAM_ORDERING", -1}});
   EXPECT_EQ(0, c.config().graphStreamOrdering);
@@ -6402,7 +6474,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingNegative_KeepsConfigA
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigUndef_LeavesNetNameNull) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(nullptr, c.config().netName);
   EXPECT_FALSE(LogHas(log, "netName reset to")) << "actual log:\n" << log;
@@ -6410,7 +6482,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigUndef_LeavesNetNameNull
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigUndef_CopiesEnvValueWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "Socket");
   const std::string log = c.RunCapturingLog({});
   ASSERT_NE(nullptr, c.config().netName);
@@ -6420,7 +6492,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigUndef_CopiesEnvValueWitho
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIb_TranslatesToIbCast) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "ROCM-IB");
   EXPECT_EQ(ncclSuccess, c.Run({}));
   ASSERT_NE(nullptr, c.config().netName);
@@ -6428,7 +6500,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIb_TranslatesToIbCast) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIbLowerCase_TranslatesToIbCast) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_NET", "rocm-ib");
   EXPECT_EQ(ncclSuccess, c.Run({}));
   ASSERT_NE(nullptr, c.config().netName);
@@ -6436,7 +6508,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvRocmIbLowerCase_TranslatesToIbCast
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigSet_ReplacesConfigNameAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().netName = "IB";
   SetMicroEnv("NCCL_NET", "Socket");
   const std::string log = c.RunCapturingLog({});
@@ -6446,7 +6518,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvSetConfigSet_ReplacesConfigNameAnd
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigSet_CopiesConfigNameIntoFreshBuffer) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const char* const configured = "IB";
   c.config().netName = configured;
   EXPECT_EQ(ncclSuccess, c.Run({}));
@@ -6456,7 +6528,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NetEnvUnsetConfigSet_CopiesConfigNameInt
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().splitShare);
   EXPECT_FALSE(LogHas(log, "splitShare reset to")) << "actual log:\n" << log;
@@ -6464,7 +6536,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigUndef_AssignsWithoutRese
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().splitShare = 0;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().splitShare);
@@ -6473,14 +6545,14 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitShareConfigSet_OverwritesAndLogsRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitShareOutOfRange_ClampedToZeroWithLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SPLIT_SHARE_RESOURCES", 5}});
   EXPECT_EQ(0, c.config().splitShare);
   EXPECT_TRUE(LogHas(log, "splitShare 5 is not a valid value 0/1, set it to 0")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().shrinkShare);
   EXPECT_FALSE(LogHas(log, "shrinkShare reset to")) << "actual log:\n" << log;
@@ -6488,7 +6560,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigUndef_AssignsWithoutRes
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().shrinkShare = 0;
   const std::string log = c.RunCapturingLog({{"COMM_SHRINK_SHARE_RESOURCES", 1}});
   EXPECT_EQ(1, c.config().shrinkShare);
@@ -6497,13 +6569,13 @@ TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareConfigSet_OverwritesAndLogsRe
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_ShrinkShareOutOfRange_KeptVerbatimUnlikeSplitShare) {
-  Env_ConfigComm c;
+  ConfigComm c;
   EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SHRINK_SHARE_RESOURCES", 5}}));
   EXPECT_EQ(5, c.config().shrinkShare);
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_SplitAndShrinkShareBothSet_EachTakesItsOwnValue) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().splitShare = 9;
   c.config().shrinkShare = 9;
   EXPECT_EQ(ncclSuccess, c.Run({{"COMM_SPLIT_SHARE_RESOURCES", 1}, {"COMM_SHRINK_SHARE_RESOURCES", 0}}));
@@ -6512,7 +6584,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_SplitAndShrinkShareBothSet_EachTakesItsO
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableEnvSetConfigUndef_AssignsAndLogsEnvironment) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(1, c.config().collnetEnable);
@@ -6521,7 +6593,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableEnvSetConfigUndef_AssignsAn
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().collnetEnable = 0;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "1");
   const std::string log = c.RunCapturingLog({});
@@ -6530,7 +6602,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableConfigSet_OverwritesAndLogs
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableHexValue_ParsedBaseZeroThenClampedToZero) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "0x3");
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(0, c.config().collnetEnable);
@@ -6539,7 +6611,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableHexValue_ParsedBaseZeroThen
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableParsesToUndefSentinel_LeavesConfigUntouched) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().collnetEnable = 1;
   SetMicroEnv("NCCL_COLLNET_ENABLE", "-2147483648");
   const std::string log = c.RunCapturingLog({});
@@ -6549,7 +6621,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CollnetEnableParsesToUndefSentinel_Leave
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
   const std::string log = c.RunCapturingLog({});
@@ -6559,7 +6631,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigUndef_AssignsWithou
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO;
   c.config().CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
@@ -6571,7 +6643,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyEnvSetConfigSet_OverwritesAndLo
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyZeroAndEfficiency_UnsetsEfficiencyWithWarn) {
-  Env_ConfigComm c;
+  ConfigComm c;
   SetMicroEnvAbsent("NCCL_CTA_POLICY");
   ctaPolicyEnv = NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY;
   const std::string log = c.RunCapturingLog({});
@@ -6580,7 +6652,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_CtaPolicyZeroAndEfficiency_UnsetsEfficie
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigUndef_AssignsWithoutResetLog) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
   EXPECT_EQ(4, c.config().nvlsCTAs);
   EXPECT_FALSE(LogHas(log, "nvlsCTAs reset to")) << "actual log:\n" << log;
@@ -6588,7 +6660,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigUndef_AssignsWitho
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigSet_OverwritesAndLogsReset) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 4}});
   EXPECT_EQ(4, c.config().nvlsCTAs);
@@ -6596,7 +6668,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsPositiveConfigSet_OverwritesAndL
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsZero_AssignedThenRestoredToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", 0}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
@@ -6605,7 +6677,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsZero_AssignedThenRestoredToUndef
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsNegative_AssignedThenRestoredToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().nvlsCTAs = 2;
   const std::string log = c.RunCapturingLog({{"NVLS_NCHANNELS", -1}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().nvlsCTAs);
@@ -6613,7 +6685,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_NvlsCTAsNegative_AssignedThenRestoredToU
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveChannelLimit_CappedToMaxChannels) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS + 1;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
@@ -6627,7 +6699,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveChannelLimit_CappedToMaxChan
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAtChannelLimit_NotCapped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
@@ -6637,7 +6709,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAtChannelLimit_NotCapped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAboveChannelLimit_CappedToMaxChannels) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = MAXCHANNELS + 1;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
@@ -6648,7 +6720,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAboveChannelLimit_CappedToMaxChan
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAtChannelLimit_NotCapped) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().maxCTAs = MAXCHANNELS;
   const std::string log = c.RunCapturingLog({});
   EXPECT_EQ(MAXCHANNELS, c.config().maxCTAs);
@@ -6657,7 +6729,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxCTAsAtChannelLimit_NotCapped) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveMaxCTAs_LowersMinToMax) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 8;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6667,7 +6739,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveMaxCTAs_LowersMinToMax) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsEqualsMaxCTAs_LeavesBothAlone) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = 4;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6678,7 +6750,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsEqualsMaxCTAs_LeavesBothAlone) {
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveBothLimits_CapsToChannelLimitBeforeLoweringToMaxCTAs) {
-  Env_ConfigComm c;
+  ConfigComm c;
   c.config().minCTAs = MAXCHANNELS + 1;
   c.config().maxCTAs = 4;
   const std::string log = c.RunCapturingLog({});
@@ -6693,10 +6765,3137 @@ TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsAboveBothLimits_CapsToChannelLimi
 
 // A MIN_CTAS override does apply, then :3183 lowers it to the still-undefined maxCTAs (AICOMRCCL-1685 TODO at :1163).
 TEST_F(InitMicrotest, EnvConfigOverride_MinCTAsSetWithUndefinedMaxCTAs_LoweredBackToUndefined) {
-  Env_ConfigComm c;
+  ConfigComm c;
   const std::string log = c.RunCapturingLog({{"MIN_CTAS", 7}});
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().minCTAs);
   EXPECT_EQ(NCCL_CONFIG_UNDEF_INT, c.config().maxCTAs);
   EXPECT_TRUE(LogHas(log, "minCTAs 7 is larger than maxCTAs -2147483648, set both to -2147483648"))
       << "actual log:\n" << log;
+}
+
+// --- ncclCommInitRankFunc (init.cc:2631) and the entry points that funnel into it ---
+
+namespace {
+
+constexpr int Rank_kCudaDev = 5;
+constexpr int Rank_kArchMajor = 9;
+constexpr int Rank_kArchMinor = 4;
+constexpr int Rank_kCudaArch = 100 * Rank_kArchMajor + 10 * Rank_kArchMinor;
+constexpr int Rank_kMaxSharedMem = 65536;
+constexpr int Rank_kCuCount = 304;
+constexpr int Rank_kUntouchedNRanks = 77;
+constexpr char Rank_kGcnArchName[] = "gfx942:sramecc+:xnack-";
+
+// Distinct per-attribute values: with major == minor the 100* / 10* operands could be swapped unnoticed.
+hipError_t Rank_DeviceAttribute(int* pi, hipDeviceAttribute_t attr, int) {
+  if (!pi) {
+    return hipErrorInvalidValue;
+  }
+  switch (attr) {
+    case hipDeviceAttributeSharedMemPerBlockOptin: *pi = Rank_kMaxSharedMem; break;
+    case hipDeviceAttributeComputeCapabilityMajor: *pi = Rank_kArchMajor; break;
+    case hipDeviceAttributeComputeCapabilityMinor: *pi = Rank_kArchMinor; break;
+    case hipDeviceAttributeWarpSize: *pi = g_hipWarpSize; break;
+    case hipDeviceAttributeDirectManagedMemAccessFromHost: *pi = 1; break;
+    default: *pi = 0; break;
+  }
+  return hipSuccess;
+}
+
+hipError_t Rank_DeviceProperties(hipDeviceProp_t* prop, int) {
+  if (!prop) {
+    return hipErrorInvalidValue;
+  }
+  *prop = hipDeviceProp_t{};
+  std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", Rank_kGcnArchName);
+  prop->multiProcessorCount = Rank_kCuCount;
+  prop->warpSize = 64;
+  return hipSuccess;
+}
+
+hipError_t Rank_SetDeviceOk(int) { return hipSuccess; }
+
+ncclResult_t Rank_KernelInitOk(int, int, size_t* maxStackSize) {
+  if (maxStackSize) {
+    *maxStackSize = 0;
+  }
+  return ncclSuccess;
+}
+
+// Heap comm and job: channels[MAXCHANNELS] is inline, so a stack ncclComm overflows.
+class Rank_JobScene {
+ public:
+  Rank_JobScene(int nranks, int myrank)
+      : comm_(new ncclComm{}),
+        job_(new ncclCommInitRankAsyncJob{}),
+        attr_(g_hipDeviceGetAttribute, Rank_DeviceAttribute),
+        props_(g_hipGetDeviceProperties, Rank_DeviceProperties) {
+    InstallCommAllocSuccess();
+    job_->comm = comm_.get();
+    job_->nranks = nranks;
+    job_->myrank = myrank;
+    job_->nId = 1;
+    job_->cudaDev = Rank_kCudaDev;
+    job_->newcomm = &published_;
+    std::snprintf(job_->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "%s", "Rank_JobScene");
+  }
+  ~Rank_JobScene() {
+    free(comm_->archName);
+    free(comm_->peerInfo);
+  }
+  Rank_JobScene(const Rank_JobScene&) = delete;
+  Rank_JobScene& operator=(const Rank_JobScene&) = delete;
+
+  ncclComm* comm() { return comm_.get(); }
+  ncclCommInitRankAsyncJob* job() { return job_.get(); }
+  ncclComm* published() const { return published_; }
+  ncclResult_t Run() { return ncclCommInitRankFunc(reinterpret_cast<ncclAsyncJob*>(job_.get())); }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclCommInitRankAsyncJob> job_;
+  ncclComm* published_ = nullptr;
+  ScopedHook<hipError_t(int*, hipDeviceAttribute_t, int)> attr_;
+  ScopedHook<hipError_t(hipDeviceProp_t*, int)> props_;
+};
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommInitRankFunc_SetDeviceFails_PublishesTheErrorAsInitStateAndStillAssignsNewcomm) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  int seenDev = -1;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    seenDev = dev;
+    return hipErrorInvalidDevice;
+  });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(Rank_kCudaDev, seenDev);
+  EXPECT_EQ(1, setDevice.calls);
+  EXPECT_EQ(ncclUnhandledCudaError, s.comm()->initState);
+  EXPECT_EQ(s.comm(), s.published()) << "exit: publishes the comm even when init failed";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SharedMemAttributeFails_ReturnsBeforeReadingTheArch) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) {
+      *pi = 0;
+    }
+    return hipErrorInvalidValue;
+  });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(1, attr.calls) << "the two arch reads must not run after the shared-mem read failed";
+  EXPECT_EQ(ncclUnhandledCudaError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_DevicePropertiesFail_ReturnsBeforeKernelInit) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t*, int) { return hipErrorInvalidValue; });
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run());
+  EXPECT_EQ(0, kernels.calls);
+  EXPECT_EQ(nullptr, s.comm()->archName);
+  EXPECT_EQ(0, s.comm()->cuCount);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenReturnsWithoutPublishing) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  int seenArch = -1;
+  int seenSharedMem = -1;
+  ScopedHook kernels(g_ncclInitKernelsForDevice, [&](int arch, int sharedMem, size_t* out) {
+    seenArch = arch;
+    seenSharedMem = sharedMem;
+    if (out) {
+      *out = 0;
+    }
+    return ncclInternalError;
+  });
+
+  EXPECT_EQ(ncclInternalError, s.Run());
+  EXPECT_EQ(Rank_kCudaArch, seenArch);
+  EXPECT_EQ(Rank_kMaxSharedMem, seenSharedMem);
+  EXPECT_EQ(1, kernels.calls);
+  EXPECT_EQ(nullptr, s.published()) << "a bare NCCLCHECK returns directly, skipping the exit: publish";
+  EXPECT_EQ(ncclSuccess, s.comm()->initState) << "and skipping the fail: initState store";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantStackSpace_RaisesTheDeviceStackLimitToThatSize) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  const size_t kMaxLocalSizeBytes = 3072;
+  SetParams({{"SET_STACK_SIZE", 1}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, [kMaxLocalSizeBytes](int, int, size_t* out) {
+    if (out) {
+      *out = kMaxLocalSizeBytes;
+    }
+    return ncclSuccess;
+  });
+  size_t seenLimit = 0;
+  ScopedHook setLimit(g_hipDeviceSetLimit, [&](hipLimit_t limit, size_t value) {
+    if (limit == hipLimitStackSize) {
+      seenLimit = value;
+    }
+    return hipSuccess;
+  });
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(kMaxLocalSizeBytes, seenLimit);
+  EXPECT_EQ(1, setLimit.calls);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantNoStackSpace_LeavesTheDeviceStackLimitAlone) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  SetParams({{"SET_STACK_SIZE", 1}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+  ScopedHook setLimit(g_hipDeviceSetLimit, [](hipLimit_t, size_t) { return hipSuccess; });
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(0, setLimit.calls);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColor_ReturnsSuccessWithoutAllocatingTheChild) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = NCCL_SPLIT_NOCOLOR;
+  s.comm()->nRanks = Rank_kUntouchedNRanks;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {NCCL_SPLIT_NOCOLOR, 0}, {7, 2}, {7, 3}});
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(Rank_kUntouchedNRanks, s.comm()->nRanks) << "commAlloc must not run for NCCL_SPLIT_NOCOLOR";
+  EXPECT_EQ(nullptr, s.comm()->archName);
+  EXPECT_EQ(0u, s.comm()->commHash);
+  EXPECT_EQ(s.comm(), s.published());
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitWithColor_DerivesChildHashAndHandsItToBootstrapSplit) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  parent->commHash = 0xABCDEF0123456789ULL;
+  s.job()->parent = parent.get();
+  s.job()->childCount = 3;
+  s.job()->color = 7;
+  s.job()->key = 2;
+  s.comm()->isGrow = true;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 2}, {7, 4}, {7, 6}});
+
+  uint64_t hacc[2] = {1, 1};
+  eatHash(hacc, &parent->commHash);
+  eatHash(hacc, &s.job()->childCount);
+  eatHash(hacc, &s.job()->color);
+  const uint64_t expectedHash = digestHash(hacc);
+
+  uint64_t seenHash = 0;
+  ncclComm* seenComm = nullptr;
+  ncclComm* seenParent = nullptr;
+  int seenColor = -1;
+  int seenKey = -1;
+  std::vector<int> seenRanks;
+  ScopedHook split(g_bootstrapSplit,
+                   [&](uint64_t hash, ncclComm* comm, ncclComm* parentComm, int color, int key, int* ranks) {
+                     seenHash = hash;
+                     seenComm = comm;
+                     seenParent = parentComm;
+                     seenColor = color;
+                     seenKey = key;
+                     seenRanks.assign(ranks, ranks + 4);
+                     return ncclRemoteError;
+                   });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_EQ(expectedHash, seenHash);
+  EXPECT_EQ(s.comm(), seenComm);
+  EXPECT_EQ(parent.get(), seenParent);
+  EXPECT_EQ(7, seenColor);
+  EXPECT_EQ(2, seenKey);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}), seenRanks);
+  EXPECT_EQ(4, s.job()->nranks);
+  EXPECT_EQ(1, s.job()->myrank);
+  EXPECT_EQ(4, s.comm()->nRanks);
+  EXPECT_EQ(1, s.comm()->rank);
+  EXPECT_FALSE(s.comm()->isGrow);
+  EXPECT_EQ(ncclRemoteError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitBootstrapSucceeds_CarriesOnIntoTheSharedArchBringup) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = 7;
+  s.job()->key = 2;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 2}, {7, 4}, {7, 6}});
+  ScopedHook split(g_bootstrapSplit, [](uint64_t, ncclComm*, ncclComm*, int, int, int*) {
+    g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+    return ncclSuccess;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_NE(ncclSuccess, s.Run()) << "initTransportsRank cannot complete host-only";
+  EXPECT_EQ(1, split.calls);
+  EXPECT_EQ(Rank_kCudaArch, s.comm()->cudaArch) << "the split arm reaches the same arch bringup as a normal init";
+  EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_ShrinkWithExcludeList_SkipsTheSplitInfoAllGather) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/5, /*rank=*/4);
+  s.job()->parent = parent.get();
+  int exclude[2] = {1, 3};
+  s.job()->excludeRanksList = exclude;
+  s.job()->excludeRanksCount = 2;
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void*, int) {
+    ADD_FAILURE() << "the shrink arm must not consult commGetSplitInfo";
+    return ncclInternalError;
+  });
+  std::vector<int> seenRanks;
+  ScopedHook split(g_bootstrapSplit, [&](uint64_t, ncclComm*, ncclComm*, int, int, int* ranks) {
+    seenRanks.assign(ranks, ranks + 3);
+    return ncclRemoteError;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(0, allGather.calls);
+  EXPECT_EQ(3, s.job()->nranks);
+  EXPECT_EQ(2, s.job()->myrank) << "rank 4 is the third survivor of {0,2,4}";
+  EXPECT_EQ(std::vector<int>({0, 2, 4}), seenRanks);
+  EXPECT_EQ(3, s.comm()->nRanks);
+  EXPECT_EQ(2, s.comm()->rank);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_NormalInit_DerivesCommHashFromTheCommIdAndClearsIsGrow) {
+  Rank_JobScene s(/*nranks=*/8, /*myrank=*/3);
+  ncclUniqueId id{};
+  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+    id.internal[i] = static_cast<char>(i + 1);
+  }
+  s.job()->commId = &id;
+  s.job()->nId = 2;
+  s.comm()->isGrow = true;
+  const uint64_t expectedHash = getHash(id.internal, NCCL_UNIQUE_ID_BYTES);
+
+  int seenHandles = -1;
+  void* seenHandle = nullptr;
+  ncclComm* seenComm = nullptr;
+  ncclComm* seenParent = s.comm();
+  ScopedHook bootInit(g_bootstrapInit, [&](int nHandles, void* handle, ncclComm* comm, ncclComm* parent) {
+    seenHandles = nHandles;
+    seenHandle = handle;
+    seenComm = comm;
+    seenParent = parent;
+    return ncclRemoteError;
+  });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_FALSE(s.comm()->isGrow);
+  EXPECT_EQ(2, seenHandles);
+  EXPECT_EQ(static_cast<void*>(&id), seenHandle);
+  EXPECT_EQ(s.comm(), seenComm);
+  EXPECT_EQ(nullptr, seenParent) << "the normal arm allocates and bootstraps with no parent";
+  EXPECT_EQ(8, s.comm()->nRanks);
+  EXPECT_EQ(3, s.comm()->rank);
+  EXPECT_EQ(ncclRemoteError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_Grow_DerivesCommHashFromTheHandleMagicAndNewRankCount) {
+  Rank_JobScene s(/*nranks=*/6, /*myrank=*/2);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/0);
+  parent->magic = 0xFEEDFACEULL;
+  parent->childCount = 9;
+  s.job()->parent = parent.get();
+  s.job()->isGrow = true;
+  ncclBootstrapHandle handle{};
+  handle.magic = 0x5A5A12345678ULL;
+  s.job()->commId = reinterpret_cast<ncclUniqueId*>(&handle);
+  const uint64_t expectedHash = hashCombine(handle.magic, s.job()->nranks);
+
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_TRUE(s.comm()->isGrow);
+  EXPECT_EQ(6, s.comm()->nRanks);
+  EXPECT_EQ(2, s.comm()->rank);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_GrowWithoutHandle_FallsBackToTheParentMagicAndChildCount) {
+  Rank_JobScene s(/*nranks=*/6, /*myrank=*/2);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/0);
+  parent->magic = 0xFEEDFACEULL;
+  parent->childCount = 9;
+  s.job()->parent = parent.get();
+  s.job()->isGrow = true;
+  s.job()->commId = nullptr;
+  const uint64_t expectedHash = hashCombine(hashCombine(parent->magic, parent->childCount), s.job()->nranks);
+
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclRemoteError; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(expectedHash, s.comm()->commHash);
+  EXPECT_NE(hashCombine(parent->magic, s.job()->nranks), s.comm()->commHash)
+      << "the childCount must take part in the fallback base magic";
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_TransportInitFails_StampsTheArchFieldsAndLeavesArchNameOwnedByTheComm) {
+  Rank_JobScene s(/*nranks=*/8, /*myrank=*/3);
+  ncclUniqueId id{};
+  s.job()->commId = &id;
+  ScopedHook bootInit(g_bootstrapInit, [](int, void*, ncclComm*, ncclComm*) { return ncclSuccess; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  const ncclResult_t res = s.Run();
+  EXPECT_NE(ncclSuccess, res) << "initTransportsRank cannot complete host-only";
+  EXPECT_EQ(Rank_kCudaArch, s.comm()->cudaArch);
+  EXPECT_EQ(Rank_kCuCount, s.comm()->cuCount);
+  ASSERT_NE(nullptr, s.comm()->archName);
+  EXPECT_STREQ(Rank_kGcnArchName, s.comm()->archName);
+  EXPECT_EQ(rcclLL128LineElemsFromArch(Rank_kGcnArchName), s.comm()->ll128LineElems);
+  EXPECT_EQ(rcclLL128DataElemsFromArch(Rank_kGcnArchName), s.comm()->ll128DataElems);
+  EXPECT_EQ(res, s.comm()->initState);
+}
+
+namespace {
+
+constexpr int Rank_kEntryNRanks = 8;
+constexpr int Rank_kEntryMyRank = 3;
+constexpr int Rank_kEntryCudaDev = 6;
+constexpr int Rank_kEntryMinCTAs = 5;
+
+void Rank_FillUniqueId(ncclUniqueId* id, unsigned char seed) {
+  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+    id->internal[i] = static_cast<char>(seed + i);
+  }
+}
+
+ncclCommInitRankAsyncJob* Rank_LaunchedJob(const Teardown_LaunchRecord& rec) {
+  return reinterpret_cast<ncclCommInitRankAsyncJob*>(rec.job);
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommInitRankDev_HappyPath_LaunchesRankFuncWithTheJobItBuilt) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  Rank_FillUniqueId(&id, 0xA1);
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, Rank_kEntryNRanks, /*nId=*/1, &id, Rank_kEntryMyRank,
+                                             Rank_kEntryCudaDev, &cfg, "Rank_Dev"));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(ncclInProgress, nc->initState);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(ncclCommInitRankFunc), rec.func);
+  EXPECT_EQ(ncclCommInitJobFree, rec.destructor);
+  EXPECT_EQ(nc, rec.comm);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nc, job->comm);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(Rank_kEntryCudaDev, job->cudaDev);
+  EXPECT_EQ(1, job->nId);
+  EXPECT_STREQ("Rank_Dev", job->funcName);
+  ASSERT_NE(nullptr, job->commId);
+  EXPECT_NE(static_cast<const void*>(job->commId), static_cast<const void*>(&id)) << "the id must be copied";
+  EXPECT_EQ(0, std::memcmp(job->commId, &id, NCCL_UNIQUE_ID_BYTES));
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_LaunchFails_ClearsNewcommAndReportsTheError) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  rec.result = ncclSystemError;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = reinterpret_cast<ncclComm_t>(0x1);
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSystemError, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
+  EXPECT_EQ(nullptr, nc) << "a failed init must not hand back a comm";
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_CommIdEnvOnRankZero_ClampsNIdToOneAndStartsTheBootstrapRoot) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  bool seenIdFromEnv = false;
+  ScopedHook root(g_bootstrapCreateRoot, [&](ncclBootstrapHandle*, bool idFromEnv) {
+    seenIdFromEnv = idFromEnv;
+    return ncclSuccess;
+  });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/2, ids, /*myrank=*/0, 0, &cfg, "t"));
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(1, Rank_LaunchedJob(rec)->nId) << "NCCL_COMM_ID cannot be combined with several unique ids";
+  EXPECT_EQ(1, root.calls);
+  EXPECT_TRUE(seenIdFromEnv);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_CommIdEnvOnNonZeroRank_KeepsNIdAndStartsNoRoot) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ScopedHook root(g_bootstrapCreateRoot, [](ncclBootstrapHandle*, bool) { return ncclSuccess; });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/2, ids, /*myrank=*/1, 0, &cfg, "t"));
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(2, Rank_LaunchedJob(rec)->nId);
+  EXPECT_EQ(0, root.calls) << "only rank 0 starts the bootstrap root";
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankDev_BootstrapRootFails_ClearsNewcommAndSkipsTheLaunch) {
+  InstallDevCommSetupSuccess();
+  SetMicroEnv("NCCL_COMM_ID", "127.0.0.1:23456");
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ScopedHook root(g_bootstrapCreateRoot, [](ncclBootstrapHandle*, bool) { return ncclRemoteError; });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclRemoteError, ncclCommInitRankDev(&nc, /*nranks=*/4, /*nId=*/1, &id, /*myrank=*/0, 0, &cfg, "t"));
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_EQ(nullptr, nc);
+}
+
+TEST_F(InitMicrotest, CommInitRank_ForwardsOneIdAndTheCurrentDeviceToRankDev) {
+  InstallDevCommSetupSuccess();
+  const int currentDev = 4;
+  ScopedHook getDevice(g_hipGetDevice, [currentDev](int* dev) {
+    if (dev) {
+      *dev = currentDev;
+    }
+    return hipSuccess;
+  });
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  Rank_FillUniqueId(&id, 0xB2);
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRank_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(1, job->nId);
+  EXPECT_EQ(currentDev, job->cudaDev);
+  EXPECT_EQ(0, std::memcmp(job->commId, &id, NCCL_UNIQUE_ID_BYTES));
+  EXPECT_STREQ("ncclCommInitRank_impl", job->funcName);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_NullConfig_StillLaunchesWithTheInternalDefaultConfig) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank,
+                                                     /*config=*/nullptr));
+  ASSERT_NE(nullptr, nc);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_NE(Rank_kEntryMinCTAs, nc->config.minCTAs) << "no user config was supplied to copy from";
+  EXPECT_EQ(Rank_kEntryMyRank, Rank_LaunchedJob(rec)->myrank);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_UserConfig_IsTheConfigParsedIntoTheComm) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = Rank_kEntryMinCTAs;
+  cfg.maxCTAs = Rank_kEntryMinCTAs;
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank, &cfg));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(Rank_kEntryMinCTAs, nc->config.minCTAs);
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankConfig_NonBlockingComm_ReportsTheCommsAsyncErrorInsteadOfTheReturnCode) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, [&rec](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*),
+                                              void (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm* comm) {
+    rec.calls++;
+    rec.job = job;
+    rec.func = func;
+    rec.destructor = destructor;
+    rec.comm = comm;
+    comm->asyncResult = ncclInProgress;
+    return ncclSuccess;
+  });
+  ncclComm_t nc = nullptr;
+  ncclUniqueId id{};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.blocking = 0;
+
+  EXPECT_EQ(ncclInProgress, ncclCommInitRankConfig_impl(&nc, Rank_kEntryNRanks, id, Rank_kEntryMyRank, &cfg));
+  ASSERT_NE(nullptr, nc);
+  EXPECT_EQ(0, nc->config.blocking);
+  EXPECT_EQ(1, rec.calls);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankScalable_ForwardsNIdAndTheWholeCommIdArray) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  const int nId = 3;
+  ncclUniqueId ids[nId] = {};
+  for (int i = 0; i < nId; ++i) {
+    Rank_FillUniqueId(&ids[i], static_cast<unsigned char>(0x21 + i));
+  }
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclSuccess,
+            ncclCommInitRankScalable(&nc, Rank_kEntryNRanks, Rank_kEntryMyRank, nId, ids, &cfg));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nId, job->nId);
+  EXPECT_EQ(Rank_kEntryNRanks, job->nranks);
+  EXPECT_EQ(Rank_kEntryMyRank, job->myrank);
+  EXPECT_EQ(0, std::memcmp(job->commId, ids, nId * NCCL_UNIQUE_ID_BYTES));
+  EXPECT_STREQ("ncclCommInitRankScalable", job->funcName);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommInitRankScalable_NIdAboveNranks_ReturnsInvalidArgumentWithoutLaunching) {
+  InstallDevCommSetupSuccess();
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t nc = nullptr;
+  ncclUniqueId ids[2] = {};
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommInitRankScalable(&nc, /*nranks=*/1, /*myrank=*/0, /*nId=*/2, ids, &cfg));
+  EXPECT_EQ(0, rec.calls);
+  EXPECT_EQ(nullptr, nc);
+}
+
+TEST_F(InitMicrotest, CommInitAll_TwoDevices_LaunchesOncePerRankWithTheDeviceFromTheDevlist) {
+  InstallDevCommSetupSuccess();
+  std::vector<int> seenRanks;
+  std::vector<int> seenDevs;
+  std::vector<int> seenNranks;
+  ScopedHook launch(g_ncclAsyncLaunch, [&](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*),
+                                           void (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm*) {
+    auto* initJob = reinterpret_cast<ncclCommInitRankAsyncJob*>(job);
+    seenRanks.push_back(initJob->myrank);
+    seenDevs.push_back(initJob->cudaDev);
+    seenNranks.push_back(initJob->nranks);
+    destructor(job);
+    return ncclSuccess;
+  });
+  ncclComm_t comms[2] = {};
+  const int devlist[2] = {1, 0};
+
+  EXPECT_EQ(ncclSuccess, ncclCommInitAll_impl(comms, 2, devlist));
+  EXPECT_EQ(2, launch.calls);
+  EXPECT_EQ(std::vector<int>({0, 1}), seenRanks);
+  EXPECT_EQ(std::vector<int>({1, 0}), seenDevs) << "rank i takes devlist[i], not i";
+  EXPECT_EQ(std::vector<int>({2, 2}), seenNranks);
+  EXPECT_NE(nullptr, comms[0]);
+  EXPECT_NE(nullptr, comms[1]);
+}
+
+TEST_F(InitMicrotest, CommSplit_NoColor_StillJoinsTheSplitCollectiveWithoutAChildComm) {
+  ReadyComm rc;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+
+  EXPECT_EQ(ncclSuccess, ncclCommSplit_impl(rc.get(), NCCL_SPLIT_NOCOLOR, /*key=*/0, &out, /*config=*/nullptr));
+  EXPECT_EQ(nullptr, out);
+  ASSERT_EQ(1, rec.calls);
+  EXPECT_EQ(Teardown_JobFn(ncclCommInitRankFunc), rec.func);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(nullptr, job->comm) << "no child comm is allocated for NCCL_SPLIT_NOCOLOR";
+  EXPECT_EQ(rc.get(), job->parent);
+  EXPECT_EQ(NCCL_SPLIT_NOCOLOR, job->color);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommSplit_WithColor_ForwardsColourKeyAndTheIncrementedChildCount) {
+  InstallDevCommSetupSuccess();
+  ReadyComm rc;
+  rc.get()->childCount = 4;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = nullptr;
+  const int color = 7;
+  const int key = 2;
+
+  EXPECT_EQ(ncclSuccess, ncclCommSplit_impl(rc.get(), color, key, &out, /*config=*/nullptr));
+  ASSERT_EQ(1, rec.calls);
+  ncclCommInitRankAsyncJob* job = Rank_LaunchedJob(rec);
+  EXPECT_EQ(color, job->color);
+  EXPECT_EQ(key, job->key);
+  EXPECT_EQ(5, job->childCount) << "every split must take a fresh child index";
+  EXPECT_EQ(nullptr, job->excludeRanksList) << "a split is not a shrink";
+  EXPECT_NE(nullptr, job->comm);
+  EXPECT_EQ(rc.get(), job->parent);
+  rec.Release();
+}
+
+TEST_F(InitMicrotest, CommSplit_NotReadyComm_ReturnsInvalidArgumentWithoutLaunching) {
+  ReadyComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSplit_impl(rc.get(), /*color=*/1, /*key=*/0, &out, /*config=*/nullptr));
+  EXPECT_EQ(0, rec.calls);
+}
+
+TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncFails_LeavesTheAbortFlagsRaised) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  g_ncclStrongStreamResult = ncclSystemError;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclSystemError, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/1, &out,
+                                                 /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  EXPECT_EQ(1u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
+  EXPECT_EQ(nullptr, out);
+}
+
+TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncSucceeds_LowersTheAbortFlagsBeforeTheChildInit) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  EXPECT_EQ(0u, c.abortFlag()) << "the abort window must close before the child comm is built";
+  EXPECT_EQ(0u, c.abortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  g_ncclStrongStreamResult = ncclSystemError;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, /*shrinkFlags=*/0));
+  EXPECT_EQ(0u, c.abortFlag()) << "without NCCL_SHRINK_ABORT nothing raises the flags";
+}
+
+
+namespace {
+
+constexpr uint64_t kGrow_ParentMagic = 0x5A5A0000BEEF0001ULL;
+constexpr int kGrow_ParentMinCTAs = 6;
+constexpr int kGrow_SuppliedMinCTAs = 3;
+constexpr int kGrow_ParentRanks = 4;
+constexpr int kGrow_ParentRank = 2;
+constexpr int kGrow_ParentCudaDev = 5;
+constexpr int kGrow_TargetRanks = 6;
+
+// A distinguishable non-null value for *newcomm, so "the store happened" and "the store was deleted" differ.
+ncclComm* const kGrow_NewcommPoison = reinterpret_cast<ncclComm*>(0xF00DULL);
+
+class Grow_ParentComm {
+ public:
+  Grow_ParentComm() : comm_(new ncclComm{}) {
+    comm_->startMagic = comm_->endMagic = NCCL_MAGIC;
+    comm_->abortFlag = &abortFlag_;
+    comm_->abortFlagDev = &abortFlagDev_;
+    comm_->abortFlagRefCount = &abortFlagRefCount_;
+    comm_->magic = kGrow_ParentMagic;
+    comm_->nRanks = kGrow_ParentRanks;
+    comm_->rank = kGrow_ParentRank;
+    comm_->cudaDev = kGrow_ParentCudaDev;
+    comm_->config.minCTAs = kGrow_ParentMinCTAs;
+    comm_->config.maxCTAs = kGrow_ParentMinCTAs;
+  }
+  ncclComm* get() { return comm_.get(); }
+  ncclComm* operator->() { return comm_.get(); }
+
+ private:
+  uint32_t abortFlag_ = 0;
+  uint32_t abortFlagDev_ = 0;
+  int abortFlagRefCount_ = 1;
+  std::unique_ptr<ncclComm> comm_;
+};
+
+struct Grow_LaunchRecord {
+  ncclResult_t (*func)(struct ncclAsyncJob*) = nullptr;
+  void (*undo)(struct ncclAsyncJob*) = nullptr;
+  void (*destructor)(void*) = nullptr;
+  ncclComm* launchComm = nullptr;
+  ncclComm* jobComm = nullptr;
+  ncclComm* jobParent = nullptr;
+  ncclComm** jobNewcomm = nullptr;
+  int cudaDev = -99, nranks = -99, myrank = -99, nId = -99;
+  int color = -99, key = -99, childCount = -99, excludeRanksCount = -99;
+  bool isGrow = true;
+  bool hasCommId = false;
+  ncclUniqueId commId{};
+  std::vector<int> excludeRanks;
+  std::string funcName;
+};
+
+// Suppresses ncclCommInitRankFunc and snapshots the job, so every field the caller computed stays observable.
+class Grow_LaunchSpy {
+ public:
+  explicit Grow_LaunchSpy(ncclResult_t result = ncclSuccess)
+      : hook_(g_ncclAsyncLaunch, [this, result](struct ncclAsyncJob* raw, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                                void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
+                                                ncclComm* comm) {
+          Capture(raw, func, undo, destructor, comm);
+          if (result != ncclSuccess) return result;
+          ReleaseCommId(raw);
+          if (destructor) destructor(raw);
+          return result;
+        }) {}
+
+  int calls() const { return hook_.calls; }
+  const Grow_LaunchRecord& rec() const { return rec_; }
+
+ private:
+  void Capture(struct ncclAsyncJob* raw, ncclResult_t (*func)(struct ncclAsyncJob*),
+               void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), ncclComm* comm) {
+    auto* job = reinterpret_cast<ncclCommInitRankAsyncJob*>(raw);
+    rec_.func = func;
+    rec_.undo = undo;
+    rec_.destructor = destructor;
+    rec_.launchComm = comm;
+    rec_.jobComm = job->comm;
+    rec_.jobParent = job->parent;
+    rec_.jobNewcomm = job->newcomm;
+    rec_.cudaDev = job->cudaDev;
+    rec_.nranks = job->nranks;
+    rec_.myrank = job->myrank;
+    rec_.nId = job->nId;
+    rec_.color = job->color;
+    rec_.key = job->key;
+    rec_.childCount = job->childCount;
+    rec_.excludeRanksCount = job->excludeRanksCount;
+    rec_.isGrow = job->isGrow;
+    rec_.funcName = job->funcName;
+    rec_.hasCommId = job->commId != nullptr;
+    if (job->commId) {
+      std::memcpy(&rec_.commId, job->commId, sizeof(ncclUniqueId));
+    }
+    if (job->excludeRanksList) {
+      rec_.excludeRanks.assign(job->excludeRanksList, job->excludeRanksList + job->excludeRanksCount);
+    }
+  }
+
+  // Only the launched job's destructor releases commId; on a failed launch the unit's own fail path must do it.
+  static void ReleaseCommId(struct ncclAsyncJob* raw) {
+    auto* job = reinterpret_cast<ncclCommInitRankAsyncJob*>(raw);
+    ::free(job->commId);
+    job->commId = nullptr;
+  }
+
+  Grow_LaunchRecord rec_;
+  ScopedHook<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                          void (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm*)>
+      hook_;
+};
+
+// Records every free() the unit made and performs none of them, so the test can prove which release happened.
+class Grow_FreeSpy {
+ public:
+  Grow_FreeSpy() : hook_(g_microFree, [this](void* p) { freed_.push_back(p); }) {}
+  const std::vector<void*>& freed() const { return freed_; }
+
+ private:
+  std::vector<void*> freed_;
+  ScopedHook<void(void*)> hook_;
+};
+
+void Grow_ReleaseComm(ncclComm* c, bool ownsAbortResources) {
+  if (!c) {
+    return;
+  }
+  if (ownsAbortResources) {
+    ::free(c->abortFlag);
+    ::free((void*)c->abortFlagDev);
+    ::free(c->abortFlagRefCount);
+  }
+  ::free(c);
+}
+
+ncclResult_t Grow_RunExisting(ncclComm* parent, int nRanks, const ncclUniqueId* id, ncclComm_t* out,
+                              ncclConfig_t* config) {
+  return ncclCommGrow_impl(parent, nRanks, id, /*rank=*/-1, out, config);
+}
+
+// hipThreadExchangeStreamCaptureMode is fail-loud by default; the real one succeeds and ncclCudaHostCalloc needs it.
+void Grow_AllowHostAlloc() { g_hipAsyncOpsResult = hipSuccess; }
+
+ncclUniqueId Grow_MakeUniqueId(unsigned char fill) {
+  ncclUniqueId id{};
+  std::memset(&id, fill, sizeof(id));
+  return id;
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, CommGrow_NullNewcomm_ReturnsInvalidArgumentWithoutBroadcasting) {
+  Grow_ParentComm parent;
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommGrow_impl(parent.get(), kGrow_TargetRanks, nullptr, /*rank=*/-1, nullptr, nullptr));
+  EXPECT_EQ(0, g_bcastGrowHandleCalls);
+}
+
+TEST_F(InitMicrotest, CommGrow_ZeroNRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&]() { res = Grow_RunExisting(parent.get(), 0, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "the nRanks guard returns before *newcomm is cleared";
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks must be positive, got 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NegativeNRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log =
+      RcclUnitTesting::CaptureLog([&]() { res = Grow_RunExisting(parent.get(), -3, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks must be positive, got -3")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NRanksEqualsParentRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_ParentRanks, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks 4 is less than current ranks 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NRanksBelowParentRanks_WarnsAndLeavesNewcommUntouched) {
+  Grow_ParentComm parent;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_ParentRanks - 1, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(kGrow_NewcommPoison, out);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: total ranks 3 is less than current ranks 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_CorruptedParentComm_ReturnsInvalidArgumentAndClearsNewcomm) {
+  Grow_ParentComm parent;
+  parent->startMagic = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out) << "*newcomm is cleared before the CommCheck";
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankNotReady_ReturnsInvalidArgumentAndClearsNewcomm) {
+  Grow_ParentComm parent;
+  parent->asyncResult = ncclInProgress;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, parent->childCount) << "childCount must not advance for a comm that never grew";
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankPassesNonNegativeRank_WarnsAndLeavesChildCountUnchanged) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&]() {
+    res = ncclCommGrow_impl(parent.get(), kGrow_TargetRanks, nullptr, /*rank=*/0, &out, nullptr);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, parent->childCount);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: existing ranks must pass rank=-1, got 0")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNegativeRank_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x11);
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, &id, /*rank=*/-2, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new ranks must pass valid rank >= 0, got -2")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNullUniqueId_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, nullptr, /*rank=*/1, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new ranks must pass non-NULL uniqueId")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankAtNRanks_WarnsAndReturnsInvalidArgument) {
+  Grow_LaunchSpy spy;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x11);
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = ncclCommGrow_impl(nullptr, kGrow_TargetRanks, &id, kGrow_TargetRanks, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new rank 6 exceeds total ranks 6")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_BoundaryRankMagicMismatch_WarnsAndBroadcastsAsNonRoot) {
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  const uint64_t wrongMagic = hashCombine(kGrow_ParentMagic, 1) ^ 0xFFULL;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = wrongMagic;
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { res = Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(1, bcast.calls);
+  EXPECT_FALSE(g_bcastGrowHandleIsRoot) << "a growing member receives the handle, it does not mint it";
+  EXPECT_EQ(1, parent->childCount) << "childCount advances before the handle is validated";
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: magic mismatch computed by the root")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommGrow_BoundaryRankMagicMatches_ReplacesUniqueIdWithReceivedHandle) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  ncclBootstrapHandle sent{};
+  std::memset(&sent, 0x3C, sizeof(sent));
+  sent.magic = hashCombine(kGrow_ParentMagic, 1);
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    *h = sent;
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(1, bcast.calls);
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(1, spy.rec().nId) << "the received handle stands in for the caller's absent uniqueId";
+  ASSERT_TRUE(spy.rec().hasCommId);
+  EXPECT_EQ(0, std::memcmp(&spy.rec().commId, &sent, sizeof(sent)));
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_LastRankIsBoundary_ReceivesHandle) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->rank = kGrow_ParentRanks - 1;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle* h, ncclComm*, bool) {
+    h->magic = hashCombine(kGrow_ParentMagic, 1);
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(1, bcast.calls);
+  EXPECT_EQ(1, spy.rec().nId);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_MiddleRank_SkipsHandleBroadcastAndLaunchesWithoutCommId) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
+    ADD_FAILURE() << "only ranks 0 and N-1 receive the grow handle";
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(0, bcast.calls);
+  EXPECT_EQ(0, spy.rec().nId);
+  EXPECT_FALSE(spy.rec().hasCommId);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_SingleRankParent_SkipsHandleBroadcast) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->nRanks = 1;
+  parent->rank = 0;
+  ScopedHook bcast(g_bcastGrowHandle, [&](struct ncclBootstrapHandle*, ncclComm*, bool) {
+    ADD_FAILURE() << "a one-rank parent has no coordinator to receive from";
+    return ncclSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), /*nRanks=*/2, /*uniqueId=*/nullptr, &out, nullptr));
+
+  EXPECT_EQ(0, bcast.calls);
+  EXPECT_EQ(1, parent->childCount);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_BroadcastFails_PropagatesAndSkipsLaunch) {
+  Grow_ParentComm parent;
+  parent->rank = 0;
+  g_bcastGrowHandleResult = ncclInternalError;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_CommAllocFails_ReturnsSystemErrorAndSkipsLaunch) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_AbortFlagAllocFails_ReturnsSystemErrorAndReleasesTheComm) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 1;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size()) << "the half-built comm and its two unset abort slots are all released";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_AbortFlagDevAllocFails_ReturnsCudaErrorAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ScopedHook hostMalloc(g_hipHostMalloc, [](void**, std::size_t, unsigned) { return hipErrorOutOfMemory; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(1, hostMalloc.calls);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size());
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_ParentDoesNotShare_FailPathReleasesAbortResourcesAndComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->shareResources = false;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(3u, frees.freed().size()) << "abortFlag, abortFlagRefCount and the comm itself";
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, CommGrow_ParentSharesResources_FailPathReleasesOnlyTheComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->shareResources = true;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.blocking = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(1u, frees.freed().size()) << "a sharing parent keeps ownership of the abort resources";
+  auto* leaked = static_cast<ncclComm*>(frees.freed()[0]);
+  EXPECT_EQ(NCCL_MAGIC, leaked->startMagic);
+  Grow_ReleaseComm(leaked, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankNullConfig_CopiesParentConfigIntoNewComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, /*config=*/nullptr));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(kGrow_ParentMinCTAs, out->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, out->config.maxCTAs);
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankWithConfig_ParsesSuppliedConfigOverParent) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &cfg));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, out->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, parent->config.minCTAs) << "the parent's config is a source, never a destination";
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_InvalidConfig_ReturnsInvalidArgumentAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t bad = NCCL_CONFIG_INITIALIZER;
+  bad.magic = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunExisting(parent.get(), kGrow_TargetRanks, nullptr, &out, &bad));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_ExistingRankHappyPath_LaunchesInitRankFuncOnTheNewComm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog(
+        [&]() { res = Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr); });
+  }
+
+  ASSERT_EQ(ncclSuccess, res);
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(&ncclCommInitRankFunc, r.func);
+  EXPECT_EQ(nullptr, r.undo);
+  EXPECT_EQ(&childCommCleanupJob, r.destructor);
+  EXPECT_EQ(out, r.launchComm) << "grow launches against the new comm, not the parent";
+  EXPECT_EQ(out, r.jobComm);
+  EXPECT_EQ(parent.get(), r.jobParent);
+  EXPECT_EQ(&out, r.jobNewcomm);
+  EXPECT_EQ(kGrow_ParentCudaDev, r.cudaDev);
+  EXPECT_EQ(kGrow_TargetRanks, r.nranks) << "the grown size comes from the argument, not the parent";
+  EXPECT_EQ(kGrow_ParentRank, r.myrank);
+  EXPECT_EQ(kGrow_ParentRank, r.key);
+  EXPECT_EQ(0, r.color);
+  EXPECT_TRUE(r.isGrow);
+  EXPECT_EQ(1, r.nId);
+  EXPECT_EQ("ncclCommGrow", r.funcName);
+  ASSERT_TRUE(r.hasCommId);
+  EXPECT_EQ(0, std::memcmp(&r.commId, &id, sizeof(id)));
+  EXPECT_EQ(ncclInProgress, out->initState);
+  EXPECT_EQ(NCCL_MAGIC, out->startMagic);
+  EXPECT_EQ(NCCL_MAGIC, out->endMagic);
+  ASSERT_NE(nullptr, out->abortFlagRefCount);
+  EXPECT_EQ(1, *out->abortFlagRefCount);
+  EXPECT_NE(parent->abortFlag, out->abortFlag) << "a grown comm never shares the parent's abort flag";
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: existing rank creating new communicator with 6 total ranks"))
+      << "actual log:\n" << log;
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankHappyPath_UsesCurrentDeviceAndCallerRank) {
+  Grow_AllowHostAlloc();
+  constexpr int kNewRank = 3;
+  constexpr int kCurrentDevice = 6;
+  g_currentDevice = kCurrentDevice;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x2D);
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog([&]() {
+      res = ncclCommGrow_impl(/*comm=*/nullptr, /*nRanks=*/8, &id, kNewRank, &out, &cfg);
+    });
+  }
+
+  ASSERT_EQ(ncclSuccess, res);
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(nullptr, r.jobParent) << "a joining rank has no parent communicator";
+  EXPECT_EQ(kCurrentDevice, r.cudaDev);
+  EXPECT_EQ(kNewRank, r.myrank);
+  EXPECT_EQ(kNewRank, r.key);
+  EXPECT_EQ(8, r.nranks);
+  EXPECT_TRUE(r.isGrow);
+  EXPECT_EQ("ncclCommGrow", r.funcName);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, out->config.minCTAs);
+  EXPECT_TRUE(LogHas(log, "ncclCommGrow: new rank creating new communicator with 8 total ranks"))
+      << "actual log:\n" << log;
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_NewRankNullConfig_UsesDefaultConfig) {
+  Grow_AllowHostAlloc();
+  const ncclUniqueId id = Grow_MakeUniqueId(0x2D);
+  Grow_LaunchSpy spy;
+  ncclComm_t out = nullptr;
+
+  ASSERT_EQ(ncclSuccess, ncclCommGrow_impl(nullptr, /*nRanks=*/8, &id, /*rank=*/0, &out, /*config=*/nullptr));
+
+  ASSERT_NE(nullptr, out);
+  EXPECT_EQ(1, out->config.blocking) << "an absent config is parsed as defaults, never copied from a null parent";
+  Grow_ReleaseComm(out, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, CommGrow_CommIdAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 3;
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclSystemError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, CommGrow_AsyncLaunchFails_PropagatesAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  const ncclUniqueId id = Grow_MakeUniqueId(0x7E);
+  Grow_LaunchSpy spy(ncclInternalError);
+  ncclComm_t out = nullptr;
+  EXPECT_EQ(ncclInternalError, Grow_RunExisting(parent.get(), kGrow_TargetRanks, &id, &out, nullptr));
+  EXPECT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, out) << "a failed launch must not publish a half-built comm";
+}
+
+namespace {
+
+constexpr int kGrow_SplitColor = 3;
+constexpr int kGrow_SplitKey = 9;
+constexpr int kGrow_ParentChildCount = 7;
+constexpr char kGrow_Caller[] = "microCaller";
+
+ncclResult_t Grow_RunSplit(ncclComm* parent, int color, int key, ncclComm_t* out, ncclConfig_t* config) {
+  return ncclCommInitChildComm(parent, out, /*isShrink=*/false, NCCL_SHRINK_DEFAULT, color, key,
+                               /*excludeRanksList=*/nullptr, /*excludeRanksCount=*/0, config, kGrow_Caller);
+}
+
+ncclResult_t Grow_RunShrink(ncclComm* parent, int flags, int* excludeRanksList, int excludeRanksCount,
+                            ncclComm_t* out) {
+  return ncclCommInitChildComm(parent, out, /*isShrink=*/true, flags, /*color=*/0, parent->rank, excludeRanksList,
+                               excludeRanksCount, /*config=*/nullptr, kGrow_Caller);
+}
+
+}  // namespace
+
+TEST_F(InitMicrotest, InitChildComm_GetDeviceFails_ReturnsCudaErrorBeforeAnyValidation) {
+  ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(/*parent=*/nullptr, kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "the device query precedes every write to *newcomm";
+  EXPECT_EQ(1, getDevice.calls);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SetDeviceFails_ReturnsCudaErrorAndRestoresDevice) {
+  Grow_ParentComm parent;
+  constexpr int kOldDevice = 1;
+  g_currentDevice = kOldDevice;
+  int setCalls = 0;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) -> hipError_t {
+    if (++setCalls == 1) return hipErrorInvalidValue;
+    g_currentDevice = dev;
+    return hipSuccess;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(kGrow_NewcommPoison, out) << "*newcomm is cleared only after the device switch succeeds";
+  EXPECT_EQ(2, setDevice.calls);
+  EXPECT_EQ(kOldDevice, g_currentDevice);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitNoColor_LaunchesWithoutAllocatingChild) {
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    log = RcclUnitTesting::CaptureLog(
+        [&]() { res = Grow_RunSplit(parent.get(), NCCL_SPLIT_NOCOLOR, kGrow_SplitKey, &out, nullptr); });
+  }
+
+  EXPECT_EQ(ncclSuccess, res);
+  EXPECT_EQ(nullptr, out);
+  ASSERT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, spy.rec().jobComm) << "a colourless rank still joins the job, with no child of its own";
+  EXPECT_EQ(NCCL_SPLIT_NOCOLOR, spy.rec().color);
+  EXPECT_EQ(parent.get(), spy.rec().launchComm);
+  EXPECT_TRUE(LogHas(log, "Rank 2 has color with NCCL_SPLIT_NOCOLOR, not creating a new communicator"))
+      << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkIgnoresNoColor_StillAllocatesChild) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, ncclCommInitChildComm(parent.get(), &out, /*isShrink=*/true, NCCL_SHRINK_DEFAULT,
+                                               NCCL_SPLIT_NOCOLOR, parent->rank, exclude, 1, nullptr, kGrow_Caller));
+
+  ASSERT_EQ(1, spy.calls());
+  ASSERT_NE(nullptr, spy.rec().jobComm) << "NCCL_SPLIT_NOCOLOR is a split concept and must not skip a shrink child";
+  Grow_ReleaseComm(spy.rec().jobComm, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_Split_AllocatesChildAndLaunchesOnTheParent) {
+  Grow_AllowHostAlloc();
+  constexpr int kSplitOldDevice = 1;
+  g_currentDevice = kSplitOldDevice;
+  Grow_ParentComm parent;
+  parent->childCount = kGrow_ParentChildCount;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out) << "*newcomm stays null until the async job completes";
+  ASSERT_EQ(1, spy.calls());
+  const Grow_LaunchRecord& r = spy.rec();
+  ncclComm* child = r.jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_EQ(&ncclCommInitRankFunc, r.func);
+  EXPECT_EQ(nullptr, r.undo);
+  EXPECT_EQ(&childCommCleanupJob, r.destructor);
+  EXPECT_EQ(parent.get(), r.launchComm) << "a split launches against the parent, not the child";
+  EXPECT_EQ(parent.get(), r.jobParent);
+  EXPECT_EQ(&out, r.jobNewcomm);
+  EXPECT_EQ(kGrow_SplitColor, r.color);
+  EXPECT_EQ(kGrow_SplitKey, r.key);
+  EXPECT_EQ(kGrow_ParentChildCount + 1, r.childCount);
+  EXPECT_EQ(kGrow_ParentChildCount + 1, parent->childCount);
+  EXPECT_EQ(kGrow_ParentCudaDev, r.cudaDev);
+  EXPECT_EQ(kGrow_Caller, r.funcName);
+  EXPECT_FALSE(r.isGrow);
+  EXPECT_EQ(NCCL_MAGIC, child->startMagic);
+  EXPECT_EQ(NCCL_MAGIC, child->endMagic);
+  EXPECT_EQ(ncclInternalError, child->initState);
+  EXPECT_FALSE(parent->shareResources);
+  ASSERT_NE(nullptr, child->abortFlag);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(child->abortFlag, parent->childAbortFlag);
+  EXPECT_EQ(child->abortFlagDev, parent->childAbortFlagDev);
+  ASSERT_NE(nullptr, child->abortFlagRefCount);
+  EXPECT_EQ(1, *child->abortFlagRefCount);
+  EXPECT_EQ(kGrow_ParentMinCTAs, child->config.minCTAs);
+  EXPECT_EQ(kSplitOldDevice, g_currentDevice) << "the caller's device is restored before returning";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitShareEnabled_ReusesParentAbortResources) {
+  Grow_ParentComm parent;
+  parent->config.splitShare = 1;
+  parent->childAbortFlag = parent->abortFlag;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_TRUE(parent->shareResources);
+  EXPECT_EQ(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(parent->abortFlagDev, child->abortFlagDev);
+  EXPECT_EQ(parent->abortFlagRefCount, child->abortFlagRefCount);
+  EXPECT_EQ(nullptr, parent->childAbortFlag) << "a sharing parent has no separate child abort flag to watch";
+  EXPECT_EQ(2, *parent->abortFlagRefCount);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/false);
+}
+
+TEST_F(InitMicrotest, InitChildComm_RevokedParent_ForcesFreshAbortResources) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.splitShare = 1;
+  parent->revokedFlag = 1;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  EXPECT_EQ(1, *parent->abortFlagRefCount) << "a revoked parent's refcount must not be taken";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkDefaultMode_SharesWhenShrinkShareIsSet) {
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  parent->config.splitShare = 0;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 1, &out));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_TRUE(parent->shareResources) << "a shrink consults shrinkShare, never splitShare";
+  EXPECT_EQ(parent->abortFlag, child->abortFlag);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/false);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ShrinkAbortMode_DoesNotShareEvenWithShrinkShareSet) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  int exclude[1] = {0};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_ABORT, exclude, 1, &out));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources);
+  EXPECT_NE(parent->abortFlag, child->abortFlag);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_SplitShareUnsetWithShrinkShareSet_DoesNotShare) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->config.shrinkShare = 1;
+  parent->config.splitShare = 0;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_FALSE(parent->shareResources) << "a split consults splitShare, never shrinkShare";
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  parent->childCount = kGrow_ParentChildCount;
+  int exclude[3] = {5, 1, 3};
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 3, &out));
+
+  EXPECT_EQ(1, exclude[0]);
+  EXPECT_EQ(3, exclude[1]);
+  EXPECT_EQ(5, exclude[2]);
+  const Grow_LaunchRecord& r = spy.rec();
+  EXPECT_EQ(3, r.excludeRanksCount);
+  EXPECT_EQ(std::vector<int>({1, 3, 5}), r.excludeRanks);
+  EXPECT_EQ(0, r.childCount) << "a shrink does not consume a childCount slot";
+  EXPECT_EQ(kGrow_ParentChildCount, parent->childCount);
+  Grow_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ConfigProvided_ParsesInsteadOfCopyingParent) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.minCTAs = kGrow_SuppliedMinCTAs;
+  cfg.maxCTAs = kGrow_SuppliedMinCTAs;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  ASSERT_EQ(ncclSuccess, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, &cfg));
+
+  ncclComm* child = spy.rec().jobComm;
+  ASSERT_NE(nullptr, child);
+  EXPECT_EQ(kGrow_SuppliedMinCTAs, child->config.minCTAs);
+  EXPECT_EQ(kGrow_ParentMinCTAs, parent->config.minCTAs);
+  Grow_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ChildAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
+  constexpr int kSplitOldDevice = 1;
+  g_currentDevice = kSplitOldDevice;
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  EXPECT_EQ(kSplitOldDevice, g_currentDevice);
+}
+
+TEST_F(InitMicrotest, InitChildComm_AbortFlagDevAllocFails_ReleasesChildAndClearsNewcomm) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  Grow_LaunchSpy spy;
+  ScopedHook hostMalloc(g_hipHostMalloc, [](void**, std::size_t, unsigned) { return hipErrorOutOfMemory; });
+  ncclComm_t out = kGrow_NewcommPoison;
+  Grow_FreeSpy frees;
+
+  EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+  ASSERT_EQ(2u, frees.freed().size()) << "the child's abort flag and the child itself";
+  EXPECT_NE(frees.freed()[0], frees.freed()[1]);
+  for (void* p : frees.freed()) {
+    ::free(p);
+  }
+}
+
+TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndSkipsLaunch) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  int exclude[2] = {0, 1};
+  Grow_LaunchSpy spy;
+  g_callocFailAt = g_callocCallIndex + 3;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclSystemError, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 2, &out));
+
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
+}
+
+TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommAndRestoresDevice) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  constexpr int kOldDevice = 1;
+  g_currentDevice = kOldDevice;
+  Grow_LaunchSpy spy(ncclInternalError);
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclInternalError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(1, spy.calls());
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(kOldDevice, g_currentDevice);
+}
+
+// initTransportsRank (:1786-2213), rung 4: arming ncclTopoComputeP2pChannelsPerPeer opens it, ncclTopoPostset ends it.
+namespace {
+
+// Mirrors the allGatherInfo declared INSIDE initTransportsRank (:1487); Tr_InstallGathers checks sizeof and 3 fields.
+struct Tr_GraphInfo {
+  int pattern;
+  int nChannels;
+  int sameChannels;
+  float bwIntra;
+  float bwInter;
+  int typeIntra;
+  int typeInter;
+  int crossNic;
+};
+
+struct Tr_AllGatherInfo {
+  Tr_GraphInfo graphInfo[NCCL_NUM_ALGORITHMS];
+  struct ncclTopoRanks topoRanks;
+  int cpuArch;
+  int cpuVendor;
+  int localRanks;
+  int nc;
+  int romeTopoModelIdx;
+  bool pivotA2AEnabled;
+  bool ll128Enabled;
+  char hostname[128];
+  int p2pnChannelsPerPeer;
+  int p2pMaxPeers;
+  float minNetBw;
+  int localNetDeviceCount;
+  int localNetDeviceBw;
+  int localCollNetCount;
+  int isAllNvlink;
+  bool nicFused;
+};
+
+// One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
+void Tr_InstallGpuNodes(ncclTopoSystem* topo, int nRanks, const char* gcn) {
+  topo->nodes[GPU].count = nRanks;
+  for (int i = 0; i < nRanks; i++) {
+    topo->nodes[GPU].nodes[i].gpu.rank = i;
+    std::snprintf(topo->nodes[GPU].nodes[i].gpu.gcn, sizeof(topo->nodes[GPU].nodes[i].gpu.gcn), "%s", gcn);
+  }
+}
+
+// Scripts both allgathers; AllGather3 broadcasts this rank's row so the :2161 folds read back what the UUT computed.
+void Tr_InstallGathers(TransportsRankComm& c, std::vector<PeerSpec> specs,
+                       std::function<void(int, Tr_AllGatherInfo&)> patch = nullptr) {
+  InstallPeerInfoAllGather(c, std::move(specs));
+  std::function<ncclResult_t(void*, void*, int)> peerFn = g_bootstrapAllGather;
+  const int selfRank = c.rank();
+  const int nranks = c.nRanks();
+  ncclComm* comm = c.get();
+  g_bootstrapAllGather = [peerFn, patch, selfRank, nranks, comm](void* bs, void* allData,
+                                                                int size) -> ncclResult_t {
+    if (size == static_cast<int>(sizeof(ncclPeerInfo))) return peerFn(bs, allData, size);
+    if (size != static_cast<int>(sizeof(Tr_AllGatherInfo))) {
+      ADD_FAILURE() << "AllGather3 payload is " << size << " bytes, the mirror is "
+                    << sizeof(Tr_AllGatherInfo) << " -- init.cc:1487 changed shape";
+      return ncclInvalidArgument;
+    }
+    auto* rows = static_cast<Tr_AllGatherInfo*>(allData);
+    const Tr_AllGatherInfo self = rows[selfRank];
+    if (self.p2pnChannelsPerPeer != comm->p2pnChannelsPerPeer || self.cpuArch != comm->cpuArch ||
+        self.cpuVendor != comm->cpuVendor) {
+      ADD_FAILURE() << "AllGather3 mirror does not line up with init.cc:1487; the fields are misread";
+      return ncclInvalidArgument;
+    }
+    for (int r = 0; r < nranks; r++) {
+      if (r != selfRank) rows[r] = self;
+      if (patch) patch(r, rows[r]);
+    }
+    return ncclSuccess;
+  };
+}
+
+// Rung 3's terminator opened, one GPU node per rank, and a ring channel count below the :1883 clamp.
+ncclTopoSystem* Tr_ReachAllGather3(TransportsRankComm& c, const char* gcn, int ringChannels = 4) {
+  ncclTopoSystem* topo = c.installTopo();
+  Tr_InstallGpuNodes(topo, c.nRanks(), gcn);
+  InstallTopoComputeSuccess(ringChannels);
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclSuccess;
+  return topo;
+}
+
+constexpr ncclResult_t kTrPostsetReached = ncclInvalidUsage;
+
+}  // namespace
+
+// --- The clique probe (init.cc:1786-1836) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_DeviceCountFails_WarnsAndProbesNoPeerLinks) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;  // :1801 needs getBusId to answer, or every pair is -1
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  ScopedHook devCount(g_hipGetDeviceCount, [](int*) { return hipErrorInvalidValue; });
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers())); });
+  EXPECT_TRUE(LogHas(log, "treating all peers as non-accessible")) << "actual log:\n" << log;
+  EXPECT_EQ(1, devCount.calls);
+  EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // localDevCount 0 fails :1817 for every pair
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerAccessDenied_ProbesNoLinkTypes) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoGetLinkTypeCalls);  // g_hipDeviceCanAccessPeer defaults to a hip error
+}
+
+// The positive anchor for the two above: every ordered pair i != j is probed exactly once.
+TEST_F(InitMicrotest, InitTransportsRank_PeerAccessGranted_ProbesEveryOrderedPairOnce) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks * (kNRanks - 1), canAccess.calls);
+  EXPECT_EQ(kNRanks * (kNRanks - 1), g_ncclTopoGetLinkTypeCalls);
+}
+
+// Only this rank's busId disagrees, and i == j skips it, so :1823 breaks on the second row rather than the first.
+TEST_F(InitMicrotest, InitTransportsRank_SelfBusIdNotLocallyVisible_StopsAfterTheFirstRow) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;  // getBusId now answers 0 for every device
+  c.get()->busId = 0x1234;                    // ... but fillInfo reports this one for rank 0
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks - 1, canAccess.calls);
+  EXPECT_EQ(kNRanks - 1, g_ncclTopoGetLinkTypeCalls);
+}
+
+// allXgmi never lands on comm; :1871-1873 is its one consumer, needing gfx906 AND a local topology AND all-XGMI links.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx906AllXgmi_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx906");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  ScopedHook linkType(g_ncclTopoGetLinkType, [](int, int, bool* isXGMI) {
+    *isXGMI = true;
+    return ncclSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx906OneNonXgmiLink_KeepsTwoChannels) {
+  const int kNonXgmiProbe = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx906");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  int probe = 0;
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  ScopedHook linkType(g_ncclTopoGetLinkType, [&probe](int, int, bool* isXGMI) {
+    *isXGMI = probe++ != kNonXgmiProbe;  // one non-XGMI pair mid-run, so the &= has to accumulate
+    return ncclSuccess;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+// --- ncclTopoRankToIndex (:1869) picks the GPU node by rank, not by position ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RankHasNoGpuNode_ReturnsInternalErrorBeforeAllGather3) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();  // nodes[GPU].count stays 0, so no node carries rank 0
+  InstallTopoComputeSuccess(/*nChannels=*/4);
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclSuccess;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers())); });
+  EXPECT_TRUE(LogHas(log, "ncclTopoRankToIndex could not find rank 0")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+// A node position that differs from the rank, with another arch at position 0, kills both "nodes[0]" and "nodes[rank]".
+TEST_F(InitMicrotest, InitTransportsRank_GpuNodesOutOfRankOrder_ReadsArchFromThisRanksNode) {
+  const int kSelfRank = 1;
+  const int kSelfNodeIndex = 0;
+  TransportsRankComm c(/*nRanks=*/2, kSelfRank);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx942");
+  topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.rank = kSelfRank;
+  topo->nodes[GPU].nodes[1].gpu.rank = 0;
+  std::snprintf(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn,
+                sizeof(topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.gcn), "gfx1250");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);  // the gfx1250 rule at :1937, not gfx942's 16
+}
+
+// --- The per-arch channel-count ladder (:1870-1939), read through ncclTopoPostset's nc ---
+
+TEST_F(InitMicrotest, InitTransportsRank_UnknownArch_LeavesChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx908_ScalesChannelCountByRingChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/1);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);  // max(4/1, 2)
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx908ManyRingChannels_FloorsChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx908", /*ringChannels=*/4);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(4/4, 2), i.e. the floor rather than the quotient
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx90aFullTopology_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+// :1878 needs the topology fully local and :1881 does not, so without this pair the two gfx90a rules look the same.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx90aPartialTopology_KeepsTwoChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/4);
+  topo->nodes[GPU].count = 5;  // init.cc:1651 pins topo->nRanks to nRanks, so vary the node count
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // max(2, 4/4)
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAboveHalfTheMaximum_CollapsesToOneChannel) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2 + 1);  // :1878 would leave 4
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RingChannelsAtHalfTheMaximum_KeepsTheArchChannelCount) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx90a", /*ringChannels=*/MAXCHANNELS / 2);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);  // the boundary the strict > at :1883 exists for
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx1250_TakesTheFullChannelPool) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx1250");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(MAXCHANNELS, g_ncclTopoPostsetNc);
+  EXPECT_TRUE(c.get()->topo->ll128Enabled);  // :1944 default-enables LL128 on this arch
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonGfx1250_LeavesLl128Disabled) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->topo->ll128Enabled);  // positive anchor for the gfx1250 case above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Ll128ForceEnabled_TurnsLl128OnForAnyArch) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"RCCL_LL128_FORCE_ENABLE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(c.get()->topo->ll128Enabled);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksOneNode_UsesSixteenChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950FourRanksOneNode_UsesEightChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(8, g_ncclTopoPostsetNc);
+}
+
+// Two ranks, but on different hosts: nNodes is 2, so neither single-node arm applies.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx950TwoRanksTwoNodes_FallsBackToFourChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942TwoRanks_UsesSixteenChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  g_hipDeviceGetAttributeResult = hipSuccess;  // :1906 is a CUDACHECK, so it must not error out
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);
+  EXPECT_TRUE(c.get()->rcclUseOneSlice);  // :1901, single node
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942FourRanks_UsesFourChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ThreeRanks_LeavesTheChannelCountAtTwo) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(3));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);  // neither the ==2 nor the ==4 arm at :1912-1917
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942DeviceAttributeFails_PropagatesTheCudaError) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(ncclUnhandledCudaError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+// Managed host access plus more than one node is the MI300A arm; it has to beat the nranks==2 rule.
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedMultiNode_UsesSixChannels) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 1;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(6, g_ncclTopoPostsetNc);
+  EXPECT_FALSE(c.get()->rcclUseOneSlice);  // :1901 is single-node only
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942ManagedSingleNode_TakesTheRankCountArm) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 1;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);  // managed alone is not enough; :1907 needs nNodes > 1 too
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx942UnmanagedMultiNode_TakesTheRankCountArm) {
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx942");
+  std::vector<PeerSpec> specs(2);
+  specs[1].node = 1;
+  Tr_InstallGathers(c, specs);
+  g_hipDeviceGetAttributeResult = hipSuccess;
+  g_hipDirectManagedMemAccess = 0;
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(16, g_ncclTopoPostsetNc);  // multi-node alone is not enough either
+}
+
+// --- Same-node P2P over network (:1855-1860) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopology_EnablesP2pOverNetwork) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 0}});  // the compiled-in default is 1, i.e. force-disabled
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->p2pNet);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyForcedIntra_LeavesP2pOverNetworkOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL | RCCL_TOPO_FORCE_INTRA;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 0}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->p2pNet);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeGdrTopologyP2pNetDisabled_LeavesP2pOverNetworkOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME | RCCL_TOPO_GDR_ALL;
+  SetParams({{"RCCL_P2P_NET_DISABLE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->p2pNet);
+  EXPECT_TRUE(LogHas(log, "RCCL force disabled same node P2P over network")) << "actual log:\n" << log;
+}
+
+// Only one of the two topology bits set: neither the enable nor the force-disable branch runs.
+TEST_F(InitMicrotest, InitTransportsRank_RomeTopologyWithoutGdr_SkipsTheP2pOverNetworkBlock) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_4P2H_ROME;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->p2pNet);
+  EXPECT_FALSE(LogHas(log, "same node P2P over network")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+// --- Net and CollNet device discovery (init.cc:1948-1957) ---
+
+namespace {
+int g_trNetDeviceCount = 0;
+int g_trCollNetDeviceCount = 0;
+
+ncclResult_t Tr_NetDevices(int* ndev) {
+  *ndev = g_trNetDeviceCount;
+  return ncclSuccess;
+}
+ncclResult_t Tr_CollNetDevices(int* ndev) {
+  *ndev = g_trCollNetDeviceCount;
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsItsDeviceCount) {
+  const int kNetDevices = 7;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->ncclNet->devices = Tr_NetDevices;
+  g_trNetDeviceCount = kNetDevices;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 0: 7 Net devices")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Rank 0: 0 CollNet devices")) << "actual log:\n" << log;
+}
+
+// The bandwidth lookup takes the GPU index from a second ncclTopoRankToIndex, not the rank.
+TEST_F(InitMicrotest, InitTransportsRank_NetPluginPresent_ReportsBandwidthForThisRanksGpuNode) {
+  const int kSelfRank = 1;
+  const int kSelfNodeIndex = 0;
+  const int kNetBw = 42;
+  TransportsRankComm c(/*nRanks=*/2, kSelfRank);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->nodes[GPU].nodes[kSelfNodeIndex].gpu.rank = kSelfRank;
+  topo->nodes[GPU].nodes[1].gpu.rank = 0;
+  c.get()->ncclNet->devices = Tr_NetDevices;
+  g_trNetDeviceCount = 1;
+  int seenGpu = -1;
+  ScopedHook byBw(g_ncclTopoGetLocalNetCountByBw,
+                  [&seenGpu](ncclTopoSystem*, int gpu, int* count, float* bw) {
+                    seenGpu = gpu;
+                    *count = kNetBw;
+                    *bw = 0.0f;
+                    return ncclSuccess;
+                  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, byBw.calls);
+  EXPECT_EQ(kSelfNodeIndex, seenGpu);
+  EXPECT_EQ(kNetBw, c.get()->minNetCount);  // :2040 folds localNetDeviceBw into minNetCount
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NoNetPlugin_SkipsTheDeviceProbe) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook byBw(g_ncclTopoGetLocalNetCountByBw, [](ncclTopoSystem*, int, int* count, float* bw) {
+    *count = 0;
+    *bw = 0.0f;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, byBw.calls);  // comm->ncclNet->devices is null, so :1949-1953 never runs
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetPlugin_ReportsItsDeviceCount) {
+  const int kCollNetDevices = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  g_trCollNetDeviceCount = kCollNetDevices;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 0: 3 CollNet devices")) << "actual log:\n" << log;
+}
+
+// --- The single-rank channel override (:1991-1992) ---
+
+// :2168 folds the override straight back, so ncclTopoPreset is the only place it stays observable.
+TEST_F(InitMicrotest, InitTransportsRank_SingleRank_PresetsEightChannels) {
+  const int kSingleRankChannels = 8;
+  TransportsRankComm c(/*nRanks=*/1, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", /*ringChannels=*/3);
+  int ringAtPreset = -1;
+  int treeAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    ringAtPreset = comm->graphs[NCCL_ALGO_RING].nChannels;
+    treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(1));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kSingleRankChannels, ringAtPreset);
+  EXPECT_EQ(kSingleRankChannels, treeAtPreset);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TwoRanks_PresetsTheComputedChannelCount) {
+  const int kComputedChannels = 3;
+  TransportsRankComm c(/*nRanks=*/2, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kComputedChannels);
+  int ringAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    ringAtPreset = comm->graphs[NCCL_ALGO_RING].nChannels;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(2));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kComputedChannels, ringAtPreset);  // positive anchor for the single-rank override
+}
+
+// --- AllGather3 marshalling and the cross-rank folds (:1961-2040, :2161-2179) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusCheck_SeesThisRanksTopologyModelIndex) {
+  const int kRomeModelIdx = 9;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->romeTopoModelIdx = kRomeModelIdx;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+  EXPECT_EQ(4, g_rcclRomeConsensusNranks);
+  EXPECT_EQ(kRomeModelIdx, g_rcclRomeConsensusIdx0);
+  EXPECT_FALSE(g_rcclRomeConsensusHost0.empty());  // :1975 marshalled a hostname, not a zeroed buffer
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsTheRomeConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  std::vector<PeerSpec> specs(3);
+  specs[2].node = 1;  // two ranks on one host, one on another
+  Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_rcclCheckRomeTopoModelIdxConsensusResult = ncclInvalidArgument;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook preset(g_ncclTopoPreset,
+                    [](ncclComm*, ncclTopoRanks*) { return ncclInvalidArgument; });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, preset.calls);
+  EXPECT_EQ(0, g_rcclCheckRomeTopoModelIdxConsensusCalls);
+}
+
+// The graphInfo fold is a min(), so a peer reporting fewer channels wins and one reporting more must not.
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsFewerChannels_FoldsDownToThatCount) {
+  const int kLocalChannels = 6;
+  const int kPeerChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) {
+      row.graphInfo[NCCL_ALGO_RING].nChannels = kPeerChannels;
+      row.graphInfo[NCCL_ALGO_TREE].nChannels = kPeerChannels;
+    }
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+  EXPECT_EQ(kPeerChannels, c.get()->nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsMoreChannels_KeepsTheLocalCount) {
+  const int kLocalChannels = 4;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900", kLocalChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.graphInfo[NCCL_ALGO_RING].nChannels = kLocalChannels + 3;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kLocalChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsHigherTypeIntra_FoldsUpToThatType) {
+  const int kPeerTypeIntra = 5;
+  const int kPeerCrossNic = 1;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 3) {
+      row.graphInfo[NCCL_ALGO_RING].typeIntra = kPeerTypeIntra;
+      row.graphInfo[NCCL_ALGO_RING].crossNic = kPeerCrossNic;
+    }
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerTypeIntra, c.get()->graphs[NCCL_ALGO_RING].typeIntra);  // max, unlike nChannels
+  EXPECT_EQ(kPeerCrossNic, c.get()->graphs[NCCL_ALGO_RING].crossNic);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt) {
+  constexpr float kLocalBw = 50.0f;
+  constexpr float kPeerBw = 12.5f;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook minBw(g_ncclTopoGetMinNetBw, [](ncclTopoSystem*, int, float* bw) {
+    *bw = kLocalBw;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 1) row.minNetBw = kPeerBw;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, minBw.calls);
+  EXPECT_FLOAT_EQ(kPeerBw, c.get()->minNetBw);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook allNvlink(g_ncclTopoPathAllNVLink, [](ncclTopoSystem*, int* v) {
+    *v = 1;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.isAllNvlink = 0;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, allNvlink.calls);
+  EXPECT_EQ(0, c.get()->isAllNvlink);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_EveryPeerAllNvlink_KeepsIsAllNvlinkSet) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook allNvlink(g_ncclTopoPathAllNVLink, [](ncclTopoSystem*, int* v) {
+    *v = 1;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->isAllNvlink);  // positive anchor for the clear above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerOnAnotherCpuArch_MarksTheCommMixed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const int localArch = c.get()->cpuArch;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [localArch](int r, Tr_AllGatherInfo& row) {
+    if (r == 1) row.cpuArch = localArch + 1;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(NCCL_TOPO_CPU_ARCH_MIXED, c.get()->cpuArch);
+  EXPECT_NE(NCCL_TOPO_CPU_VENDOR_MIXED, c.get()->cpuVendor);  // the vendors still agree
+  EXPECT_TRUE(LogHas(log, "CPUs with mixed architecture were detected.")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed vendors were detected.")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PeerFromAnotherCpuVendor_MarksTheCommMixed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const int localVendor = c.get()->cpuVendor;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [localVendor](int r, Tr_AllGatherInfo& row) {
+    if (r == 3) row.cpuVendor = localVendor + 1;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(NCCL_TOPO_CPU_VENDOR_MIXED, c.get()->cpuVendor);
+  EXPECT_TRUE(LogHas(log, "CPUs with mixed vendors were detected.")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed architecture were detected.")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_UniformCpus_ReportsNoMixture) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "CPUs with mixed")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+// --- Node discovery from the gathered ring roots (:2012-2022, :2107-2135) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_DistinctRingRoots_MakesEveryRankItsOwnNode) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/2);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kNRanks, c.get()->nNodes);
+  EXPECT_EQ(std::vector<int>({0, 1, 2, 3}),
+            std::vector<int>(c.get()->rankToNode, c.get()->rankToNode + kNRanks));
+  EXPECT_EQ(2, c.get()->node);
+  EXPECT_EQ(0, c.get()->localRank);
+  EXPECT_EQ(1, c.get()->localRanks);
+  EXPECT_EQ(1, c.get()->maxLocalRanks);
+}
+
+// Two interleaved nodes of two, so neither "same node as rank 0" nor "localRank == rank" produces this answer.
+TEST_F(InitMicrotest, InitTransportsRank_InterleavedRingRoots_GroupsRanksByTheirRoot) {
+  const int kNRanks = 4;
+  const int kSelfRank = 3;
+  TransportsRankComm c(kNRanks, kSelfRank);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + (r % 2); });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, c.get()->nNodes);
+  EXPECT_EQ(std::vector<int>({0, 1, 0, 1}),
+            std::vector<int>(c.get()->rankToNode, c.get()->rankToNode + kNRanks));
+  EXPECT_EQ(std::vector<int>({0, 0, 1, 1}),
+            std::vector<int>(c.get()->rankToLocalRank, c.get()->rankToLocalRank + kNRanks));
+  EXPECT_EQ(1, c.get()->node);
+  EXPECT_EQ(1, c.get()->localRank);
+  EXPECT_EQ(2, c.get()->localRanks);
+  EXPECT_EQ(std::vector<int>({1, 3}),
+            std::vector<int>(c.get()->localRankToRank, c.get()->localRankToRank + 2));
+  EXPECT_EQ(2, c.get()->maxLocalRanks);
+  EXPECT_EQ(2, c.get()->minLocalRanks);
+  EXPECT_EQ(0, c.get()->isOneRPN);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_UnevenNodes_RecordsBothTheMinAndMaxLocalRankCount) {
+  const int kNRanks = 4;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = r == 3 ? 200 : 100; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, c.get()->nNodes);
+  EXPECT_EQ(3, c.get()->maxLocalRanks);
+  EXPECT_EQ(1, c.get()->minLocalRanks);
+  EXPECT_EQ(3, c.get()->nvlDomainInfo.maxRanksPerNvlDomain);  // initNvlDomainInfo ran after the counts
+  EXPECT_EQ(1, c.get()->nvlDomainInfo.minRanksPerNvlDomain);
+  EXPECT_EQ(2, c.get()->nvlDomainInfo.nNvlDomains);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_OneRankPerNode_SetsIsOneRpn) {
+  const int kNRanks = 3;
+  TransportsRankComm c(kNRanks, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(kNRanks),
+                    [](int r, Tr_AllGatherInfo& row) { row.topoRanks.ringRecv[0] = 100 + r; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->isOneRPN);
+}
+
+// --- Net / CollNet device-count mismatch reporting (:2048-2091) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCounts_WarnsAndFails) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_NET_MISMATCH", 0}});  // the compiled-in default is 1, i.e. ignore
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 1 has 1 local Net devices (max 4).")) << "actual log:\n" << log;
+  // The ignore INFO shares this prefix, so the "Set ..." suffix is what tells the two diagnostics apart.
+  EXPECT_TRUE(LogHas(log, "(min 1, max 4). Set NCCL_IGNORE_NET_MISMATCH=1 to continue."))
+      << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsIgnored_ContinuesToPostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_NET_MISMATCH", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "(min 1, max 4). Ignoring due to NCCL_IGNORE_NET_MISMATCH.")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclTopoPostsetCalls);
+}
+
+// The mismatch report is rank 0's job only; every other rank stays silent and does not fail.
+TEST_F(InitMicrotest, InitTransportsRank_MixedNetDeviceCountsOnNonZeroRank_StaysSilent) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localNetDeviceCount = r == 1 ? 1 : 4;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "mixed local Net device counts")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Net devices")) << "the run never reached :1958\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCounts_WarnsAndFails) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localCollNetCount = r == 2 ? 0 : 2;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Rank 2 has 0 local CollNet devices (max 2).")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "(min 0, max 2). Set NCCL_IGNORE_COLLNET_MISMATCH=1 to continue."))
+      << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "mixed local Net device counts")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MixedCollNetDeviceCountsIgnored_ContinuesToPostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  SetParams({{"IGNORE_COLLNET_MISMATCH", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    row.localCollNetCount = r == 2 ? 0 : 2;
+  });
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "(min 0, max 2). Ignoring due to NCCL_IGNORE_COLLNET_MISMATCH.")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclTopoPostsetCalls);
+}
+
+// --- Cross-clique P2P, NVLS tuning and the CollNet node threshold (:2151-2215) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithMoreCliquesThanOne_EnablesCrossCliqueP2p) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->MNNVL = 1;
+  c.get()->nvlDomainSize = 8;
+  c.get()->clique.size = 4;
+  SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(c.get()->p2pCrossClique);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_MnnvlWithASingleClique_LeavesCrossCliqueP2pOff) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->MNNVL = 1;
+  c.get()->nvlDomainSize = 4;
+  c.get()->clique.size = 4;  // not strictly greater, so :2151 stays false
+  SetParams({{"MNNVL_CROSS_CLIQUE", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(c.get()->p2pCrossClique);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsSupported_TunesNvlsBeforePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->nvlsSupport = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclNvlsTuningCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsGraphHasNoChannels_DisablesNvlsAndSkipsTuning) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->nvlsSupport = 1;
+  c.get()->nvlsChannels = 4;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4),
+                    [](int, Tr_AllGatherInfo& row) { row.graphInfo[NCCL_ALGO_NVLS].nChannels = 0; });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->nvlsSupport);
+  EXPECT_EQ(0, c.get()->nvlsChannels);
+  EXPECT_EQ(0, g_ncclNvlsTuningCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetChainGraphHasNoChannels_DisablesCollNet) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  c.get()->config.collnetEnable = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_COLLNET_CHAIN].nChannels = 0;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->config.collnetEnable);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_FewerNodesThanTheCollNetThreshold_DisablesCollNet) {
+  const int kCollNetNodeThreshold = 5;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  c.get()->config.collnetEnable = 1;
+  SetParams({{"COLLNET_NODE_THRESHOLD", kCollNetNodeThreshold}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_EQ(0, c.get()->config.collnetEnable);
+  EXPECT_TRUE(LogHas(log, "1 nodes which is less than CollNet node threshold 5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AtTheCollNetNodeThreshold_KeepsCollNetEnabled) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ncclCollNet_t collNet{};
+  collNet.devices = Tr_CollNetDevices;
+  c.get()->ncclCollNet = &collNet;
+  c.get()->config.collnetEnable = 1;
+  SetParams({{"COLLNET_NODE_THRESHOLD", 1}});
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->config.collnetEnable);  // 1 node is not < 1
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeDefinedByTheTopology_RunsTheTreeBasePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  g_ncclTopoPostsetResult = ncclSuccess;  // :2215 sits past the rung-4 terminator
+  g_ncclTreeBasePostsetResult = ncclRemoteError;
+  ScopedTopoGetSystem restoreTopo;
+  ScopedHook postset(g_ncclTopoPreset, [topo](ncclComm*, ncclTopoRanks*) {
+    topo->treeDefined = true;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTreeBasePostsetCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TreeNotDefined_SkipsTheTreeBasePostset) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTreeBasePostsetCalls);
+}
+
+// A GPU count that disagrees with nRanks plus a NET node takes the min() arm at :2189-2191; otherwise ring wins.
+TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithANetNode_TakesTheSmallerChannelCount) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
+  topo->nodes[GPU].count = 5;
+  topo->nodes[NET].count = 1;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kTreeChannels, c.get()->nChannels);
+  EXPECT_EQ(kTreeChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_PartialTopologyWithoutANetNode_KeepsTheRingChannelCount) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900", kRingChannels);
+  topo->nodes[GPU].count = 5;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kTreeChannels;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kRingChannels, c.get()->nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Cr8gFullTopology_RaisesChannelCountToFour) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_CR8G;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Cr8gPartialTopology_KeepsTwoChannels) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->type = RCCL_TOPO_CR8G;
+  topo->nodes[GPU].count = 5;  // != nRanks, so :1876 does not fire
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoPostsetNc);
+}
+
+// globalNicFused is consumed past the terminator, so the oracle is :1981 putting the flag in this rank's row.
+TEST_F(InitMicrotest, InitTransportsRank_NicFused_ReachesThisRanksAllGatherRow) {
+  const int kSelfRank = 2;
+  TransportsRankComm c(/*nRanks=*/4, kSelfRank);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook nicFused(g_ncclTopoCheckNicFused, [](ncclComm*, bool* fused) {
+    *fused = true;
+    return ncclSuccess;
+  });
+  int rowsSeen = 0;
+  int fusedRows = 0;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [&](int, Tr_AllGatherInfo& row) {
+    rowsSeen++;
+    if (row.nicFused) fusedRows++;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, nicFused.calls);
+  EXPECT_EQ(4, rowsSeen);
+  EXPECT_EQ(4, fusedRows);  // the broadcast copies this rank's row, so all four carry the flag
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NicNotFused_LeavesTheAllGatherRowClear) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  int fusedRows = 0;
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [&](int, Tr_AllGatherInfo& row) {
+    if (row.nicFused) fusedRows++;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, fusedRows);  // positive anchor: the default seam answers false
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NicFusedCheckFails_PropagatesBeforeTheMinBwLookup) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  ScopedHook nicFused(g_ncclTopoCheckNicFused,
+                      [](ncclComm*, bool*) { return ncclInvalidArgument; });
+  ScopedHook minBw(g_ncclTopoGetMinNetBw, [](ncclTopoSystem*, int, float* bw) {
+    *bw = 0.0f;
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, minBw.calls);
+}
+
+// --- commAlloc: the split-from-parent resource sharing arms (init.cc:745-816) ---
+
+namespace {
+// The post-ncclCommSplit parent state, the only state that opens :745-751 and :800-803.
+class Tr_ParentComm {
+ public:
+  Tr_ParentComm() : comm_(new ncclComm{}), sr_(new ncclSharedResources{}), net_(new ncclNet_t{}) {
+    net_->name = "parentnet";
+    comm_->sharedRes = sr_.get();
+    comm_->ncclNet = net_.get();
+    comm_->shareResources = true;
+    sr_->refCount = 1;
+  }
+  Tr_ParentComm(const Tr_ParentComm&) = delete;
+  Tr_ParentComm& operator=(const Tr_ParentComm&) = delete;
+  ncclComm* get() { return comm_.get(); }
+  ncclSharedResources* sharedRes() { return sr_.get(); }
+  ncclNet_t* net() { return net_.get(); }
+
+ private:
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sr_;
+  std::unique_ptr<ncclNet_t> net_;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, CommAlloc_ParentSharesResources_AdoptsThemAndBumpsTheRefCount) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/3));
+  EXPECT_EQ(parent.sharedRes(), comm->sharedRes);
+  EXPECT_EQ(2, parent.sharedRes()->refCount);  // :747 incremented the parent's count, not a fresh one
+  EXPECT_EQ(parent.net(), comm->ncclNet);      // ncclNetInitFromParent, not ncclNetInit
+}
+
+TEST_F(InitMicrotest, CommAlloc_NoParent_AllocatesItsOwnSharedResources) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/3));
+  EXPECT_NE(parent.sharedRes(), comm->sharedRes);
+  EXPECT_EQ(1, parent.sharedRes()->refCount);  // untouched: the anchor for the increment above
+  EXPECT_EQ(1, comm->sharedRes->refCount);
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentDoesNotShareResources_AllocatesItsOwn) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  parent.get()->shareResources = false;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_NE(parent.sharedRes(), comm->sharedRes);  // :745 needs BOTH a parent and shareResources
+  EXPECT_EQ(1, parent.sharedRes()->refCount);
+  EXPECT_NE(parent.net(), comm->ncclNet);          // ncclNetInit, not ncclNetInitFromParent
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentSharesAMemManager_AdoptsItAndBumpsTheRefCount) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  ncclMemManager manager{};
+  manager.refCount = 1;
+  parent.get()->memManager = &manager;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_EQ(&manager, comm->memManager);
+  EXPECT_EQ(2, manager.refCount);
+}
+
+TEST_F(InitMicrotest, CommAlloc_ParentHasNoMemManager_CreatesAFreshOne) {
+  InstallCommAllocSuccess();
+  Tr_ParentComm parent;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), parent.get(), /*ndev=*/8, /*rank=*/0));
+  EXPECT_EQ(nullptr, comm->memManager);  // ncclMemManagerInit is faked and writes nothing
+}
+
+TEST_F(InitMicrotest, CommAlloc_LaunchOrderImplicit_TracksTheCudaContext) {
+  InstallCommAllocSuccess();
+  SetParams({{"LAUNCH_ORDER_IMPLICIT", 1}});
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_TRUE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclCudaContextTrackCalls);
+}
+
+TEST_F(InitMicrotest, CommAlloc_LaunchOrderNotImplicit_SkipsContextTracking) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_FALSE(LogHas(log, "context tracking created")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclCudaContextTrackCalls);
+  EXPECT_TRUE(LogHas(log, "Using network")) << "commAlloc never got that far\n" << log;
+}
+
+// This build has no ENABLE_FAULT_INJECTION, so a non-zero request is refused rather than honoured.
+TEST_F(InitMicrotest, CommAlloc_FaultInjectionRequested_WarnsAndLeavesFaultsUnset) {
+  const int64_t kFaultMask = 0x5;
+  InstallCommAllocSuccess();
+  SetParams({{"RCCL_INJECT_FAULTS", kFaultMask}});
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_TRUE(LogHas(log, "Ignore faults injection of value 0x5")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, CommAlloc_NoFaultInjectionRequested_StaysSilent) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  });
+  EXPECT_FALSE(LogHas(log, "faults injection")) << "actual log:\n" << log;
+}
+
+// --- devCommSetup: the workFifo sizing guard and the CollNet rank map (init.cc:933-979) ---
+
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesNotAPowerOfTwo_WarnsAndFallsBackToTheDefault) {
+  const int64_t kNotAPowerOfTwo = 3 << 20;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kNotAPowerOfTwo}});
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  });
+  EXPECT_TRUE(LogHas(log, "NCCL_WORK_FIFO_BYTES=3145728 is being ignored because it is not a power of 2."))
+      << "actual log:\n" << log;
+  EXPECT_EQ(static_cast<uint32_t>(NCCL_WORK_FIFO_BYTES_DEFAULT), comm->workFifoBytes);
+}
+
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAPowerOfTwo_IsKept) {
+  const int64_t kPowerOfTwo = 1 << 20;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kPowerOfTwo}});
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  });
+  EXPECT_FALSE(LogHas(log, "is not a power of 2")) << "actual log:\n" << log;
+  EXPECT_EQ(static_cast<uint32_t>(kPowerOfTwo), comm->workFifoBytes);
+}
+
+// 2^31 and not 2^32: workFifoBytes is a uint32_t, so 2^32 truncates to 0 before the cap ever sees it.
+TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAboveOneGigabyte_IsCappedThere) {
+  const int64_t kTwoGigabytes = 1LL << 31;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  SetParams({{"WORK_FIFO_BYTES", kTwoGigabytes}});
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(1u << 30, comm->workFifoBytes);
+}
+
+TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {
+  const int kNRanks = 8;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
+  std::vector<int> denseToUser(kNRanks);
+  for (int r = 0; r < kNRanks; r++) {
+    denseToUser[r] = kNRanks - 1 - r;
+  }
+  comm->collNetDenseToUserRank = denseToUser.data();
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(3, g_hipMemcpyAsyncCalls);      // one more than the baseline below: the :976 copy
+  EXPECT_EQ(denseToUser[0], kNRanks - 1);   // the source map is read, never rewritten
+  comm->collNetDenseToUserRank = nullptr;   // stack-owned, so it must not outlive this test
+}
+
+TEST_F(InitMicrotest, DevCommSetup_NoCollNetRankMap_SkipsTheDeviceCopy) {
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
+  EXPECT_EQ(nullptr, comm->collNetDenseToUserRank);
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(2, g_hipMemcpyAsyncCalls);  // the baseline: the :976 rank-map copy is skipped
+  EXPECT_NE(nullptr, comm->devComm);
+}
+
+namespace {
+bool AllBytesAre(const unsigned char* p, std::size_t n, unsigned char v) {
+  for (std::size_t i = 0; i < n; i++) {
+    if (p[i] != v) return false;
+  }
+  return true;
+}
+
+// ncclTopoCompute answers per graph id, so the ring and tree counts can differ. Ids are seeded at
+// :1644 (ring 0), :1668 (tree 1), :1757 (chain 2), :1776 (nvls 3) and :1763 (direct 4).
+void Tr_InstallTopoComputePerGraph(int ringChannels, int treeChannels) {
+  g_ncclTopoCompute = [ringChannels, treeChannels](ncclTopoSystem*, ncclTopoGraph* g) {
+    g->nChannels = g->id == 1 ? treeChannels : ringChannels;
+    return ncclSuccess;
+  };
+}
+}  // namespace
+
+// graphs[0] is the TREE graph, so reading graphs[0] instead of graphs[a] is invisible while every
+// graph carries the same channel count. Giving the tree fewer channels than the ring exposes it.
+TEST_F(InitMicrotest, InitTransportsRank_GraphInfoIsMarshalledPerAlgorithm_NotFromTheTreeGraph) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  Tr_InstallTopoComputePerGraph(kRingChannels, kTreeChannels);
+  int treeAtPreset = -1;
+  ncclComm* comm = c.get();
+  ScopedHook preset(g_ncclTopoPreset, [&](ncclComm*, ncclTopoRanks*) {
+    treeAtPreset = comm->graphs[NCCL_ALGO_TREE].nChannels;  // :2188 later overwrites it with ring's
+    return ncclSuccess;
+  });
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kTreeChannels, treeAtPreset);
+  EXPECT_EQ(kRingChannels, c.get()->nChannels);  // single node, so :2191 takes the ring count
+  EXPECT_EQ(kRingChannels, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+// nChannelsOrig is captured at :1988 and only read by the :2192 guard, so the relocation loop is the
+// one place a wrong capture shows up. The fold has to shrink nChannels below it for that to happen.
+TEST_F(InitMicrotest, InitTransportsRank_FoldShrinksTheChannelCount_RelocatesTheSpareChannels) {
+  const int kRingChannels = 6;
+  const int kTreeChannels = 2;
+  const int kFoldedTreeChannels = 1;
+  const unsigned char kPoison = 0xA5;
+  const unsigned char kSource = 0x5C;
+  const unsigned char kGuard = 0x3E;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  ncclTopoSystem* topo = Tr_ReachAllGather3(c, "gfx900");
+  topo->nodes[GPU].count = 5;
+  topo->nodes[NET].count = 1;
+  Tr_InstallTopoComputePerGraph(kRingChannels, kTreeChannels);
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int, Tr_AllGatherInfo& row) {
+    row.graphInfo[NCCL_ALGO_TREE].nChannels = kFoldedTreeChannels;
+  });
+  ncclComm* comm = c.get();
+  std::memset(&comm->channels[1], kPoison, sizeof(struct ncclChannel));
+  std::memset(&comm->channels[2], kSource, sizeof(struct ncclChannel));
+  std::memset(&comm->channels[3], kGuard, sizeof(struct ncclChannel));
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm, nullptr, c.timers()));
+  EXPECT_EQ(kFoldedTreeChannels, comm->nChannels);
+  const auto* dst = reinterpret_cast<const unsigned char*>(&comm->channels[1]);
+  const auto* src = reinterpret_cast<const unsigned char*>(&comm->channels[2]);
+  const auto* guard = reinterpret_cast<const unsigned char*>(&comm->channels[3]);
+  EXPECT_TRUE(AllBytesAre(dst, sizeof(struct ncclChannel), kSource));
+  EXPECT_TRUE(AllBytesAre(src, sizeof(struct ncclChannel), kSource));  // the source is not consumed
+  EXPECT_TRUE(AllBytesAre(guard, sizeof(struct ncclChannel), kGuard));  // one iteration, not two
+}
+
+// nc starts from rank 0's contribution, so a lower value on a LATER rank is what proves the reduction
+// runs at all; patching rank 0 alone would pass even with the min() deleted.
+TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsFewerChannels_FoldsNcDownToIt) {
+  const int kPeerNc = 3;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");  // this rank contributes 8, so a peer's 3 has to win
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.nc = kPeerNc;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kPeerNc, g_ncclTopoPostsetNc);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_ALaterRankReportsMoreChannels_KeepsTheSmallerNc) {
+  const int kLocalNc = 8;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx950");
+  Tr_InstallGathers(c, std::vector<PeerSpec>(4), [](int r, Tr_AllGatherInfo& row) {
+    if (r == 2) row.nc = kLocalNc + 4;
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(kLocalNc, g_ncclTopoPostsetNc);  // a min(), not a max()
+}
+
+TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesThemToTheDevice) {
+  const int kNRanks = 8;
+  const int kChannelsWithRanks = 2;
+  InstallDevCommSetupSuccess();
+  std::unique_ptr<ncclComm> comm;
+  ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
+  std::vector<int> userRanks(kNRanks);
+  for (int c = 0; c < kChannelsWithRanks; c++) {
+    comm->channels[c].ring.userRanks = userRanks.data();
+  }
+  g_hipMemcpyAsyncCalls = 0;
+  EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
+  EXPECT_EQ(2 + kChannelsWithRanks, g_hipMemcpyAsyncCalls);  // the two baseline copies plus one per channel
+  for (int c = 0; c < kChannelsWithRanks; c++) {
+    comm->channels[c].ring.userRanks = nullptr;  // stack-owned, so it must not outlive this test
+  }
 }

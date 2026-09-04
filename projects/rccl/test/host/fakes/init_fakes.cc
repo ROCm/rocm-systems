@@ -221,6 +221,12 @@ int g_bcastGrowHandleCalls                = 0;
 bool g_bcastGrowHandleIsRoot              = false;
 int g_bootstrapGetUniqueIdCalls           = 0;
 
+ncclResult_t DefaultBcastGrowHandle(struct ncclBootstrapHandle*, struct ncclComm*, bool) {
+  return g_bcastGrowHandleResult;
+}
+std::function<ncclResult_t(struct ncclBootstrapHandle*, struct ncclComm*, bool)> g_bcastGrowHandle =
+    DefaultBcastGrowHandle;
+
 ncclResult_t g_initChannelResult        = ncclSuccess;
 int g_initChannelLastId                 = -1;
 // Default 1 (!= VerSuccess) means "version unknown".
@@ -287,6 +293,33 @@ int g_ncclTopoDumpGraphsNgraphs             = -1;
 std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;  // rung-3 terminator
 
+// AllGather3 seams (:1786-2213), rung 4. Each default is deterministic: the UUT marshals it into allGather3Data.
+std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =
+    [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTopoGetMinNetBw =
+    [](struct ncclTopoSystem*, int, float* bw) { *bw = 0.0f; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw =
+    [](struct ncclTopoSystem*, int, int* count, float* bw) { *count = 0; *bw = 0.0f; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink =
+    [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset =
+    [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
+int g_ncclTopoPresetCalls                   = 0;
+ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
+int g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
+int g_rcclRomeConsensusNranks               = -1;
+int g_rcclRomeConsensusIdx0                 = -1;
+std::string g_rcclRomeConsensusHost0;
+ncclResult_t g_ncclCudaContextTrackResult   = ncclSuccess;
+int g_ncclCudaContextTrackCalls             = 0;
+ncclResult_t g_ncclNvlsTuningResult         = ncclSuccess;
+int g_ncclNvlsTuningCalls                   = 0;
+ncclResult_t g_ncclTreeBasePostsetResult    = ncclSuccess;
+int g_ncclTreeBasePostsetCalls              = 0;
+ncclResult_t g_ncclTopoPostsetResult        = ncclInvalidUsage;  // rung-4 terminator
+int g_ncclTopoPostsetCalls                  = 0;
+int g_ncclTopoPostsetNc                     = -1;
+
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
@@ -326,6 +359,7 @@ void ResetInitFakes() {
   ResetRecorderFakes();
   ResetRcclWrapFakes();
   ResetNcclStubs();
+  ResetBootstrapStubs();
   ResetTransportStubs();
   ResetTuningFakes();
   ResetEnvFakes();
@@ -364,6 +398,7 @@ void ResetInitFakes() {
   g_ncclEnvPluginInitResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
   g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_bcastGrowHandle = DefaultBcastGrowHandle;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
@@ -406,4 +441,28 @@ void ResetInitFakes() {
   g_ncclCeFinalizeResult = ncclSuccess;
   g_ncclTunerPluginUnloadResult = ncclSuccess;
   g_ncclTunerPluginUnloadLastComm = nullptr;
+  g_ncclTopoCheckNicFused = [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
+  g_ncclTopoGetMinNetBw = [](struct ncclTopoSystem*, int, float* bw) { *bw = 0.0f; return ncclSuccess; };
+  g_ncclTopoGetLocalNetCountByBw = [](struct ncclTopoSystem*, int, int* count, float* bw) {
+    *count = 0;
+    *bw = 0.0f;
+    return ncclSuccess;
+  };
+  g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
+  g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
+  g_ncclTopoPresetCalls = 0;
+  g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
+  g_rcclCheckRomeTopoModelIdxConsensusCalls = 0;
+  g_rcclRomeConsensusNranks = -1;
+  g_rcclRomeConsensusIdx0 = -1;
+  g_rcclRomeConsensusHost0.clear();
+  g_ncclCudaContextTrackResult = ncclSuccess;
+  g_ncclCudaContextTrackCalls = 0;
+  g_ncclNvlsTuningResult = ncclSuccess;
+  g_ncclNvlsTuningCalls = 0;
+  g_ncclTreeBasePostsetResult = ncclSuccess;
+  g_ncclTreeBasePostsetCalls = 0;
+  g_ncclTopoPostsetResult = ncclInvalidUsage;
+  g_ncclTopoPostsetCalls = 0;
+  g_ncclTopoPostsetNc = -1;
 }

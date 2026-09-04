@@ -64,7 +64,14 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
+// Controllable (was fail-loud). init.cc:778, gated on NCCL_LAUNCH_ORDER_IMPLICIT.
+extern ncclResult_t g_ncclCudaContextTrackResult;
+extern int g_ncclCudaContextTrackCalls;
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
+  g_ncclCudaContextTrackCalls++;
+  if (out) *out = nullptr;
+  return g_ncclCudaContextTrackResult;
+}
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
@@ -79,7 +86,11 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
-ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
+static ncclResult_t DefaultNcclInitKernelsForDevice(int, int, size_t*) { ::abort(); }
+std::function<ncclResult_t(int, int, size_t*)> g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
+ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
+  return g_ncclInitKernelsForDevice(cudaArch, maxSharedMem, maxStackSize);
+}
 #endif
 // Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
 // so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
@@ -241,6 +252,9 @@ ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) { ::abort(); }
 
 void ResetNcclStubs() {
+#ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
+  g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
+#endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclSymkFinalize = DefaultNcclSymkFinalize;
