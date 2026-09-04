@@ -107,17 +107,35 @@ struct InstructionRewriteContext {
   std::string_view owner_kernel_name;
 };
 
-/// @brief Optional whole-text rewrite for one ordinary source instruction.
+/// @brief One client-defined location inside an instruction rewrite.
+struct InstructionRewriteMarker {
+  uint64_t id = 0;
+  /// Byte offset from the beginning of the prefix and replacement sequence.
+  uint32_t byte_offset = 0;
+};
+
+/// @brief Position-independent client fragment attached to one source instruction.
 ///
-/// @details The callback runs after control-transfer relocation has claimed its instructions and
-/// before profile-specific semantic lowering. Returning words replaces the complete source
-/// instruction in the identified kernel scope; returning nullopt leaves normal translation in
-/// charge. The replacement is emitted inline, so BinaryTranslator's existing block, branch,
-/// symbol, descriptor, and PC-relative relocation transaction owns the resulting text growth.
-/// Callers are responsible for including the guest instruction in the replacement when its
-/// semantics must still execute.
+/// @details Prefix words execute before the translator-owned instruction. Supplying replacement
+/// words instead makes the client own the complete instruction semantics, including the guest
+/// operation when it must still execute. A prefix without a replacement is valid for direct
+/// control transfers: the translator relocates the transfer after emitting the prefix. Markers
+/// name offsets within the client-supplied words, or the translated instruction boundary at the
+/// end of a prefix-only fragment.
+struct InstructionRewrite {
+  std::vector<uint32_t> prefix_words;
+  std::optional<std::vector<uint32_t>> replacement_words;
+  std::vector<InstructionRewriteMarker> markers;
+};
+
+/// @brief Optional whole-text rewrite for one source instruction.
+///
+/// @details The callback runs before direct-control-transfer handling and profile-specific semantic
+/// lowering. Returning a fragment attaches client instrumentation in the identified kernel scope;
+/// returning nullopt leaves normal translation in charge. BinaryTranslator's existing block,
+/// branch, symbol, descriptor, and PC-relative relocation transaction owns the resulting growth.
 using InstructionRewriteCallback =
-    std::function<std::optional<std::vector<uint32_t>>(const InstructionRewriteContext &)>;
+    std::function<std::optional<InstructionRewrite>(const InstructionRewriteContext &)>;
 
 /// @brief One final placement of a source .text instruction or boundary.
 ///
@@ -131,6 +149,14 @@ struct TranslatedTextPlacement {
   uint64_t owner_descriptor_file_offset = 0;
   /// @brief True only when the client rewrite callback replaced this instruction.
   bool client_rewrite = false;
+};
+
+/// @brief Final placement of one client-defined marker in one kernel-scope copy.
+struct ClientTextMarkerPlacement {
+  uint64_t id = 0;
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+  uint64_t owner_descriptor_file_offset = 0;
 };
 
 /// @brief One source `.text` range that the translator may decode as executable code.
@@ -213,7 +239,8 @@ struct TranslatedCodeObject {
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
   std::vector<TranslatedTextPlacement> text_placements;  ///< Final source-to-target multimap.
-  bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
+  std::vector<ClientTextMarkerPlacement> client_marker_placements; ///< Final client landmarks.
+  bool rewrite_discharge_checked = false;  ///< Final output scan was attempted.
   bool rewrite_discharge_verified = false; ///< No registered rewrite remained actionable.
 
   /// @brief True if translation produced no error diagnostics.

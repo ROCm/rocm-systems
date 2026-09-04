@@ -1902,6 +1902,14 @@ struct PendingTrace {
   std::vector<uint32_t> target_words;
 };
 
+/// @brief Client marker rebased only after its kernel scope receives a final placement.
+struct PendingClientTextMarker {
+  uint64_t id = 0;
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+  uint64_t owner_descriptor_file_offset = 0;
+};
+
 /// @brief A per-kernel lowering failure, before it is turned into a diagnostic.
 ///
 /// @details Carried rather than reported immediately because skip_failed_kernels decides whether
@@ -2027,6 +2035,7 @@ struct ScopeRelocationCheckpoint {
 struct ObjectRollbackState {
   std::vector<uint8_t> &translated_text;
   std::vector<TextOffsetRelocation> &text_relocations;
+  std::vector<ClientTextMarkerPlacement> &client_marker_placements;
   std::vector<PcRelativeDataRelocation> &data_relocations;
   std::vector<PcRelativeTextRelocation> &code_relocations;
   std::vector<PendingCodeRelocation> &pending_code_relocations;
@@ -2048,6 +2057,7 @@ struct ObjectRollbackState {
 struct ScopeTransaction {
   size_t output_begin = 0;
   size_t text_relocations_begin = 0;
+  size_t client_marker_placements_begin = 0;
   size_t data_relocations_begin = 0;
   std::vector<DescriptorVariantCheckpoint> descriptors;
   ScopeRelocationCheckpoint relocations;
@@ -2058,6 +2068,7 @@ struct ScopeTransaction {
     return ScopeTransaction{
         .output_begin = state.translated_text.size(),
         .text_relocations_begin = state.text_relocations.size(),
+        .client_marker_placements_begin = state.client_marker_placements.size(),
         .data_relocations_begin = state.data_relocations.size(),
         .descriptors = checkpoint_scope_descriptors(state.descriptor_translations, translation),
         .relocations = {.code_relocations_begin = state.code_relocations.size(),
@@ -2079,6 +2090,7 @@ struct ScopeTransaction {
   [[nodiscard]] bool rollback(const ObjectRollbackState &state) const {
     state.translated_text.resize(output_begin);
     state.text_relocations.resize(text_relocations_begin);
+    state.client_marker_placements.resize(client_marker_placements_begin);
     state.data_relocations.resize(data_relocations_begin);
     state.code_relocations.resize(relocations.code_relocations_begin);
     state.pending_code_relocations.resize(relocations.pending_code_relocations_begin);
@@ -3295,6 +3307,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // fixup or descriptor recompute) would leave stale entries whose source mapping
   // then applies to the replacement stub or a later kernel.
   std::vector<TextOffsetRelocation> text_relocations;
+  std::vector<ClientTextMarkerPlacement> client_marker_placements;
   std::vector<PcRelativeDataRelocation> data_relocations;
   // A code-target builder cannot be finished inside the scope loop: its target may belong to a
   // scope not yet emitted, and a body reached from several kernels is cloned once per scope, so the
@@ -3326,6 +3339,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const ObjectRollbackState rollback_state{
       .translated_text = translated_text,
       .text_relocations = text_relocations,
+      .client_marker_placements = client_marker_placements,
       .data_relocations = data_relocations,
       .code_relocations = code_relocations,
       .pending_code_relocations = pending_code_relocations,
@@ -3939,6 +3953,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;
+    std::vector<PendingClientTextMarker> pending_client_markers;
     uint64_t source_body_size = 0;
     for (BasicBlock *block : scope.blocks)
       source_body_size += block->size();
@@ -4138,6 +4153,49 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // helper receive its body address rather than the caller's end.
         target_offset_by_source_offset.insert_or_assign(offset, target_offset);
 
+        std::optional<InstructionRewrite> client_rewrite;
+        if (instruction_rewrite_callback_) {
+          client_rewrite = instruction_rewrite_callback_(
+              {.instruction = inst,
+               .source_offset = offset,
+               .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
+               .owner_entry_source_offset = scope.translation->entry_text_offset,
+               .owner_kernel_name = scope.translation->kernel_name});
+          if (client_rewrite) {
+            const uint64_t supplied_size =
+                (client_rewrite->prefix_words.size() +
+                 (client_rewrite->replacement_words ? client_rewrite->replacement_words->size()
+                                                    : 0u)) *
+                sizeof(uint32_t);
+            const bool invalid_marker = std::ranges::any_of(
+                client_rewrite->markers, [&](const InstructionRewriteMarker &marker) {
+                  return marker.byte_offset % sizeof(uint32_t) != 0u ||
+                         marker.byte_offset > supplied_size;
+                });
+            if (invalid_marker) {
+              auto failure = make_kernel_failure(
+                  DiagnosticKind::Legalization,
+                  "client instruction rewrite marker is outside its supplied fragment", offset,
+                  std::string(inst.mnemonic()));
+              if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+                skip_scope = true;
+                break;
+              }
+              return leave_unchanged();
+            }
+            client_rewritten_source_offsets.insert(offset);
+            for (const InstructionRewriteMarker &marker : client_rewrite->markers) {
+              pending_client_markers.push_back(
+                  {.id = marker.id,
+                   .source_offset = offset,
+                   .target_offset = target_offset + marker.byte_offset,
+                   .owner_descriptor_file_offset = scope.translation->descriptor_file_offset});
+            }
+            append_words(kernel_text, client_rewrite->prefix_words);
+          }
+        }
+        const uint64_t instruction_target_offset = kernel_text.size();
+
         const auto recovered_it = recovered_indirect_by_call.find(offset);
         const bool has_recovered_indirect_call = recovered_it != recovered_indirect_by_call.end();
         const bool has_relocation_table_call = relocation_table_calls.contains(offset);
@@ -4253,12 +4311,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               {.inst = &inst,
                .source_inst_offset = offset,
                .source_target_offset = static_cast<uint64_t>(source_target),
-               .target_inst_offset = target_offset,
+               .target_inst_offset = instruction_target_offset,
                .target_window_bytes = branch_window_bytes,
                .translated_words = target_words});
           append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_);
           queue_trace(pending_traces, inst, offset, branch_leg, copied_original, false, changed,
-                      target_offset, std::move(target_words));
+                      instruction_target_offset, std::move(target_words));
           continue;
         }
 
@@ -4267,7 +4325,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           layout.recovered_indirect_fixups.push_back(
               {.source_call_offset = source_fixup.source_call_offset,
                .source_target_offset = source_fixup.source_target_offset,
-               .target_window_offset = target_offset,
+               .target_window_offset = instruction_target_offset,
                .target_sreg = source_fixup.source_call_sreg,
                .return_sreg = source_fixup.source_return_sreg,
                .target_selector = source_fixup.source_call_selector,
@@ -4285,21 +4343,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           continue;
         }
 
-        if (instruction_rewrite_callback_) {
-          std::optional<std::vector<uint32_t>> rewrite = instruction_rewrite_callback_(
-              {.instruction = inst,
-               .source_offset = offset,
-               .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
-               .owner_entry_source_offset = scope.translation->entry_text_offset,
-               .owner_kernel_name = scope.translation->kernel_name});
-          if (rewrite) {
-            std::vector<uint32_t> target_words = std::move(*rewrite);
-            client_rewritten_source_offsets.insert(offset);
-            append_words(kernel_text, target_words);
-            queue_trace(pending_traces, inst, offset, nullptr, false, true, true, target_offset,
-                        std::move(target_words));
-            continue;
-          }
+        if (client_rewrite && client_rewrite->replacement_words) {
+          std::vector<uint32_t> target_words = std::move(*client_rewrite->replacement_words);
+          append_words(kernel_text, target_words);
+          queue_trace(pending_traces, inst, offset, nullptr, false, true, true, target_offset,
+                      std::move(target_words));
+          continue;
         }
 
         const InstructionLegalization *leg = lookup_legalization(inst);
@@ -4840,6 +4889,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
            .owner_descriptor_file_offset = scope.translation->descriptor_file_offset,
            .client_rewrite = client_rewritten_source_offsets.contains(source_offset)});
     }
+    for (const PendingClientTextMarker &marker : pending_client_markers) {
+      client_marker_placements.push_back(
+          {.id = marker.id,
+           .source_offset = marker.source_offset,
+           .target_offset = marker.target_offset + target_delta,
+           .owner_descriptor_file_offset = marker.owner_descriptor_file_offset});
+    }
     // patch_recovered_builder_fixups NOPs and regenerates a builder's whole source range, so a
     // literal it owns must not also be written here -- the later write would land in a range the
     // other model has already rebuilt.
@@ -5154,6 +5210,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   if (!materialized)
     return leave_unchanged();
   result.elf_bytes = std::move(*materialized);
+  result.client_marker_placements = std::move(client_marker_placements);
   result.text_placements.reserve(text_relocations.size());
   for (const TextOffsetRelocation &relocation : text_relocations) {
     result.text_placements.push_back(

@@ -146,13 +146,14 @@ relocate_consan_text(std::span<const uint8_t> descriptor_patched_image, rj_code_
   const auto *header = reinterpret_cast<const Elf64_Ehdr *>(descriptor_patched_image.data());
   BinaryTranslator translator(arch, arch, header->e_flags & EF_AMDGPU_MACH, translator_options);
   translator.set_instruction_rewrite_callback(
-      [&](const InstructionRewriteContext &context) -> std::optional<std::vector<uint32_t>> {
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
         const auto rewrite = std::ranges::find(
             rewrites, context.source_offset,
             [](const ConSanStagedTextRewrite &rewrite) { return rewrite.patch.anchor_offset; });
         if (rewrite == rewrites.end())
           return std::nullopt;
-        return rewrite->words;
+        return InstructionRewrite{
+            .prefix_words = {}, .replacement_words = rewrite->words, .markers = {}};
       });
   TranslatedCodeObject translated = translator.translate(source);
   if (!translated.dispatchable()) {
