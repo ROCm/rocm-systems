@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -145,8 +146,6 @@ class SimulatedKfd : public LinuxKfd {
 public:
   /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
   using DebugIdentityValidationHook = std::function<void()>;
-  /// @brief One-shot test seam between debugger ownership selection and event publication.
-  using DebugEventClaimHook = std::function<void()>;
 
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
@@ -170,9 +169,12 @@ public:
   ///         daemon/remote mode); the caller must NOT treat the fd as retained.
   [[nodiscard]] bool retain_local_open() override;
 
-  void set_debug_event_claim_hook_for_testing(DebugEventClaimHook hook) {
-    debug_event_claim_hook_ = std::move(hook);
-  }
+  /// @brief Change the debugger mask once, immediately before event publication.
+  /// @details This test seam mutates only state protected by
+  /// debug_sessions_mutex_. An arbitrary callback here could re-enter an ioctl
+  /// while the compute unit's wave-state lock is held and manufacture a lock
+  /// order that production event publication never takes.
+  void set_debug_event_claim_mask_for_testing(uint64_t exception_mask);
 
   /// @brief Release the local process's parked event waiters so a blocking
   /// WAIT_EVENTS returns and drops its driver snapshot before teardown.
@@ -453,7 +455,7 @@ private:
                                       uint64_t exception_mask);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
-  void run_debug_event_claim_hook_for_testing();
+  void apply_debug_event_claim_mask_for_testing(pid_t target_pid);
   [[nodiscard]] bool notify_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                         uint32_t gpu_id,
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
@@ -616,7 +618,7 @@ private:
   mutable std::mutex debug_sessions_mutex_;
   std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
   DebugIdentityValidationHook debug_identity_validation_hook_;
-  DebugEventClaimHook debug_event_claim_hook_;
+  std::optional<uint64_t> debug_event_claim_mask_for_testing_;
   std::condition_variable_any debug_sessions_cv_;
   std::jthread debug_session_reaper_;
 

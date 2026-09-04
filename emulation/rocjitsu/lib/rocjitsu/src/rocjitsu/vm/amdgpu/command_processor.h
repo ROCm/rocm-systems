@@ -158,7 +158,7 @@ public:
   void set_doorbell_base(uint32_t process_id, void *base);
 
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
-  void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
+  void set_interrupt_callback(InterruptCallback cb);
 
   using ScratchBackingResolver = std::function<uint64_t(uint32_t process_id)>;
   void set_scratch_backing_resolver(ScratchBackingResolver cb) {
@@ -708,7 +708,12 @@ private:
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
   void ensure_doorbell_monitor();
   bool scan_doorbells();
+  [[nodiscard]] InterruptCallback interrupt_callback() const;
 
+  /// @brief Guards replacement and snapshotting of the external interrupt callback.
+  /// @details Callers copy the callback under this leaf mutex and invoke it
+  /// after unlocking, so callback implementation locks never enter CP ordering.
+  mutable std::mutex interrupt_cb_mutex_;
   InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;

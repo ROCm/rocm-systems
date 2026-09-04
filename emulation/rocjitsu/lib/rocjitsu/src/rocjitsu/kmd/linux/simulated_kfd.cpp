@@ -3177,7 +3177,7 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   if (!debug_stop_publishable(gpu_id))
     return;
 
-  run_debug_event_claim_hook_for_testing();
+  apply_debug_event_claim_mask_for_testing(target_pid);
 
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
@@ -3432,12 +3432,20 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   return true;
 }
 
-void SimulatedKfd::run_debug_event_claim_hook_for_testing() {
-  if (!debug_event_claim_hook_)
+void SimulatedKfd::set_debug_event_claim_mask_for_testing(uint64_t exception_mask) {
+  std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+  debug_event_claim_mask_for_testing_ = exception_mask;
+}
+
+void SimulatedKfd::apply_debug_event_claim_mask_for_testing(pid_t target_pid) {
+  std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+  if (!debug_event_claim_mask_for_testing_)
     return;
-  DebugEventClaimHook hook = std::move(debug_event_claim_hook_);
-  debug_event_claim_hook_ = {};
-  hook();
+  const uint64_t exception_mask = *debug_event_claim_mask_for_testing_;
+  debug_event_claim_mask_for_testing_.reset();
+  auto session = debug_sessions_.find(target_pid);
+  if (session != debug_sessions_.end())
+    session->second.exception_enable_mask = exception_mask;
 }
 
 bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
@@ -3482,7 +3490,7 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   // queue. The debugger's ensuing SUSPEND_QUEUES request publishes one stable,
   // authoritative CWSR snapshot instead of redundantly serializing every
   // resident wave here first.
-  run_debug_event_claim_hook_for_testing();
+  apply_debug_event_claim_mask_for_testing(proc->client_pid());
   if (!notify_debug_event(proc, wave.queue_id(), gpu_id)) {
     wave.restore_debug_stop_state(saved);
     return false;

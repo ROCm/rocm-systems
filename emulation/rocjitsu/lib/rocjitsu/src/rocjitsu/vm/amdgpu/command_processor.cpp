@@ -38,6 +38,16 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+void CommandProcessor::set_interrupt_callback(InterruptCallback cb) {
+  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+  interrupt_cb_ = std::move(cb);
+}
+
+CommandProcessor::InterruptCallback CommandProcessor::interrupt_callback() const {
+  std::lock_guard<std::mutex> lock(interrupt_cb_mutex_);
+  return interrupt_cb_;
+}
+
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
@@ -554,8 +564,8 @@ void CommandProcessor::startup() {
   completion_->set_dispatch_retired_callback(
       [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
   completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
-  if (interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
+  if (auto interrupt = interrupt_callback())
+    completion_->set_interrupt_callback(std::move(interrupt));
 }
 
 void CommandProcessor::shutdown() {
@@ -812,8 +822,8 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
 
   const uint64_t combined_status = memory_->read64(exception_status_va, process_id) | status;
   memory_->write64(exception_status_va, combined_status, process_id);
-  if (interrupt_cb_)
-    interrupt_cb_(process_id, exception_event_id);
+  if (auto interrupt = interrupt_callback())
+    interrupt(process_id, exception_event_id);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
   while (memory_->read64(exception_status_va, process_id) == combined_status &&
          std::chrono::steady_clock::now() < deadline)
@@ -1148,11 +1158,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     // signal. Re-broadcasting every ~10ms ensures late-created events see
     // the idle state within a bounded window.
     if (poll_count % 100 == 0) {
-      // Snapshot the idle queues' process ids under the lock, then fire interrupt_cb_
-      // OUTSIDE it. interrupt_cb_ is an external KFD-layer callback whose internal
-      // locking is opaque to the CP; invoking it while holding hw_queue_mutex_ risks a
-      // lock-order inversion if that callback ever takes a lock held elsewhere while
-      // acquiring hw_queue_mutex_.
+      // Snapshot the idle queues and interrupt callback under their respective
+      // locks, then invoke the external KFD-layer callback outside both. Its
+      // internal locking is opaque to the CP.
       std::vector<uint32_t> idle_pids;
       {
         std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
@@ -1166,9 +1174,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
             idle_pids.push_back(hw_queues_[i].process_id);
         }
       }
-      if (interrupt_cb_)
+      if (auto interrupt = interrupt_callback())
         for (uint32_t pid : idle_pids)
-          interrupt_cb_(pid, 0);
+          interrupt(pid, 0);
     }
 
     if (poll_count % 5000 == 1) {
@@ -2560,8 +2568,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick now) {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
 
   // Ensure interrupt callback is set on completion tracker.
-  if (completion_ && interrupt_cb_)
-    completion_->set_interrupt_callback(interrupt_cb_);
+  if (completion_) {
+    if (auto interrupt = interrupt_callback())
+      completion_->set_interrupt_callback(std::move(interrupt));
+  }
 
   size_t entries_after = 0;
   for (auto &qs : new_queue_states_)
@@ -3209,8 +3219,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     case sdma::OP_TRAP: {
       uint32_t event_id = dw(1) & 0x0FFFFFFF;
-      if (interrupt_cb_)
-        interrupt_cb_(queue.process_id, event_id);
+      if (auto interrupt = interrupt_callback())
+        interrupt(queue.process_id, event_id);
       pkt_dwords = sdma::TRAP_SIZE;
       break;
     }
@@ -3306,7 +3316,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // that can refuse has to be settled BEFORE the decrement: once the
         // value drops, the waiter may already have observed it, and faulting
         // afterwards leaves a signal that fired with no notification behind it.
-        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt_cb_;
+        auto interrupt = interrupt_callback();
+        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt;
         uint64_t sig_base = addr_va - 8; // Signal layout: value at offset 8.
         uint64_t mailbox_ptr = 0;
         uint32_t event_id = 0;
@@ -3352,7 +3363,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           }
           // Zero means the id was never read, not "wake everything".
           if (event_id != 0)
-            interrupt_cb_(queue.process_id, event_id);
+            interrupt(queue.process_id, event_id);
           else
             util::Logger::vm("SDMA: signal at 0x", std::hex, sig_base, std::dec,
                              " has no event id; not broadcasting");
