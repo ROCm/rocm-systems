@@ -10,12 +10,11 @@ without GPU hardware or the compiled ``amdsmi`` package. Pins the fix that
 aligned the ``CU %``/``SDMA`` columns and dropped the redundant ``%`` suffix.
 """
 
-import importlib.util
 import os
 import types
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modules
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module, stub_modules
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
 # checkout wins. None -> setUpClass skips.
@@ -34,10 +33,7 @@ def _fake_helpers():
 
 
 def _load_logger_module():
-    spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", LOGGER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("amdsmi_logger_under_test", LOGGER_PATH)
 
 
 def _process(name="python3", cu=None, sdma="0", gpu="0", pid="12345"):

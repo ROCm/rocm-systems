@@ -17,11 +17,17 @@ the marker must never itself become an empty dict.
 exercises the code under development; an explicit AMDSMI_PATH pins that install.
 """
 
-import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
@@ -29,12 +35,7 @@ LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
 
 def _load_logger_module():
-    spec = importlib.util.spec_from_file_location("amdsmi_logger_under_test", LOGGER_PATH)
-    if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"could not load amdsmi_logger from {LOGGER_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("amdsmi_logger_under_test", LOGGER_PATH)
 
 
 class TestCliEmptySectionNA(unittest.TestCase):

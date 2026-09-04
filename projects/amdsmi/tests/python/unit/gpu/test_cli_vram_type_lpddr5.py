@@ -17,11 +17,17 @@ exercises the code under development; an explicit AMDSMI_PATH pins that install.
 
 import argparse
 import copy
-import importlib.util
 import os
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
 # checkout wins. None -> setUpClass skips.
@@ -95,12 +101,7 @@ def _fake_modules(holder):
 
 
 def _load_static_module():
-    spec = importlib.util.spec_from_file_location("static_under_test", STATIC_PATH)
-    if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"amd-smi CLI static.py is not loadable ({STATIC_PATH})")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("static_under_test", STATIC_PATH)
 
 
 class _FakeLogger:

@@ -16,14 +16,20 @@ and the ``--overwrite`` / ``--append`` fast paths.
 
 import argparse
 import builtins
-import importlib.util
 import os
 import sys
 import tempfile
 import types
 import unittest
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    find_cli_dir,
+    generated_version_stub,
+    load_cli_module,
+    stub_modules,
+)
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
 # checkout wins. None -> setUpClass skips.
@@ -41,38 +47,40 @@ class _FakeStdin:
         return self._is_tty
 
 
-def _install_stubs():
-    """Register lightweight stubs for the parser's non-stdlib imports.
+def _missing_stubs():
+    """Stubs for the parser's non-stdlib imports that are not already loaded.
 
-    ``setdefault`` leaves any already-imported real module in place (the CLI is
-    installed, so ``amdsmi``/``amdsmi_helpers`` may already be loaded by the
-    shared test harness); only the missing ones fall back to stubs. The parser
-    references these names at import only to bind them, so stubs are sufficient.
+    Only the missing names are stubbed: the CLI is installed, so ``amdsmi`` and
+    ``amdsmi_helpers`` may already be real modules loaded by the shared harness,
+    and replacing those would hide the thing under test. The parser references
+    these names at import only to bind them, so stubs are sufficient.
     ``amdsmi_cli_exceptions`` is intentionally NOT stubbed -- the test asserts on
     the real exception type raised by the action.
+
+    Hand the result to ``stub_modules`` so every name is restored afterwards; a
+    stub that outlives the class corrupts later test modules in the same run.
     """
-    amdsmi_mod = types.ModuleType("amdsmi")
-    amdsmi_mod.amdsmi_interface = types.SimpleNamespace()
-    sys.modules.setdefault("amdsmi", amdsmi_mod)
+    stubs = {}
 
-    version_mod = types.ModuleType("_version")
-    version_mod.__version__ = "0.0.0-test"
-    sys.modules.setdefault("_version", version_mod)
+    if "amdsmi" not in sys.modules:
+        amdsmi_mod = types.ModuleType("amdsmi")
+        amdsmi_mod.amdsmi_interface = types.SimpleNamespace()
+        stubs["amdsmi"] = amdsmi_mod
 
-    helpers_mod = types.ModuleType("amdsmi_helpers")
-    helpers_mod.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    sys.modules.setdefault("amdsmi_helpers", helpers_mod)
+    stubs.update(generated_version_stub())
+
+    if "amdsmi_helpers" not in sys.modules:
+        helpers_mod = types.ModuleType("amdsmi_helpers")
+        helpers_mod.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
+        stubs["amdsmi_helpers"] = helpers_mod
+
+    return stubs
 
 
 def _load_parser_module():
     # Put the installed CLI dir on sys.path so the parser's own
     # ``import amdsmi_cli_exceptions`` resolves to the real module.
-    if _CLI_DIR not in sys.path:
-        sys.path.insert(0, _CLI_DIR)
-    spec = importlib.util.spec_from_file_location("amdsmi_parser_under_test", PARSER_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("amdsmi_parser_under_test", PARSER_PATH, sys_path_dir=_CLI_DIR)
 
 
 class TestOutputFileStdinGuard(unittest.TestCase):
@@ -82,7 +90,7 @@ class TestOutputFileStdinGuard(unittest.TestCase):
             raise unittest.SkipTest(
                 f"amd-smi CLI amdsmi_parser.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
-        _install_stubs()
+        stub_modules(cls, _missing_stubs())
         cls.parser_mod = _load_parser_module()
         import amdsmi_cli_exceptions  # resolved from _CLI_DIR above
 

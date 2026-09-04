@@ -20,7 +20,6 @@ exercises the source CLI directly; it skips if that source file is absent.
 
 import argparse
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -34,6 +33,7 @@ from common.common import (
     amdsmi_path,
     cli_search_order,
     find_cli_dir,
+    load_cli_module,
     stub_modules,
 )
 
@@ -161,10 +161,7 @@ def _build_fake_amdsmi():
 
 
 def _load_ras_module():
-    spec = importlib.util.spec_from_file_location("ras_cper_json_under_test", _RAS_SRC)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_cli_module("ras_cper_json_under_test", _RAS_SRC)
 
 
 def _build_ras_args(handles, **overrides):
