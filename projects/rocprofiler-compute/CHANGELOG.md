@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added Memory Bandwidth Analysis guided analysis under `--experimental --membw-analysis` for gfx950. When enabled during analysis, the memory chart annotates active GL1/GL2/EA stall bottlenecks and renders a guidance panel with per-bottleneck condition, measurement, and impact.
+
 * Added the `LDS Utilization` metric to the gfx115x Memory Chart.
 
 ### Changed

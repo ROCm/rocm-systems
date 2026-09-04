@@ -1,0 +1,2 @@
+Kernel_Name,Count,Sum(ns),Mean(ns),Median(ns),Percent
+"vecCopy(double*, double*, double*, int, int)",1,6800.0,6800.0,6800.0,100.0

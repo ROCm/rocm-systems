@@ -27,6 +27,8 @@ subtrees:
     - file: how-to/use.rst
     - file: how-to/pc_sampling.rst
       title: Use PC sampling
+    - file: how-to/membw_analysis.rst
+      title: Use Memory Bandwidth Analysis
     - file: how-to/live_attach_detach.rst
       title: Use Dynamic process attachment
     - file: how-to/profile/mode.rst
