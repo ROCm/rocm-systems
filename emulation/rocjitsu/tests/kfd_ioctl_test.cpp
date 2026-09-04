@@ -5076,6 +5076,49 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
                    [&](const auto &entry) { return entry.queue_id == runtime_queue.queue_id; });
   ASSERT_NE(runtime_entry, runtime_entries.end());
   EXPECT_EQ(runtime_entry->exception_status & kReportedExceptions, 0u);
+
+  // Now force the enabled-to-disabled boundary inside trap completion. The
+  // sendmsg initially assigns the event to the debugger, then the one-shot
+  // hook removes its subscription immediately before publication validates it.
+  kfd_ioctl_create_queue_args rejected_queue = create;
+  rejected_queue.ctx_save_restore_address = kRuntimeCwsrAddress;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &rejected_queue), 0);
+  auto *rejected_wave = cu->dispatch_wf(/*wg_id=*/3, kKernelAddress, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(rejected_wave, nullptr);
+  rejected_wave->set_process_id(driver_->local_process_id());
+  rejected_wave->set_queue_id(rejected_queue.queue_id);
+  runtime_notified.store(false, std::memory_order_release);
+  exceptions.set_exceptions_enabled.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  driver_->set_debug_event_claim_hook_for_testing([&] {
+    exceptions.set_exceptions_enabled.exception_mask = 0;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+  });
+  for (uint32_t i = 0; i < 8 && rejected_wave->pc != kTrapHandlerAddress + 5 * sizeof(uint32_t);
+       ++i) {
+    if (rejected_wave->pc == kTrapHandlerAddress + 4 * sizeof(uint32_t))
+      rejected_wave->set_m0((kReportedExceptions << 10) | rejected_queue.queue_id);
+    cu->step();
+  }
+  ASSERT_EQ(rejected_wave->pc, kTrapHandlerAddress + 5 * sizeof(uint32_t));
+  EXPECT_FALSE(runtime_notified.load(std::memory_order_acquire));
+  cu->step();
+  EXPECT_TRUE(runtime_notified.load(std::memory_order_acquire));
+  notifications = 0;
+  EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_FALSE(rejected_wave->debug_halted());
+
+  std::array<kfd_queue_snapshot_entry, 3> rejected_entries{};
+  runtime_snapshot.queue_snapshot.snapshot_buf_ptr =
+      reinterpret_cast<uint64_t>(rejected_entries.data());
+  runtime_snapshot.queue_snapshot.num_queues = rejected_entries.size();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &runtime_snapshot), 0);
+  auto rejected_entry =
+      std::find_if(rejected_entries.begin(), rejected_entries.end(),
+                   [&](const auto &entry) { return entry.queue_id == rejected_queue.queue_id; });
+  ASSERT_NE(rejected_entry, rejected_entries.end());
+  EXPECT_EQ(rejected_entry->exception_status & kReportedExceptions, 0u);
   soc_->for_each_cp(
       [&](rocjitsu::amdgpu::CommandProcessor *cp) { cp->set_interrupt_callback(nullptr); });
 }

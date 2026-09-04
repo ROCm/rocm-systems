@@ -3177,6 +3177,12 @@ void SimulatedKfd::on_wave_trap_complete(amdgpu::Wavefront &wave) {
   if (!debug_stop_publishable(gpu_id))
     return;
 
+  if (debug_event_claim_hook_) {
+    DebugEventClaimHook hook = std::move(debug_event_claim_hook_);
+    debug_event_claim_hook_ = {};
+    hook();
+  }
+
   // A trap interrupt is wave-local: hardware reports it without waiting for
   // every peer in the queue to stop. The debugger's ensuing SUSPEND_QUEUES
   // request publishes the authoritative full-queue CWSR snapshot.
