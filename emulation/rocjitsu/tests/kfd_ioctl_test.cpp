@@ -216,6 +216,43 @@ protected:
   void SetUp() override { SetUpWithConfig(GetParam().config_path); }
 };
 
+TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
+  struct EncodingCase {
+    rj_code_arch_t arch;
+    uint32_t profiling_move;
+    uint32_t exception_move;
+  };
+  constexpr EncodingCase kCases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA2, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA3, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_CDNA4, 0xBEFC0073u, 0xBEFC006Fu},
+      {ROCJITSU_CODE_ARCH_RDNA1, 0xBEFC0373u, 0xBEFC036Fu},
+      {ROCJITSU_CODE_ARCH_RDNA2, 0xBEFC0373u, 0xBEFC036Fu},
+      {ROCJITSU_CODE_ARCH_RDNA3, 0xBEFD0073u, 0xBEFD006Fu},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xBEFD0073u, 0xBEFD006Fu},
+  };
+  constexpr uint32_t kSNop0 = 0xBF800000u;
+
+  for (const auto &test_case : kCases) {
+    EXPECT_TRUE(rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(test_case.arch));
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.profiling_move, kSNop0),
+              rocjitsu::kmd::detail::TrapInterruptSite::Profiling);
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.exception_move, kSNop0),
+              rocjitsu::kmd::detail::TrapInterruptSite::QueueException);
+    EXPECT_EQ(rocjitsu::kmd::detail::classify_pre_gfx12_trap_interrupt_site(
+                  test_case.arch, test_case.profiling_move, 0),
+              rocjitsu::kmd::detail::TrapInterruptSite::Unknown);
+  }
+
+  EXPECT_FALSE(
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_CDNA5));
+  EXPECT_FALSE(
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
 // still reads the ring alone. An SDMA queue is per-engine and is not replicated.
