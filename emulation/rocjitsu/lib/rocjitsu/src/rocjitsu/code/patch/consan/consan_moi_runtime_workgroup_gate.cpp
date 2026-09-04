@@ -216,48 +216,6 @@ build_moi_runtime_workgroup_gate_prefix(const MoiRuntimeWorkgroupGatePlan &plan,
   return result;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_island_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const MoiRuntimeWorkgroupGatePlan &plan, const ConSanMoiWorkgroupSources &workgroup_sources,
-    uint64_t island_text_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
-    uint64_t island_word_count, rj_code_arch_t arch) {
-  if (plan.sample_stride <= 1u)
-    return std::nullopt;
-  const uint16_t saved_scc = static_cast<uint16_t>(plan.exec_save_sgpr + 4u);
-  const uint16_t quotient = static_cast<uint16_t>(plan.exec_save_sgpr + 5u);
-  const uint16_t residue = static_cast<uint16_t>(plan.exec_save_sgpr + 6u);
-
-  std::vector<uint32_t> words;
-  words.reserve(island_word_count);
-  InstructionSequence sequence(words);
-  if (!append_moi_runtime_workgroup_predicate(words, plan, workgroup_sources, saved_scc, quotient,
-                                              residue, arch))
-    return std::nullopt;
-  const InstructionSequence::Label selected = sequence.make_label();
-  if (!sequence.emit_branch(selected, InstructionSequence::BranchKind::SccNonzero) ||
-      !sequence.emit(
-          instrumentation::build_s_cmp_lg_u32(saved_scc, scalar_positive_inline_u32(0), arch)))
-    return std::nullopt;
-  for (uint64_t offset = 0; offset < candidate.size(); offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
-    (void)sequence.emit(word);
-  }
-  const uint64_t return_branch_text_offset = island_text_offset + words.size() * sizeof(uint32_t);
-  const auto return_offset =
-      compute_sopp_branch_simm16(return_branch_text_offset, return_text_offset);
-  if (!return_offset || !sequence.emit(build_s_branch(*return_offset, arch)) ||
-      !sequence.bind(selected) || !sequence.resolve_branches(arch))
-    return std::nullopt;
-  if (!append_moi_scc_preserving_indirect_jump(words, island_text_offset, cave_text_offset,
-                                               plan.exec_save_sgpr, saved_scc,
-                                               /*capture_scc=*/false, arch) ||
-      words.size() > island_word_count)
-    return std::nullopt;
-  words.resize(island_word_count, build_s_nop(0, arch));
-  return words;
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_runtime_workgroup_gate_call_words(
     std::span<const uint8_t> guest_bytes, const MoiRuntimeWorkgroupGatePlan &plan,
     const ConSanMoiWorkgroupSources &workgroup_sources, uint64_t gate_text_offset,

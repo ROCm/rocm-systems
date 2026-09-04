@@ -416,7 +416,6 @@ TEST(ConSanMoi, CdnaInlineShadowMovesOnlyAnEmptyAccumulatorBoundaryForScratchGro
     ASSERT_NE(access, result.patches.end());
     ASSERT_NE(prologue, result.patches.end());
     EXPECT_EQ(access->anchor_offset, 0u);
-    EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
     EXPECT_TRUE(access->relocated_guest_instruction_offset);
     EXPECT_TRUE(result.text_relocation);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -483,7 +482,6 @@ TEST(ConSanMoi, CdnaInlineShadowGrowsUnifiedAllocationInsideEmptyAccumulatorGap)
     ASSERT_NE(access, result.patches.end());
     ASSERT_NE(prologue, result.patches.end());
     EXPECT_EQ(access->anchor_offset, 0u);
-    EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
     EXPECT_TRUE(access->relocated_guest_instruction_offset);
     EXPECT_TRUE(result.text_relocation);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -573,7 +571,6 @@ TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulator
         ASSERT_NE(access, result.patches.end());
         ASSERT_NE(prologue, result.patches.end());
         EXPECT_EQ(access->anchor_offset, 0u);
-        EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
         EXPECT_TRUE(access->relocated_guest_instruction_offset);
         EXPECT_TRUE(result.text_relocation);
         EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -3296,7 +3293,6 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   });
   ASSERT_NE(access, result.patches.end());
   EXPECT_TRUE(access->relocated_guest_instruction_offset);
-  EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
   ASSERT_TRUE(result.text_relocation);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -3419,7 +3415,6 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   EXPECT_TRUE(access->relocated_guest_instruction_offset);
-  EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
   ASSERT_TRUE(result.text_relocation);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -6871,7 +6866,6 @@ TEST(ConSanMoi, Cdna4FarEntryPrefixAndAccessShareTextTransaction) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(prologue->anchor_offset, 0u);
   EXPECT_EQ(prologue->original_size, 0u);
-  EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
   EXPECT_TRUE(access_patch->relocated_guest_instruction_offset);
   ASSERT_TRUE(result.text_relocation);
 }
@@ -6913,7 +6907,6 @@ TEST(ConSanMoi, Cdna4FarEntryPrefixNeedsNoOverlappingIndirectIsland) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(prologue->anchor_offset, 0u);
   EXPECT_EQ(prologue->original_size, 0u);
-  EXPECT_FALSE(prologue->entry_prologue_chained_trampoline_offset);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             0u);

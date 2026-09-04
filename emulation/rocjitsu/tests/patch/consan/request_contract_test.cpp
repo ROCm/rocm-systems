@@ -155,7 +155,6 @@ TEST(TransformPolicyContractTest, DefaultsAndBothGrowthFormsAreValueSemantic) {
       .absolute_bytes = 0,
       .input_percent = 125,
   };
-  percent.sopp_relay_planning_work_limit = {.base = 9, .per_input = 3};
   EXPECT_EQ(validate_transform_policy(percent), ConSanContractIssue::None);
   EXPECT_NE(percent, defaults);
   TransformPolicy copy = percent;
@@ -720,10 +719,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   transform.patched_image_growth_limit.absolute_bytes = 1234;
   transform.max_patches = 23;
   transform.max_patches_is_expert_limit = false;
-  transform.sopp_relay_planning_work_limit = {1, 2};
-  transform.direct_reservoir_planning_work_limit = {3, 4};
-  transform.lds_relay_layout_planning_work_limit = {5, 6};
-  transform.lds_convergence_planning_work_limit = {7, 8};
   ConSanDebugOverrides debug;
   debug.probe_nop = true;
   debug.probe_trampoline_nop = true;
@@ -762,14 +757,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   EXPECT_EQ(options.patched_image_growth_limit.absolute_bytes, 1234u);
   EXPECT_EQ(options.max_patches, 23u);
   EXPECT_FALSE(options.max_patches_is_expert_limit);
-  EXPECT_EQ(options.sopp_relay_planning_work_limit.base, 1u);
-  EXPECT_EQ(options.sopp_relay_planning_work_limit.per_input, 2u);
-  EXPECT_EQ(options.direct_reservoir_planning_work_limit.base, 3u);
-  EXPECT_EQ(options.direct_reservoir_planning_work_limit.per_input, 4u);
-  EXPECT_EQ(options.lds_relay_layout_planning_work_limit.base, 5u);
-  EXPECT_EQ(options.lds_relay_layout_planning_work_limit.per_input, 6u);
-  EXPECT_EQ(options.lds_convergence_planning_work_limit.base, 7u);
-  EXPECT_EQ(options.lds_convergence_planning_work_limit.per_input, 8u);
   EXPECT_TRUE(options.probe_nop);
   EXPECT_TRUE(options.probe_trampoline_nop);
   EXPECT_TRUE(options.probe_endpgm);

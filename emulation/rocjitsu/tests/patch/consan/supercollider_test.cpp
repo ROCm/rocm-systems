@@ -7228,13 +7228,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   ASSERT_TRUE(consan_patch_succeeded(repeated));
   EXPECT_EQ(repeated.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(repeated.replacement, result.replacement);
-
-  ConSanOptions exhausted_options = options;
-  exhausted_options.direct_reservoir_planning_work_limit = {1u, 0u};
-  const ConSanTransformArtifacts exhausted = test_lower_consan(bytes, exhausted_options);
-  EXPECT_TRUE(consan_patch_succeeded(exhausted));
-  EXPECT_TRUE(exhausted.modified());
-  EXPECT_TRUE(exhausted.errors.empty());
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeUsesCommonDirectRelayReservoirForCdna4Wave64) {

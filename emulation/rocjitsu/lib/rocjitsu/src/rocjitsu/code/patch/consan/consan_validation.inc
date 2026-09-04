@@ -269,20 +269,8 @@ void validate_patch_byte_accounting(const FinalValidationEnvironment &environmen
            ((next.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
              next.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore) &&
             existing->kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata));
-      const auto &existing_patch = result.patches[existing->patch_index];
-      const auto &next_patch = result.patches[next.patch_index];
-      const bool nested_composed_entry_prefix =
-          !existing->is_trampoline && !next.is_trampoline &&
-          ((existing->kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-            existing_patch.entry_prologue_chained_trampoline_offset ==
-                next_patch.trampoline_offset &&
-            next.bytes.begin < existing->bytes.end) ||
-           (next.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-            next_patch.entry_prologue_chained_trampoline_offset ==
-                existing_patch.trampoline_offset &&
-            existing->bytes.begin < next.bytes.end));
       if (!exact_alias && !nested_cross_phase && !nested_composed_access_atomic &&
-          !nested_composed_sampled_access_atomic && !nested_composed_entry_prefix) {
+          !nested_composed_sampled_access_atomic) {
         if (failure_cause)
           *failure_cause = ConSanTransformFailureCause::OverlappingPatchRanges;
         errors.emplace_back(

@@ -348,14 +348,6 @@ struct ConSanTargetProfile {
   /// about whether the target supports two-address LDS operations.
   bool requires_split_two_address_lds_relocation = false;
   uint16_t semantic_form_mask = 0;
-  /// Maximum sites addressable by one ordinary dense MOI routing group. A
-  /// zero value selects target-specific translated routing instead.
-  uint8_t moi_dense_route_group_capacity = 0;
-  /// Whether a relocated dense host may rescue a far atomic or barrier that
-  /// has no directly reachable local island.
-  bool supports_moi_far_dense_atomic_route = false;
-  bool supports_moi_far_dense_barrier_route = false;
-  bool supports_moi_dense_s_call_b64 = false;
   bool supports_sc_inline_flat_trap_rewrite = false;
   bool requires_sc_runtime_flat_group_gate = false;
   /// Whether decoded atomic/fence ordering includes an explicit TH/SC field.
@@ -504,13 +496,6 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
         (profile.requires_split_two_address_lds_relocation &&
          profile.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
-        (profile.moi_dense_route_group_capacity != 0u &&
-         profile.moi_dense_route_group_capacity != 31u &&
-         profile.moi_dense_route_group_capacity != 64u) ||
-        (profile.supports_moi_far_dense_atomic_route &&
-         !profile.supports_moi_far_dense_barrier_route) ||
-        (profile.supports_moi_dense_s_call_b64 &&
-         profile.direct_call_form != ConSanDirectCallForm::SCallB64) ||
         (profile.supports_sc_inline_flat_trap_rewrite &&
          profile.arch != ROCJITSU_CODE_ARCH_RDNA4) ||
         (profile.requires_sc_runtime_flat_group_gate && !profile.has_selectable_vgpr_bank) ||

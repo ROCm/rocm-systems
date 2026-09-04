@@ -87,10 +87,4 @@ private:
     const RuntimeCapabilities *capabilities, rj_code_arch_t arch, std::string_view subject,
     std::vector<std::string> &errors);
 
-[[nodiscard]] bool append_moi_call_return_match(std::vector<uint32_t> &words,
-                                                uint64_t words_text_offset,
-                                                uint64_t caller_return_text_offset,
-                                                uint16_t pc_sgpr, uint16_t call_return_sgpr,
-                                                rj_code_arch_t arch);
-
 } // namespace rocjitsu::consan_moi_impl

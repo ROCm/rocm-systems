@@ -15,8 +15,6 @@ inline constexpr ConSanTargetProfile kConSanGfx1201TargetProfile = [] {
   profile.atomic_address_materialization.flat_and_global = true;
   profile.atomic_address_materialization.buffer_resource = true;
   profile.moi_dispatch_identity_placement = ConSanMoiDispatchIdentityPlacement::ScalarThenLiteral;
-  profile.supports_moi_far_dense_barrier_route = true;
-  profile.supports_moi_dense_s_call_b64 = true;
   profile.supports_sc_inline_flat_trap_rewrite = true;
   return profile;
 }();

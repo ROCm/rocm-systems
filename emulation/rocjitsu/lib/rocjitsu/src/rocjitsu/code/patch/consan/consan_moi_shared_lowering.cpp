@@ -642,53 +642,5 @@ moi_workgroup_key_register_plan(const ConSanMoiOperatingPoint &point) {
   };
 }
 
-/// Emit a call-return comparison whose expected PC is rebuilt from a
-/// canonical get-PC sequence. Revision translation can then relocate the
-/// expected caller independently of the dispatcher and its in-kernel entry
-/// island. The target profile owns the choice of PC-delta representation; the
-/// router owns only the semantic comparison.
-[[nodiscard]] bool append_moi_call_return_match(std::vector<uint32_t> &words,
-                                                uint64_t words_text_offset,
-                                                uint64_t caller_return_text_offset,
-                                                uint16_t pc_sgpr, uint16_t call_return_sgpr,
-                                                rj_code_arch_t arch) {
-  const ConSanTargetProfile *target = consan_target_profile(arch);
-  if (target == nullptr)
-    return false;
-  const uint64_t getpc_text_offset =
-      words_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
-  words.push_back(build_s_getpc_b64(pc_sgpr, arch));
-  const uint64_t pc_after_getpc = getpc_text_offset + sizeof(uint32_t);
-  if (caller_return_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
-      pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-    return false;
-  }
-  const int64_t delta =
-      static_cast<int64_t>(caller_return_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/target->direct_call_form ==
-                                   ConSanDirectCallForm::SCallI64))
-    return false;
-  const auto compare = instrumentation::build_s_cmp_eq_u32(call_return_sgpr, pc_sgpr, arch);
-  if (!compare)
-    return false;
-  words.push_back(*compare);
-  return true;
-}
-
-/// Emit the owner-local dense entry island, dispatcher, optional relocated
-/// host entry, and original-site route anchors shared by all three access
-/// engines.
-///
-/// `PlannedPatch` is deliberately structural: the engines retain distinct
-/// evidence-body plans, but expose the same `candidate`, `resources`,
-/// `placement`, and `entry_island_offset` facts to this routing mechanism.
-/// The boolean parameter preserves the Record/Replay-versus-Sampled policy for
-/// equal indirect-PC and call-return assignments on explicit-key targets.
-/// Inline Shadow selects its distinct scalar ABI through the request and
-/// owner-bound operating point; its
-/// SCC-tagged explicit key and indirect-PC dependency wait remain explicit
-/// branches of this shared routing mechanism. Evidence construction and
-/// per-site resource admission remain outside this function.
 } // namespace consan_moi_impl
 } // namespace rocjitsu

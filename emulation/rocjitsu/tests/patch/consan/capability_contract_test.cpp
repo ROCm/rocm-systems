@@ -63,10 +63,6 @@ struct ExpectedTargetProfile {
   uint8_t flat_compare_swap_data_pair_alignment;
   bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
-  uint8_t moi_dense_route_group_capacity;
-  bool supports_moi_far_dense_atomic_route;
-  bool supports_moi_far_dense_barrier_route;
-  bool supports_moi_dense_s_call_b64;
   bool supports_sc_inline_flat_trap_rewrite;
   bool requires_sc_runtime_flat_group_gate;
   bool requires_raw_memory_order_qualifier;
@@ -117,10 +113,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .moi_dense_route_group_capacity = 31,
-        .supports_moi_far_dense_atomic_route = true,
-        .supports_moi_far_dense_barrier_route = true,
-        .supports_moi_dense_s_call_b64 = true,
         .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = false,
@@ -169,10 +161,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 2,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
-        .moi_dense_route_group_capacity = 31,
-        .supports_moi_far_dense_atomic_route = true,
-        .supports_moi_far_dense_barrier_route = true,
-        .supports_moi_dense_s_call_b64 = true,
         .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = false,
@@ -222,10 +210,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .moi_dense_route_group_capacity = 64,
-        .supports_moi_far_dense_atomic_route = false,
-        .supports_moi_far_dense_barrier_route = false,
-        .supports_moi_dense_s_call_b64 = false,
         .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = true,
@@ -283,10 +267,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
-        .moi_dense_route_group_capacity = 64,
-        .supports_moi_far_dense_atomic_route = false,
-        .supports_moi_far_dense_barrier_route = true,
-        .supports_moi_dense_s_call_b64 = true,
         .supports_sc_inline_flat_trap_rewrite = true,
         .requires_sc_runtime_flat_group_gate = false,
         .requires_raw_memory_order_qualifier = true,
@@ -347,10 +327,6 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .flat_compare_swap_data_pair_alignment = 1,
         .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
-        .moi_dense_route_group_capacity = 0,
-        .supports_moi_far_dense_atomic_route = false,
-        .supports_moi_far_dense_barrier_route = false,
-        .supports_moi_dense_s_call_b64 = false,
         .supports_sc_inline_flat_trap_rewrite = false,
         .requires_sc_runtime_flat_group_gate = true,
         .requires_raw_memory_order_qualifier = true,
@@ -406,12 +382,6 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
             expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
-  EXPECT_EQ(actual.moi_dense_route_group_capacity, expected.moi_dense_route_group_capacity);
-  EXPECT_EQ(actual.supports_moi_far_dense_atomic_route,
-            expected.supports_moi_far_dense_atomic_route);
-  EXPECT_EQ(actual.supports_moi_far_dense_barrier_route,
-            expected.supports_moi_far_dense_barrier_route);
-  EXPECT_EQ(actual.supports_moi_dense_s_call_b64, expected.supports_moi_dense_s_call_b64);
   EXPECT_EQ(actual.supports_sc_inline_flat_trap_rewrite,
             expected.supports_sc_inline_flat_trap_rewrite);
   EXPECT_EQ(actual.requires_sc_runtime_flat_group_gate,
@@ -515,12 +485,6 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("two-address relocation split outside CDNA5", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });
-  expect_invalid("unsupported dense-route group capacity",
-                 [](auto &profiles) { profiles[0].moi_dense_route_group_capacity = 1u; });
-  expect_invalid("far atomic route without far barrier route",
-                 [](auto &profiles) { profiles[0].supports_moi_far_dense_barrier_route = false; });
-  expect_invalid("dense s_call_b64 support without the target call form",
-                 [](auto &profiles) { profiles[4].supports_moi_dense_s_call_b64 = true; });
   expect_invalid("SC inline FLAT trap outside RDNA4",
                  [](auto &profiles) { profiles[0].supports_sc_inline_flat_trap_rewrite = true; });
   expect_invalid("SC runtime group gate without selectable VGPR banks",

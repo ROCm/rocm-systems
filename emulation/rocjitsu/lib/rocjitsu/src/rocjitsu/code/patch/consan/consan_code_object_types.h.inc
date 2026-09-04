@@ -503,10 +503,6 @@ struct ConSanCommittedPatchGeometry {
 /// Exact control-flow routing proof retained for final validation. Emitters
 /// populate this slice, but semantic policy and runtime reporting never see it.
 struct ConSanPatchRoutingProof {
-  /// Trampoline reached after this entry prologue completes. This is recorded
-  /// on the prologue patch so final validation can prove composed entry
-  /// ownership without treating the overwritten anchor branch as live.
-  std::optional<uint64_t> entry_prologue_chained_trampoline_offset;
   /// Full dispatch-ID initialization bodies reached through paired
   /// kernarg-preload entry relays. Absent when initialization is inline in
   /// the two 256-byte hardware entry slots.
@@ -570,10 +566,6 @@ struct ConSanPatchAbiEffects {
   /// Minimum ordinary SGPR allocation required by this patch, independent of
   /// whether its placement uses an indirect control-flow relay.
   uint16_t required_sgpr_count = 0;
-  /// Entry island paired with this MOI dense dispatcher. This explicit
-  /// relation lets later synchronization composition reuse an access router
-  /// without depending on incidental result.patches ordering.
-  std::optional<uint64_t> moi_dense_entry_island_offset;
   /// Complete owner-local persistent identity layout and the distinct,
   /// target-normalized base available to ephemeral spill state.
   std::optional<ConSanMoiPrivateStateLayout> private_state_layout;

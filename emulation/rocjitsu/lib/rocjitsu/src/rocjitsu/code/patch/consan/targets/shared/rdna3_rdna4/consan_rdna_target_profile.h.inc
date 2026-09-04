@@ -16,7 +16,6 @@
   profile.user_sgpr_initialization_limit = 16;
   profile.max_group_segment_bytes = 64u * 1024u;
   profile.semantic_form_mask = kConSanCommonSemanticFormMask;
-  profile.moi_dense_route_group_capacity = 64;
   profile.requires_raw_memory_order_qualifier = true;
   return profile;
 }

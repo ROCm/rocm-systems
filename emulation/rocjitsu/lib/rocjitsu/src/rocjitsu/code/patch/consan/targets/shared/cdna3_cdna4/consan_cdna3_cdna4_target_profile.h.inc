@@ -20,9 +20,5 @@
   profile.moi_visible_evidence_address_precedes_result = true;
   profile.flat_compare_swap_data_pair_alignment = 2;
   profile.semantic_form_mask = kConSanCdnaSemanticFormMask;
-  profile.moi_dense_route_group_capacity = 31;
-  profile.supports_moi_far_dense_atomic_route = true;
-  profile.supports_moi_far_dense_barrier_route = true;
-  profile.supports_moi_dense_s_call_b64 = true;
   return profile;
 }
